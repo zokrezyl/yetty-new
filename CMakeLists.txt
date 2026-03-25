@@ -22,6 +22,9 @@ option(YETTY_IOS "Build for iOS" OFF)
 set(WEBGPU_BACKEND "dawn" CACHE STRING "WebGPU backend (wgpu or dawn)")
 set(TOYBOX_PATH "" CACHE PATH "Path to Toybox binary")
 
+# Central build variables (libraries and features)
+include(${YETTY_ROOT}/build-tools/cmake/variables.cmake)
+
 # Include CPM
 include(${YETTY_ROOT}/build-tools/cmake/CPM.cmake)
 

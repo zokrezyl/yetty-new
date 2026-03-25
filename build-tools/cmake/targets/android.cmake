@@ -2,9 +2,6 @@
 
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
-# libjpeg-turbo for VNC compression
-include(${YETTY_ROOT}/build-tools/cmake/libs/libjpeg-turbo.cmake)
-
 # native_app_glue from Android NDK
 add_library(native_app_glue STATIC
     ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c

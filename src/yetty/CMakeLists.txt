@@ -1,14 +1,32 @@
 # yetty sources and subdirectories
 
-# YGui-C library (pure C, for FFI bindings)
-add_subdirectory(ygui-c)
+#-----------------------------------------------------------------------------
+# Feature subdirectories — guarded by YETTY_ENABLE_FEATURE_*
+#-----------------------------------------------------------------------------
 
-# Sources for yetty executable (collected from subdirectories)
-add_subdirectory(ydraw-zoo)
-add_subdirectory(ydraw-maze)
-add_subdirectory(cards/ygrid)
-add_subdirectory(msdf-gen)
-add_subdirectory(rpc)
+if(YETTY_ENABLE_FEATURE_YGUI_C)
+    add_subdirectory(ygui-c)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YDRAW_ZOO)
+    add_subdirectory(ydraw-zoo)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YDRAW_MAZE)
+    add_subdirectory(ydraw-maze)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YGRID)
+    add_subdirectory(cards/ygrid)
+endif()
+
+if(YETTY_ENABLE_FEATURE_MSDF_GEN)
+    add_subdirectory(msdf-gen)
+endif()
+
+if(YETTY_ENABLE_FEATURE_RPC)
+    add_subdirectory(rpc)
+endif()
 
 # Core sources - ALL sources needed for yetty executable (platform-agnostic)
 set(YETTY_CORE_SOURCES
@@ -45,7 +63,7 @@ set(YETTY_CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/bm-font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/shader-font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/shared-memory.cpp
-    # Renderer sources (from subdirectories)
+    # Renderer sources (from subdirectories, empty if features disabled)
     ${YETTY_ZOO_SOURCES}
     ${YETTY_MAZE_SOURCES}
     ${YETTY_YGRID_SOURCES}
@@ -92,43 +110,92 @@ set(YETTY_RENDERER_INCLUDES
     PARENT_SCOPE
 )
 
-# Subdirectories that build libraries (common to all platforms)
-add_subdirectory(base)
-add_subdirectory(font)
-add_subdirectory(yecho)
-# ycat requires OpenSSL via cpr and libmagic, skip for WebAssembly/iOS
-if(NOT EMSCRIPTEN AND NOT YETTY_IOS)
-    add_subdirectory(ycat)
-endif()
-add_subdirectory(ydraw)
-add_subdirectory(yrich)
-add_subdirectory(ypaint)
-add_subdirectory(diagram)
-add_subdirectory(ygrid)
-# ythorvg requires thorvg which overrides global new/delete - disabled by default
-if(YETTY_ENABLE_THORVG)
-    add_subdirectory(ythorvg)
-endif()
-# yvideo - H.264/AV1 codec support for VNC
-add_subdirectory(yvideo)
-add_subdirectory(cards)
-add_subdirectory(yast)
-add_subdirectory(yfsvm)
-add_subdirectory(yplot)
-add_subdirectory(msdf-wgsl)
-add_subdirectory(shaders)
+#-----------------------------------------------------------------------------
+# Library subdirectories — guarded by YETTY_ENABLE_FEATURE_*
+#-----------------------------------------------------------------------------
 
-# VNC is available on all platforms except Android
-# - Desktop (Linux, macOS, Windows): uses POSIX/Winsock sockets
-# - iPhone/iOS: uses POSIX sockets
-# - WebAssembly: uses Emscripten WebSocket API
-if(NOT YETTY_ANDROID)
-    add_subdirectory(vnc)
+if(YETTY_ENABLE_FEATURE_BASE)
+    add_subdirectory(base)
 endif()
 
-# Telnet is available on Unix platforms (primarily for Android local connections)
-# Windows: telnet/CMakeLists.txt creates an INTERFACE stub (uses ConPTY instead)
-add_subdirectory(telnet)
+if(YETTY_ENABLE_FEATURE_FONT)
+    add_subdirectory(font)
+endif()
 
-# SSH is available on all platforms
-add_subdirectory(ssh)
+if(YETTY_ENABLE_FEATURE_YECHO)
+    add_subdirectory(yecho)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YCAT)
+    if(NOT EMSCRIPTEN AND NOT YETTY_IOS)
+        add_subdirectory(ycat)
+    endif()
+endif()
+
+if(YETTY_ENABLE_FEATURE_YDRAW)
+    add_subdirectory(ydraw)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YRICH)
+    add_subdirectory(yrich)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YPAINT)
+    add_subdirectory(ypaint)
+endif()
+
+if(YETTY_ENABLE_FEATURE_DIAGRAM)
+    add_subdirectory(diagram)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YGRID)
+    add_subdirectory(ygrid)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YTHORVG)
+    if(YETTY_ENABLE_LIB_THORVG)
+        add_subdirectory(ythorvg)
+    endif()
+endif()
+
+if(YETTY_ENABLE_FEATURE_YVIDEO)
+    add_subdirectory(yvideo)
+endif()
+
+if(YETTY_ENABLE_FEATURE_CARDS)
+    add_subdirectory(cards)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YAST)
+    add_subdirectory(yast)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YFSVM)
+    add_subdirectory(yfsvm)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YPLOT)
+    add_subdirectory(yplot)
+endif()
+
+if(YETTY_ENABLE_FEATURE_MSDF_WGSL)
+    add_subdirectory(msdf-wgsl)
+endif()
+
+if(YETTY_ENABLE_FEATURE_SHADERS)
+    add_subdirectory(shaders)
+endif()
+
+if(YETTY_ENABLE_FEATURE_VNC)
+    if(NOT YETTY_ANDROID)
+        add_subdirectory(vnc)
+    endif()
+endif()
+
+if(YETTY_ENABLE_FEATURE_TELNET)
+    add_subdirectory(telnet)
+endif()
+
+if(YETTY_ENABLE_FEATURE_SSH)
+    add_subdirectory(ssh)
+endif()

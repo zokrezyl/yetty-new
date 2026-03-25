@@ -1,40 +1,112 @@
 # Shared configuration for all platforms
 # Include this before platform-specific target files
 
+# Note: variables.cmake is included from root CMakeLists.txt
+
 # Auto-generate MSDF CDB fonts if not present (must run before incbin)
-include(${YETTY_ROOT}/build-tools/cmake/prepare-assets.cmake)
+if(YETTY_ENABLE_FEATURE_MSDF_GEN)
+    include(${YETTY_ROOT}/build-tools/cmake/prepare-assets.cmake)
+endif()
 
-# Common libraries needed by all platforms
-include(${YETTY_ROOT}/build-tools/cmake/incbin.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/args.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/lz4.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/libuv.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/glm.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/stb.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/yaml-cpp.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/spdlog.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/ytrace.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/msgpack.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/webgpu.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/vterm.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/zlib.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/libpng.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/msdfgen.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/cdb.cmake)
+#-----------------------------------------------------------------------------
+# Libraries — guarded by YETTY_ENABLE_LIB_*
+#-----------------------------------------------------------------------------
 
-# ThorVG - disabled by default due to global operator new/delete override conflicts
-option(YETTY_ENABLE_THORVG "Enable ThorVG (SVG/Lottie support)" OFF)
-if(YETTY_ENABLE_THORVG)
+if(YETTY_ENABLE_LIB_INCBIN)
+    include(${YETTY_ROOT}/build-tools/cmake/incbin.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_ARGS)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/args.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_LZ4)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/lz4.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_LIBUV)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/libuv.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_GLM)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/glm.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_STB)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/stb.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_YAML_CPP)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/yaml-cpp.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_SPDLOG)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/spdlog.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_YTRACE)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/ytrace.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_MSGPACK)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/msgpack.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_WEBGPU)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/webgpu.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_VTERM)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/vterm.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_ZLIB)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/zlib.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_LIBPNG)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/libpng.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_MSDFGEN)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/msdfgen.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_CDB)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/cdb.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_THORVG)
     include(${YETTY_ROOT}/build-tools/cmake/thorvg.cmake)
 endif()
 
-include(${YETTY_ROOT}/build-tools/cmake/TreeSitter.cmake)
-# yvideo dependencies (dav1d, openh264, minimp4)
-include(${YETTY_ROOT}/build-tools/cmake/Dav1d.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/openh264.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/minimp4.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/wasm3.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/libssh2.cmake)
+if(YETTY_ENABLE_LIB_TREESITTER)
+    include(${YETTY_ROOT}/build-tools/cmake/TreeSitter.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_DAV1D)
+    include(${YETTY_ROOT}/build-tools/cmake/Dav1d.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_OPENH264)
+    include(${YETTY_ROOT}/build-tools/cmake/openh264.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_MINIMP4)
+    include(${YETTY_ROOT}/build-tools/cmake/minimp4.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_WASM3)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/wasm3.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_LIBSSH2)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/libssh2.cmake)
+endif()
+
+if(YETTY_ENABLE_LIB_LIBJPEG_TURBO)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/libjpeg-turbo.cmake)
+endif()
 
 # Common include directories
 set(YETTY_INCLUDES
@@ -47,36 +119,78 @@ set(YETTY_DEFINITIONS
     CMAKE_SOURCE_DIR="${YETTY_ROOT}"
 )
 
-# Add YETTY_HAS_THORVG definition when thorvg is enabled
-if(YETTY_ENABLE_THORVG)
+if(YETTY_ENABLE_LIB_THORVG)
     list(APPEND YETTY_DEFINITIONS YETTY_HAS_THORVG=1)
 endif()
 
-# Common libraries to link
-set(YETTY_LIBS
-    webgpu
-    glm::glm
-    stb
-    yaml-cpp
-    vterm
-    msgpack-cxx
-    msdfgen::msdfgen-core
-    msdfgen::msdfgen-ext
-    cdb-wrapper
-    yetty_base
-    yetty_font
-    yetty_yecho
-    yetty_ydraw
-    yetty_ypaint
-    yetty_diagram
-    ygrid
-    yetty_cards
-    yetty_yast
-    yetty_telnet
-    yetty_ssh
-    msdf-wgsl
-    args
-)
+# Common libraries to link (only include what's enabled)
+set(YETTY_LIBS "")
+
+if(YETTY_ENABLE_LIB_WEBGPU)
+    list(APPEND YETTY_LIBS webgpu)
+endif()
+if(YETTY_ENABLE_LIB_GLM)
+    list(APPEND YETTY_LIBS glm::glm)
+endif()
+if(YETTY_ENABLE_LIB_STB)
+    list(APPEND YETTY_LIBS stb)
+endif()
+if(YETTY_ENABLE_LIB_YAML_CPP)
+    list(APPEND YETTY_LIBS yaml-cpp)
+endif()
+if(YETTY_ENABLE_LIB_VTERM)
+    list(APPEND YETTY_LIBS vterm)
+endif()
+if(YETTY_ENABLE_LIB_MSGPACK)
+    list(APPEND YETTY_LIBS msgpack-cxx)
+endif()
+if(YETTY_ENABLE_LIB_MSDFGEN)
+    list(APPEND YETTY_LIBS msdfgen::msdfgen-core msdfgen::msdfgen-ext)
+endif()
+if(YETTY_ENABLE_LIB_CDB)
+    list(APPEND YETTY_LIBS cdb-wrapper)
+endif()
+if(YETTY_ENABLE_LIB_ARGS)
+    list(APPEND YETTY_LIBS args)
+endif()
+
+# Feature libraries (only added when the feature is enabled)
+if(YETTY_ENABLE_FEATURE_BASE)
+    list(APPEND YETTY_LIBS yetty_base)
+endif()
+if(YETTY_ENABLE_FEATURE_FONT)
+    list(APPEND YETTY_LIBS yetty_font)
+endif()
+if(YETTY_ENABLE_FEATURE_YECHO)
+    list(APPEND YETTY_LIBS yetty_yecho)
+endif()
+if(YETTY_ENABLE_FEATURE_YDRAW)
+    list(APPEND YETTY_LIBS yetty_ydraw)
+endif()
+if(YETTY_ENABLE_FEATURE_YPAINT)
+    list(APPEND YETTY_LIBS yetty_ypaint)
+endif()
+if(YETTY_ENABLE_FEATURE_DIAGRAM)
+    list(APPEND YETTY_LIBS yetty_diagram)
+endif()
+if(YETTY_ENABLE_FEATURE_YGRID)
+    list(APPEND YETTY_LIBS ygrid)
+endif()
+if(YETTY_ENABLE_FEATURE_CARDS)
+    list(APPEND YETTY_LIBS yetty_cards)
+endif()
+if(YETTY_ENABLE_FEATURE_YAST)
+    list(APPEND YETTY_LIBS yetty_yast)
+endif()
+if(YETTY_ENABLE_FEATURE_TELNET)
+    list(APPEND YETTY_LIBS yetty_telnet)
+endif()
+if(YETTY_ENABLE_FEATURE_SSH)
+    list(APPEND YETTY_LIBS yetty_ssh)
+endif()
+if(YETTY_ENABLE_FEATURE_MSDF_WGSL)
+    list(APPEND YETTY_LIBS msdf-wgsl)
+endif()
 
 #-----------------------------------------------------------------------------
 # yetty_embed_assets(TARGET)
@@ -86,6 +200,10 @@ set(YETTY_LIBS
 # WebAssembly: provides empty stubs (uses --preload-file instead)
 #-----------------------------------------------------------------------------
 function(yetty_embed_assets TARGET)
+    if(NOT YETTY_ENABLE_LIB_INCBIN)
+        return()
+    endif()
+
     # Embed logo and default config
     incbin_add_resources(${TARGET}
         Logo "${YETTY_ROOT}/docs/logo.jpeg"

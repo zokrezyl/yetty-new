@@ -2,10 +2,13 @@
 
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
-# macOS-specific libraries
-include(${YETTY_ROOT}/build-tools/cmake/libs/glfw.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/libjpeg-turbo.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/Libmagic.cmake)
+# macOS-specific libraries (guarded by variables.cmake)
+if(YETTY_ENABLE_LIB_GLFW)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/glfw.cmake)
+endif()
+if(YETTY_ENABLE_LIB_LIBMAGIC)
+    include(${YETTY_ROOT}/build-tools/cmake/Libmagic.cmake)
+endif()
 
 # Add src/yetty (builds libraries)
 add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)

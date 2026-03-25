@@ -2,9 +2,10 @@
 
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
-# Windows-specific libraries
-include(${YETTY_ROOT}/build-tools/cmake/libs/glfw.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/libs/libjpeg-turbo.cmake)
+# Windows-specific libraries (guarded by variables.cmake)
+if(YETTY_ENABLE_LIB_GLFW)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/glfw.cmake)
+endif()
 
 # Add src/yetty (builds libraries)
 add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)

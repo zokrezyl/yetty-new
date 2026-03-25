@@ -2,9 +2,6 @@
 
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
-# iOS-specific libraries
-include(${YETTY_ROOT}/build-tools/cmake/libs/libjpeg-turbo.cmake)
-
 # Set iOS assets directory BEFORE adding yetty subdirectory
 set(IOS_ASSETS_DIR "${CMAKE_BINARY_DIR}/ios-assets")
 file(MAKE_DIRECTORY ${IOS_ASSETS_DIR})

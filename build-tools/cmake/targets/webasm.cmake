@@ -2,9 +2,6 @@
 
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
-# VNC support requires libjpeg-turbo
-include(${YETTY_ROOT}/build-tools/cmake/libs/libjpeg-turbo.cmake)
-
 # CDB font generation (builds host tools automatically)
 include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
 
