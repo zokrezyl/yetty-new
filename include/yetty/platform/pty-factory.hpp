@@ -5,14 +5,17 @@
 
 namespace yetty {
 
-// Forward declaration
 class Config;
 
 // PtyFactory - Creates platform-appropriate PTY instances
 //
-// Platform implementations:
-// - linux/pty-io.cpp: forkpty
-// - macos/pty-io.cpp: forkpty
+// create(Config*, void*) creates the factory with config and platform-specific
+// context (e.g., JS interop on WebAssembly). createPty() then creates individual
+// Pty instances using the stored config.
+//
+// Platform implementations provide createImpl():
+// - linux/unix-pty.cpp: forkpty
+// - macos/unix-pty.cpp: forkpty
 // - windows/pty-io.cpp: ConPTY
 // - android/pty-io.cpp: Telnet to Termux/toybox
 // - ios/pty-io.cpp: SSH
@@ -20,16 +23,12 @@ class Config;
 //
 class PtyFactory : public core::FactoryObject<PtyFactory> {
 public:
-  using Ptr = std::shared_ptr<PtyFactory>;
-
-  static Result<Ptr> createImpl();
+  static Result<PtyFactory *> createImpl(Config *config,
+                                         void *osSpecific = nullptr);
 
   virtual ~PtyFactory() = default;
 
-  // Create a Pty instance.
-  // osSpecific: platform-specific context (e.g., JS interop on WebAssembly)
-  virtual Result<Pty::Ptr> create(Config *config,
-                                  void *osSpecific = nullptr) = 0;
+  virtual Result<Pty *> createPty() = 0;
 };
 
 } // namespace yetty

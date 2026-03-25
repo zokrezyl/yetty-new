@@ -18,8 +18,8 @@ public:
   }
 };
 
-Result<ClipboardManager::Ptr> ClipboardManager::createImpl() {
-  return Ok(Ptr(new ClipboardManagerImpl()));
+Result<ClipboardManager*> ClipboardManager::createImpl() {
+  return Ok(static_cast<ClipboardManager*>(new ClipboardManagerImpl()));
 }
 
 } // namespace yetty

@@ -112,7 +112,7 @@ private:
   };
 
 public:
-  template <typename... Args> static Result<T> create(Args &&...args) {
+  template <typename... Args> static Result<T *> create(Args &&...args) {
     ContextType context;
 
     if constexpr (HasCreateImplWithContext<FactoryType, Args...>::value) {
@@ -132,17 +132,17 @@ public:
             static_assert(sizeof(T) == 0,
                 "ObjectFactory: No createImpl found.\n"
                 "Subclass must implement one of (checked in order):\n"
-                "  1. static Result<Ptr> createImpl(ContextType&, Args...)\n"
-                "  2. static Result<Ptr> createImpl(ContextType&)\n"
-                "  3. static Result<Ptr> createImpl(Args...)\n"
-                "  4. static Result<Ptr> createImpl()\n"
+                "  1. static Result<T*> createImpl(ContextType&, Args...)\n"
+                "  2. static Result<T*> createImpl(ContextType&)\n"
+                "  3. static Result<T*> createImpl(Args...)\n"
+                "  4. static Result<T*> createImpl()\n"
                 "\n"
                 "The createImpl should:\n"
-                "  - Create an instance of the implementation subclass\n"
+                "  - Create an instance of the implementation subclass via new\n"
                 "  - Call init() on it (which returns Result<void>)\n"
-                "  - Return Result<T> based on init() success\n");
+                "  - Return Result<T*> on success\n");
       // clang-format on
-      return Err<Ptr>("unreachable");
+      return Err<T *>("unreachable");
     }
   }
 };

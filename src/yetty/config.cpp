@@ -1,4 +1,4 @@
-#include "yetty/config.h"
+#include <yetty/config.hpp>
 #include <algorithm>
 #include <args.hxx>
 #include <cctype>
@@ -22,7 +22,6 @@
 
 namespace yetty {
 
-using namespace ygui;
 
 // ─── ConfigNode: Custom tree structure ───────────────────────────────────────
 
@@ -947,15 +946,16 @@ private:
 };
 
 // Factory
-Result<Config::Ptr> Config::createImpl(ContextType &, int argc, char *argv[],
-                                       const PlatformPaths *paths) noexcept {
-  auto impl = Ptr(new ConfigImpl(argc, argv, paths));
-  if (auto res = static_cast<ConfigImpl *>(impl.get())->init(); !res) {
+Result<Config *> Config::createImpl(int argc, char *argv[],
+                                    const PlatformPaths *paths) noexcept {
+  auto *impl = new ConfigImpl(argc, argv, paths);
+  if (auto res = impl->init(); !res) {
     yerror("Config creation failed: {}", error_msg(res));
-    return Err<Ptr>("Failed to initialize Config", res);
+    delete impl;
+    return Err<Config *>("Failed to initialize Config", res);
   }
   ytest("config-created", "Config created successfully");
-  return Ok(std::move(impl));
+  return Ok(static_cast<Config *>(impl));
 }
 
 // Static helpers

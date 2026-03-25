@@ -28,8 +28,21 @@ if(YETTY_ENABLE_FEATURE_RPC)
     add_subdirectory(rpc)
 endif()
 
-# Core sources — populated as features are ported
-set(YETTY_CORE_SOURCES "" PARENT_SCOPE)
+# Yetty sources (src/yetty/*.cpp)
+set(YETTY_SOURCES
+    ${YETTY_ROOT}/src/yetty/yetty.cpp
+    ${YETTY_ROOT}/src/yetty/config.cpp
+    ${YETTY_ROOT}/src/yetty/tree-like.cpp
+)
+
+# Core sources (src/yetty/core/*.cpp)
+set(YETTY_CORE_SOURCES "")
+
+# Term subsystem
+add_subdirectory(term)
+
+set(YETTY_SOURCES ${YETTY_SOURCES} PARENT_SCOPE)
+set(YETTY_CORE_SOURCES ${YETTY_CORE_SOURCES} PARENT_SCOPE)
 
 # Desktop-only sources (Linux, macOS - NOT Windows)
 set(YETTY_DESKTOP_SOURCES "" PARENT_SCOPE)

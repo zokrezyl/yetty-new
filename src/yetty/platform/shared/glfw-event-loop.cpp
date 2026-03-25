@@ -1,11 +1,12 @@
-// Linux raw-event-loop.cpp - OS event loop using GLFW
+// glfw-event-loop.cpp - OS event loop using GLFW
 //
 // Threading model:
 // - This runs on the MAIN THREAD
 // - GLFW callbacks are invoked during glfwWaitEvents() on the main thread
-// - Callbacks push events to EventQueue, which wakes the render thread
+// - Callbacks write events to PlatformInputPipe, which wakes the render thread
+// - PlatformInputPipe pointer is stored via glfwSetWindowUserPointer
 
-#include <yetty/core/event-queue.hpp>
+#include <yetty/core/platform-input-pipe.hpp>
 #include <yetty/core/event.hpp>
 #include <ytrace/ytrace.hpp>
 #include <GLFW/glfw3.h>
@@ -15,66 +16,85 @@ using namespace yetty;
 
 namespace {
 
-// GLFW key callback - executes on MAIN THREAD during glfwWaitEvents()
 static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    (void)window;
-    auto queueResult = core::EventQueue::instance();
-    if (!queueResult) return;
-    auto queue = *queueResult;
+    auto* pipe = static_cast<core::PlatformInputPipe*>(glfwGetWindowUserPointer(window));
+    if (!pipe) {
+        yerror("keyCallback: null platformInputPipe");
+        return;
+    }
 
+    core::Event event;
     if (action == GLFW_PRESS || action == GLFW_REPEAT) {
         if (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) {
             if (key == GLFW_KEY_SPACE) {
-                queue->push(core::Event::charInputWithMods(' ', mods));
+                event = core::Event::charInputWithMods(' ', mods);
+                pipe->write(&event, sizeof(event));
                 return;
             }
             const char* keyName = glfwGetKeyName(key, scancode);
             if (keyName && keyName[0] && !keyName[1]) {
                 uint32_t ch = static_cast<uint32_t>(static_cast<uint8_t>(keyName[0]));
-                queue->push(core::Event::charInputWithMods(ch, mods));
+                event = core::Event::charInputWithMods(ch, mods);
+                pipe->write(&event, sizeof(event));
                 return;
             }
         }
-        queue->push(core::Event::keyDown(key, mods, scancode));
+        event = core::Event::keyDown(key, mods, scancode);
     } else if (action == GLFW_RELEASE) {
-        queue->push(core::Event::keyUp(key, mods, scancode));
+        event = core::Event::keyUp(key, mods, scancode);
+    } else {
+        return;
     }
+    pipe->write(&event, sizeof(event));
 }
 
 static void charCallback(GLFWwindow* window, unsigned int codepoint) {
-    (void)window;
-    auto queueResult = core::EventQueue::instance();
-    if (!queueResult) return;
-    (*queueResult)->push(core::Event::charInput(codepoint));
+    auto* pipe = static_cast<core::PlatformInputPipe*>(glfwGetWindowUserPointer(window));
+    if (!pipe) {
+        yerror("charCallback: null platformInputPipe");
+        return;
+    }
+    auto event = core::Event::charInput(codepoint);
+    pipe->write(&event, sizeof(event));
 }
 
 static void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
-    auto queueResult = core::EventQueue::instance();
-    if (!queueResult) return;
+    auto* pipe = static_cast<core::PlatformInputPipe*>(glfwGetWindowUserPointer(window));
+    if (!pipe) {
+        yerror("mouseButtonCallback: null platformInputPipe");
+        return;
+    }
 
     double x, y;
     glfwGetCursorPos(window, &x, &y);
 
+    core::Event event;
     if (action == GLFW_PRESS) {
-        (*queueResult)->push(core::Event::mouseDown(
-            static_cast<float>(x), static_cast<float>(y), button, mods));
+        event = core::Event::mouseDown(
+            static_cast<float>(x), static_cast<float>(y), button, mods);
     } else {
-        (*queueResult)->push(core::Event::mouseUp(
-            static_cast<float>(x), static_cast<float>(y), button, mods));
+        event = core::Event::mouseUp(
+            static_cast<float>(x), static_cast<float>(y), button, mods);
     }
+    pipe->write(&event, sizeof(event));
 }
 
 static void cursorPosCallback(GLFWwindow* window, double x, double y) {
-    (void)window;
-    auto queueResult = core::EventQueue::instance();
-    if (!queueResult) return;
-    (*queueResult)->push(core::Event::mouseMove(
-        static_cast<float>(x), static_cast<float>(y)));
+    auto* pipe = static_cast<core::PlatformInputPipe*>(glfwGetWindowUserPointer(window));
+    if (!pipe) {
+        yerror("cursorPosCallback: null platformInputPipe");
+        return;
+    }
+    auto event = core::Event::mouseMove(static_cast<float>(x), static_cast<float>(y));
+    pipe->write(&event, sizeof(event));
 }
 
 static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
-    auto queueResult = core::EventQueue::instance();
-    if (!queueResult) return;
+    auto* pipe = static_cast<core::PlatformInputPipe*>(glfwGetWindowUserPointer(window));
+    if (!pipe) {
+        yerror("scrollCallback: null platformInputPipe");
+        return;
+    }
 
     double x, y;
     glfwGetCursorPos(window, &x, &y);
@@ -93,17 +113,20 @@ static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
         mods |= GLFW_MOD_ALT;
     }
 
-    (*queueResult)->push(core::Event::scrollEvent(
+    auto event = core::Event::scrollEvent(
         static_cast<float>(x), static_cast<float>(y),
-        static_cast<float>(xoffset), static_cast<float>(yoffset), mods));
+        static_cast<float>(xoffset), static_cast<float>(yoffset), mods);
+    pipe->write(&event, sizeof(event));
 }
 
 static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
-    (void)window;
-    auto queueResult = core::EventQueue::instance();
-    if (!queueResult) return;
-    (*queueResult)->push(core::Event::resizeEvent(
-        static_cast<float>(width), static_cast<float>(height)));
+    auto* pipe = static_cast<core::PlatformInputPipe*>(glfwGetWindowUserPointer(window));
+    if (!pipe) {
+        yerror("framebufferSizeCallback: null platformInputPipe");
+        return;
+    }
+    auto event = core::Event::resizeEvent(static_cast<float>(width), static_cast<float>(height));
+    pipe->write(&event, sizeof(event));
 }
 
 static void windowCloseCallback(GLFWwindow* window) {

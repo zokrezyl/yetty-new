@@ -15,7 +15,7 @@ namespace yetty {
 class ClipboardManager : public core::FactoryObject<ClipboardManager> {
 public:
     using Ptr = std::shared_ptr<ClipboardManager>;
-    static Result<Ptr> createImpl();
+    static Result<ClipboardManager*> createImpl();
 
     virtual ~ClipboardManager() = default;
 

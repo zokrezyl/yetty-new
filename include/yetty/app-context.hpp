@@ -8,7 +8,7 @@ class ClipboardManager;
 
 namespace core {
 class EventLoop;
-class EventQueue;
+class PlatformInputPipe;
 } // namespace core
 
 // Application-level context created by platform main() and passed to yetty::create.
@@ -16,7 +16,7 @@ class EventQueue;
 struct AppContext {
   Config *config = nullptr;
   core::EventLoop *eventLoop = nullptr;
-  core::EventQueue *eventQueue = nullptr;
+  core::PlatformInputPipe *platformInputPipe = nullptr;
   ClipboardManager *clipboardManager = nullptr;
   PtyFactory *ptyFactory = nullptr;
 };

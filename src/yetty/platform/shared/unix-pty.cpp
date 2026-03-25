@@ -2,7 +2,7 @@
 
 #include <yetty/platform/pty.hpp>
 #include <yetty/platform/pty-factory.hpp>
-#include <yetty/core/event-loop.hpp>
+#include "fd-pty-poll-source.hpp"
 #include <ytrace/ytrace.hpp>
 
 #include <fcntl.h>
@@ -61,7 +61,7 @@ std::vector<std::string> parseCommand(const std::string& cmd) {
 
 } // anonymous namespace
 
-class UnixPty : public Pty, public core::EventListener {
+class UnixPty : public Pty {
 public:
     UnixPty() = default;
 
@@ -69,8 +69,7 @@ public:
         stop();
     }
 
-    Result<void> init(Config* config) {
-        // TODO: read shell/command/cols/rows from Config
+    Result<void> init(Config* /*config*/) {
         _shell = "/bin/bash";
         _cols = 80;
         _rows = 24;
@@ -88,7 +87,6 @@ public:
         }
 
         if (_childPid == 0) {
-            // Child process
             for (int fd = 3; fd < 1024; fd++) {
                 close(fd);
             }
@@ -115,31 +113,7 @@ public:
         int flags = fcntl(_ptyMaster, F_GETFL, 0);
         fcntl(_ptyMaster, F_SETFL, flags | O_NONBLOCK);
 
-        // Set up event loop polling
-        auto loopResult = core::EventLoop::instance();
-        if (!loopResult) {
-            return Err<void>("No event loop available");
-        }
-        auto loop = *loopResult;
-
-        auto pollResult = loop->createPoll();
-        if (!pollResult) {
-            return Err<void>("Failed to create poll", pollResult);
-        }
-        _pollId = *pollResult;
-
-        if (auto res = loop->configPoll(_pollId, _ptyMaster); !res) {
-            return Err<void>("Failed to configure poll", res);
-        }
-
-        if (auto res = loop->registerPollListener(_pollId, sharedAs<core::EventListener>()); !res) {
-            return Err<void>("Failed to register poll listener", res);
-        }
-
-        if (auto res = loop->startPoll(_pollId); !res) {
-            return Err<void>("Failed to start poll", res);
-        }
-
+        _pollSource = FdPtyPollSource(_ptyMaster);
         _running = true;
         ydebug("UnixPty: Started fd={}, PID={}, shell={}", _ptyMaster, _childPid, _shell);
         return Ok();
@@ -186,17 +160,6 @@ public:
 
         ydebug("UnixPty: Stopping");
 
-        if (_pollId >= 0) {
-            if (auto loopResult = core::EventLoop::instance(); loopResult) {
-                auto loop = *loopResult;
-                if (auto self = weak_from_this().lock()) {
-                    loop->deregisterListener(sharedAs<core::EventListener>());
-                }
-                loop->destroyPoll(_pollId);
-            }
-            _pollId = -1;
-        }
-
         if (_ptyMaster >= 0) {
             close(_ptyMaster);
             _ptyMaster = -1;
@@ -206,68 +169,44 @@ public:
             kill(_childPid, SIGTERM);
             int status;
             waitpid(_childPid, &status, 0);
-            if (_exitCallback) {
-                _exitCallback(WEXITSTATUS(status));
-            }
             _childPid = -1;
         }
     }
 
-    void setDataAvailableCallback(DataAvailableCallback cb) override {
-        _dataAvailableCallback = std::move(cb);
-    }
-
-    void setExitCallback(ExitCallback cb) override {
-        _exitCallback = std::move(cb);
-    }
-
-    Result<bool> onEvent(const core::Event& event) override {
-        if (event.type == core::Event::Type::PollReadable &&
-            event.poll.fd == _ptyMaster) {
-
-            int status;
-            if (waitpid(_childPid, &status, WNOHANG) > 0) {
-                _running = false;
-                if (_exitCallback) {
-                    _exitCallback(WEXITSTATUS(status));
-                }
-                return Ok(true);
-            }
-
-            if (_dataAvailableCallback) {
-                _dataAvailableCallback();
-            }
-            return Ok(true);
-        }
-        return Ok(false);
+    PtyPollSource *pollSource() override {
+        return &_pollSource;
     }
 
 private:
     int _ptyMaster = -1;
     pid_t _childPid = -1;
-    core::PollId _pollId = -1;
     uint32_t _cols = 80;
     uint32_t _rows = 24;
     std::string _shell;
     std::string _command;
     bool _running = false;
-    DataAvailableCallback _dataAvailableCallback;
-    ExitCallback _exitCallback;
+    FdPtyPollSource _pollSource{-1};
 };
 
 class UnixPtyFactory : public PtyFactory {
 public:
-    Result<Pty::Ptr> create(Config* config, void* /*osSpecific*/) override {
-        auto pty = std::make_shared<UnixPty>();
-        if (auto res = pty->init(config); !res) {
-            return Err<Pty::Ptr>("Failed to create UnixPty", res);
+    explicit UnixPtyFactory(Config* config) : _config(config) {}
+
+    Result<Pty *> createPty() override {
+        auto *pty = new UnixPty();
+        if (auto res = pty->init(_config); !res) {
+            delete pty;
+            return Err<Pty *>("Failed to create UnixPty", res);
         }
-        return Ok<Pty::Ptr>(pty);
+        return Ok(static_cast<Pty *>(pty));
     }
+
+private:
+    Config* _config;
 };
 
-PtyFactory::Ptr createPtyFactory() {
-    return std::make_shared<UnixPtyFactory>();
+Result<PtyFactory *> PtyFactory::createImpl(Config *config, void *) {
+    return Ok(static_cast<PtyFactory *>(new UnixPtyFactory(config)));
 }
 
 } // namespace yetty

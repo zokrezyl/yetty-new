@@ -10,9 +10,6 @@ if(YETTY_ENABLE_LIB_LIBMAGIC)
     include(${YETTY_ROOT}/build-tools/cmake/Libmagic.cmake)
 endif()
 
-# Add src/yetty (builds libraries)
-add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
-
 # Desktop-specific subdirectories
 if(YETTY_ENABLE_FEATURE_GPU)
     add_subdirectory(${YETTY_ROOT}/src/yetty/gpu ${CMAKE_BINARY_DIR}/src/yetty/gpu)
@@ -30,13 +27,15 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/platform/linux/surface.cpp
     ${YETTY_ROOT}/src/yetty/platform/shared/glfw-event-loop.cpp
     ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-clipboard-manager.cpp
     ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
     ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/window.cpp
+    ${YETTY_ROOT}/src/yetty/core/unix-pipe.cpp
 )
 
 # Create executable with core sources + platform
 add_executable(yetty
+    ${YETTY_SOURCES}
     ${YETTY_CORE_SOURCES}
     ${YETTY_DESKTOP_SOURCES}
     ${YETTY_PLATFORM_SOURCES}

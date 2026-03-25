@@ -4,17 +4,11 @@
 // on the main thread and used for both rendering (via WebGPU surface)
 // and input (via callbacks set up in raw-event-loop.cpp).
 
-#include <yetty/core/core.hpp>
 #include <ytrace/ytrace.hpp>
 #include <GLFW/glfw3.h>
+#include <string>
 
-using namespace yetty;
-
-GLFWwindow* createWindow(Config::Ptr config) {
-    // Get window size from config, or use defaults
-    int width = config->get<int>("window/width", 1280);
-    int height = config->get<int>("window/height", 720);
-    std::string title = config->get<std::string>("window/title", "yetty");
+GLFWwindow* createWindow(int width, int height, const char* title) {
 
     // No OpenGL context - we use WebGPU
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -23,7 +17,7 @@ GLFWwindow* createWindow(Config::Ptr config) {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     // Create window
-    GLFWwindow* window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(width, height, title, nullptr, nullptr);
     if (!window) {
         yerror("Window: glfwCreateWindow failed");
         return nullptr;

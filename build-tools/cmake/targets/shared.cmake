@@ -68,6 +68,10 @@ if(YETTY_ENABLE_LIB_LIBPNG)
     include(${YETTY_ROOT}/build-tools/cmake/libs/libpng.cmake)
 endif()
 
+if(YETTY_ENABLE_LIB_FREETYPE)
+    include(${YETTY_ROOT}/build-tools/cmake/FreeType.cmake)
+endif()
+
 if(YETTY_ENABLE_LIB_MSDFGEN)
     include(${YETTY_ROOT}/build-tools/cmake/libs/msdfgen.cmake)
 endif()
@@ -107,6 +111,9 @@ endif()
 if(YETTY_ENABLE_LIB_LIBJPEG_TURBO)
     include(${YETTY_ROOT}/build-tools/cmake/libs/libjpeg-turbo.cmake)
 endif()
+
+# Add src/yetty (populates YETTY_SOURCES, YETTY_CORE_SOURCES, builds feature libraries)
+add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
 
 # Common include directories
 set(YETTY_INCLUDES

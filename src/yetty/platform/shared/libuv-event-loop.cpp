@@ -1,4 +1,6 @@
 #include <yetty/core/event-loop.hpp>
+#include <yetty/core/platform-input-pipe.hpp>
+#include "fd-pty-poll-source.hpp"
 #include <ytrace/ytrace.hpp>
 #include <uv.h>
 #include <vector>
@@ -16,18 +18,21 @@ struct EventTypeHash {
     }
 };
 
+class EventLoopImpl;
+
 struct PollHandle {
     uv_poll_t poll;
     int fd = -1;
     int events = UV_READABLE;
-    std::vector<std::weak_ptr<EventListener>> listeners;
+    EventLoopImpl* owner = nullptr;
+    std::vector<EventListener*> listeners;
 };
 
 struct TimerHandle {
     uv_timer_t timer;
     int id = -1;
     Timeout timeout = 0;
-    std::vector<std::weak_ptr<EventListener>> listeners;
+    std::vector<EventListener*> listeners;
 };
 
 class EventLoopImpl : public EventLoop {
@@ -62,9 +67,12 @@ public:
         uv_stop(self->_loop);
     }
 
-    int start() override {
+    Result<void> start() override {
         ydebug("EventLoop::start: running uv_default_loop");
-        return uv_run(_loop, UV_RUN_DEFAULT);
+        int r = uv_run(_loop, UV_RUN_DEFAULT);
+        if (r < 0)
+            return Err<void>(std::string("uv_run failed: ") + uv_strerror(r));
+        return Ok();
     }
 
     Result<void> stop() override {
@@ -73,7 +81,8 @@ public:
         return Ok();
     }
 
-    Result<void> registerListener(Event::Type type, EventListener::Ptr listener, int priority = 0) override {
+    Result<void> registerListener(Event::Type type, EventListener * listener, int priority = 0) override {
+        if (!listener) return Err<void>("registerListener: null listener");
         auto& vec = _listeners[type];
         PrioritizedListener entry{listener, priority};
         auto insertPos = std::lower_bound(vec.begin(), vec.end(), entry,
@@ -84,7 +93,7 @@ public:
         return Ok();
     }
 
-    Result<void> deregisterListener(Event::Type type, EventListener::Ptr listener) override {
+    Result<void> deregisterListener(Event::Type type, EventListener * listener) override {
         auto it = _listeners.find(type);
         if (it == _listeners.end()) return Ok();
 
@@ -92,20 +101,18 @@ public:
         vec.erase(
             std::remove_if(vec.begin(), vec.end(),
                 [&](const PrioritizedListener& pl) {
-                    auto sp = pl.listener.lock();
-                    return !sp || sp == listener;
+                    return pl.listener == listener;
                 }),
             vec.end());
         return Ok();
     }
 
-    Result<void> deregisterListener(EventListener::Ptr listener) override {
+    Result<void> deregisterListener(EventListener * listener) override {
         for (auto& [type, vec] : _listeners) {
             vec.erase(
                 std::remove_if(vec.begin(), vec.end(),
                     [&](const PrioritizedListener& pl) {
-                        auto sp = pl.listener.lock();
-                        return !sp || sp == listener;
+                        return pl.listener == listener;
                     }),
                 vec.end());
         }
@@ -120,8 +127,8 @@ public:
 
         auto listeners = it->second;  // copy for safe iteration
         for (const auto& pl : listeners) {
-            if (auto sp = pl.listener.lock()) {
-                auto result = sp->onEvent(event);
+            {
+                auto result = pl.listener->onEvent(event);
                 if (!result) {
                     return Err<bool>("Event handler failed", result);
                 }
@@ -137,11 +144,9 @@ public:
         auto listenersCopy = _listeners;
         for (auto& [type, vec] : listenersCopy) {
             for (const auto& pl : vec) {
-                if (auto sp = pl.listener.lock()) {
-                    auto result = sp->onEvent(event);
-                    if (!result) {
-                        return Err<void>("Broadcast handler failed", result);
-                    }
+                auto result = pl.listener->onEvent(event);
+                if (!result) {
+                    return Err<void>("Broadcast handler failed", result);
                 }
             }
         }
@@ -150,7 +155,9 @@ public:
 
     Result<PollId> createPoll() override {
         PollId id = _nextPollId++;
-        _polls[id] = std::make_unique<PollHandle>();
+        auto ph = std::make_unique<PollHandle>();
+        ph->owner = this;
+        _polls[id] = std::move(ph);
         ydebug("EventLoop::createPoll: id={}", id);
         return Ok(id);
     }
@@ -253,15 +260,14 @@ public:
 
     static void onPollCloseCallback(uv_handle_t* handle) {
         auto* ph = reinterpret_cast<PollHandle*>(handle);
-        // Get EventLoopImpl from singleton to remove from pending set
-        if (auto loopResult = EventLoop::instance(); loopResult) {
-            auto* impl = static_cast<EventLoopImpl*>(loopResult->get());
-            impl->_pendingPollClose.erase(ph);
+        if (ph->owner) {
+            ph->owner->_pendingPollClose.erase(ph);
         }
         delete ph;
     }
 
-    Result<void> registerPollListener(PollId id, EventListener::Ptr listener) override {
+    Result<void> registerPollListener(PollId id, EventListener * listener) override {
+        if (!listener) return Err<void>("registerPollListener: null listener");
         auto it = _polls.find(id);
         if (it == _polls.end()) {
             return Err<void>("Poll not found");
@@ -332,7 +338,8 @@ public:
         return Ok();
     }
 
-    Result<void> registerTimerListener(TimerId id, EventListener::Ptr listener) override {
+    Result<void> registerTimerListener(TimerId id, EventListener * listener) override {
+        if (!listener) return Err<void>("registerTimerListener: null listener");
         auto it = _timers.find(id);
         if (it == _timers.end()) {
             return Err<void>("Timer not found");
@@ -343,10 +350,51 @@ public:
         return Ok();
     }
 
-    // Request immediate screen update - async dispatch of ScreenUpdate event
+    Result<PollId> createPtyPoll(PtyPollSource *source) override {
+        auto *fdSource = static_cast<FdPtyPollSource *>(source);
+        int fd = fdSource->fd();
+
+        auto pollResult = createPoll();
+        if (!pollResult) return pollResult;
+        PollId id = *pollResult;
+
+        if (auto res = configPoll(id, fd); !res) {
+            destroyPoll(id);
+            return Err<PollId>("createPtyPoll: configPoll failed", res);
+        }
+
+        return Ok(id);
+    }
+
     void requestScreenUpdate() override {
         _screenUpdatePending = true;
         uv_async_send(&_screenUpdateAsync);
+    }
+
+    Result<PollId> createPlatformInputPipePoll(PlatformInputPipe* pipe) override {
+        _platformInputPipe = pipe;
+
+        auto pollResult = createPoll();
+        if (!pollResult) return pollResult;
+        PollId id = *pollResult;
+
+        if (auto res = configPoll(id, pipe->readFd()); !res) {
+            destroyPoll(id);
+            return Err<PollId>("createPlatformInputPipePoll: configPoll failed", res);
+        }
+
+        _platformInputPipePollId = id;
+        pipe->setEventLoop(this);
+        ydebug("EventLoop: created PlatformInputPipePoll id={} fd={}", id, pipe->readFd());
+        return Ok(id);
+    }
+
+    Result<void> startPlatformInputPipePoll(PollId id) override {
+        return startPoll(id);
+    }
+
+    Result<void> registerPlatformInputPipePollListener(PollId id, EventListener* listener) override {
+        return registerPollListener(id, listener);
     }
 
 private:
@@ -372,10 +420,8 @@ private:
             event.type = Event::Type::PollReadable;
             event.poll.fd = ph->fd;
 
-            for (const auto& wp : ph->listeners) {
-                if (auto sp = wp.lock()) {
-                    sp->onEvent(event);
-                }
+            for (auto *listener : ph->listeners) {
+                listener->onEvent(event);
             }
         }
 
@@ -384,10 +430,8 @@ private:
             event.type = Event::Type::PollWritable;
             event.poll.fd = ph->fd;
 
-            for (const auto& wp : ph->listeners) {
-                if (auto sp = wp.lock()) {
-                    sp->onEvent(event);
-                }
+            for (auto *listener : ph->listeners) {
+                listener->onEvent(event);
             }
         }
     }
@@ -398,15 +442,13 @@ private:
 
         Event event = Event::timerEvent(th->id);
 
-        for (const auto& wp : th->listeners) {
-            if (auto sp = wp.lock()) {
-                sp->onEvent(event);
-            }
+        for (auto *listener : th->listeners) {
+            listener->onEvent(event);
         }
     }
 
     struct PrioritizedListener {
-        std::weak_ptr<EventListener> listener;
+        EventListener *listener;
         int priority;
     };
 
@@ -419,6 +461,10 @@ private:
     PollId _nextPollId = 1;
     TimerId _nextTimerId = 1;
 
+    // Platform input pipe - receives events from main thread
+    PlatformInputPipe* _platformInputPipe = nullptr;
+    PollId _platformInputPipePollId = -1;
+
     // Screen update async - for immediate re-render without waiting for timer
     uv_async_t _screenUpdateAsync;
     std::atomic<bool> _screenUpdatePending{false};
@@ -428,9 +474,8 @@ private:
     uv_signal_t _sigtermHandle;
 };
 
-// Factory implementation
-Result<EventLoop::Ptr> EventLoop::createImpl() noexcept {
-    return Ok(Ptr(new EventLoopImpl()));
+Result<EventLoop*> EventLoop::createImpl() noexcept {
+    return Ok(static_cast<EventLoop*>(new EventLoopImpl()));
 }
 
 } // namespace core

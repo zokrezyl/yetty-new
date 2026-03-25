@@ -1,4 +1,5 @@
-#include <yetty/platform/event-loop.h>
+#include <yetty/core/event-loop.hpp>
+#include <yetty/core/platform-input-pipe.hpp>
 #include <ytrace/ytrace.hpp>
 #include <emscripten/emscripten.h>
 #include <vector>
@@ -19,14 +20,14 @@ public:
     EventLoopImpl() = default;
     ~EventLoopImpl() override = default;
 
-    int start() override {
+    Result<void> start() override {
         ydebug("EventLoop::start (webasm) - setting up emscripten main loop");
         _running = true;
         // Set up browser main loop - runs at ~60fps via requestAnimationFrame
         // The callback fires timer events for registered timers
         emscripten_set_main_loop_arg(mainLoopCallback, this, 0, true);
         // Note: emscripten_set_main_loop with simulateInfiniteLoop=true doesn't return
-        return 0;
+        return Ok();
     }
 
     Result<void> stop() override {
@@ -36,7 +37,8 @@ public:
         return Ok();
     }
 
-    Result<void> registerListener(Event::Type type, EventListener::Ptr listener, int priority = 0) override {
+    Result<void> registerListener(Event::Type type, EventListener* listener, int priority = 0) override {
+        if (!listener) return Err<void>("registerListener: null listener");
         auto& vec = _listeners[type];
         PrioritizedListener entry{listener, priority};
         auto insertPos = std::lower_bound(vec.begin(), vec.end(), entry,
@@ -47,7 +49,7 @@ public:
         return Ok();
     }
 
-    Result<void> deregisterListener(Event::Type type, EventListener::Ptr listener) override {
+    Result<void> deregisterListener(Event::Type type, EventListener* listener) override {
         auto it = _listeners.find(type);
         if (it == _listeners.end()) return Ok();
 
@@ -55,20 +57,18 @@ public:
         vec.erase(
             std::remove_if(vec.begin(), vec.end(),
                 [&](const PrioritizedListener& pl) {
-                    auto sp = pl.listener.lock();
-                    return !sp || sp == listener;
+                    return pl.listener == listener;
                 }),
             vec.end());
         return Ok();
     }
 
-    Result<void> deregisterListener(EventListener::Ptr listener) override {
+    Result<void> deregisterListener(EventListener* listener) override {
         for (auto& [type, vec] : _listeners) {
             vec.erase(
                 std::remove_if(vec.begin(), vec.end(),
                     [&](const PrioritizedListener& pl) {
-                        auto sp = pl.listener.lock();
-                        return !sp || sp == listener;
+                        return pl.listener == listener;
                     }),
                 vec.end());
         }
@@ -81,16 +81,14 @@ public:
             return Ok(false);
         }
 
-        auto listeners = it->second;
+        auto listeners = it->second;  // copy for safe iteration
         for (const auto& pl : listeners) {
-            if (auto sp = pl.listener.lock()) {
-                auto result = sp->onEvent(event);
-                if (!result) {
-                    return Err<bool>("Event handler failed", result);
-                }
-                if (*result) {
-                    return Ok(true);
-                }
+            auto result = pl.listener->onEvent(event);
+            if (!result) {
+                return Err<bool>("Event handler failed", result);
+            }
+            if (*result) {
+                return Ok(true);  // consumed
             }
         }
         return Ok(false);
@@ -100,38 +98,67 @@ public:
         auto listenersCopy = _listeners;
         for (auto& [type, vec] : listenersCopy) {
             for (const auto& pl : vec) {
-                if (auto sp = pl.listener.lock()) {
-                    auto result = sp->onEvent(event);
-                    if (!result) {
-                        return Err<void>("Broadcast handler failed", result);
-                    }
+                auto result = pl.listener->onEvent(event);
+                if (!result) {
+                    return Err<void>("Broadcast handler failed", result);
                 }
             }
         }
         return Ok();
     }
 
-    // Poll - not used on webasm (JS handles I/O)
+    // Poll - callback-based on webasm (no fd polling)
     Result<PollId> createPoll() override {
-        return Err<PollId>("Poll not used on webasm");
+        PollId id = _nextPollId++;
+        _pollListeners[id] = {};
+        return Ok(id);
     }
     Result<void> configPoll(PollId, int) override {
-        return Err<void>("Poll not used on webasm");
+        return Ok();  // No-op on webasm
     }
     Result<void> startPoll(PollId, int) override {
-        return Err<void>("Poll not used on webasm");
+        return Ok();  // No-op on webasm - callbacks handle notification
     }
     Result<void> setPollEvents(PollId, int) override {
-        return Err<void>("Poll not used on webasm");
+        return Ok();  // No-op on webasm
     }
     Result<void> stopPoll(PollId) override {
-        return Err<void>("Poll not used on webasm");
+        return Ok();  // No-op on webasm
     }
-    Result<void> destroyPoll(PollId) override {
-        return Err<void>("Poll not used on webasm");
+    Result<void> destroyPoll(PollId id) override {
+        _pollListeners.erase(id);
+        return Ok();
     }
-    Result<void> registerPollListener(PollId, EventListener::Ptr) override {
-        return Err<void>("Poll not used on webasm");
+    Result<void> registerPollListener(PollId id, EventListener* listener) override {
+        _pollListeners[id].push_back(listener);
+        return Ok();
+    }
+
+    Result<PollId> createPtyPoll(PtyPollSource* /*source*/) override {
+        // On webasm, PTY uses callback mechanism - just create a poll id
+        return createPoll();
+    }
+
+    Result<PollId> createPlatformInputPipePoll(PlatformInputPipe* pipe) override {
+        auto pollResult = createPoll();
+        if (!pollResult) return pollResult;
+        PollId id = *pollResult;
+        _platformInputPipe = pipe;
+        _platformInputPipePollId = id;
+        pipe->setEventLoop(this);
+        return Ok(id);
+    }
+
+    Result<void> startPlatformInputPipePoll(PollId /*id*/) override {
+        return Ok();  // No-op on webasm - pipe triggers listener directly
+    }
+
+    Result<void> registerPlatformInputPipePollListener(PollId id, EventListener* listener) override {
+        if (_platformInputPipe) {
+            _platformInputPipe->setListener(listener);
+        }
+        _pollListeners[id].push_back(listener);
+        return Ok();
     }
 
     // Timer
@@ -179,7 +206,8 @@ public:
         return Ok();
     }
 
-    Result<void> registerTimerListener(TimerId id, EventListener::Ptr listener) override {
+    Result<void> registerTimerListener(TimerId id, EventListener* listener) override {
+        if (!listener) return Err<void>("registerTimerListener: null listener");
         auto it = _timers.find(id);
         if (it == _timers.end()) {
             return Err<void>("Timer not found");
@@ -214,17 +242,15 @@ private:
                 td.lastFire = now;
 
                 Event event = Event::timerEvent(id);
-                for (const auto& wp : td.listeners) {
-                    if (auto sp = wp.lock()) {
-                        sp->onEvent(event);
-                    }
+                for (auto* listener : td.listeners) {
+                    listener->onEvent(event);
                 }
             }
         }
     }
 
     struct PrioritizedListener {
-        std::weak_ptr<EventListener> listener;
+        EventListener* listener;
         int priority;
     };
 
@@ -232,18 +258,22 @@ private:
         Timeout timeout = 0;
         bool running = false;
         double lastFire = 0;
-        std::vector<std::weak_ptr<EventListener>> listeners;
+        std::vector<EventListener*> listeners;
     };
 
     std::unordered_map<Event::Type, std::vector<PrioritizedListener>, EventTypeHash> _listeners;
     std::unordered_map<TimerId, TimerData> _timers;
+    std::unordered_map<PollId, std::vector<EventListener*>> _pollListeners;
     TimerId _nextTimerId = 1;
+    PollId _nextPollId = 1;
     bool _running = false;
+    PlatformInputPipe* _platformInputPipe = nullptr;
+    PollId _platformInputPipePollId = -1;
 };
 
 // Factory
-Result<EventLoop::Ptr> EventLoop::createImpl() noexcept {
-    return Ok(Ptr(new EventLoopImpl()));
+Result<EventLoop*> EventLoop::createImpl() noexcept {
+    return Ok(static_cast<EventLoop*>(new EventLoopImpl()));
 }
 
 } // namespace core

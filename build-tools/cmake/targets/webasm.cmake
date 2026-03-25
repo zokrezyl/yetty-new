@@ -1,5 +1,9 @@
 # WebAssembly (Emscripten) build target
 
+# Disable desktop-only libraries
+set(YETTY_ENABLE_LIB_LIBUV OFF CACHE BOOL "" FORCE)
+set(YETTY_ENABLE_LIB_GLFW OFF CACHE BOOL "" FORCE)
+
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
 # CDB font generation (builds host tools automatically)
@@ -18,19 +22,13 @@ add_compile_definitions(YETTY_WEB=1 YETTY_ANDROID=0)
 # Set shader directory path for web (used by card libraries)
 set(YETTY_SHADERS_DIR "/assets/shaders" CACHE STRING "Shader directory path")
 
-# Add src/yetty (builds libraries)
-add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
-
-# Platform manager sources (new architecture)
-# Note: event-loop is included via yetty_base
+# Platform sources
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/init-manager/webasm.cpp
-    ${YETTY_ROOT}/src/yetty/platform/surface-manager/webasm.cpp
-    ${YETTY_ROOT}/src/yetty/platform/pty-manager/webasm.cpp
-    ${YETTY_ROOT}/src/yetty/platform/pty-reader/webasm.cpp
-    ${YETTY_ROOT}/src/yetty/platform/fs-path-manager/webasm.cpp
-    ${YETTY_ROOT}/src/yetty/platform/clipboard-manager/webasm.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webgpu-manager/webasm.cpp
+    ${YETTY_ROOT}/src/yetty/platform/webasm/surface.cpp
+    ${YETTY_ROOT}/src/yetty/platform/webasm/pty-io.cpp
+    ${YETTY_ROOT}/src/yetty/platform/webasm/window.cpp
+    ${YETTY_ROOT}/src/yetty/platform/webasm/event-loop.cpp
+    ${YETTY_ROOT}/src/yetty/core/webasm-pipe.cpp
 )
 
 # Create executable with core sources + web platform

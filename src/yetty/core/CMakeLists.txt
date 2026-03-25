@@ -9,7 +9,6 @@ else()
 endif()
 
 add_library(yetty_base STATIC
-    event-queue.cpp
     ${EVENT_LOOP_SRC}
 )
 

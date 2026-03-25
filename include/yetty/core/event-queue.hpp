@@ -6,18 +6,18 @@
 namespace yetty {
 namespace core {
 
-// EventQueue - thread-safe queue for cross-thread event delivery
-//
-// Use this when posting events from non-main threads (e.g., GPU callbacks).
-// Main thread code should continue using EventLoop dispatch() directly.
-//
+class EventLoop;
+
 class EventQueue : public FactoryObject<EventQueue> {
 public:
   using Ptr = std::shared_ptr<EventQueue>;
 
-  static Result<Ptr> createImpl() noexcept;
+  static Result<EventQueue*> createImpl() noexcept;
 
   virtual ~EventQueue() = default;
+
+  // Called by EventLoop::connectEventQueue() to set the event loop pointer
+  virtual void setEventLoop(EventLoop* loop) = 0;
 
   // Push event to queue (thread-safe, can be called from any thread)
   // Wakes up main thread to process the event
