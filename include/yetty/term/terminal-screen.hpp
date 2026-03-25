@@ -1,10 +1,10 @@
 #pragma once
 
+#include <cstdint>
+#include <functional>
 #include <yetty/core/event-listener.hpp>
 #include <yetty/core/factory-object.hpp>
 #include <yetty/term/text-cell.hpp>
-#include <cstdint>
-#include <functional>
 
 namespace yetty {
 
@@ -14,7 +14,7 @@ class TerminalScreen : public core::FactoryObject<TerminalScreen>,
                        public core::EventListener {
 public:
   static Result<TerminalScreen *> createImpl(uint32_t cols, uint32_t rows,
-                                              Pty *pty);
+                                             Pty *pty);
 
   virtual ~TerminalScreen() = default;
 
@@ -29,11 +29,6 @@ public:
   // Damage tracking
   virtual bool hasDamage() const = 0;
   virtual void clearDamage() = 0;
-
-  // Callback for vterm output (to write to PTY)
-  using OutputCallback = std::function<void(const char *, size_t)>;
-  virtual void setOutputCallback(OutputCallback cb) = 0;
-
 
   // Cell data access — flat contiguous buffer, zero-copy GPU upload
   virtual const TextCell *getCellData() const = 0;

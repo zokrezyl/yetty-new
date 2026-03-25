@@ -8,7 +8,7 @@
 //
 // Platform owns instance and surface lifetime - destroys them after Yetty exits.
 
-#include <yetty/wgpu-compat.h>
+#include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
 #include <emscripten/html5.h>
 

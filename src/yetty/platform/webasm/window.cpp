@@ -7,7 +7,7 @@
 //
 // Single-threaded: all operations happen on the main (only) thread.
 
-#include <yetty/config.h>
+#include <yetty/config.hpp>
 #include <ytrace/ytrace.hpp>
 #include <emscripten/emscripten.h>
 #include <emscripten/html5.h>

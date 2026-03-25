@@ -1,5 +1,5 @@
-#include <yetty/term/terminal-screen.hpp>
 #include <yetty/platform/pty.hpp>
+#include <yetty/term/terminal-screen.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -49,7 +49,6 @@ public:
   uint32_t getRows() const override { return static_cast<uint32_t>(_rows); }
   bool hasDamage() const override { return _hasDamage; }
   void clearDamage() override { _hasDamage = false; }
-  void setOutputCallback(OutputCallback cb) override;
 
   const TextCell *getCellData() const override;
   TextCell getCell(int row, int col) const override;
@@ -80,8 +79,7 @@ public:
   static int onSetPenAttr(VTermAttr attr, VTermValue *val, void *user);
   static int onSetTermProp(VTermProp prop, VTermValue *val, void *user);
   static int onBell(void *user);
-  static int onResize(int rows, int cols, VTermStateFields *fields,
-                      void *user);
+  static int onResize(int rows, int cols, VTermStateFields *fields, void *user);
   static int onSetLineInfo(int row, const VTermLineInfo *newinfo,
                            const VTermLineInfo *oldinfo, void *user);
 
@@ -93,8 +91,7 @@ private:
                uint8_t fgB, uint8_t bgR, uint8_t bgG, uint8_t bgB,
                uint8_t style);
 
-  void colorToRGB(const VTermColor &color, uint8_t &r, uint8_t &g,
-                  uint8_t &b);
+  void colorToRGB(const VTermColor &color, uint8_t &r, uint8_t &g, uint8_t &b);
 
   size_t cellIndex(int row, int col) const {
     return static_cast<size_t>(row * _cols + col);
@@ -141,10 +138,7 @@ private:
   VTermColor _defaultFg;
   VTermColor _defaultBg;
 
-  // Callbacks
-  OutputCallback _outputCallback;
-
-  // Pty for reading on PollReadable
+  // Pty for reading on PollReadable and writing vterm output
   Pty *_pty;
 };
 
@@ -189,6 +183,17 @@ Result<void> TerminalScreenImpl::init(uint32_t cols, uint32_t rows) {
   if (!_vterm) {
     return Err<void>("TerminalScreen: failed to create vterm");
   }
+
+  // Set up vterm output callback to write directly to PTY
+  vterm_output_set_callback(
+      _vterm,
+      [](const char *data, size_t len, void *user) {
+        auto *self = static_cast<TerminalScreenImpl *>(user);
+        if (self->_pty) {
+          self->_pty->write(data, len);
+        }
+      },
+      this);
 
   return Ok();
 }
@@ -245,21 +250,6 @@ void TerminalScreenImpl::attach(VTerm *vt) {
 void TerminalScreenImpl::write(const char *data, size_t len) {
   if (_vterm && len > 0) {
     vterm_input_write(_vterm, data, len);
-  }
-}
-
-void TerminalScreenImpl::setOutputCallback(OutputCallback cb) {
-  _outputCallback = std::move(cb);
-  if (_vterm && _outputCallback) {
-    vterm_output_set_callback(
-        _vterm,
-        [](const char *data, size_t len, void *user) {
-          auto *self = static_cast<TerminalScreenImpl *>(user);
-          if (self->_outputCallback) {
-            self->_outputCallback(data, len);
-          }
-        },
-        this);
   }
 }
 
@@ -657,15 +647,15 @@ int TerminalScreenImpl::onMoveRect(VTermRect dest, VTermRect src, void *user) {
       for (int row = 0; row < height; row++) {
         size_t si = self->cellIndex(src.start_row + row, 0);
         size_t di = self->cellIndex(dest.start_row + row, 0);
-        std::memmove(&(*self->_visibleBuffer)[di],
-                     &(*self->_visibleBuffer)[si], width * sizeof(TextCell));
+        std::memmove(&(*self->_visibleBuffer)[di], &(*self->_visibleBuffer)[si],
+                     width * sizeof(TextCell));
       }
     } else {
       for (int row = height - 1; row >= 0; row--) {
         size_t si = self->cellIndex(src.start_row + row, 0);
         size_t di = self->cellIndex(dest.start_row + row, 0);
-        std::memmove(&(*self->_visibleBuffer)[di],
-                     &(*self->_visibleBuffer)[si], width * sizeof(TextCell));
+        std::memmove(&(*self->_visibleBuffer)[di], &(*self->_visibleBuffer)[si],
+                     width * sizeof(TextCell));
       }
     }
   }
@@ -679,16 +669,18 @@ int TerminalScreenImpl::onMoveRect(VTermRect dest, VTermRect src, void *user) {
         (dest.start_row == src.start_row && dest.start_col <= src.start_col);
 
     auto copyRow = [&](int row) {
-      size_t si = self->cellIndex(
-          (copyForward ? src.start_row + row : src.start_row + height - 1 - row),
-          src.start_col);
-      size_t di = self->cellIndex(
-          (copyForward ? dest.start_row + row : dest.start_row + height - 1 - row),
-          dest.start_col);
-      std::memcpy(self->_scratchBuffer.data(),
-                  &(*self->_visibleBuffer)[si], width * sizeof(TextCell));
-      std::memcpy(&(*self->_visibleBuffer)[di],
-                  self->_scratchBuffer.data(), width * sizeof(TextCell));
+      size_t si =
+          self->cellIndex((copyForward ? src.start_row + row
+                                       : src.start_row + height - 1 - row),
+                          src.start_col);
+      size_t di =
+          self->cellIndex((copyForward ? dest.start_row + row
+                                       : dest.start_row + height - 1 - row),
+                          dest.start_col);
+      std::memcpy(self->_scratchBuffer.data(), &(*self->_visibleBuffer)[si],
+                  width * sizeof(TextCell));
+      std::memcpy(&(*self->_visibleBuffer)[di], self->_scratchBuffer.data(),
+                  width * sizeof(TextCell));
     };
 
     for (int row = 0; row < height; row++) {
@@ -860,8 +852,8 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
   return Ok(false);
 }
 
-Result<TerminalScreen *>
-TerminalScreen::createImpl(uint32_t cols, uint32_t rows, Pty *pty) {
+Result<TerminalScreen *> TerminalScreen::createImpl(uint32_t cols,
+                                                    uint32_t rows, Pty *pty) {
   auto *screen = new TerminalScreenImpl(pty);
   if (auto res = screen->init(cols, rows); !res) {
     delete screen;

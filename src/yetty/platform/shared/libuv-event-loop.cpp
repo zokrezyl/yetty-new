@@ -411,10 +411,28 @@ private:
                ph->fd, status, events, ph->listeners.size());
 
         if (status < 0) {
-            ywarn("EventLoop::onPollCallback: error status={} for fd={}", status, ph->fd);
+            yerror("EventLoop::onPollCallback: error status={} for fd={}", status, ph->fd);
             return;
         }
 
+        // Check if this is the PlatformInputPipe poll
+        if (ph->owner->_platformInputPipe &&
+            ph->fd == ph->owner->_platformInputPipe->readFd()) {
+            if (events & UV_READABLE) {
+                Event pipeEvent;
+                while (ph->owner->_platformInputPipe->read(&pipeEvent, sizeof(pipeEvent)) == sizeof(pipeEvent)) {
+                    ydebug("EventLoop: pipe event type={}", static_cast<int>(pipeEvent.type));
+                    for (auto *listener : ph->listeners) {
+                        listener->onEvent(pipeEvent);
+                    }
+                }
+            } else {
+                yerror("EventLoop: unexpected event {} on PlatformInputPipe fd={}", events, ph->fd);
+            }
+            return;
+        }
+
+        // Regular poll (PTY, etc.)
         if (events & UV_READABLE) {
             Event event;
             event.type = Event::Type::PollReadable;

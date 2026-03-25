@@ -1,7 +1,7 @@
 // WebAssembly pty-io.cpp - PTY I/O via JSLinux iframe postMessage
 
-#include <yetty/platform/pty.h>
-#include <yetty/platform/pty-factory.h>
+#include <yetty/platform/pty.hpp>
+#include <yetty/platform/pty-factory.hpp>
 #include <ytrace/ytrace.hpp>
 #include <emscripten/emscripten.h>
 
