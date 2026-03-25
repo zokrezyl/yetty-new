@@ -28,87 +28,26 @@ if(YETTY_ENABLE_FEATURE_RPC)
     add_subdirectory(rpc)
 endif()
 
-# Core sources - ALL sources needed for yetty executable (platform-agnostic)
-set(YETTY_CORE_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/yetty.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/incbin-assets.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/config.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/osc-scanner.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terminal.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terminal-view.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/gpu-screen.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/osc-command.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/gpu-allocator.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/gpu-memory-manager.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/gpu-buffer-manager.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/gpu-texture-manager.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/gpu-screen-manager.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/card-factory.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/card.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/name-generator.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/ygui/ygui-overlay.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/screen-draw-layer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/workspace.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/tile.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/view.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/frame-renderer.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/shader-manager.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/font-manager.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/msdf-atlas.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/ms-msdf-font.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/vector-sdf-font.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/vector-coverage-font.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/raster-font.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/bm-font.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/shader-font.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/shared-memory.cpp
-    # Renderer sources (from subdirectories, empty if features disabled)
-    ${YETTY_ZOO_SOURCES}
-    ${YETTY_MAZE_SOURCES}
-    ${YETTY_YGRID_SOURCES}
-    PARENT_SCOPE
-)
+# Core sources — populated as features are ported
+set(YETTY_CORE_SOURCES "" PARENT_SCOPE)
 
 # Desktop-only sources (Linux, macOS - NOT Windows)
-set(YETTY_DESKTOP_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/msdf-cdb-provider.cpp
-    ${YETTY_MSDF_GEN_SOURCES}
-    ${YETTY_RPC_SOURCES}
-    PARENT_SCOPE
-)
+set(YETTY_DESKTOP_SOURCES "" PARENT_SCOPE)
 
 # Windows-specific sources
-set(YETTY_WINDOWS_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/msdf-cdb-provider.cpp
-    ${YETTY_MSDF_GEN_SOURCES}
-    ${YETTY_RPC_SOURCES}
-    PARENT_SCOPE
-)
+set(YETTY_WINDOWS_SOURCES "" PARENT_SCOPE)
 
 # WebAssembly-specific sources
-set(YETTY_WEB_SOURCES
-    PARENT_SCOPE
-)
+set(YETTY_WEB_SOURCES "" PARENT_SCOPE)
 
 # Android-specific sources
-set(YETTY_ANDROID_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/msdf-cdb-provider.cpp
-    PARENT_SCOPE
-)
+set(YETTY_ANDROID_SOURCES "" PARENT_SCOPE)
 
 # iPhone/iOS-specific sources
-set(YETTY_IOS_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/msdf-cdb-provider.cpp
-    PARENT_SCOPE
-)
+set(YETTY_IOS_SOURCES "" PARENT_SCOPE)
 
 # Include directories for renderer sources
-set(YETTY_RENDERER_INCLUDES
-    ${YETTY_ZOO_INCLUDES}
-    ${YETTY_MAZE_INCLUDES}
-    PARENT_SCOPE
-)
+set(YETTY_RENDERER_INCLUDES "" PARENT_SCOPE)
 
 #-----------------------------------------------------------------------------
 # Library subdirectories — guarded by YETTY_ENABLE_FEATURE_*

@@ -73,51 +73,55 @@ find_library(QUARTZCORE_LIBRARY QuartzCore REQUIRED)
 
 target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
-    ytrace::ytrace
-    lz4_static
-    uv_a
-    yetty_vnc
-    yetty_yvideo
-    turbojpeg-static
     ${CORETEXT_LIBRARY}
     ${COREFOUNDATION_LIBRARY}
     ${COREGRAPHICS_LIBRARY}
     ${UIKIT_LIBRARY}
     ${METAL_LIBRARY}
     ${QUARTZCORE_LIBRARY}
-    ${FREETYPE_ALL_LIBS}
-    ${BROTLIDEC_LIBRARIES}
 )
 
 # CDB font generation (builds host tools for cross-compilation)
-include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+endif()
 
 # Generate demo outputs (pre-run demo scripts to capture output for iOS)
-message(STATUS "Generating demo outputs for iOS...")
-execute_process(
-    COMMAND ${CMAKE_COMMAND}
-        -DYETTY_ROOT=${YETTY_ROOT}
-        -DOUTPUT_DIR=${IOS_ASSETS_DIR}
-        -P ${YETTY_ROOT}/build-tools/cmake/generate-demo-outputs.cmake
-    WORKING_DIRECTORY ${YETTY_ROOT}
-)
+if(YETTY_ENABLE_FEATURE_DEMO)
+    message(STATUS "Generating demo outputs for iOS...")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND}
+            -DYETTY_ROOT=${YETTY_ROOT}
+            -DOUTPUT_DIR=${IOS_ASSETS_DIR}
+            -P ${YETTY_ROOT}/build-tools/cmake/generate-demo-outputs.cmake
+        WORKING_DIRECTORY ${YETTY_ROOT}
+    )
+endif()
 
 # Copy static assets to iOS build directory
-file(GLOB ASSET_FILES "${YETTY_ROOT}/assets/*")
-file(COPY ${ASSET_FILES} DESTINATION ${IOS_ASSETS_DIR})
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    file(GLOB ASSET_FILES "${YETTY_ROOT}/assets/*")
+    file(COPY ${ASSET_FILES} DESTINATION ${IOS_ASSETS_DIR})
+endif()
 
 # Ensure CDB, shaders, and assets are built before yetty
-add_dependencies(yetty generate-cdb copy-shaders copy-shaders-for-incbin copy-fonts-for-incbin)
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    add_dependencies(yetty generate-cdb copy-shaders copy-shaders-for-incbin copy-fonts-for-incbin)
+endif()
 
 # Copy generated CDB fonts and shaders to iOS assets dir after build
-add_custom_command(TARGET yetty POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/assets/msdf-fonts ${IOS_ASSETS_DIR}/msdf-fonts
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/assets/shaders ${IOS_ASSETS_DIR}/shaders
-    COMMENT "Copying CDB fonts and shaders to iOS assets"
-)
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    add_custom_command(TARGET yetty POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/assets/msdf-fonts ${IOS_ASSETS_DIR}/msdf-fonts
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/assets/shaders ${IOS_ASSETS_DIR}/shaders
+        COMMENT "Copying CDB fonts and shaders to iOS assets"
+    )
+endif()
 
 # Verify all required assets are present
-add_custom_command(TARGET yetty POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${IOS_ASSETS_DIR}/.. -DTARGET_TYPE=ios -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
-    COMMENT "Verifying build assets..."
-)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_custom_command(TARGET yetty POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${IOS_ASSETS_DIR}/.. -DTARGET_TYPE=ios -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
+        COMMENT "Verifying build assets..."
+    )
+endif()

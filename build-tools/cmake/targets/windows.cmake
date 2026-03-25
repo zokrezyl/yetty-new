@@ -11,8 +11,12 @@ endif()
 add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
 
 # Desktop-specific subdirectories
-add_subdirectory(${YETTY_ROOT}/src/yetty/gpu ${CMAKE_BINARY_DIR}/src/yetty/gpu)
-add_subdirectory(${YETTY_ROOT}/src/yetty/client ${CMAKE_BINARY_DIR}/src/yetty/client)
+if(YETTY_ENABLE_FEATURE_GPU)
+    add_subdirectory(${YETTY_ROOT}/src/yetty/gpu ${CMAKE_BINARY_DIR}/src/yetty/gpu)
+endif()
+if(YETTY_ENABLE_FEATURE_CLIENT)
+    add_subdirectory(${YETTY_ROOT}/src/yetty/client ${CMAKE_BINARY_DIR}/src/yetty/client)
+endif()
 
 # Platform manager sources (new architecture)
 # Note: event-loop is included via yetty_base
@@ -59,29 +63,24 @@ set_target_properties(yetty PROPERTIES ENABLE_EXPORTS TRUE)
 
 target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
-    glfw
-    glfw3webgpu
-    args
-    ytrace::ytrace
-    lz4_static
-    uv_a
-    yetty_gpu
-    turbojpeg-static
-    yetty_vnc
     dwrite
     ws2_32
-    ${FREETYPE_ALL_LIBS}
-    ${BROTLIDEC_LIBRARIES}
 )
 
 # CDB font generation
-include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+endif()
 
 # Copy runtime assets to build directory
-add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
+endif()
 
 # Ensure all runtime assets are in build output before yetty
-add_dependencies(yetty generate-cdb copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
+if(YETTY_ENABLE_FEATURE_CDB_GEN AND YETTY_ENABLE_FEATURE_ASSETS)
+    add_dependencies(yetty generate-cdb copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
+endif()
 
 # Copy DirectX runtime DLLs needed by Dawn (shader compiler + DXIL signing)
 if(WIN32)
@@ -96,7 +95,6 @@ if(WIN32)
     endif()
 
     # --- Find d3dcompiler_47.dll ---
-    # Typically in Windows Kits Redist/D3D/x64 or versioned Redist/<version>/x64
     set(_d3dcompiler_dll "")
     if(EXISTS "C:/Program Files (x86)/Windows Kits/10/Redist/D3D/x64/d3dcompiler_47.dll")
         set(_d3dcompiler_dll "C:/Program Files (x86)/Windows Kits/10/Redist/D3D/x64/d3dcompiler_47.dll")
@@ -108,7 +106,6 @@ if(WIN32)
             endif()
         endforeach()
     endif()
-    # Also search bin/<version>/x64 as fallback
     if(NOT _d3dcompiler_dll)
         foreach(_dir ${_sdk_bin_x64_dirs})
             if(EXISTS "${_dir}/d3dcompiler_47.dll")
@@ -131,8 +128,6 @@ if(WIN32)
     endif()
 
     # --- Find dxil.dll ---
-    # dxil.dll (DXC signing library) lives in Windows Kits bin/<version>/x64,
-    # NOT in the Redist directory.
     set(_dxil_dll "")
     foreach(_dir ${_sdk_bin_x64_dirs})
         if(EXISTS "${_dir}/dxil.dll")
@@ -140,7 +135,6 @@ if(WIN32)
             break()
         endif()
     endforeach()
-    # Fallback: Redist/D3D/x64 or versioned Redist
     if(NOT _dxil_dll)
         if(EXISTS "C:/Program Files (x86)/Windows Kits/10/Redist/D3D/x64/dxil.dll")
             set(_dxil_dll "C:/Program Files (x86)/Windows Kits/10/Redist/D3D/x64/dxil.dll")
@@ -168,11 +162,15 @@ if(WIN32)
 endif()
 
 # Verify all required assets are present
-add_custom_command(TARGET yetty POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=desktop -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
-    COMMENT "Verifying build assets..."
-)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_custom_command(TARGET yetty POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=desktop -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
+        COMMENT "Verifying build assets..."
+    )
+endif()
 
 # Tests
-enable_testing()
-add_subdirectory(${YETTY_ROOT}/test/ut/windows ${CMAKE_BINARY_DIR}/test/ut/windows)
+if(YETTY_ENABLE_FEATURE_TESTS)
+    enable_testing()
+    add_subdirectory(${YETTY_ROOT}/test/ut/windows ${CMAKE_BINARY_DIR}/test/ut/windows)
+endif()

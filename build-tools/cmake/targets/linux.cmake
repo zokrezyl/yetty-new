@@ -14,21 +14,25 @@ endif()
 add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
 
 # Desktop-specific subdirectories
-add_subdirectory(${YETTY_ROOT}/src/yetty/gpu ${CMAKE_BINARY_DIR}/src/yetty/gpu)
-add_subdirectory(${YETTY_ROOT}/src/yetty/client ${CMAKE_BINARY_DIR}/src/yetty/client)
-add_subdirectory(${YETTY_ROOT}/src/yetty/ytop ${CMAKE_BINARY_DIR}/src/yetty/ytop)
+if(YETTY_ENABLE_FEATURE_GPU)
+    add_subdirectory(${YETTY_ROOT}/src/yetty/gpu ${CMAKE_BINARY_DIR}/src/yetty/gpu)
+endif()
+if(YETTY_ENABLE_FEATURE_CLIENT)
+    add_subdirectory(${YETTY_ROOT}/src/yetty/client ${CMAKE_BINARY_DIR}/src/yetty/client)
+endif()
+if(YETTY_ENABLE_FEATURE_YTOP)
+    add_subdirectory(${YETTY_ROOT}/src/yetty/ytop ${CMAKE_BINARY_DIR}/src/yetty/ytop)
+endif()
 
-# Platform manager sources (new architecture)
-# Note: event-loop is included via yetty_base
+# Platform sources — linux-specific + shared glfw
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/init-manager/glfw.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window-singleton.cpp
-    ${YETTY_ROOT}/src/yetty/platform/surface-manager/glfw.cpp
-    ${YETTY_ROOT}/src/yetty/platform/pty-manager/unix.cpp
-    ${YETTY_ROOT}/src/yetty/platform/pty-reader/unix.cpp
-    ${YETTY_ROOT}/src/yetty/platform/fs-path-manager/unix.cpp
-    ${YETTY_ROOT}/src/yetty/platform/clipboard-manager/glfw.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webgpu-manager/linux.cpp
+    ${YETTY_ROOT}/src/yetty/platform/linux/main.cpp
+    ${YETTY_ROOT}/src/yetty/platform/linux/surface.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-event-loop.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/window.cpp
 )
 
 # Create executable with core sources + platform
@@ -69,46 +73,48 @@ find_library(UUID_STATIC_LIB libuuid.a PATHS /usr/lib/x86_64-linux-gnu /usr/lib 
 
 target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
-    glfw
-    glfw3webgpu
-    args
-    ytrace::ytrace
-    lz4_static
-    uv_a
-    yetty_gpu
-    turbojpeg-static
-    yetty_vnc
     ${FONTCONFIG_STATIC_LIB}
     ${EXPAT_STATIC_LIB}
     ${UUID_STATIC_LIB}
     rt
     util
-    ${FREETYPE_ALL_LIBS}
-    ${BROTLIDEC_LIBRARIES}
 )
 
 # CDB font generation
-include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+endif()
 
 # Copy runtime assets to build directory
-add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
+endif()
 
 # Ensure all runtime assets are in build output before yetty
-add_dependencies(yetty generate-cdb copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
+if(YETTY_ENABLE_FEATURE_CDB_GEN AND YETTY_ENABLE_FEATURE_ASSETS)
+    add_dependencies(yetty generate-cdb copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
+endif()
 
 # Verify all required assets are present
-add_custom_command(TARGET yetty POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=desktop -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
-    COMMENT "Verifying build assets..."
-)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_custom_command(TARGET yetty POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=desktop -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
+        COMMENT "Verifying build assets..."
+    )
+endif()
 
 # Tests
-enable_testing()
-add_subdirectory(${YETTY_ROOT}/test/ut ${CMAKE_BINARY_DIR}/test/ut)
+if(YETTY_ENABLE_FEATURE_TESTS)
+    enable_testing()
+    add_subdirectory(${YETTY_ROOT}/test/ut ${CMAKE_BINARY_DIR}/test/ut)
+endif()
 
 # Tools (ydraw-maze, ydraw-zoo, etc.)
-# Note: ycat is already added via src/yetty/CMakeLists.txt
-add_subdirectory(${YETTY_ROOT}/tools ${CMAKE_BINARY_DIR}/tools)
+if(YETTY_ENABLE_FEATURE_TOOLS)
+    add_subdirectory(${YETTY_ROOT}/tools ${CMAKE_BINARY_DIR}/tools)
+endif()
 
 # Demos
-add_subdirectory(${YETTY_ROOT}/demo ${CMAKE_BINARY_DIR}/demo)
+if(YETTY_ENABLE_FEATURE_DEMO)
+    add_subdirectory(${YETTY_ROOT}/demo ${CMAKE_BINARY_DIR}/demo)
+endif()

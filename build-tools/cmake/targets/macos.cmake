@@ -14,9 +14,15 @@ endif()
 add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
 
 # Desktop-specific subdirectories
-add_subdirectory(${YETTY_ROOT}/src/yetty/gpu ${CMAKE_BINARY_DIR}/src/yetty/gpu)
-add_subdirectory(${YETTY_ROOT}/src/yetty/client ${CMAKE_BINARY_DIR}/src/yetty/client)
-add_subdirectory(${YETTY_ROOT}/src/yetty/ytop ${CMAKE_BINARY_DIR}/src/yetty/ytop)
+if(YETTY_ENABLE_FEATURE_GPU)
+    add_subdirectory(${YETTY_ROOT}/src/yetty/gpu ${CMAKE_BINARY_DIR}/src/yetty/gpu)
+endif()
+if(YETTY_ENABLE_FEATURE_CLIENT)
+    add_subdirectory(${YETTY_ROOT}/src/yetty/client ${CMAKE_BINARY_DIR}/src/yetty/client)
+endif()
+if(YETTY_ENABLE_FEATURE_YTOP)
+    add_subdirectory(${YETTY_ROOT}/src/yetty/ytop ${CMAKE_BINARY_DIR}/src/yetty/ytop)
+endif()
 
 # Platform manager sources (new architecture)
 # Note: event-loop is included via yetty_base
@@ -65,32 +71,29 @@ find_library(COREFOUNDATION_LIBRARY CoreFoundation REQUIRED)
 
 target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
-    glfw
-    glfw3webgpu
-    args
-    ytrace::ytrace
-    lz4_static
-    uv_a
-    yetty_gpu
-    turbojpeg-static
-    yetty_vnc
     ${CORETEXT_LIBRARY}
     ${COREFOUNDATION_LIBRARY}
-    ${FREETYPE_ALL_LIBS}
-    ${BROTLIDEC_LIBRARIES}
 )
 
 # CDB font generation
-include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+endif()
 
 # Copy runtime assets to build directory
-add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
+endif()
 
 # Ensure all runtime assets are in build output before yetty
-add_dependencies(yetty generate-cdb copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
+if(YETTY_ENABLE_FEATURE_CDB_GEN AND YETTY_ENABLE_FEATURE_ASSETS)
+    add_dependencies(yetty generate-cdb copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
+endif()
 
 # Verify all required assets are present
-add_custom_command(TARGET yetty POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=desktop -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
-    COMMENT "Verifying build assets..."
-)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_custom_command(TARGET yetty POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=desktop -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
+        COMMENT "Verifying build assets..."
+    )
+endif()

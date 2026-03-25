@@ -23,7 +23,9 @@ file(MAKE_DIRECTORY ${ANDROID_ASSETS_DIR})
 add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
 
 # VNC server/client support
-add_subdirectory(${YETTY_ROOT}/src/yetty/vnc ${CMAKE_BINARY_DIR}/src/yetty/vnc)
+if(YETTY_ENABLE_FEATURE_VNC)
+    add_subdirectory(${YETTY_ROOT}/src/yetty/vnc ${CMAKE_BINARY_DIR}/src/yetty/vnc)
+endif()
 
 # Platform manager sources (new architecture)
 # Note: event-loop is included via yetty_base
@@ -70,47 +72,50 @@ target_link_libraries(yetty PRIVATE
     -Wl,--whole-archive
     native_app_glue
     -Wl,--no-whole-archive
-    ytrace::ytrace
-    lz4_static
-    uv_a
-    yetty_vnc
-    turbojpeg-static
-    ${FREETYPE_ALL_LIBS}
-    ${BROTLIDEC_LIBRARIES}
     android
     log
 )
 
 # CDB font generation (builds host tools for cross-compilation)
-include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+endif()
 
 # Generate demo outputs (pre-run demo scripts to capture output for Android)
-# This runs at configure time since Android can't run bash scripts
-message(STATUS "Generating demo outputs for Android...")
-execute_process(
-    COMMAND ${CMAKE_COMMAND}
-        -DYETTY_ROOT=${YETTY_ROOT}
-        -DOUTPUT_DIR=${ANDROID_ASSETS_DIR}
-        -P ${YETTY_ROOT}/build-tools/cmake/generate-demo-outputs.cmake
-    WORKING_DIRECTORY ${YETTY_ROOT}
-)
+if(YETTY_ENABLE_FEATURE_DEMO)
+    message(STATUS "Generating demo outputs for Android...")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND}
+            -DYETTY_ROOT=${YETTY_ROOT}
+            -DOUTPUT_DIR=${ANDROID_ASSETS_DIR}
+            -P ${YETTY_ROOT}/build-tools/cmake/generate-demo-outputs.cmake
+        WORKING_DIRECTORY ${YETTY_ROOT}
+    )
+endif()
 
-# Copy static assets to Android build directory (ANDROID_ASSETS_DIR already set above)
-file(GLOB ASSET_FILES "${YETTY_ROOT}/assets/*")
-file(COPY ${ASSET_FILES} DESTINATION ${ANDROID_ASSETS_DIR})
+# Copy static assets to Android build directory
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    file(GLOB ASSET_FILES "${YETTY_ROOT}/assets/*")
+    file(COPY ${ASSET_FILES} DESTINATION ${ANDROID_ASSETS_DIR})
+endif()
 
 # Ensure CDB, shaders, and assets are built before yetty
-add_dependencies(yetty generate-cdb copy-shaders copy-shaders-for-incbin copy-fonts-for-incbin)
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    add_dependencies(yetty generate-cdb copy-shaders copy-shaders-for-incbin copy-fonts-for-incbin)
+endif()
 
 # Copy generated CDB fonts to Android assets dir after build
-# (shaders are already copied at configure time in shaders/CMakeLists.txt)
-add_custom_command(TARGET yetty POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/assets/msdf-fonts ${ANDROID_ASSETS_DIR}/msdf-fonts
-    COMMENT "Copying CDB fonts to Android assets"
-)
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    add_custom_command(TARGET yetty POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/assets/msdf-fonts ${ANDROID_ASSETS_DIR}/msdf-fonts
+        COMMENT "Copying CDB fonts to Android assets"
+    )
+endif()
 
 # Verify all required assets are present
-add_custom_command(TARGET yetty POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${ANDROID_ASSETS_DIR}/.. -DTARGET_TYPE=android -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
-    COMMENT "Verifying build assets..."
-)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_custom_command(TARGET yetty POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${ANDROID_ASSETS_DIR}/.. -DTARGET_TYPE=android -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
+        COMMENT "Verifying build assets..."
+    )
+endif()

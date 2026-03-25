@@ -3,10 +3,14 @@
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
 # CDB font generation (builds host tools automatically)
-include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
+endif()
 
 # Copy runtime assets (fonts, etc.) to build directory
-add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
+endif()
 
 # Global definitions for all webasm targets (applied before add_subdirectory)
 add_compile_definitions(YETTY_WEB=1 YETTY_ANDROID=0)
@@ -37,18 +41,24 @@ add_executable(yetty
 )
 
 # JSLinux integration (downloads and copies files)
-add_subdirectory(${YETTY_ROOT}/build-tools/jslinux ${CMAKE_BINARY_DIR}/jslinux-build)
+if(YETTY_ENABLE_FEATURE_JSLINUX)
+    add_subdirectory(${YETTY_ROOT}/build-tools/jslinux ${CMAKE_BINARY_DIR}/jslinux-build)
+endif()
 
 target_include_directories(yetty PRIVATE ${YETTY_INCLUDES} ${YETTY_RENDERER_INCLUDES} ${JPEG_INCLUDE_DIRS})
 
 # Embed resources (stubs on web, but needed for symbol resolution)
 # Note: webasm uses preload files, not incbin, so we only need stubs for symbols
-incbin_add_resources(yetty
-    Logo "${YETTY_ROOT}/docs/logo.jpeg"
-    DefaultConfig "${YETTY_ROOT}/assets/default-config.yaml"
-)
+if(YETTY_ENABLE_LIB_INCBIN)
+    incbin_add_resources(yetty
+        Logo "${YETTY_ROOT}/docs/logo.jpeg"
+        DefaultConfig "${YETTY_ROOT}/assets/default-config.yaml"
+    )
+endif()
 
-add_dependencies(yetty generate-cdb copy-shaders copy-assets)
+if(YETTY_ENABLE_FEATURE_CDB_GEN AND YETTY_ENABLE_FEATURE_ASSETS)
+    add_dependencies(yetty generate-cdb copy-shaders copy-assets)
+endif()
 
 target_compile_definitions(yetty PRIVATE
     ${YETTY_DEFINITIONS}
@@ -90,17 +100,16 @@ set_target_properties(yetty PROPERTIES SUFFIX ".js")
 target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
     Freetype::Freetype
-    zlibstatic
-    turbojpeg-static
-    yetty_vnc
 )
 
 # Copy demo and source tree to build directory for preloading
-add_custom_command(TARGET yetty PRE_LINK
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${YETTY_ROOT}/demo ${CMAKE_BINARY_DIR}/demo
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${YETTY_ROOT}/src ${CMAKE_BINARY_DIR}/src
-    COMMENT "Copying demo and source tree to build directory"
-)
+if(YETTY_ENABLE_FEATURE_DEMO)
+    add_custom_command(TARGET yetty PRE_LINK
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${YETTY_ROOT}/demo ${CMAKE_BINARY_DIR}/demo
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${YETTY_ROOT}/src ${CMAKE_BINARY_DIR}/src
+        COMMENT "Copying demo and source tree to build directory"
+    )
+endif()
 
 # Remove stamp file that can cause issues with Emscripten file packaging
 add_custom_command(TARGET yetty PRE_LINK
@@ -117,27 +126,30 @@ add_custom_command(TARGET yetty POST_BUILD
 )
 
 # Copy JSLinux files to build output
-add_custom_command(TARGET yetty POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/jslinux
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/jslinux-build/jslinux ${CMAKE_BINARY_DIR}/jslinux
-    COMMENT "Copying JSLinux files..."
-)
-
-# Toybox: run build-tools/web/build-toybox-minimal.sh manually if needed
+if(YETTY_ENABLE_FEATURE_JSLINUX)
+    add_custom_command(TARGET yetty POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/jslinux
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/jslinux-build/jslinux ${CMAKE_BINARY_DIR}/jslinux
+        COMMENT "Copying JSLinux files..."
+    )
+endif()
 
 # Generate pre-computed demo script outputs
-add_custom_target(generate-demo-outputs
-    COMMAND ${CMAKE_COMMAND}
-        -DYETTY_ROOT=${YETTY_ROOT}
-        -DOUTPUT_DIR=${CMAKE_BINARY_DIR}
-        -P ${YETTY_ROOT}/build-tools/cmake/generate-demo-outputs.cmake
-    COMMENT "Generating demo script outputs..."
-)
-
-add_dependencies(yetty generate-demo-outputs)
+if(YETTY_ENABLE_FEATURE_DEMO)
+    add_custom_target(generate-demo-outputs
+        COMMAND ${CMAKE_COMMAND}
+            -DYETTY_ROOT=${YETTY_ROOT}
+            -DOUTPUT_DIR=${CMAKE_BINARY_DIR}
+            -P ${YETTY_ROOT}/build-tools/cmake/generate-demo-outputs.cmake
+        COMMENT "Generating demo script outputs..."
+    )
+    add_dependencies(yetty generate-demo-outputs)
+endif()
 
 # Verify all required assets are present
-add_custom_command(TARGET yetty POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=webasm -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
-    COMMENT "Verifying build assets..."
-)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_custom_command(TARGET yetty POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=webasm -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
+        COMMENT "Verifying build assets..."
+    )
+endif()
