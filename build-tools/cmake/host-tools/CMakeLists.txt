@@ -140,45 +140,47 @@ target_compile_definitions(yetty-msdf-gen PRIVATE CMAKE_SOURCE_DIR="${YETTY_ROOT
 # VM tools - statically linked for x86_64 Linux (JSLinux VM)
 # =============================================================================
 
-# Generate glyph registry header for yecho
-set(GLYPH_REGISTRY_HEADER "${CMAKE_CURRENT_BINARY_DIR}/glyph-registry-generated.h")
-set(SHADER_DIR "${YETTY_ROOT}/src/yetty/shaders")
+if(YETTY_ENABLE_FEATURE_YECHO)
+    # Generate glyph registry header for yecho
+    set(GLYPH_REGISTRY_HEADER "${CMAKE_CURRENT_BINARY_DIR}/glyph-registry-generated.h")
+    set(SHADER_DIR "${YETTY_ROOT}/src/yetty/shaders")
 
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-execute_process(
-    COMMAND ${Python3_EXECUTABLE}
-        ${YETTY_ROOT}/src/yetty/yecho/gen-glyph-registry.py
-        ${SHADER_DIR}
-        ${GLYPH_REGISTRY_HEADER}
-    WORKING_DIRECTORY ${YETTY_ROOT}/src/yetty/yecho
-    RESULT_VARIABLE GEN_RESULT
-)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE}
+            ${YETTY_ROOT}/src/yetty/yecho/gen-glyph-registry.py
+            ${SHADER_DIR}
+            ${GLYPH_REGISTRY_HEADER}
+        WORKING_DIRECTORY ${YETTY_ROOT}/src/yetty/yecho
+        RESULT_VARIABLE GEN_RESULT
+    )
 
-# yecho - for VM (try static with musl, fallback to dynamic)
-add_executable(yecho-static
-    ${YETTY_ROOT}/src/yetty/yecho/yecho.cpp
-    ${YETTY_ROOT}/src/yetty/yecho/yecho-parser.cpp
-)
-target_include_directories(yecho-static PRIVATE
-    ${YETTY_ROOT}/include
-    ${YETTY_ROOT}/src/yetty/yecho
-    ${CMAKE_CURRENT_BINARY_DIR}
-)
-target_link_libraries(yecho-static PRIVATE args ytrace::ytrace)
+    # yecho - for VM (try static with musl, fallback to dynamic)
+    add_executable(yecho-static
+        ${YETTY_ROOT}/src/yetty/yecho/yecho.cpp
+        ${YETTY_ROOT}/src/yetty/yecho/yecho-parser.cpp
+    )
+    target_include_directories(yecho-static PRIVATE
+        ${YETTY_ROOT}/include
+        ${YETTY_ROOT}/src/yetty/yecho
+        ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    target_link_libraries(yecho-static PRIVATE args ytrace::ytrace)
 
-# Try to find musl-gcc for true static linking, otherwise build dynamic
-find_program(MUSL_GCC musl-gcc)
-if(MUSL_GCC)
-    message(STATUS "Using musl-gcc for static VM tools")
-    set(CMAKE_C_COMPILER ${MUSL_GCC})
-    set(CMAKE_CXX_COMPILER ${MUSL_GCC})
-    target_link_options(yecho-static PRIVATE -static)
-else()
-    message(STATUS "musl-gcc not found, building dynamic VM tools")
+    # Try to find musl-gcc for true static linking, otherwise build dynamic
+    find_program(MUSL_GCC musl-gcc)
+    if(MUSL_GCC)
+        message(STATUS "Using musl-gcc for static VM tools")
+        set(CMAKE_C_COMPILER ${MUSL_GCC})
+        set(CMAKE_CXX_COMPILER ${MUSL_GCC})
+        target_link_options(yecho-static PRIVATE -static)
+    else()
+        message(STATUS "musl-gcc not found, building dynamic VM tools")
+    endif()
+
+    target_compile_features(yecho-static PRIVATE cxx_std_23)
+    set_target_properties(yecho-static PROPERTIES OUTPUT_NAME "yecho")
 endif()
-
-target_compile_features(yecho-static PRIVATE cxx_std_23)
-set_target_properties(yecho-static PROPERTIES OUTPUT_NAME "yecho")
 
 # =============================================================================
 # ycat-static + ybrowser-static — only built when BUILD_VM_TOOLS is ON

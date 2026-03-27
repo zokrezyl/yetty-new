@@ -55,7 +55,7 @@ option(YETTY_ENABLE_LIB_LIBMAGIC    "libmagic — file type detection"         O
 # Core modules
 option(YETTY_ENABLE_FEATURE_BASE      "yetty_base — core utilities"          OFF)
 option(YETTY_ENABLE_FEATURE_FONT      "yetty_font — font subsystem"          OFF)
-option(YETTY_ENABLE_FEATURE_SHADERS   "shaders — WGSL shader sources"        OFF)
+option(YETTY_ENABLE_FEATURE_SHADERS   "shaders — WGSL shader sources"        ON)
 option(YETTY_ENABLE_FEATURE_MSDF_WGSL "msdf-wgsl — MSDF shader lib"         OFF)
 option(YETTY_ENABLE_FEATURE_MSDF_GEN  "msdf-gen — MSDF font generator"       OFF)
 
@@ -92,12 +92,12 @@ option(YETTY_ENABLE_FEATURE_YFSVM     "yfsvm — filesystem VM"                O
 option(YETTY_ENABLE_FEATURE_YCAT      "ycat — file viewer"                   OFF)
 
 # Build pipeline
-option(YETTY_ENABLE_FEATURE_ASSETS    "assets — runtime asset copying"       OFF)
-option(YETTY_ENABLE_FEATURE_CDB_GEN   "cdb-gen — CDB font generation"       OFF)
+option(YETTY_ENABLE_FEATURE_ASSETS    "assets — runtime asset copying"       ON)
+option(YETTY_ENABLE_FEATURE_CDB_GEN   "cdb-gen — CDB font generation"       ON)
 option(YETTY_ENABLE_FEATURE_TESTS     "tests — unit tests"                   OFF)
 option(YETTY_ENABLE_FEATURE_TOOLS     "tools — build tools"                  OFF)
 option(YETTY_ENABLE_FEATURE_DEMO      "demo — demo programs"                 OFF)
-option(YETTY_ENABLE_FEATURE_JSLINUX   "jslinux — JSLinux integration"        OFF)
+option(YETTY_ENABLE_FEATURE_JSLINUX   "jslinux — JSLinux integration"        ON)
 
 # Desktop-only features
 option(YETTY_ENABLE_FEATURE_GPU       "gpu — GPU tools (desktop)"            OFF)

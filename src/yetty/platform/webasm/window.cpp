@@ -21,7 +21,7 @@ namespace webasm {
 static int g_canvasWidth = 0;
 static int g_canvasHeight = 0;
 
-bool createWindow(Config::Ptr config) {
+bool createWindow(Config* config) {
     int defaultWidth = config->get<int>("window/width", 1280);
     int defaultHeight = config->get<int>("window/height", 720);
     std::string title = config->get<std::string>("window/title", "yetty");

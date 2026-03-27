@@ -24,6 +24,7 @@ set(YETTY_SHADERS_DIR "/assets/shaders" CACHE STRING "Shader directory path")
 
 # Platform sources
 set(YETTY_PLATFORM_SOURCES
+    ${YETTY_ROOT}/src/yetty/platform/webasm/main.cpp
     ${YETTY_ROOT}/src/yetty/platform/webasm/surface.cpp
     ${YETTY_ROOT}/src/yetty/platform/webasm/pty-io.cpp
     ${YETTY_ROOT}/src/yetty/platform/webasm/window.cpp
@@ -33,6 +34,7 @@ set(YETTY_PLATFORM_SOURCES
 
 # Create executable with core sources + web platform
 add_executable(yetty
+    ${YETTY_SOURCES}
     ${YETTY_CORE_SOURCES}
     ${YETTY_WEB_SOURCES}
     ${YETTY_PLATFORM_SOURCES}
@@ -85,11 +87,17 @@ target_link_options(yetty PRIVATE
     -sASSERTIONS=2
     -lwebsocket.js
     "--preload-file=${CMAKE_BINARY_DIR}/assets@/assets"
-    "--preload-file=${CMAKE_BINARY_DIR}/demo@/demo"
-    "--preload-file=${CMAKE_BINARY_DIR}/src@/src"
     "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','FS','ENV','HEAPU8']"
-    "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_yetty_write','_yetty_key','_yetty_special_key','_yetty_read_input','_yetty_sync','_yetty_set_scale','_yetty_resize','_yetty_get_cols','_yetty_get_rows','_webpty_on_data']"
+    # "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_yetty_write','_yetty_key','_yetty_special_key','_yetty_read_input','_yetty_sync','_yetty_set_scale','_yetty_resize','_yetty_get_cols','_yetty_get_rows','_webpty_on_data']"
+    "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_webpty_on_data']"
 )
+
+if(YETTY_ENABLE_FEATURE_DEMO)
+    target_link_options(yetty PRIVATE
+        "--preload-file=${CMAKE_BINARY_DIR}/demo@/demo"
+        "--preload-file=${CMAKE_BINARY_DIR}/src@/src"
+    )
+endif()
 
 target_compile_options(yetty PRIVATE --use-port=emdawnwebgpu -fexceptions)
 target_link_options(yetty PRIVATE -fexceptions)

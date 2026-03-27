@@ -277,7 +277,7 @@ build-webasm-ytrace-release: ## Build WebAssembly ytrace release (CDB generation
 	@if [ ! -f "$(BUILD_DIR_WEBASM_YTRACE_RELEASE)/build.ninja" ]; then $(MAKE) config-webasm-ytrace-release; fi
 	nix develop .#web --command bash -c 'cmake --build $(BUILD_DIR_WEBASM_YTRACE_RELEASE) --target yetty $(CMAKE_PARALLEL)'
 	@cp build-tools/web/index.html build-tools/web/serve.py $(BUILD_DIR_WEBASM_YTRACE_RELEASE)/
-	@$(MAKE) build-vm-tools BUILD_DIR=$(BUILD_DIR_WEBASM_YTRACE_RELEASE)
+	# @$(MAKE) build-vm-tools BUILD_DIR=$(BUILD_DIR_WEBASM_YTRACE_RELEASE)
 	@bash build-tools/jslinux/alpine/build-vfsync.sh $(BUILD_DIR_WEBASM_YTRACE_RELEASE)
 	@$(MAKE) verify-webasm BUILD_DIR=$(BUILD_DIR_WEBASM_YTRACE_RELEASE)
 
@@ -318,10 +318,10 @@ build-webasm-yinfo-release: ## Build WebAssembly yinfo release (minimal logging)
 .PHONY: verify-webasm
 verify-webasm: ## Post-build verification that all webasm artifacts are present
 	@echo "=== Post-build webasm verification ==="
+# TODO: add back when vm-tools ready: vm-tools/yecho vm-tools/ycat vm-tools/ybrowser
 	@FAIL=0; \
 	for f in yetty.js yetty.wasm yetty.data index.html serve.py \
 	         jslinux/vm-bridge.html jslinux/term-bridge.js \
-	         vm-tools/yecho vm-tools/ycat vm-tools/ybrowser \
 	         vfsync/u/os/yetty-alpine/head; do \
 		if [ ! -e "$(BUILD_DIR)/$$f" ]; then \
 			echo "MISSING: $$f"; \
