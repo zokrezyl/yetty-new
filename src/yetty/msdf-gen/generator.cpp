@@ -1,4 +1,4 @@
-#include "generator.h"
+#include "generator.hpp"
 
 #include <yetty/cdb-wrapper.hpp>
 #include <msdfgen.h>

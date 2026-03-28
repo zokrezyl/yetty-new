@@ -1,5 +1,5 @@
-#include "animation.h"
-#include "ypaint-types.gen.h"
+#include "animation.hpp"
+#include "ypaint-types.gen.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>

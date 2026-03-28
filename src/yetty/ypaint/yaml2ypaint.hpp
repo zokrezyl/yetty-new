@@ -1,7 +1,7 @@
 #pragma once
 
-#include "ypaint-buffer.h"
-#include "animation.h"
+#include "ypaint-buffer.hpp"
+#include "animation.hpp"
 #include <string>
 
 namespace yetty::ypaint {

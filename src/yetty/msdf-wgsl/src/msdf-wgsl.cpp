@@ -2,7 +2,7 @@
  * MSDF-WGSL: Compute shader-based MSDF generation for WebGPU
  */
 
-#include "msdf-wgsl.h"
+#include "msdf-wgsl.hpp"
 #include <yetty/wgpu-compat.h>
 #include <ytrace/ytrace.hpp>
 

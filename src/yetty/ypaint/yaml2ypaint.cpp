@@ -1,5 +1,5 @@
-#include "yaml2ypaint.h"
-#include "ypaint-buffer.h"
+#include "yaml2ypaint.hpp"
+#include "ypaint-buffer.hpp"
 #include <yaml-cpp/yaml.h>
 #include <ytrace/ytrace.hpp>
 #include <cmath>

@@ -1,5 +1,5 @@
-#include "ypaint-buffer.h"
-#include "ypaint-prim-writer.gen.h"
+#include "ypaint-buffer.hpp"
+#include "ypaint-prim-writer.gen.hpp"
 
 #include <ytrace/ytrace.hpp>
 #include <cstring>

@@ -57,8 +57,8 @@ struct Event {
     // Frame rate change (dispatched by GPUScreen via OSC 666671, handled by
     // Yetty)
     SetFrameRate,
-    // Screen update request (dispatched on PTY activity, handled by Yetty)
-    ScreenUpdate
+    // Render request (dispatched when terminal has damage)
+    Render
   };
 
   struct KeyEvent {
@@ -408,10 +408,10 @@ struct Event {
     return e;
   }
 
-  // Screen update request
-  static Event screenUpdateEvent() {
+  // Render request
+  static Event renderEvent() {
     Event e;
-    e.type = Type::ScreenUpdate;
+    e.type = Type::Render;
     return e;
   }
 };

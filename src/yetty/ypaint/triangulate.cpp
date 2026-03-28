@@ -1,4 +1,4 @@
-#include "triangulate.h"
+#include "triangulate.hpp"
 #include <cmath>
 #include <algorithm>
 

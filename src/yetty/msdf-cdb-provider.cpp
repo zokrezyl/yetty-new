@@ -8,7 +8,7 @@
 #include <cstring>
 
 // CPU provider — msdfgen library (internal, not CDB-dependent)
-#include "msdf-gen/generator.h"
+#include "msdf-gen/generator.hpp"
 
 // GPU provider — msdf-wgsl library
 #include <msdf-wgsl.h>

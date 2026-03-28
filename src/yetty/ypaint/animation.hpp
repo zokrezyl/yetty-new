@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ypaint-buffer.h"
+#include "ypaint-buffer.hpp"
 #include <yetty/base/object.h>
 #include <yetty/base/factory.h>
 #include <cstdint>

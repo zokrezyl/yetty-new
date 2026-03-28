@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ypaint-prim-writer.gen.h"
+#include "ypaint-prim-writer.gen.hpp"
 #include <yetty/base/object.h>
 #include <yetty/base/factory.h>
 #include <yetty/result.hpp>

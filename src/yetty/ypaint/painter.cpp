@@ -3,9 +3,9 @@
 #define NOMINMAX
 #endif
 
-#include "triangulate.h"
-#include "ypaint-buffer.h"
-#include "ypaint-types.gen.h"
+#include "triangulate.hpp"
+#include "ypaint-buffer.hpp"
+#include "ypaint-types.gen.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
