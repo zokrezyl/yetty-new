@@ -113,13 +113,41 @@ private:
     WGPULimits adapterLimits = {};
     wgpuAdapterGetLimits(_adapter, &adapterLimits);
 
+    // Initialize all limits to UNDEFINED (don't care), then set specific ones
     WGPULimits limits = {};
+    limits.maxTextureDimension1D = WGPU_LIMIT_U32_UNDEFINED;
     limits.maxTextureDimension2D = std::min(16384u, adapterLimits.maxTextureDimension2D);
+    limits.maxTextureDimension3D = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxTextureArrayLayers = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxBindGroups = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxBindGroupsPlusVertexBuffers = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxBindingsPerBindGroup = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxDynamicUniformBuffersPerPipelineLayout = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxDynamicStorageBuffersPerPipelineLayout = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxSampledTexturesPerShaderStage = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxSamplersPerShaderStage = WGPU_LIMIT_U32_UNDEFINED;
     limits.maxStorageBuffersPerShaderStage = 10;
+    limits.maxStorageTexturesPerShaderStage = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxUniformBuffersPerShaderStage = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxUniformBufferBindingSize = WGPU_LIMIT_U64_UNDEFINED;
     limits.maxStorageBufferBindingSize = std::min(
         static_cast<uint64_t>(512 * 1024 * 1024), adapterLimits.maxStorageBufferBindingSize);
+    limits.minUniformBufferOffsetAlignment = WGPU_LIMIT_U32_UNDEFINED;
+    limits.minStorageBufferOffsetAlignment = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxVertexBuffers = WGPU_LIMIT_U32_UNDEFINED;
     limits.maxBufferSize = std::min(
         static_cast<uint64_t>(1024 * 1024 * 1024), adapterLimits.maxBufferSize);
+    limits.maxVertexAttributes = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxVertexBufferArrayStride = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxInterStageShaderVariables = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxColorAttachments = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxColorAttachmentBytesPerSample = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeWorkgroupStorageSize = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeInvocationsPerWorkgroup = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeWorkgroupSizeX = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeWorkgroupSizeY = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeWorkgroupSizeZ = WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeWorkgroupsPerDimension = WGPU_LIMIT_U32_UNDEFINED;
 
     WGPUDeviceDescriptor deviceDesc = {};
     deviceDesc.label = WGPU_STR("yetty device");
