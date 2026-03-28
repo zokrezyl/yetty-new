@@ -29,7 +29,7 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/platform/webasm/pty-io.cpp
     ${YETTY_ROOT}/src/yetty/platform/webasm/window.cpp
     ${YETTY_ROOT}/src/yetty/platform/webasm/event-loop.cpp
-    ${YETTY_ROOT}/src/yetty/core/webasm-pipe.cpp
+    ${YETTY_ROOT}/src/yetty/platform/webasm/pipe.cpp
 )
 
 # Create executable with core sources + web platform

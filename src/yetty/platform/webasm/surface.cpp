@@ -1,12 +1,7 @@
-// WebAssembly surface.cpp - WebGPU instance and surface creation
+// WebAssembly surface.cpp - Platform-specific surface creation
 //
-// Platform creates (on the single thread):
-//   - WGPUInstance
-//   - WGPUSurface (from instance + canvas HTML selector)
-//
-// These are passed to Yetty, which creates adapter/device/queue.
-//
-// Platform owns instance and surface lifetime - destroys them after Yetty exits.
+// Provides createSurface(instance) - creates WGPUSurface from canvas HTML selector.
+// Yetty creates instance, calls this, then creates adapter/device/queue.
 
 #include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
@@ -16,26 +11,12 @@ namespace yetty {
 namespace platform {
 namespace webasm {
 
-// Holds instance + surface created by platform
-struct WebGPUContext {
-    WGPUInstance instance = nullptr;
-    WGPUSurface surface = nullptr;
-};
-
-WebGPUContext* createWebGPUContext() {
-    auto* ctx = new WebGPUContext();
-
-    // Create instance
-    WGPUInstanceDescriptor instanceDesc = {};
-    ctx->instance = wgpuCreateInstance(&instanceDesc);
-    if (!ctx->instance) {
-        yerror("Surface: Failed to create WebGPU instance");
-        delete ctx;
+WGPUSurface createSurface(WGPUInstance instance) {
+    if (!instance) {
+        yerror("createSurface: null instance");
         return nullptr;
     }
-    ydebug("Surface: Instance created");
 
-    // Create surface from canvas HTML selector
     WGPUEmscriptenSurfaceSourceCanvasHTMLSelector canvasSource = {};
     canvasSource.chain.sType = WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector;
     canvasSource.selector = { .data = "#canvas", .length = 7 };
@@ -43,39 +24,14 @@ WebGPUContext* createWebGPUContext() {
     WGPUSurfaceDescriptor surfaceDesc = {};
     surfaceDesc.nextInChain = &canvasSource.chain;
 
-    ctx->surface = wgpuInstanceCreateSurface(ctx->instance, &surfaceDesc);
-    if (!ctx->surface) {
-        yerror("Surface: Failed to create surface from canvas");
-        wgpuInstanceRelease(ctx->instance);
-        delete ctx;
+    WGPUSurface surface = wgpuInstanceCreateSurface(instance, &surfaceDesc);
+    if (!surface) {
+        yerror("createSurface: Failed to create surface from #canvas");
         return nullptr;
     }
-    ydebug("Surface: Surface created from #canvas");
+    ydebug("createSurface: Surface created from #canvas");
 
-    return ctx;
-}
-
-void destroyWebGPUContext(WebGPUContext* ctx) {
-    if (!ctx) return;
-
-    if (ctx->surface) {
-        wgpuSurfaceRelease(ctx->surface);
-        ydebug("Surface: Surface released");
-    }
-    if (ctx->instance) {
-        wgpuInstanceRelease(ctx->instance);
-        ydebug("Surface: Instance released");
-    }
-
-    delete ctx;
-}
-
-WGPUInstance getInstance(WebGPUContext* ctx) {
-    return ctx ? ctx->instance : nullptr;
-}
-
-WGPUSurface getSurface(WebGPUContext* ctx) {
-    return ctx ? ctx->surface : nullptr;
+    return surface;
 }
 
 } // namespace webasm

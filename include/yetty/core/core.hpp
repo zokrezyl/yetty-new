@@ -8,4 +8,3 @@
 #include <yetty/core/object.hpp>
 #include <yetty/core/types.hpp>
 #include <yetty/core/event-loop.hpp>
-#include <yetty/core/event-queue.hpp>

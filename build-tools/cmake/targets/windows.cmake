@@ -18,17 +18,18 @@ if(YETTY_ENABLE_FEATURE_CLIENT)
     add_subdirectory(${YETTY_ROOT}/src/yetty/client ${CMAKE_BINARY_DIR}/src/yetty/client)
 endif()
 
-# Platform manager sources (new architecture)
-# Note: event-loop is included via yetty_base
+# Platform sources — Windows-specific + shared GLFW
+# Windows uses GLFW for window/surface but ConPTY for terminal and Windows pipes
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/init-manager/glfw.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window-singleton.cpp
-    ${YETTY_ROOT}/src/yetty/platform/surface-manager/glfw.cpp
-    ${YETTY_ROOT}/src/yetty/platform/pty-manager/windows.cpp
-    ${YETTY_ROOT}/src/yetty/platform/pty-reader/windows.cpp
-    ${YETTY_ROOT}/src/yetty/platform/fs-path-manager/windows.cpp
-    ${YETTY_ROOT}/src/yetty/platform/clipboard-manager/glfw.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webgpu-manager/windows.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-main.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-surface.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-event-loop.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-clipboard-manager.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
+    ${YETTY_ROOT}/src/yetty/platform/windows/conpty.cpp
+    ${YETTY_ROOT}/src/yetty/platform/windows/pipe.cpp
+    ${YETTY_ROOT}/src/yetty/platform/windows/platform-paths.cpp
 )
 
 # Create executable with core sources + platform

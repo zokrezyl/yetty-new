@@ -21,16 +21,17 @@ if(YETTY_ENABLE_FEATURE_YTOP)
     add_subdirectory(${YETTY_ROOT}/src/yetty/ytop ${CMAKE_BINARY_DIR}/src/yetty/ytop)
 endif()
 
-# Platform sources — linux-specific + shared glfw
+# Platform sources — linux-specific + shared GLFW/Unix
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/linux/main.cpp
-    ${YETTY_ROOT}/src/yetty/platform/linux/surface.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-main.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-surface.cpp
     ${YETTY_ROOT}/src/yetty/platform/shared/glfw-event-loop.cpp
     ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window.cpp
     ${YETTY_ROOT}/src/yetty/platform/shared/glfw-clipboard-manager.cpp
     ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
     ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.cpp
-    ${YETTY_ROOT}/src/yetty/core/unix-pipe.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.cpp
+    ${YETTY_ROOT}/src/yetty/platform/linux/platform-paths.cpp
 )
 
 # Create executable with core sources + platform

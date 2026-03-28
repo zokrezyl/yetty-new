@@ -1,5 +1,7 @@
 #pragma once
 
+#include <webgpu/webgpu.h>
+
 namespace yetty {
 
 class Config;
@@ -19,6 +21,10 @@ struct AppContext {
   core::PlatformInputPipe *platformInputPipe = nullptr;
   ClipboardManager *clipboardManager = nullptr;
   PtyFactory *ptyFactory = nullptr;
+
+  // WebGPU objects created by platform main()
+  WGPUInstance instance = nullptr;
+  WGPUSurface surface = nullptr;
 };
 
 } // namespace yetty

@@ -228,7 +228,7 @@ elif [ "$TEST_MODE" = "telnet" ]; then
     echo "  3. Start server:  cd build-webasm-dawn-release && python3 serve.py 8080"
     echo ""
 else
-    TEST_URL="${BASE_URL}/"
+    TEST_URL="${BASE_URL}/?mode=jslinux&trace=1"
     echo "Testing full yetty at: $TEST_URL"
 fi
 
@@ -460,85 +460,64 @@ if [ "$TEST_MODE" = "jslinux" ] || [ "$TEST_MODE" = "jslinux-local" ]; then
     fi
 else
     # Full yetty checks
-    if [ "$RESULT" -eq 0 ]; then
-        echo "Checking expected ytrace output..."
-
-        # Required checkpoints
-        CHECKPOINTS=(
-            "Yetty starting"
-            "Config::init done"
-            "Web platform created"
-            "initWebGPU: Creating instance"
-            "ShaderFont: loaded"
-        )
-
-        # Desired checkpoints (render loop)
-        RENDER_CHECKPOINTS=(
-            "Starting render loop"
-            "Surface configured"
-        )
-
-        # ytrace checkpoints are informational on web (output may not reach console)
-        YTRACE_FOUND=0
-        for checkpoint in "${CHECKPOINTS[@]}"; do
-            if grep -q "$checkpoint" "$CONSOLE_LOG"; then
-                echo -e "${GREEN}OK: $checkpoint${NC}"
-                YTRACE_FOUND=1
-            else
-                echo -e "${YELLOW}MISSING: $checkpoint${NC}"
-            fi
-        done
-        if [ "$YTRACE_FOUND" -eq 0 ]; then
-            echo -e "${YELLOW}NOTE: ytrace output not visible in console (common on web)${NC}"
-        fi
-
-        # Check WebGPU initialization
-        if grep -q "initWebGPU: Device obtained" "$CONSOLE_LOG" || grep -q "initWebGPU: Queue obtained" "$CONSOLE_LOG"; then
-            echo -e "${GREEN}OK: WebGPU initialized${NC}"
-
-            # If WebGPU works, check render loop
-            for checkpoint in "${RENDER_CHECKPOINTS[@]}"; do
-                if grep -q "$checkpoint" "$CONSOLE_LOG"; then
-                    echo -e "${GREEN}OK: $checkpoint${NC}"
-                else
-                    echo -e "${YELLOW}MISSING: $checkpoint${NC}"
-                fi
-            done
-        else
-            # WebGPU ytrace messages not found - this is OK if screenshots work
-            echo -e "${YELLOW}WARN: WebGPU initialization logs not found (ytrace output may not reach console)${NC}"
-        fi
-    fi
-
-    # Show shader loading output
     echo ""
-    echo "=== Shader Loading ==="
-    grep -E "ShaderFont:|ShaderManager:" "$CONSOLE_LOG" | head -30 || echo "(no shader output - ytrace may not reach console)"
+    echo "=== Yetty Startup Verification ==="
 
-    # Verify shader glyphs loaded (informational - ytrace output may not reach console)
-    if grep -q "ShaderFont: loaded.*glyph shaders" "$CONSOLE_LOG"; then
-        GLYPH_COUNT=$(grep "ShaderFont: loaded.*glyph shaders" "$CONSOLE_LOG" | grep -oP '\d+ glyph' | head -1)
-        echo -e "${GREEN}OK: Shader glyphs loaded ($GLYPH_COUNT)${NC}"
+    # Check for JavaScript errors first
+    if grep -qE "Uncaught|TypeError|ReferenceError|SyntaxError" "$CONSOLE_LOG"; then
+        echo -e "${RED}FAIL: JavaScript errors found${NC}"
+        grep -E "Uncaught|TypeError|ReferenceError|SyntaxError" "$CONSOLE_LOG" | head -10
+        RESULT=1
+    fi
+
+    # Check yetty.js was loaded (look for preRun or ENV setting)
+    if grep -q "preRun.*Setting ENV" "$CONSOLE_LOG" || grep -q "onRuntimeInitialized" "$CONSOLE_LOG"; then
+        echo -e "${GREEN}OK: yetty.js loaded${NC}"
     else
-        echo -e "${YELLOW}WARN: Shader glyphs log not found (ytrace may not reach console)${NC}"
+        echo -e "${RED}FAIL: yetty.js not loaded - check WebGPU availability${NC}"
+        RESULT=1
     fi
 
-    # Check for shader glyph rendering (when cat shader-glyphs.txt is run)
-    if grep -q "SHADER GLYPH:" "$CONSOLE_LOG"; then
-        echo -e "${GREEN}OK: Shader glyphs rendered${NC}"
-        grep "SHADER GLYPH:" "$CONSOLE_LOG" | head -5
+    # Check for C++ ytrace output (required checkpoints)
+    echo ""
+    echo "=== Required Checkpoints ==="
+    CHECKPOINTS=(
+        "main: WebASM starting"
+        "main: Config created"
+        "main: Window created"
+        "main: EventLoop created"
+        "main: PlatformInputPipe created"
+        "main: PtyFactory created"
+        "main: Yetty created"
+        "initWebGPU: Instance created"
+        "initWebGPU: Adapter obtained"
+        "initWebGPU: Device obtained"
+    )
+
+    CHECKPOINT_PASS=0
+    CHECKPOINT_FAIL=0
+    for checkpoint in "${CHECKPOINTS[@]}"; do
+        if grep -q "$checkpoint" "$CONSOLE_LOG"; then
+            echo -e "${GREEN}OK: $checkpoint${NC}"
+            ((CHECKPOINT_PASS++))
+        else
+            echo -e "${RED}MISSING: $checkpoint${NC}"
+            ((CHECKPOINT_FAIL++))
+        fi
+    done
+
+    echo ""
+    echo "Checkpoints: $CHECKPOINT_PASS passed, $CHECKPOINT_FAIL failed"
+
+    if [ "$CHECKPOINT_FAIL" -gt 0 ]; then
+        echo -e "${RED}FAIL: Required checkpoints missing${NC}"
+        RESULT=1
     fi
 
-    # Check for shader glyph enabling
-    if grep -q "ShaderFont::getGlyphIndex: enabled" "$CONSOLE_LOG"; then
-        echo -e "${GREEN}OK: Shader glyphs enabled for compilation${NC}"
-        grep "ShaderFont::getGlyphIndex: enabled" "$CONSOLE_LOG" | head -5
-    fi
-
-    # Show yetty-specific log output
+    # Show all yetty console output
     echo ""
     echo "=== Yetty Console Output ==="
-    grep -E "\[yetty\]" "$CONSOLE_LOG" | head -40 || echo "(no yetty output)"
+    grep -E "\[yetty\]" "$CONSOLE_LOG" | head -50 || echo "(no [yetty] output)"
 fi
 
 # Show any errors

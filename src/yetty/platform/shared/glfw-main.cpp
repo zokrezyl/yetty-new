@@ -1,10 +1,11 @@
-// Linux main.cpp - Application entry point
+// GLFW main.cpp - Application entry point for Linux/macOS/Windows
 //
 // Threading model:
 // - Main thread: Creates window; runs OS event loop
 // - Render thread: Runs Yetty (runs libuv EventLoop)
 
 #include <GLFW/glfw3.h>
+#include <webgpu/webgpu.h>
 #include <atomic>
 #include <cstdlib>
 #include <filesystem>
@@ -23,30 +24,14 @@
 
 GLFWwindow *createWindow(int width, int height, const char *title);
 void destroyWindow(GLFWwindow *window);
+WGPUSurface createSurface(WGPUInstance instance, GLFWwindow* window);
 
 void setupWindowCallbacks(GLFWwindow *window);
 void runOsEventLoop(GLFWwindow *window, std::atomic<bool> &running);
 
-namespace {
-
-std::string getCacheDir() {
-  if (const char *xdg = std::getenv("XDG_CACHE_HOME")) {
-    return std::string(xdg) + "/yetty";
-  }
-  if (const char *home = std::getenv("HOME")) {
-    return std::string(home) + "/.cache/yetty";
-  }
-  return "/tmp/yetty";
-}
-
-std::string getRuntimeDir() {
-  if (const char *xdg = std::getenv("XDG_RUNTIME_DIR")) {
-    return std::string(xdg) + "/yetty";
-  }
-  return "/tmp/yetty-" + std::to_string(getuid());
-}
-
-} // anonymous namespace
+// Platform-specific path functions - implemented in {linux,macos,windows}/platform-paths.cpp
+std::string getCacheDir();
+std::string getRuntimeDir();
 
 int main(int argc, char **argv) {
   using namespace yetty;
@@ -64,19 +49,21 @@ int main(int argc, char **argv) {
   } glfwGuard;
   ydebug("main: GLFW initialized");
 
-  // Platform paths
-  auto cacheDir = getCacheDir();
-  auto runtimeDir = getRuntimeDir();
-  auto shadersDir = cacheDir + "/shaders";
-  auto fontsDir = cacheDir + "/fonts";
+  // Platform paths (using std::filesystem::path for cross-platform separators)
+  namespace fs = std::filesystem;
+  auto cacheDir = fs::path(getCacheDir());
+  auto runtimeDir = fs::path(getRuntimeDir());
+  auto shadersDir = (cacheDir / "shaders").string();
+  auto fontsDir = (cacheDir / "fonts").string();
 
-  std::filesystem::create_directories(cacheDir);
-  std::filesystem::create_directories(runtimeDir);
-  std::filesystem::create_directories(fontsDir);
+  fs::create_directories(cacheDir);
+  fs::create_directories(runtimeDir);
+  fs::create_directories(fontsDir);
 
+  auto runtimeDirStr = runtimeDir.string();
   PlatformPaths paths = {.shadersDir = shadersDir.c_str(),
                          .fontsDir = fontsDir.c_str(),
-                         .runtimeDir = runtimeDir.c_str(),
+                         .runtimeDir = runtimeDirStr.c_str(),
                          .binDir = nullptr};
   ydebug("main: Platform paths created");
 
@@ -142,12 +129,42 @@ int main(int argc, char **argv) {
   auto *ptyFactory = *ptyFactoryResult;
   ydebug("main: PtyFactory created");
 
+  // WebGPU instance
+  WGPUInstanceDescriptor instanceDesc = {};
+  WGPUInstance instance = wgpuCreateInstance(&instanceDesc);
+  if (!instance) {
+    yerror("Failed to create WebGPU instance");
+    delete ptyFactory;
+    delete platformInputPipe;
+    delete eventLoop;
+    delete config;
+    destroyWindow(window);
+    return 1;
+  }
+  ydebug("main: WebGPU instance created");
+
+  // WebGPU surface
+  WGPUSurface surface = createSurface(instance, window);
+  if (!surface) {
+    yerror("Failed to create WebGPU surface");
+    wgpuInstanceRelease(instance);
+    delete ptyFactory;
+    delete platformInputPipe;
+    delete eventLoop;
+    delete config;
+    destroyWindow(window);
+    return 1;
+  }
+  ydebug("main: WebGPU surface created");
+
   // AppContext
   AppContext appCtx{};
   appCtx.config = config;
   appCtx.eventLoop = eventLoop;
   appCtx.platformInputPipe = platformInputPipe;
   appCtx.ptyFactory = ptyFactory;
+  appCtx.instance = instance;
+  appCtx.surface = surface;
 
   // Yetty
   auto yettyResult = Yetty::create(appCtx);
@@ -203,6 +220,8 @@ int main(int argc, char **argv) {
 
   // Cleanup
   delete yetty;
+  wgpuSurfaceRelease(surface);
+  wgpuInstanceRelease(instance);
   delete ptyFactory;
   glfwSetWindowUserPointer(window, nullptr);
   delete platformInputPipe;

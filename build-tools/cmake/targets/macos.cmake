@@ -24,17 +24,17 @@ if(YETTY_ENABLE_FEATURE_YTOP)
     add_subdirectory(${YETTY_ROOT}/src/yetty/ytop ${CMAKE_BINARY_DIR}/src/yetty/ytop)
 endif()
 
-# Platform manager sources (new architecture)
-# Note: event-loop is included via yetty_base
+# Platform sources — macOS-specific + shared GLFW/Unix
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/init-manager/glfw.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window-singleton.cpp
-    ${YETTY_ROOT}/src/yetty/platform/surface-manager/glfw.cpp
-    ${YETTY_ROOT}/src/yetty/platform/pty-manager/unix.cpp
-    ${YETTY_ROOT}/src/yetty/platform/pty-reader/unix.cpp
-    ${YETTY_ROOT}/src/yetty/platform/fs-path-manager/unix.cpp
-    ${YETTY_ROOT}/src/yetty/platform/clipboard-manager/glfw.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webgpu-manager/macos.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-main.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-surface.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-event-loop.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-clipboard-manager.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.cpp
+    ${YETTY_ROOT}/src/yetty/platform/macos/platform-paths.cpp
 )
 
 # Create executable with core sources + platform
