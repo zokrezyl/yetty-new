@@ -54,12 +54,19 @@ private:
     static void onDataAvailable(void* arg) {
         auto* self = static_cast<WebasmPlatformInputPipe*>(arg);
         self->_callbackPending = false;
-        if (self->_listener) {
-            // Notify listener that data is available (PollReadable event)
-            Event event;
-            event.type = Event::Type::PollReadable;
-            event.poll.fd = -1;  // No real fd on webasm
-            self->_listener->onEvent(event);
+
+        if (!self->_eventLoop) {
+            ywarn("PlatformInputPipe::onDataAvailable: no EventLoop");
+            return;
+        }
+
+        // Read Event structs from buffer and dispatch (mirrors libuv-event-loop.cpp)
+        Event pipeEvent;
+        while (self->_buffer.size() >= sizeof(Event)) {
+            std::memcpy(&pipeEvent, self->_buffer.data(), sizeof(Event));
+            self->_buffer.erase(self->_buffer.begin(), self->_buffer.begin() + sizeof(Event));
+            ydebug("PlatformInputPipe: dispatching event type={}", static_cast<int>(pipeEvent.type));
+            self->_eventLoop->dispatch(pipeEvent);
         }
     }
 

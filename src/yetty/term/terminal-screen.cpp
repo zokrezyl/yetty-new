@@ -1,5 +1,7 @@
 #include <yetty/platform/pty.hpp>
 #include <yetty/term/terminal-screen.hpp>
+#include <yetty/core/event.hpp>
+#include <ytrace/ytrace.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -838,7 +840,51 @@ int TerminalScreenImpl::onSetLineInfo(int, const VTermLineInfo *,
 // Factory
 //=============================================================================
 
+// Convert GLFW modifier flags to VTerm modifier flags
+static VTermModifier glfwModsToVterm(int mods) {
+  VTermModifier vtMod = VTERM_MOD_NONE;
+  if (mods & 0x0001) vtMod = static_cast<VTermModifier>(vtMod | VTERM_MOD_SHIFT);
+  if (mods & 0x0002) vtMod = static_cast<VTermModifier>(vtMod | VTERM_MOD_CTRL);
+  if (mods & 0x0004) vtMod = static_cast<VTermModifier>(vtMod | VTERM_MOD_ALT);
+  return vtMod;
+}
+
+// Convert GLFW key code to VTerm key (for special keys)
+// Returns VTERM_KEY_NONE if it's a printable character (handled by Char)
+static VTermKey glfwKeyToVterm(int key) {
+  switch (key) {
+    case 257: return VTERM_KEY_ENTER;      // GLFW_KEY_ENTER
+    case 258: return VTERM_KEY_TAB;        // GLFW_KEY_TAB
+    case 259: return VTERM_KEY_BACKSPACE;  // GLFW_KEY_BACKSPACE
+    case 260: return VTERM_KEY_INS;        // GLFW_KEY_INSERT
+    case 261: return VTERM_KEY_DEL;        // GLFW_KEY_DELETE
+    case 262: return VTERM_KEY_RIGHT;      // GLFW_KEY_RIGHT
+    case 263: return VTERM_KEY_LEFT;       // GLFW_KEY_LEFT
+    case 264: return VTERM_KEY_DOWN;       // GLFW_KEY_DOWN
+    case 265: return VTERM_KEY_UP;         // GLFW_KEY_UP
+    case 266: return VTERM_KEY_PAGEUP;     // GLFW_KEY_PAGE_UP
+    case 267: return VTERM_KEY_PAGEDOWN;   // GLFW_KEY_PAGE_DOWN
+    case 268: return VTERM_KEY_HOME;       // GLFW_KEY_HOME
+    case 269: return VTERM_KEY_END;        // GLFW_KEY_END
+    case 256: return VTERM_KEY_ESCAPE;     // GLFW_KEY_ESCAPE
+    case 290: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 1);  // GLFW_KEY_F1
+    case 291: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 2);
+    case 292: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 3);
+    case 293: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 4);
+    case 294: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 5);
+    case 295: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 6);
+    case 296: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 7);
+    case 297: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 8);
+    case 298: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 9);
+    case 299: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 10);
+    case 300: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 11);
+    case 301: return static_cast<VTermKey>(VTERM_KEY_FUNCTION_0 + 12);  // GLFW_KEY_F12
+    default: return VTERM_KEY_NONE;
+  }
+}
+
 Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
+  // PTY readable - read data from PTY and feed to vterm
   if (event.type == core::Event::Type::PollReadable && _pty) {
     char buf[65536];
     while (true) {
@@ -849,6 +895,31 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
     }
     return Ok(true);
   }
+
+  // Character input (printable characters)
+  if (event.type == core::Event::Type::Char) {
+    if (_vterm) {
+      VTermModifier mod = glfwModsToVterm(event.chr.mods);
+      vterm_keyboard_unichar(_vterm, event.chr.codepoint, mod);
+      ydebug("TerminalScreen: Char codepoint={} mods={}", event.chr.codepoint, event.chr.mods);
+    }
+    return Ok(true);
+  }
+
+  // Key down - handle special keys (arrows, function keys, etc.)
+  if (event.type == core::Event::Type::KeyDown) {
+    if (_vterm) {
+      VTermKey vtKey = glfwKeyToVterm(event.key.key);
+      if (vtKey != VTERM_KEY_NONE) {
+        VTermModifier mod = glfwModsToVterm(event.key.mods);
+        vterm_keyboard_key(_vterm, vtKey, mod);
+        ydebug("TerminalScreen: KeyDown key={} vtKey={} mods={}", event.key.key, static_cast<int>(vtKey), event.key.mods);
+        return Ok(true);
+      }
+    }
+    return Ok(false);  // Not a special key, let CharInput handle it
+  }
+
   return Ok(false);
 }
 

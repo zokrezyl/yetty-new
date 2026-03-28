@@ -126,23 +126,27 @@ EM_BOOL onKeyDown(int, const EmscriptenKeyboardEvent* e, void* userData) {
 
     int key = domKeyToGlfw(e->code, e->key);
     int mods = domModsToGlfw(e);
+    ydebug("onKeyDown: code='{}' key='{}' glfwKey={} mods={}", e->code, e->key, key, mods);
 
     // Printable char with Ctrl/Alt -> charInputWithMods
     if ((mods & (0x0002 | 0x0004)) && e->key[0] && !e->key[1]) {
         uint32_t ch = static_cast<uint32_t>(static_cast<uint8_t>(e->key[0]));
         Event event = Event::charInputWithMods(ch, mods);
         pipe->write(&event, sizeof(event));
+        ydebug("onKeyDown: sent CharInputWithMods ch={} mods={}", ch, mods);
         return EM_TRUE;
     }
 
     Event event = Event::keyDown(key, mods, 0);
     pipe->write(&event, sizeof(event));
+    ydebug("onKeyDown: sent KeyDown key={}", key);
 
     // Printable char without Ctrl/Alt -> also send Char event
     if (!(mods & (0x0002 | 0x0004)) && e->key[0] && !e->key[1]) {
         uint32_t ch = static_cast<uint32_t>(static_cast<uint8_t>(e->key[0]));
         Event charEvent = Event::charInput(ch);
         pipe->write(&charEvent, sizeof(charEvent));
+        ydebug("onKeyDown: sent CharInput ch={}", ch);
     }
 
     return EM_TRUE;

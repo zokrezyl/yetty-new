@@ -237,12 +237,13 @@ echo "Running headless Chrome with software WebGPU..."
 
 CONSOLE_LOG="/tmp/yetty-chrome-console.log"
 
+# Use lavapipe (software Vulkan) for WebGPU - much more reliable than SwiftShader flags
+export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json
+
 # Chrome flags for software WebGPU:
 # --enable-unsafe-webgpu: Enable WebGPU
-# --use-webgpu-adapter=swiftshader: Force SwiftShader software adapter
-# --enable-features=Vulkan: Enable Vulkan (needed for SwiftShader)
-# --disable-vulkan-surface: Don't require actual display surface
-# --disable-gpu-sandbox: Allow software rendering
+# --enable-features=Vulkan,WebGPU: Enable Vulkan backend for WebGPU
+# --use-vulkan: Force Vulkan usage
 timeout 120 $CHROME \
     --headless=new \
     --no-sandbox \
@@ -250,9 +251,8 @@ timeout 120 $CHROME \
     --disable-gpu-sandbox \
     --enable-logging=stderr \
     --enable-unsafe-webgpu \
-    --use-webgpu-adapter=swiftshader \
     --enable-features=Vulkan,WebGPU \
-    --disable-vulkan-surface \
+    --use-vulkan \
     --allow-insecure-localhost \
     --disable-web-security \
     --v=1 \
@@ -485,11 +485,11 @@ else
         "main: WebASM starting"
         "main: Config created"
         "main: Window created"
-        "main: EventLoop created"
         "main: PlatformInputPipe created"
         "main: PtyFactory created"
+        "main: WebGPU instance created"
         "main: Yetty created"
-        "initWebGPU: Instance created"
+        "main: Starting Yetty"
         "initWebGPU: Adapter obtained"
         "initWebGPU: Device obtained"
     )
@@ -499,10 +499,10 @@ else
     for checkpoint in "${CHECKPOINTS[@]}"; do
         if grep -q "$checkpoint" "$CONSOLE_LOG"; then
             echo -e "${GREEN}OK: $checkpoint${NC}"
-            ((CHECKPOINT_PASS++))
+            CHECKPOINT_PASS=$((CHECKPOINT_PASS + 1))
         else
             echo -e "${RED}MISSING: $checkpoint${NC}"
-            ((CHECKPOINT_FAIL++))
+            CHECKPOINT_FAIL=$((CHECKPOINT_FAIL + 1))
         fi
     done
 
@@ -619,9 +619,8 @@ timeout 60 $CHROME \
     --disable-gpu-sandbox \
     --enable-logging=stderr \
     --enable-unsafe-webgpu \
-    --use-webgpu-adapter=swiftshader \
     --enable-features=Vulkan,WebGPU \
-    --disable-vulkan-surface \
+    --use-vulkan \
     --window-size=800,600 \
     --virtual-time-budget=10000 \
     "$TEST_URL" \
