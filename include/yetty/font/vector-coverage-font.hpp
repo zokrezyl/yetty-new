@@ -1,9 +1,9 @@
 #pragma once
 
-#include <yetty/font.h>
-#include <yetty/gpu-allocator.h>
-#include <yetty/gpu-context.h>
-#include <yetty/base/base.h>
+#include <yetty/font/font.hpp>
+#include <yetty/gpu-allocator.hpp>
+#include <yetty/gpu-context.hpp>
+#include <yetty/core/factory-object.hpp>
 
 #include <string>
 #include <memory>
@@ -37,17 +37,12 @@ namespace yetty {
  * Each point packed as: x[16] | y[16] normalized to cell space [0,1]
  */
 class VectorCoverageFont : public Font,
-                           public base::Object,
-                           public base::ObjectFactory<VectorCoverageFont> {
+                           public core::FactoryObject<VectorCoverageFont> {
 public:
-    using Ptr = std::shared_ptr<VectorCoverageFont>;
-    using base::ObjectFactory<VectorCoverageFont>::create;
-
     // Factory: loads font from TTF path
-    static Result<Ptr> createImpl(ContextType& ctx,
-                                  const GPUContext& gpu,
-                                  GpuAllocator::Ptr allocator,
-                                  const std::string& ttfPath);
+    static Result<VectorCoverageFont*> createImpl(const GPUContext& gpu,
+                                                   GpuAllocator* allocator,
+                                                   const std::string& ttfPath);
 
     ~VectorCoverageFont() override = default;
 

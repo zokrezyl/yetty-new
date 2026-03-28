@@ -1,8 +1,8 @@
-#include <yetty/font-manager.h>
-#include <yetty/vector-sdf-font.h>
-#include <yetty/vector-coverage-font.h>
-#include <yetty/raster-font.h>
-#include <yetty/shader-manager.h>
+#include <yetty/font/font-manager.hpp>
+#include <yetty/font/vector-sdf-font.hpp>
+#include <yetty/font/vector-coverage-font.hpp>
+#include <yetty/font/raster-font.hpp>
+#include <yetty/shader-manager.hpp>
 #include <ytrace/ytrace.hpp>
 
 #include <array>

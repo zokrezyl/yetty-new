@@ -1,6 +1,6 @@
-#include <yetty/bm-font.h>
-#include <yetty/gpu-allocator.h>
-#include <yetty/wgpu-compat.h>
+#include <yetty/font/bm-font.hpp>
+#include <yetty/gpu-allocator.hpp>
+#include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
 
 // Android/Emscripten: stub implementation without FreeType/fontconfig

@@ -1,0 +1,219 @@
+//=============================================================================
+// Render implementation for TerminalScreen
+// Included by terminal-screen.cpp after TerminalScreenImpl class definition
+//=============================================================================
+
+//=============================================================================
+// Render initialization
+//=============================================================================
+
+Result<void> TerminalScreenImpl::initRender() {
+  auto &gpuContext = _terminalScreenContext.yettyContext.gpuContext;
+  auto *shaderManager = _terminalScreenContext.shaderManager;
+  auto *allocator = gpuContext.allocator;
+
+  if (!shaderManager) {
+    return Err<void>("ShaderManager not available");
+  }
+  if (!allocator) {
+    return Err<void>("GpuAllocator not available in GPUContext");
+  }
+
+  // Get shared pipeline and layout from ShaderManager
+  _terminalScreenRenderState.pipeline = shaderManager->getGridPipeline();
+  _terminalScreenRenderState.bindGroupLayout = shaderManager->getGridBindGroupLayout();
+  _terminalScreenRenderState.vertexBuffer = shaderManager->getQuadVertexBuffer();
+
+  if (!_terminalScreenRenderState.pipeline) {
+    return Err<void>("ShaderManager pipeline not ready");
+  }
+
+  // Create per-instance uniform buffer
+  WGPUBufferDescriptor uniformDesc = {};
+  uniformDesc.label = WGPU_STR("terminal-screen uniforms");
+  uniformDesc.size = sizeof(GridUniforms);
+  uniformDesc.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+
+  _terminalScreenRenderState.uniformBuffer = allocator->createBuffer(uniformDesc);
+  if (!_terminalScreenRenderState.uniformBuffer) {
+    return Err<void>("Failed to create uniform buffer");
+  }
+
+  // Create cell buffer
+  size_t cellBufferSize = static_cast<size_t>(_rows * _cols) * sizeof(TextCell);
+  WGPUBufferDescriptor cellDesc = {};
+  cellDesc.label = WGPU_STR("terminal-screen cells");
+  cellDesc.size = cellBufferSize;
+  cellDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+
+  _terminalScreenRenderState.cellBuffer = allocator->createBuffer(cellDesc);
+  if (!_terminalScreenRenderState.cellBuffer) {
+    return Err<void>("Failed to create cell buffer");
+  }
+
+  // Create raster font
+  // TODO: Get font path from config
+  std::string fontPath = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
+  auto fontResult = RasterFont::createImpl(gpuContext, allocator, fontPath,
+                                            static_cast<uint32_t>(_cellWidth),
+                                            static_cast<uint32_t>(_cellHeight));
+  if (!fontResult) {
+    return Err<void>("Failed to create RasterFont: " + error_msg(fontResult));
+  }
+  _rasterFont = fontResult.value();
+
+  // Load basic ASCII glyphs
+  if (auto res = _rasterFont->loadBasicLatin(); !res) {
+    return Err<void>("Failed to load basic Latin glyphs: " + error_msg(res));
+  }
+
+  // Upload font atlas to GPU
+  _rasterFont->uploadToGpu();
+
+  // Create bind group with all 15 entries
+  // For entries we don't use, we use raster font resources as placeholders
+  WGPUBindGroupEntry bgEntries[15] = {};
+
+  // 0: Grid uniforms
+  bgEntries[0].binding = 0;
+  bgEntries[0].buffer = _terminalScreenRenderState.uniformBuffer;
+  bgEntries[0].size = sizeof(GridUniforms);
+
+  // 1-3: MSDF font (use raster font as placeholder)
+  bgEntries[1].binding = 1;
+  bgEntries[1].textureView = _rasterFont->getTextureView();
+  bgEntries[2].binding = 2;
+  bgEntries[2].sampler = _rasterFont->getSampler();
+  bgEntries[3].binding = 3;
+  bgEntries[3].buffer = _rasterFont->getMetadataBuffer();
+  bgEntries[3].size = _rasterFont->getMetadataBufferSize();
+
+  // 4: Cell buffer
+  bgEntries[4].binding = 4;
+  bgEntries[4].buffer = _terminalScreenRenderState.cellBuffer;
+  bgEntries[4].size = static_cast<size_t>(_rows * _cols) * sizeof(TextCell);
+
+  // 5-7: Bitmap font (use raster font as placeholder)
+  bgEntries[5].binding = 5;
+  bgEntries[5].textureView = _rasterFont->getTextureView();
+  bgEntries[6].binding = 6;
+  bgEntries[6].sampler = _rasterFont->getSampler();
+  bgEntries[7].binding = 7;
+  bgEntries[7].buffer = _rasterFont->getMetadataBuffer();
+  bgEntries[7].size = _rasterFont->getMetadataBufferSize();
+
+  // 8-11: Vector/Coverage fonts (use uniform buffer as placeholder for storage)
+  bgEntries[8].binding = 8;
+  bgEntries[8].buffer = _terminalScreenRenderState.uniformBuffer;
+  bgEntries[8].size = sizeof(GridUniforms);
+  bgEntries[9].binding = 9;
+  bgEntries[9].buffer = _terminalScreenRenderState.uniformBuffer;
+  bgEntries[9].size = sizeof(GridUniforms);
+  bgEntries[10].binding = 10;
+  bgEntries[10].buffer = _terminalScreenRenderState.uniformBuffer;
+  bgEntries[10].size = sizeof(GridUniforms);
+  bgEntries[11].binding = 11;
+  bgEntries[11].buffer = _terminalScreenRenderState.uniformBuffer;
+  bgEntries[11].size = sizeof(GridUniforms);
+
+  // 12-14: Raster font (actual resources)
+  bgEntries[12].binding = 12;
+  bgEntries[12].textureView = _rasterFont->getTextureView();
+  bgEntries[13].binding = 13;
+  bgEntries[13].sampler = _rasterFont->getSampler();
+  bgEntries[14].binding = 14;
+  bgEntries[14].buffer = _rasterFont->getMetadataBuffer();
+  bgEntries[14].size = _rasterFont->getMetadataBufferSize();
+
+  WGPUBindGroupDescriptor bindGroupDesc = {};
+  bindGroupDesc.layout = _terminalScreenRenderState.bindGroupLayout;
+  bindGroupDesc.entryCount = 15;
+  bindGroupDesc.entries = bgEntries;
+  _terminalScreenRenderState.bindGroup = wgpuDeviceCreateBindGroup(gpuContext.device, &bindGroupDesc);
+  if (!_terminalScreenRenderState.bindGroup) {
+    return Err<void>("Failed to create bind group");
+  }
+
+  ydebug("TerminalScreen: render initialized ({}x{} cells)", _cols, _rows);
+  return Ok();
+}
+
+//=============================================================================
+// Render cleanup
+//=============================================================================
+
+void TerminalScreenImpl::cleanupRender() {
+  auto &gpuContext = _terminalScreenContext.yettyContext.gpuContext;
+  auto *allocator = gpuContext.allocator;
+
+  // Release bind group (owned by us)
+  if (_terminalScreenRenderState.bindGroup) {
+    wgpuBindGroupRelease(_terminalScreenRenderState.bindGroup);
+  } else {
+    yerror("bindGroup is null");
+  }
+
+  // Release buffers via allocator
+  if (_terminalScreenRenderState.cellBuffer) {
+    if (allocator) {
+      allocator->releaseBuffer(_terminalScreenRenderState.cellBuffer);
+    } else {
+      wgpuBufferRelease(_terminalScreenRenderState.cellBuffer);
+    }
+  } else {
+    yerror("cellBuffer is null");
+  }
+
+  if (_terminalScreenRenderState.uniformBuffer) {
+    if (allocator) {
+      allocator->releaseBuffer(_terminalScreenRenderState.uniformBuffer);
+    } else {
+      wgpuBufferRelease(_terminalScreenRenderState.uniformBuffer);
+    }
+  } else {
+    yerror("uniformBuffer is null");
+  }
+
+  // Raster font
+  if (_rasterFont) {
+    delete _rasterFont;
+  } else {
+    yerror("rasterFont is null");
+  }
+
+  // pipeline, bindGroupLayout, vertexBuffer are owned by ShaderManager - don't release
+}
+
+//=============================================================================
+// Render frame
+//=============================================================================
+
+void TerminalScreenImpl::render() {
+  if (!hasDamage()) {
+    return;
+  }
+
+  auto &gpuContext = _terminalScreenContext.yettyContext.gpuContext;
+
+  // Upload cell data
+  const TextCell *cells = getCellData();
+  size_t cellCount = static_cast<size_t>(_rows * _cols);
+  wgpuQueueWriteBuffer(gpuContext.queue, _terminalScreenRenderState.cellBuffer, 0,
+                       cells, cellCount * sizeof(TextCell));
+
+  // TODO: Get surface texture and create render pass
+  // TODO: Draw fullscreen quad
+  // TODO: Submit command buffer
+
+  clearDamage();
+  ydebug("TerminalScreen: rendered frame {}x{}", _cols, _rows);
+}
+
+//=============================================================================
+// Handle Render event
+//=============================================================================
+
+Result<bool> TerminalScreenImpl::handleRenderEvent() {
+  render();
+  return Ok(true);
+}

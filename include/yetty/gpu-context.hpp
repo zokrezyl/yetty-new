@@ -4,6 +4,8 @@
 
 namespace yetty {
 
+class GpuAllocator;
+
 // Low-level GPU context - pure WebGPU handles
 // For components that only need GPU access without application-level dependencies
 struct GPUContext {
@@ -14,6 +16,9 @@ struct GPUContext {
     WGPUBindGroup sharedBindGroup;
     WGPUBuffer sharedUniformBuffer;
     uint32_t sharedUniformSize;
+
+    // GPU resource allocator
+    GpuAllocator* allocator = nullptr;
 
     // Current render target dimensions (updated before each frame)
     // Used to clamp scissor rects during resize transitions

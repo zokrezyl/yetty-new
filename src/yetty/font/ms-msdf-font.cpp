@@ -1,4 +1,4 @@
-#include <yetty/ms-msdf-font.h>
+#include <yetty/font/ms-msdf-font.hpp>
 #include <ytrace/ytrace.hpp>
 
 namespace yetty {

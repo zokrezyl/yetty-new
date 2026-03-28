@@ -33,6 +33,8 @@ set(YETTY_SOURCES
     ${YETTY_ROOT}/src/yetty/yetty.cpp
     ${YETTY_ROOT}/src/yetty/config.cpp
     ${YETTY_ROOT}/src/yetty/tree-like.cpp
+    ${YETTY_ROOT}/src/yetty/gpu-allocator.cpp
+    ${YETTY_ROOT}/src/yetty/shader-manager.cpp
 )
 
 # Core sources (src/yetty/core/*.cpp)

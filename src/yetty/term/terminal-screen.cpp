@@ -1,7 +1,9 @@
 #include <yetty/platform/pty.hpp>
 #include <yetty/term/terminal-screen.hpp>
 #include <yetty/core/event.hpp>
-#include <yetty/font/raster-font.h>
+#include <yetty/font/raster-font.hpp>
+#include <yetty/gpu-allocator.hpp>
+#include <yetty/shader-manager.hpp>
 #include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
 
@@ -33,6 +35,73 @@ struct Pen {
   bool reverse = false;
   bool blink = false;
 };
+
+//=============================================================================
+// GPU rendering state
+//=============================================================================
+
+struct TerminalScreenRenderState {
+  // Borrowed from ShaderManager (do not release)
+  WGPURenderPipeline pipeline = nullptr;
+  WGPUBindGroupLayout bindGroupLayout = nullptr;
+  WGPUBuffer vertexBuffer = nullptr;
+
+  // Owned by us
+  WGPUBindGroup bindGroup = nullptr;
+  WGPUBuffer cellBuffer = nullptr;
+  WGPUBuffer uniformBuffer = nullptr;
+};
+
+// Grid uniforms matching shader (272 bytes, 16-byte aligned)
+struct GridUniforms {
+  float projection[16];      // 64 bytes - mat4x4
+  float screenSize[2];       // 8 bytes
+  float cellSize[2];         // 8 bytes
+  float gridSize[2];         // 8 bytes (cols, rows)
+  float pixelRange;          // 4 bytes
+  float scale;               // 4 bytes
+  float cursorPos[2];        // 8 bytes (col, row)
+  float cursorVisible;       // 4 bytes
+  float cursorShape;         // 4 bytes (1=block, 2=underline, 3=bar)
+  float viewportOrigin[2];   // 8 bytes
+  float cursorBlink;         // 4 bytes
+  float hasSelection;        // 4 bytes
+  float selStart[2];         // 8 bytes
+  float selEnd[2];           // 8 bytes
+  uint32_t preEffectIndex;   // 4 bytes (unused)
+  uint32_t postEffectIndex;  // 4 bytes (unused)
+  float preEffectP0;         // 4 bytes
+  float preEffectP1;         // 4 bytes
+  float preEffectP2;         // 4 bytes
+  float preEffectP3;         // 4 bytes
+  float preEffectP4;         // 4 bytes
+  float preEffectP5;         // 4 bytes
+  float postEffectP0;        // 4 bytes
+  float postEffectP1;        // 4 bytes
+  float postEffectP2;        // 4 bytes
+  float postEffectP3;        // 4 bytes
+  float postEffectP4;        // 4 bytes
+  float postEffectP5;        // 4 bytes
+  uint32_t defaultFg;        // 4 bytes
+  uint32_t defaultBg;        // 4 bytes
+  uint32_t spaceGlyph;       // 4 bytes (unused)
+  uint32_t effectIndex;      // 4 bytes (unused)
+  float effectP0;            // 4 bytes
+  float effectP1;            // 4 bytes
+  float effectP2;            // 4 bytes
+  float effectP3;            // 4 bytes
+  float effectP4;            // 4 bytes
+  float effectP5;            // 4 bytes
+  float visualZoomScale;     // 4 bytes (unused)
+  float visualZoomOffsetX;   // 4 bytes
+  float visualZoomOffsetY;   // 4 bytes
+  uint32_t ypaintScrollingSlot; // 4 bytes (unused)
+  uint32_t ypaintOverlaySlot;   // 4 bytes (unused)
+  float _pad0;               // 4 bytes
+  float _pad1;               // 4 bytes
+  float _pad2;               // 4 bytes
+};
+static_assert(sizeof(GridUniforms) == 272, "GridUniforms must be 272 bytes");
 
 //=============================================================================
 // TerminalScreenImpl
@@ -146,7 +215,26 @@ private:
 
   // Context with pty, GPU resources, etc.
   TerminalScreenContext _terminalScreenContext;
+
+  // Raster font (owned by TerminalScreenImpl)
+  RasterFont* _rasterFont = nullptr;
+
+  // Cell size in pixels
+  float _cellWidth = 10.0f;
+  float _cellHeight = 20.0f;
+
+  // GPU render state
+  TerminalScreenRenderState _terminalScreenRenderState;
+
+  // Render methods (implemented in render-terminal-screen.incl)
+  Result<void> initRender();
+  void cleanupRender();
+  void render();
+  Result<bool> handleRenderEvent();
 };
+
+// Render implementation
+#include "render-terminal-screen.incl"
 
 //=============================================================================
 // VTerm state callbacks struct
@@ -172,9 +260,11 @@ static VTermStateCallbacks stateCallbacks = {
 //=============================================================================
 
 TerminalScreenImpl::~TerminalScreenImpl() {
+  cleanupRender();
   if (_vterm) {
     vterm_free(_vterm);
-    _vterm = nullptr;
+  } else {
+    yerror("vterm is null");
   }
 }
 
@@ -200,6 +290,11 @@ Result<void> TerminalScreenImpl::init(uint32_t cols, uint32_t rows) {
         }
       },
       this);
+
+  auto renderResult = initRender();
+  if (!renderResult) {
+    return renderResult;
+  }
 
   return Ok();
 }
@@ -922,6 +1017,11 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
       }
     }
     return Ok(false);  // Not a special key, let CharInput handle it
+  }
+
+  // Render event
+  if (event.type == core::Event::Type::Render) {
+    return handleRenderEvent();
   }
 
   return Ok(false);

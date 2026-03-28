@@ -1,12 +1,18 @@
 #pragma once
 
-#include <yetty/font.h>
-#include <yetty/gpu-context.h>
-#include <yetty/gpu-allocator.h>
-#include <yetty/base/base.h>
+#include <yetty/font/font.hpp>
+#include <yetty/gpu-context.hpp>
+#include <yetty/core/factory-object.hpp>
+#include <webgpu/webgpu.h>
 
-#include <string>
+#include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
+
+namespace yetty {
+class GpuAllocator;
+}
 
 namespace yetty {
 
@@ -34,20 +40,14 @@ namespace yetty {
  *   - Sampler
  *   - Metadata buffer (UV coords, size, bearing, advance per glyph)
  */
-class RasterFont : public Font,
-                   public base::Object,
-                   public base::ObjectFactory<RasterFont> {
+class RasterFont : public Font {
 public:
-    using Ptr = std::shared_ptr<RasterFont>;
-    using base::ObjectFactory<RasterFont>::create;
-
     // Factory: loads font from TTF path
-    static Result<Ptr> createImpl(ContextType& ctx,
-                                  const GPUContext& gpu,
-                                  GpuAllocator::Ptr allocator,
-                                  const std::string& ttfPath,
-                                  uint32_t cellWidth,
-                                  uint32_t cellHeight);
+    static Result<RasterFont*> createImpl(const GPUContext& gpu,
+                                          GpuAllocator* allocator,
+                                          const std::string& ttfPath,
+                                          uint32_t cellWidth,
+                                          uint32_t cellHeight);
 
     ~RasterFont() override = default;
 

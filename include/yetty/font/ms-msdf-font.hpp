@@ -1,9 +1,9 @@
 #pragma once
 
-#include <yetty/font.h>
-#include <yetty/msdf-atlas.h>
-#include <yetty/gpu-allocator.h>
-#include <yetty/base/base.h>
+#include <yetty/font/font.hpp>
+#include <yetty/msdf-atlas.hpp>
+#include <yetty/gpu-allocator.hpp>
+#include <yetty/core/factory-object.hpp>
 
 #include <string>
 #include <memory>
@@ -19,20 +19,15 @@ namespace yetty {
 // Header = interface, implementation in ms-msdf-font.cpp (MsMsdfFontImpl).
 //=============================================================================
 class MsMsdfFont : public Font,
-                   public base::Object,
-                   public base::ObjectFactory<MsMsdfFont> {
+                   public core::FactoryObject<MsMsdfFont> {
 public:
-    using Ptr = std::shared_ptr<MsMsdfFont>;
-    using base::ObjectFactory<MsMsdfFont>::create;
-
-    static Result<Ptr> createImpl(ContextType& ctx,
-                                   const std::string& cdbBasePath,
-                                   GpuAllocator::Ptr allocator);
+    static Result<MsMsdfFont*> createImpl(const std::string& cdbBasePath,
+                                           GpuAllocator* allocator);
 
     ~MsMsdfFont() override = default;
 
     // Atlas access (for GPU resources, font registration, etc.)
-    virtual MsdfAtlas::Ptr atlas() const = 0;
+    virtual MsdfAtlas* atlas() const = 0;
 
     // Set fallback CDB for CJK characters (loaded lazily on demand)
     virtual void setFallbackCdb(const std::string& cdbPath) = 0;

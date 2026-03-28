@@ -1,9 +1,8 @@
 #pragma once
 
-#include <yetty/font/raw-font.h>
-#include <yetty/base/object.h>
-#include <yetty/base/factory.h>
-#include <yetty/result.hpp>
+#include <yetty/font/raw-font.hpp>
+#include <yetty/core/factory-object.hpp>
+#include <yetty/core/result.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <memory>

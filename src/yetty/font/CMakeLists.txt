@@ -3,6 +3,7 @@ add_library(yetty_font STATIC
     freetype.cpp
     raw-font.cpp
     raw-font-manager.cpp
+    raster-font.cpp
 )
 
 target_include_directories(yetty_font PUBLIC

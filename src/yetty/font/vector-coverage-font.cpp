@@ -1,6 +1,6 @@
-#include <yetty/vector-coverage-font.h>
-#include <yetty/gpu-allocator.h>
-#include <yetty/wgpu-compat.h>
+#include <yetty/font/vector-coverage-font.hpp>
+#include <yetty/gpu-allocator.hpp>
+#include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
 
 #include <ft2build.h>

@@ -246,14 +246,14 @@ void android_main(android_app* app) {
     ydebug("main: WebGPU surface created");
 
     // 6. AppContext + Yetty (main thread)
-    AppContext appCtx{};
-    appCtx.config = config;
-    appCtx.platformInputPipe = state.pipe;
-    appCtx.ptyFactory = ptyFactory;
-    appCtx.instance = instance;
-    appCtx.surface = surface;
+    AppContext appContext{};
+    appContext.config = config;
+    appContext.platformInputPipe = state.pipe;
+    appContext.ptyFactory = ptyFactory;
+    appContext.instance = instance;
+    appContext.surface = surface;
 
-    auto yettyResult = Yetty::create(appCtx);
+    auto yettyResult = Yetty::create(appContext);
     if (!yettyResult) {
         yerror("Failed to create Yetty: {}", yettyResult.error().message());
         wgpuSurfaceRelease(surface);

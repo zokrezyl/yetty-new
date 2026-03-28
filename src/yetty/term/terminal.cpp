@@ -33,7 +33,7 @@ public:
     _eventLoop = *eventLoopResult;
     ydebug("Terminal: EventLoop created");
 
-    auto ptyResult = _terminalScreenContext.yettyContext.appCtx->ptyFactory->createPty();
+    auto ptyResult = _terminalScreenContext.yettyContext.appContext->ptyFactory->createPty();
     if (!ptyResult)
       return Err<void>("Failed to create PTY", ptyResult);
     _pty = *ptyResult;
@@ -61,7 +61,7 @@ public:
     ydebug("Terminal: PTY poll started");
 
     // Setup PlatformInputPipe poll - TerminalScreen receives platform events
-    auto *pipe = _terminalScreenContext.yettyContext.appCtx->platformInputPipe;
+    auto *pipe = _terminalScreenContext.yettyContext.appContext->platformInputPipe;
     auto pipePollResult = _eventLoop->createPlatformInputPipePoll(pipe);
     if (!pipePollResult)
       return Err<void>("Failed to create PlatformInputPipe poll", pipePollResult);

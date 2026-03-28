@@ -1,9 +1,9 @@
 #pragma once
 
-#include <yetty/font.h>
-#include <yetty/shader-provider.h>
-#include <yetty/result.hpp>
-#include <yetty/base/base.h>
+#include <yetty/font/font.hpp>
+#include <yetty/shader-provider.hpp>
+#include <yetty/core/result.hpp>
+#include <yetty/core/factory-object.hpp>
 #include <string>
 #include <vector>
 #include <memory>
@@ -28,7 +28,6 @@ class ShaderManager;
  */
 class ShaderFont : public Font,
                    public ShaderProvider,
-                   public base::ObjectFactory<ShaderFont>,
                    public std::enable_shared_from_this<ShaderFont> {
 public:
     using Ptr = std::shared_ptr<ShaderFont>;
@@ -44,16 +43,14 @@ public:
     /**
      * Create a ShaderFont for the specified category.
      *
-     * @param ctx Factory context
      * @param shaderMgr ShaderManager to register with
      * @param category Glyph or Card category
      * @param shaderDir Directory containing shader files
      * @return ShaderFont instance or error
      */
-    static Result<Ptr> createImpl(ContextType& ctx,
-                                  std::shared_ptr<ShaderManager> shaderMgr,
-                                  Category category,
-                                  const std::string& shaderDir);
+    static Result<ShaderFont*> createImpl(ShaderManager* shaderMgr,
+                                           Category category,
+                                           const std::string& shaderDir);
 
     ~ShaderFont() override = default;
 

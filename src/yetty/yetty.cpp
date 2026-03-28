@@ -12,8 +12,8 @@ namespace yetty {
 
 class YettyImpl : public Yetty {
 public:
-  explicit YettyImpl(const AppContext &appCtx) : _appContext(appCtx) {
-    _yettyCtx.appCtx = &_appContext;
+  explicit YettyImpl(const AppContext &appContext) : _appContext(appContext) {
+    _yettyContext.appContext = &_appContext;
   }
 
   ~YettyImpl() override {
@@ -33,7 +33,7 @@ public:
     }
 
     // Create terminal
-    auto termResult = Terminal::create(_yettyCtx);
+    auto termResult = Terminal::create(_yettyContext);
     if (!termResult) {
       return Err<void>("Failed to create Terminal", termResult);
     }
@@ -201,16 +201,16 @@ private:
     ydebug("initWebGPU: Surface format = {}", static_cast<int>(_surfaceFormat));
 
     // Populate GPU context
-    _yettyCtx.gpuCtx.device = _device;
-    _yettyCtx.gpuCtx.queue = _queue;
-    _yettyCtx.gpuCtx.surfaceFormat = _surfaceFormat;
+    _yettyContext.gpuContext.device = _device;
+    _yettyContext.gpuContext.queue = _queue;
+    _yettyContext.gpuContext.surfaceFormat = _surfaceFormat;
 
     ydebug("initWebGPU: Complete");
     return Ok();
   }
 
   AppContext _appContext;
-  YettyContext _yettyCtx;
+  YettyContext _yettyContext;
   Terminal *_terminal = nullptr;
 
   // WebGPU state
@@ -222,8 +222,8 @@ private:
   WGPUTextureFormat _surfaceFormat = WGPUTextureFormat_BGRA8Unorm;
 };
 
-Result<Yetty *> Yetty::createImpl(const AppContext &appCtx) {
-  auto *yetty = new YettyImpl(appCtx);
+Result<Yetty *> Yetty::createImpl(const AppContext &appContext) {
+  auto *yetty = new YettyImpl(appContext);
   if (auto res = yetty->init(); !res) {
     delete yetty;
     return Err<Yetty *>("Yetty init failed", res);

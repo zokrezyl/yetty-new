@@ -139,15 +139,15 @@ int main(int argc, char **argv) {
   ydebug("main: WebGPU surface created");
 
   // AppContext
-  AppContext appCtx{};
-  appCtx.config = config;
-  appCtx.platformInputPipe = platformInputPipe;
-  appCtx.ptyFactory = ptyFactory;
-  appCtx.instance = instance;
-  appCtx.surface = surface;
+  AppContext appContext{};
+  appContext.config = config;
+  appContext.platformInputPipe = platformInputPipe;
+  appContext.ptyFactory = ptyFactory;
+  appContext.instance = instance;
+  appContext.surface = surface;
 
   // Yetty
-  auto yettyResult = Yetty::create(appCtx);
+  auto yettyResult = Yetty::create(appContext);
   if (!yettyResult) {
     yerror("Failed to create Yetty: {}", yettyResult.error().message());
     wgpuSurfaceRelease(surface);

@@ -1,8 +1,8 @@
 #pragma once
 
-#include <yetty/font.h>
-#include <yetty/gpu-allocator.h>
-#include <yetty/result.hpp>
+#include <yetty/font/font.hpp>
+#include <yetty/gpu-allocator.hpp>
+#include <yetty/core/result.hpp>
 #include <webgpu/webgpu.h>
 #include <cstdint>
 #include <vector>
@@ -31,7 +31,7 @@ public:
     using Ptr = std::shared_ptr<BmFont>;
 
     // Factory method
-    static Result<Ptr> create(WGPUDevice device, GpuAllocator::Ptr allocator,
+    static Result<Ptr> create(WGPUDevice device, GpuAllocator* allocator,
                               const std::string& fontPath = "",
                               uint32_t glyphSize = 64) noexcept;
 
@@ -82,10 +82,10 @@ public:
     uint32_t getGlyphCount() const noexcept { return static_cast<uint32_t>(_glyphMetadata.size()); }
 
 protected:
-    Result<void> init() override;
+    Result<void> init();
 
 private:
-    BmFont(WGPUDevice device, GpuAllocator::Ptr allocator, const std::string& fontPath,
+    BmFont(WGPUDevice device, GpuAllocator* allocator, const std::string& fontPath,
            uint32_t glyphSize) noexcept;
 
     Result<void> findFont() noexcept;
@@ -95,7 +95,7 @@ private:
     Result<void> renderGlyph(uint32_t codepoint, int atlasX, int atlasY) noexcept;
 
     WGPUDevice _device = nullptr;
-    GpuAllocator::Ptr _allocator;
+    GpuAllocator* _allocator = nullptr;
 
     // FreeType handles
     void* _ftLibrary = nullptr;

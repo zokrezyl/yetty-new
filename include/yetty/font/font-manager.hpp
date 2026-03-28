@@ -1,17 +1,17 @@
 #pragma once
 
-#include <yetty/ms-msdf-font.h>
-#include <yetty/bm-font.h>
-#include <yetty/shader-font.h>
-#include <yetty/vector-sdf-font.h>
-#include <yetty/vector-coverage-font.h>
-#include <yetty/raster-font.h>
-#include <yetty/gpu-allocator.h>
-#include <yetty/gpu-context.h>
-#include <yetty/shader-manager.h>
-#include <yetty/msdf-cdb-provider.h>
-#include <yetty/result.hpp>
-#include <yetty/base/base.h>
+#include <yetty/font/ms-msdf-font.hpp>
+#include <yetty/font/bm-font.hpp>
+#include <yetty/font/shader-font.hpp>
+#include <yetty/font/vector-sdf-font.hpp>
+#include <yetty/font/vector-coverage-font.hpp>
+#include <yetty/font/raster-font.hpp>
+#include <yetty/gpu-allocator.hpp>
+#include <yetty/gpu-context.hpp>
+#include <yetty/shader-manager.hpp>
+#include <yetty/msdf-cdb-provider.hpp>
+#include <yetty/core/result.hpp>
+#include <yetty/core/factory-object.hpp>
 #include <string>
 #include <memory>
 
@@ -23,10 +23,8 @@ namespace yetty {
  * Created via ObjectFactory with GPUContext and ShaderManager.
  * Stored in YettyContext for access by renderers.
  */
-class FontManager : public base::ObjectFactory<FontManager> {
+class FontManager : public core::FactoryObject<FontManager> {
 public:
-    using Ptr = std::shared_ptr<FontManager>;
-
     virtual ~FontManager() = default;
 
     // Factory - creates FontManagerImpl
@@ -35,42 +33,41 @@ public:
     // shadersDir: Directory for WGSL shader files (from Platform::getShadersDir())
     // preloadCardShaders: Shader names to preload for cards (format: "0xNNNN-name")
     // preloadGlyphShaders: Shader names to preload for glyphs (format: "0xNNNN-name")
-    static Result<Ptr> createImpl(ContextType& ctx,
-                                  const GPUContext& gpu,
-                                  GpuAllocator::Ptr allocator,
-                                  ShaderManager::Ptr shaderMgr,
-                                  const std::string& msdfFontsDir,
-                                  const std::string& fontsDir,
-                                  const std::string& shadersDir,
-                                  MsdfCdbProvider::Ptr cdbProvider = nullptr,
-                                  const std::vector<std::string>& preloadCardShaders = {},
-                                  const std::vector<std::string>& preloadGlyphShaders = {}) noexcept;
+    static Result<FontManager*> createImpl(const GPUContext& gpu,
+                                            GpuAllocator* allocator,
+                                            ShaderManager* shaderMgr,
+                                            const std::string& msdfFontsDir,
+                                            const std::string& fontsDir,
+                                            const std::string& shadersDir,
+                                            MsdfCdbProvider* cdbProvider = nullptr,
+                                            const std::vector<std::string>& preloadCardShaders = {},
+                                            const std::vector<std::string>& preloadGlyphShaders = {}) noexcept;
 
-    virtual Result<MsMsdfFont::Ptr> getMsMsdfFont(const std::string& fontName) noexcept = 0;
-    virtual MsMsdfFont::Ptr getDefaultMsMsdfFont() noexcept = 0;
-    virtual BmFont::Ptr getDefaultBmFont() noexcept = 0;
-    virtual ShaderFont::Ptr getDefaultShaderGlyphFont() noexcept = 0;
-    virtual ShaderFont::Ptr getDefaultCardFont() noexcept = 0;
+    virtual Result<MsMsdfFont*> getMsMsdfFont(const std::string& fontName) noexcept = 0;
+    virtual MsMsdfFont* getDefaultMsMsdfFont() noexcept = 0;
+    virtual BmFont* getDefaultBmFont() noexcept = 0;
+    virtual ShaderFont* getDefaultShaderGlyphFont() noexcept = 0;
+    virtual ShaderFont* getDefaultCardFont() noexcept = 0;
 
     // Vector font (SDF curve-based rendering)
-    virtual Result<VectorSdfFont::Ptr> getVectorSdfFont(const std::string& ttfPath) noexcept = 0;
-    virtual VectorSdfFont::Ptr getDefaultVectorSdfFont() noexcept = 0;
+    virtual Result<VectorSdfFont*> getVectorSdfFont(const std::string& ttfPath) noexcept = 0;
+    virtual VectorSdfFont* getDefaultVectorSdfFont() noexcept = 0;
 
     // Vector font (coverage-based rendering)
-    virtual Result<VectorCoverageFont::Ptr> getVectorCoverageFont(const std::string& ttfPath) noexcept = 0;
-    virtual VectorCoverageFont::Ptr getDefaultVectorCoverageFont() noexcept = 0;
+    virtual Result<VectorCoverageFont*> getVectorCoverageFont(const std::string& ttfPath) noexcept = 0;
+    virtual VectorCoverageFont* getDefaultVectorCoverageFont() noexcept = 0;
 
     // Raster font (texture atlas rendering)
     // Cell size defaults are placeholder - caller should use setCellSize() once actual size is known
-    virtual Result<RasterFont::Ptr> getRasterFont(const std::string& ttfPath,
-                                                  uint32_t cellWidth = 16,
-                                                  uint32_t cellHeight = 32) noexcept = 0;
-    virtual RasterFont::Ptr getDefaultRasterFont() noexcept = 0;
+    virtual Result<RasterFont*> getRasterFont(const std::string& ttfPath,
+                                               uint32_t cellWidth = 16,
+                                               uint32_t cellHeight = 32) noexcept = 0;
+    virtual RasterFont* getDefaultRasterFont() noexcept = 0;
 
     virtual void setDefaultFont(const std::string& fontName) noexcept = 0;
     virtual bool hasFont(const std::string& fontName) const noexcept = 0;
     virtual const std::string& getCacheDir() const noexcept = 0;
-    virtual MsdfCdbProvider::Ptr getCdbProvider() const noexcept = 0;
+    virtual MsdfCdbProvider* getCdbProvider() const noexcept = 0;
 
 protected:
     FontManager() = default;

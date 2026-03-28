@@ -1,5 +1,5 @@
-#include <yetty/raster-font.h>
-#include <yetty/wgpu-compat.h>
+#include <yetty/font/raster-font.hpp>
+#include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
 
 #include <ft2build.h>
@@ -34,10 +34,10 @@ static_assert(sizeof(RasterGlyphUV) == 8, "RasterGlyphUV must be 8 bytes");
 
 class RasterFontImpl : public RasterFont {
 public:
-    RasterFontImpl(const GPUContext& gpu, GpuAllocator::Ptr allocator,
+    RasterFontImpl(const GPUContext& gpu, GpuAllocator* allocator,
                    const std::string& ttfPath,
                    uint32_t cellWidth, uint32_t cellHeight)
-        : _gpu(gpu), _allocator(std::move(allocator))
+        : _gpu(gpu), _allocator(allocator)
         , _ttfPath(ttfPath), _cellWidth(cellWidth), _cellHeight(cellHeight) {}
 
     ~RasterFontImpl() override {
@@ -511,7 +511,7 @@ private:
     //=========================================================================
 
     const GPUContext& _gpu;
-    GpuAllocator::Ptr _allocator;
+    GpuAllocator* _allocator;
     std::string _ttfPath;
     uint32_t _cellWidth;
     uint32_t _cellHeight;
@@ -544,22 +544,22 @@ private:
 };
 
 //=============================================================================
-// RasterFont::createImpl - ObjectFactory entry point
+// RasterFont::createImpl - factory entry point
 //=============================================================================
 
-Result<RasterFont::Ptr> RasterFont::createImpl(ContextType&,
-                                               const GPUContext& gpu,
-                                               GpuAllocator::Ptr allocator,
-                                               const std::string& ttfPath,
-                                               uint32_t cellWidth,
-                                               uint32_t cellHeight) {
-    auto font = Ptr(new RasterFontImpl(gpu, std::move(allocator), ttfPath, cellWidth, cellHeight));
-    if (auto res = static_cast<RasterFontImpl*>(font.get())->init(); !res) {
+Result<RasterFont*> RasterFont::createImpl(const GPUContext& gpu,
+                                           GpuAllocator* allocator,
+                                           const std::string& ttfPath,
+                                           uint32_t cellWidth,
+                                           uint32_t cellHeight) {
+    auto* font = new RasterFontImpl(gpu, allocator, ttfPath, cellWidth, cellHeight);
+    if (auto res = font->init(); !res) {
         yerror("RasterFont creation failed: {}", error_msg(res));
-        return Err<Ptr>("Failed to initialize RasterFont", res);
+        delete font;
+        return Err<RasterFont*>("Failed to initialize RasterFont", res);
     }
     ytest("raster-font-created", "RasterFont created successfully");
-    return Ok(std::move(font));
+    return Ok(font);
 }
 
 } // namespace yetty

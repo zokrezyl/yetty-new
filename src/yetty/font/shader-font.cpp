@@ -1,5 +1,5 @@
-#include <yetty/shader-font.h>
-#include <yetty/shader-manager.h>
+#include <yetty/font/shader-font.hpp>
+#include <yetty/shader-manager.hpp>
 #include <ytrace/ytrace.hpp>
 
 #include <filesystem>

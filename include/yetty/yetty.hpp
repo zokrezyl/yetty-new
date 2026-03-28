@@ -7,7 +7,7 @@ namespace yetty {
 
 class Yetty : public core::FactoryObject<Yetty> {
 public:
-  static Result<Yetty *> createImpl(const AppContext &appCtx);
+  static Result<Yetty *> createImpl(const AppContext &appContext);
 
   virtual ~Yetty() = default;
 
