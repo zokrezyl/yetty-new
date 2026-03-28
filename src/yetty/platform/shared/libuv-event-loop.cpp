@@ -40,9 +40,9 @@ public:
     EventLoopImpl() {
         _loop = uv_default_loop();
 
-        // Initialize screen update async handle
-        _screenUpdateAsync.data = this;
-        uv_async_init(_loop, &_screenUpdateAsync, onScreenUpdateAsync);
+        // Initialize render async handle
+        _renderAsync.data = this;
+        uv_async_init(_loop, &_renderAsync, onRenderAsync);
 
         // Initialize signal handlers for graceful shutdown
         _sigintHandle.data = this;
@@ -58,7 +58,7 @@ public:
         uv_signal_stop(&_sigtermHandle);
         uv_close(reinterpret_cast<uv_handle_t*>(&_sigintHandle), nullptr);
         uv_close(reinterpret_cast<uv_handle_t*>(&_sigtermHandle), nullptr);
-        uv_close(reinterpret_cast<uv_handle_t*>(&_screenUpdateAsync), nullptr);
+        uv_close(reinterpret_cast<uv_handle_t*>(&_renderAsync), nullptr);
     }
 
     static void onSignal(uv_signal_t* handle, int signum) {
@@ -366,9 +366,9 @@ public:
         return Ok(id);
     }
 
-    void requestScreenUpdate() override {
-        _screenUpdatePending = true;
-        uv_async_send(&_screenUpdateAsync);
+    void requestRender() override {
+        _renderPending = true;
+        uv_async_send(&_renderAsync);
     }
 
     Result<PollId> createPlatformInputPipePoll(PlatformInputPipe* pipe) override {
@@ -398,10 +398,12 @@ public:
     }
 
 private:
-    static void onScreenUpdateAsync(uv_async_t* handle) {
+    static void onRenderAsync(uv_async_t* handle) {
         auto* self = static_cast<EventLoopImpl*>(handle->data);
-        if (self->_screenUpdatePending.exchange(false)) {
-            self->dispatch(Event::screenUpdateEvent());
+        if (self->_renderPending.exchange(false)) {
+            self->dispatch(Event::renderEvent());
+        } else {
+            ywarn("EventLoop::onRenderAsync: render signal but not pending");
         }
     }
 
@@ -483,9 +485,9 @@ private:
     PlatformInputPipe* _platformInputPipe = nullptr;
     PollId _platformInputPipePollId = -1;
 
-    // Screen update async - for immediate re-render without waiting for timer
-    uv_async_t _screenUpdateAsync;
-    std::atomic<bool> _screenUpdatePending{false};
+    // Render async - for immediate re-render without waiting for timer
+    uv_async_t _renderAsync;
+    std::atomic<bool> _renderPending{false};
 
     // Signal handlers for graceful shutdown
     uv_signal_t _sigintHandle;

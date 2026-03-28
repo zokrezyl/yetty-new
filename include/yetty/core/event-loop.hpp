@@ -77,9 +77,9 @@ public:
   virtual Result<void> registerTimerListener(TimerId id,
                                              EventListener * listener) = 0;
 
-  // Async screen update - dispatch ScreenUpdate event asynchronously
+  // Async render - dispatch Render event asynchronously
   // This allows immediate re-render without waiting for the frame timer
-  virtual void requestScreenUpdate() = 0;
+  virtual void requestRender() = 0;
 
   // Platform input pipe poll - receives events from main/platform thread
   // Desktop: uses uv_poll on pipe->readFd()

@@ -15,9 +15,9 @@ class YGuiOverlay;
 // Yetty-level context — created by Yetty, passed to GPUScreens.
 // Extends AppContext with GPU state and shared managers.
 struct YettyContext {
-  AppContext *appCtx = nullptr;
+  AppContext *appContext = nullptr;
 
-  GPUContext gpuCtx;
+  GPUContext gpuContext;
 
   GpuAllocator *gpuAllocator = nullptr;
   GpuMonitor *gpuMonitor = nullptr;

@@ -1,11 +1,14 @@
 #include <yetty/platform/pty.hpp>
 #include <yetty/term/terminal-screen.hpp>
 #include <yetty/core/event.hpp>
+#include <yetty/font/raster-font.h>
+#include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
 
 #include <algorithm>
 #include <cstring>
 #include <deque>
+#include <memory>
 #include <vector>
 #include <vterm.h>
 
@@ -37,7 +40,8 @@ struct Pen {
 
 class TerminalScreenImpl : public TerminalScreen {
 public:
-  explicit TerminalScreenImpl(Pty *pty) : _pty(pty) {}
+  explicit TerminalScreenImpl(const TerminalScreenContext &terminalScreenContext)
+      : _terminalScreenContext(terminalScreenContext) {}
   ~TerminalScreenImpl() override;
 
   const char *typeName() const override { return "TerminalScreen"; }
@@ -140,8 +144,8 @@ private:
   VTermColor _defaultFg;
   VTermColor _defaultBg;
 
-  // Pty for reading on PollReadable and writing vterm output
-  Pty *_pty;
+  // Context with pty, GPU resources, etc.
+  TerminalScreenContext _terminalScreenContext;
 };
 
 //=============================================================================
@@ -191,8 +195,8 @@ Result<void> TerminalScreenImpl::init(uint32_t cols, uint32_t rows) {
       _vterm,
       [](const char *data, size_t len, void *user) {
         auto *self = static_cast<TerminalScreenImpl *>(user);
-        if (self->_pty) {
-          self->_pty->write(data, len);
+        if (self->_terminalScreenContext.pty) {
+          self->_terminalScreenContext.pty->write(data, len);
         }
       },
       this);
@@ -885,10 +889,10 @@ static VTermKey glfwKeyToVterm(int key) {
 
 Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
   // PTY readable - read data from PTY and feed to vterm
-  if (event.type == core::Event::Type::PollReadable && _pty) {
+  if (event.type == core::Event::Type::PollReadable && _terminalScreenContext.pty) {
     char buf[65536];
     while (true) {
-      size_t n = _pty->read(buf, sizeof(buf));
+      size_t n = _terminalScreenContext.pty->read(buf, sizeof(buf));
       if (n == 0)
         break;
       write(buf, n);
@@ -924,8 +928,9 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
 }
 
 Result<TerminalScreen *> TerminalScreen::createImpl(uint32_t cols,
-                                                    uint32_t rows, Pty *pty) {
-  auto *screen = new TerminalScreenImpl(pty);
+                                                    uint32_t rows,
+                                                    const TerminalScreenContext &terminalScreenContext) {
+  auto *screen = new TerminalScreenImpl(terminalScreenContext);
   if (auto res = screen->init(cols, rows); !res) {
     delete screen;
     return Err<TerminalScreen *>("TerminalScreen init failed", res);

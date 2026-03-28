@@ -217,9 +217,8 @@ public:
         return Ok();
     }
 
-    void requestScreenUpdate() override {
-        // No-op for WebASM - already running at ~60fps via requestAnimationFrame
-        // Screen updates happen every frame anyway
+    void requestRender() override {
+        dispatch(Event::renderEvent());
     }
 
 private:

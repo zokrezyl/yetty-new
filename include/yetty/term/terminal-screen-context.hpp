@@ -5,16 +5,18 @@
 
 namespace yetty {
 
+class Pty;
 class GpuAllocator;
 class ShaderManager;
 class FontManager;
 class CardFactory;
 class GpuMemoryManager;
 
-// Per-GPUScreen context passed to cards and other per-screen components.
-// Created by GPUScreen, extends YettyContext with per-screen managers.
-struct GpuScreenContext {
-  YettyContext *yettyCtx = nullptr;
+// Per-TerminalScreen context for GPU rendering.
+// Extends YettyContext with per-screen managers.
+struct TerminalScreenContext {
+  YettyContext yettyContext;
+  Pty *pty = nullptr;
 
   GpuAllocator *gpuAllocator = nullptr;
   ShaderManager *shaderManager = nullptr;

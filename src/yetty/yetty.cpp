@@ -12,8 +12,8 @@ namespace yetty {
 
 class YettyImpl : public Yetty {
 public:
-  explicit YettyImpl(const AppContext &appCtx) : _appCtx(appCtx) {
-    _yettyCtx.appCtx = &_appCtx;
+  explicit YettyImpl(const AppContext &appCtx) : _appContext(appCtx) {
+    _yettyCtx.appCtx = &_appContext;
   }
 
   ~YettyImpl() override {
@@ -53,8 +53,8 @@ private:
     ydebug("initWebGPU: Starting...");
 
     // Instance and surface provided by platform
-    _instance = _appCtx.instance;
-    _surface = _appCtx.surface;
+    _instance = _appContext.instance;
+    _surface = _appContext.surface;
 
     if (!_instance) {
       return Err<void>("No WebGPU instance provided");
@@ -209,7 +209,7 @@ private:
     return Ok();
   }
 
-  AppContext _appCtx;
+  AppContext _appContext;
   YettyContext _yettyCtx;
   Terminal *_terminal = nullptr;
 
