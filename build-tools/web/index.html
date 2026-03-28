@@ -456,8 +456,8 @@ busybox telnetd -p 8023 -l /bin/bash
 
         var Module = {
             canvas: document.getElementById('canvas'),
-            print: function(text) { console.log('[yetty]', text); },
-            printErr: function(text) { console.error('[yetty]', text); },
+            print: function(text) { console.log(text); },
+            printErr: function(text) { console.log(text); },
             // preRun runs AFTER yetty.js loads but BEFORE main() executes
             // This is where we inject environment variables into Emscripten's ENV
             preRun: [function() {
