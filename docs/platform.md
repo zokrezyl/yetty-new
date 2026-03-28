@@ -9,30 +9,31 @@ Platform-specific code is organized to **maximize code reuse**. Instead of dupli
 GLFW provides window, surface, input, and clipboard handling that works across Linux, macOS, and Windows. Instead of writing separate code for each OS:
 
 ```
-shared/glfw-window.cpp            ← Window creation (Linux, macOS, Windows)
-shared/glfw-surface.cpp           ← WebGPU surface via glfwCreateWindowWGPUSurface()
-shared/glfw-event-loop.cpp        ← Event polling
-shared/glfw-clipboard-manager.cpp ← Clipboard access
+shared/glfw-main.cpp              <- Entry point (Linux, macOS, Windows)
+shared/glfw-window.cpp            <- Window creation
+shared/glfw-surface.cpp           <- WebGPU surface via glfwCreateWindowWGPUSurface()
+shared/glfw-event-loop.cpp        <- Event polling
+shared/glfw-clipboard-manager.cpp <- Clipboard access
 ```
 
-**Example: Unix main()**
+**Example: Platform Paths**
 
-The main() entry point for Unix-like systems (Linux, macOS) is nearly identical. The only difference is how to determine platform paths (cache, config, runtime directories). So:
+The only difference between Linux, macOS, and Windows is how to determine platform paths (cache, config, runtime directories):
 
 ```
-shared/unix-main.cpp        ← Common main() logic, calls getPlatformPaths()
-linux/platform-paths.cpp    ← Implements getPlatformPaths() with XDG
-macos/platform-paths.cpp    ← Implements getPlatformPaths() with ~/Library/...
+linux/platform-paths.cpp    <- XDG directories
+macos/platform-paths.cpp    <- ~/Library/...
+windows/platform-paths.cpp  <- AppData
 ```
 
-The linker picks the correct `getPlatformPaths()` implementation based on the target platform.
+The linker picks the correct implementation based on the target platform.
 
 **Example: libuv EventLoop**
 
 All native platforms (Linux, macOS, Windows, Android) use libuv for the event loop:
 
 ```
-shared/libuv-event-loop.cpp ← Used by all native platforms
+shared/libuv-event-loop.cpp <- Used by all native platforms
 ```
 
 Only WebASM needs a different implementation (emscripten requestAnimationFrame).
@@ -42,40 +43,44 @@ Only WebASM needs a different implementation (emscripten requestAnimationFrame).
 ```
 src/yetty/platform/
 ├── shared/                      # Reusable code across platforms
-│   ├── unix-main.cpp            # main() for Unix (Linux, macOS)
-│   ├── unix-pty.cpp             # forkpty() PTY (Linux, macOS)
-│   ├── libuv-event-loop.cpp     # Event loop (all native platforms)
-│   ├── glfw-window.cpp          # Window creation (Linux, macOS, Windows)
-│   ├── glfw-surface.cpp         # WebGPU surface via GLFW (Linux, macOS, Windows)
+│   ├── glfw-main.cpp            # main() for GLFW platforms (Linux, macOS, Windows)
+│   ├── glfw-window.cpp          # Window creation
+│   ├── glfw-surface.cpp         # WebGPU surface via GLFW
 │   ├── glfw-event-loop.cpp      # GLFW event polling
 │   ├── glfw-clipboard-manager.cpp
-│   └── fd-pty-poll-source.hpp
+│   ├── libuv-event-loop.cpp     # Event loop (all native platforms)
+│   ├── unix-pty.cpp             # forkpty() PTY (Linux, macOS)
+│   ├── unix-pipe.cpp            # pipe() for PlatformInputPipe (Unix)
+│   └── fd-pty-poll-source.hpp   # PTY poll source wrapping fd
 │
 ├── linux/                       # Linux-specific only
 │   └── platform-paths.cpp       # XDG directories
 │
-├── macos/                       # macOS-specific only (planned)
+├── macos/                       # macOS-specific only
 │   └── platform-paths.cpp       # ~/Library/... paths
 │
-├── windows/                     # Windows-specific only (planned)
+├── windows/                     # Windows-specific only
+│   ├── main.cpp                 # Windows entry point (GLFW)
 │   ├── platform-paths.cpp       # AppData paths
-│   └── conpty.cpp               # ConPTY (Windows PTY)
+│   ├── conpty.cpp               # ConPTY (Windows PTY)
+│   └── pipe.cpp                 # Windows pipe via HANDLEs
 │
-├── android/                     # Android-specific only (planned)
-│   ├── main.cpp                 # Different entry point (no GLFW)
-│   ├── platform-paths.cpp
+├── android/                     # Android-specific (no GLFW)
+│   ├── main.cpp                 # NativeActivity entry point
+│   ├── platform-paths.cpp       # App internal storage
 │   └── surface.cpp              # ANativeWindow surface
 │
-├── ios/                         # iOS-specific only (planned)
-│   ├── main.mm                  # Different entry point (no GLFW)
-│   ├── platform-paths.mm
+├── ios/                         # iOS-specific (no GLFW)
+│   ├── main.mm                  # UIKit entry point
+│   ├── platform-paths.mm        # NSSearchPathForDirectoriesInDomains
 │   └── surface.mm               # CAMetalLayer surface
 │
-└── webasm/                      # WebASM - mostly unique (no GLFW, no libuv)
+└── webasm/                      # WebASM (no GLFW, no libuv)
     ├── main.cpp                 # Emscripten entry point
     ├── event-loop.cpp           # requestAnimationFrame loop
     ├── surface.cpp              # Canvas-based surface
-    ├── window.cpp
+    ├── window.cpp               # Canvas setup
+    ├── pipe.cpp                 # In-memory PlatformInputPipe
     └── pty-io.cpp               # JSLinux PTY via iframe
 ```
 
@@ -83,13 +88,13 @@ src/yetty/platform/
 
 | Code | Location | Why |
 |------|----------|-----|
-| GLFW window/surface/input | `shared/` | Works on Linux, macOS, Windows |
+| GLFW main/window/surface/input | `shared/` | Works on Linux, macOS, Windows |
 | libuv event loop | `shared/` | Works on all native platforms |
-| Unix main() | `shared/` | Same logic for Linux, macOS |
 | Unix PTY (forkpty) | `shared/` | Works on Linux, macOS |
-| getPlatformPaths() | Each platform dir | Different paths per OS (XDG, ~/Library, AppData) |
-| Windows ConPTY | `windows/` | Windows-only PTY API |
-| Android/iOS surface | Platform dir | No GLFW, different window system |
+| Unix pipe | `shared/` | Works on Linux, macOS |
+| getPlatformPaths() | Each platform dir | Different paths per OS |
+| Windows ConPTY/pipe | `windows/` | Windows-only APIs |
+| Android/iOS surface/main | Platform dir | No GLFW, different window system |
 | WebASM everything | `webasm/` | No GLFW, no libuv, emscripten-specific |
 
 ## Key Abstractions
@@ -99,9 +104,10 @@ Platform code implements these interfaces:
 | Interface | What it does | Implementations |
 |-----------|--------------|-----------------|
 | `EventLoop` | Runs main loop | `shared/libuv-event-loop.cpp`, `webasm/event-loop.cpp` |
-| `PlatformInputPipe` | Transfers input events | `core/unix-pipe.cpp`, `core/webasm-pipe.cpp` |
-| `Pty` + `PtyPollSource` | Shell I/O + polling | `shared/unix-pty.cpp`, `webasm/pty-io.cpp` |
-| `getPlatformPaths()` | Cache/config directories | Each platform implements |
+| `PlatformInputPipe` | Transfers input events | `shared/unix-pipe.cpp`, `windows/pipe.cpp`, `webasm/pipe.cpp` |
+| `Pty` + `PtyPollSource` | Shell I/O + polling | `shared/unix-pty.cpp`, `windows/conpty.cpp`, `webasm/pty-io.cpp` |
+| `createSurface()` | WebGPU surface | `shared/glfw-surface.cpp`, `android/surface.cpp`, `ios/surface.mm`, `webasm/surface.cpp` |
+| `getCacheDir()`, `getRuntimeDir()` | Platform directories | Each platform implements |
 
 ### Polling Model: Unix vs WebASM
 
@@ -110,21 +116,22 @@ Unix platforms have file descriptors. libuv polls them. WebASM has no fds - uses
 **PTY Polling:**
 
 ```
-include/yetty/platform/pty-poll-source.hpp   ← Base class (opaque handle)
-shared/fd-pty-poll-source.hpp                ← Unix: wraps PTY master fd
-webasm/pty-io.cpp (WebasmPtyPollSource)      ← WebASM: buffer + JS interop
+include/yetty/platform/pty-poll-source.hpp   <- Base class (opaque handle)
+shared/fd-pty-poll-source.hpp                <- Unix: wraps PTY master fd
+webasm/pty-io.cpp (WebasmPtyPollSource)      <- WebASM: buffer + JS interop
 ```
 
 - `Pty::pollSource()` returns a `PtyPollSource*`
 - EventLoop static_casts to the concrete type it knows
-- Unix: `FdPtyPollSource` wraps fd → libuv polls it
-- WebASM: `WebasmPtyPollSource` holds buffer → JS pushes data via postMessage
+- Unix: `FdPtyPollSource` wraps fd -> libuv polls it
+- WebASM: `WebasmPtyPollSource` holds buffer -> JS pushes data via postMessage
 
-**PlatformInputPipe Polling:**
+**PlatformInputPipe:**
 
 ```
-core/unix-pipe.cpp      ← Unix: real pipe() fd, libuv polls read end
-core/webasm-pipe.cpp    ← WebASM: in-memory buffer + emscripten_async_call
+shared/unix-pipe.cpp    <- Unix: real pipe() fd, libuv polls read end
+windows/pipe.cpp        <- Windows: HANDLE-based pipe
+webasm/pipe.cpp         <- WebASM: in-memory buffer + emscripten_async_call
 ```
 
 - Unix: main thread writes to pipe fd, render thread polls read fd via libuv
@@ -134,47 +141,66 @@ core/webasm-pipe.cpp    ← WebASM: in-memory buffer + emscripten_async_call
 
 | Platform | Threads | Main Thread | Render Thread |
 |----------|---------|-------------|---------------|
-| Linux/macOS/Windows | 2 | GLFW event loop | libuv + Yetty |
-| Android | 2 | UI events | libuv + Yetty |
-| iOS | 2 | UIKit | libuv + Yetty |
+| Linux/macOS/Windows | 2 | GLFW event loop | Yetty (creates EventLoop) |
+| Android | 2 | ALooper events | Yetty (creates EventLoop) |
+| iOS | 1 | UIKit + CADisplayLink | - |
 | WebASM | 1 | Everything | - |
 
 Desktop threading (2 threads):
 ```
 MAIN THREAD                     RENDER THREAD
-───────────────────────────────────────────────
-glfwWaitEvents()                libuv event loop
-  ↓                               ↓
-Input callbacks ──────────────→ PlatformInputPipe
-                                  ↓
+-------------------------------------------
+glfwWaitEvents()                Yetty creates EventLoop
+  |                               |
+Input callbacks -------------> PlatformInputPipe
+                                  |
+                                Terminal runs EventLoop
+                                  |
                                 Yetty render
 ```
 
 ## Startup Sequence
 
-1. **getPlatformPaths()** - Platform-specific cache/config/runtime directories
-2. **Config::create()** - Parse command line, load config
-3. **GLFW init** - Initialize window system (desktop) or canvas (webasm)
-4. **Create window** - GLFW window or HTML canvas
-5. **Create abstractions** - EventLoop, PlatformInputPipe, PtyFactory
-6. **Create WebGPU instance + surface** - Surface needs window handle
-7. **Pack into AppContext** - All objects bundled for Yetty
-8. **Yetty::create()** - Requests adapter/device, creates Terminal
-9. **Run event loop** - Platform-specific main loop
+1. **Config::create()** - FIRST. Parse command line, load config (determines headless mode, window size)
+2. **Create window** - GLFW window or HTML canvas (based on config)
+3. **Create PlatformInputPipe** - For input event transfer
+4. **Create PtyFactory** - For creating PTY instances
+5. **Create WebGPU surface** - Platform-specific, requires window handle. Instance created internally.
+6. **Pack into AppContext** - All objects bundled for Yetty
+7. **Yetty::create()** - Creates WebGPU instance, requests adapter/device
+8. **Spawn render thread** (desktop) - Calls yetty->run()
+9. **Run OS event loop** - Platform-specific (GLFW, ALooper, UIKit, emscripten)
 
 ## AppContext
 
-Struct passed from platform main() to Yetty:
+Struct passed from platform main() to Yetty. Contains only what platform must create:
 
 ```cpp
 struct AppContext {
     Config *config;
-    EventLoop *eventLoop;
     PlatformInputPipe *platformInputPipe;
+    ClipboardManager *clipboardManager;  // optional
     PtyFactory *ptyFactory;
-    WGPUInstance instance;
-    WGPUSurface surface;
+    WGPUInstance instance;  // Created by platform (needed for surface), reused by Yetty
+    WGPUSurface surface;    // Platform creates surface (requires window handle)
 };
 ```
 
-Platform code creates everything. Yetty just uses it.
+**What Yetty creates internally:**
+- WebGPU adapter, device, queue (using instance from AppContext)
+- EventLoop (created by Terminal)
+
+Platform creates instance once, uses it to create surface, passes both to Yetty for reuse.
+
+## Surface Creation
+
+Each platform creates instance + surface:
+
+| Platform | Surface Source | Function |
+|----------|---------------|----------|
+| Linux/macOS/Windows | GLFWwindow | `glfwCreateWindowWGPUSurface(instance, window)` |
+| Android | ANativeWindow | `wgpuInstanceCreateSurface(instance, &androidDesc)` |
+| iOS | CAMetalLayer | `wgpuInstanceCreateSurface(instance, &metalDesc)` |
+| WebASM | HTML canvas | `wgpuInstanceCreateSurface(instance, &canvasDesc)` |
+
+Instance is created once in main(), passed to `createSurface()`, then both are passed through AppContext to Yetty.

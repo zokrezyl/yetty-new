@@ -25,7 +25,7 @@
 
 std::string getCacheDir();
 std::string getRuntimeDir();
-WGPUSurface createSurface(ANativeWindow* window);
+WGPUSurface createSurface(WGPUInstance instance, ANativeWindow* window);
 
 namespace {
 
@@ -223,10 +223,21 @@ void android_main(android_app* app) {
     auto* ptyFactory = *ptyFactoryResult;
     ydebug("main: PtyFactory created");
 
-    // 5. WebGPU surface (main thread, instance created internally)
-    WGPUSurface surface = createSurface(state.window);
+    // 5. WebGPU instance + surface (main thread)
+    WGPUInstance instance = wgpuCreateInstance(nullptr);
+    if (!instance) {
+        yerror("Failed to create WebGPU instance");
+        delete ptyFactory;
+        delete state.pipe;
+        delete config;
+        return;
+    }
+    ydebug("main: WebGPU instance created");
+
+    WGPUSurface surface = createSurface(instance, state.window);
     if (!surface) {
         yerror("Failed to create WebGPU surface");
+        wgpuInstanceRelease(instance);
         delete ptyFactory;
         delete state.pipe;
         delete config;
@@ -239,12 +250,14 @@ void android_main(android_app* app) {
     appCtx.config = config;
     appCtx.platformInputPipe = state.pipe;
     appCtx.ptyFactory = ptyFactory;
+    appCtx.instance = instance;
     appCtx.surface = surface;
 
     auto yettyResult = Yetty::create(appCtx);
     if (!yettyResult) {
         yerror("Failed to create Yetty: {}", yettyResult.error().message());
         wgpuSurfaceRelease(surface);
+        wgpuInstanceRelease(instance);
         delete ptyFactory;
         delete state.pipe;
         delete config;
@@ -280,6 +293,7 @@ void android_main(android_app* app) {
     // Cleanup
     delete yetty;
     wgpuSurfaceRelease(surface);
+    wgpuInstanceRelease(instance);
     delete ptyFactory;
     delete state.pipe;
     state.pipe = nullptr;

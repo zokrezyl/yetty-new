@@ -266,7 +266,7 @@ bool createWindow(Config* config);
 void destroyWindow();
 void getFramebufferSize(int& width, int& height);
 
-WGPUSurface createSurface();
+WGPUSurface createSurface(WGPUInstance instance);
 
 } // namespace webasm
 } // namespace platform
@@ -332,10 +332,22 @@ int main(int argc, char** argv) {
     auto* ptyFactory = *ptyFactoryResult;
     ydebug("main: PtyFactory created");
 
-    // WebGPU surface
-    WGPUSurface surface = platform::webasm::createSurface();
+    // WebGPU instance + surface
+    WGPUInstance instance = wgpuCreateInstance(nullptr);
+    if (!instance) {
+        yerror("Failed to create WebGPU instance");
+        delete ptyFactory;
+        delete pipe;
+        platform::webasm::destroyWindow();
+        delete config;
+        return 1;
+    }
+    ydebug("main: WebGPU instance created");
+
+    WGPUSurface surface = platform::webasm::createSurface(instance);
     if (!surface) {
         yerror("Failed to create WebGPU surface");
+        wgpuInstanceRelease(instance);
         delete ptyFactory;
         delete pipe;
         platform::webasm::destroyWindow();
@@ -349,6 +361,7 @@ int main(int argc, char** argv) {
     appCtx.config = config;
     appCtx.platformInputPipe = pipe;
     appCtx.ptyFactory = ptyFactory;
+    appCtx.instance = instance;
     appCtx.surface = surface;
 
     // Yetty
@@ -356,6 +369,7 @@ int main(int argc, char** argv) {
     if (!yettyResult) {
         yerror("Failed to create Yetty: {}", yettyResult.error().message());
         wgpuSurfaceRelease(surface);
+        wgpuInstanceRelease(instance);
         delete ptyFactory;
         delete pipe;
         platform::webasm::destroyWindow();
@@ -386,6 +400,7 @@ int main(int argc, char** argv) {
     // Cleanup (won't reach here on web - infinite loop)
     delete yetty;
     wgpuSurfaceRelease(surface);
+    wgpuInstanceRelease(instance);
     delete ptyFactory;
     delete pipe;
     platform::webasm::destroyWindow();

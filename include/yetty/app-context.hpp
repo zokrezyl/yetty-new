@@ -20,8 +20,8 @@ struct AppContext {
   ClipboardManager *clipboardManager = nullptr;
   PtyFactory *ptyFactory = nullptr;
 
-  // WebGPU surface - created by platform (requires window handle)
-  // Instance is created internally by Yetty
+  // WebGPU - instance created by platform (needed for surface), reused by Yetty
+  WGPUInstance instance = nullptr;
   WGPUSurface surface = nullptr;
 };
 

@@ -23,7 +23,7 @@
 
 GLFWwindow *createWindow(int width, int height, const char *title);
 void destroyWindow(GLFWwindow *window);
-WGPUSurface createSurface(GLFWwindow* window);
+WGPUSurface createSurface(WGPUInstance instance, GLFWwindow* window);
 
 void setupWindowCallbacks(GLFWwindow *window);
 void runOsEventLoop(GLFWwindow *window, std::atomic<bool> &running);
@@ -114,10 +114,22 @@ int main(int argc, char **argv) {
   auto *ptyFactory = *ptyFactoryResult;
   ydebug("main: PtyFactory created");
 
-  // WebGPU surface (instance created internally by surface creator)
-  WGPUSurface surface = createSurface(window);
+  // WebGPU instance and surface
+  WGPUInstance instance = wgpuCreateInstance(nullptr);
+  if (!instance) {
+    yerror("Failed to create WebGPU instance");
+    delete ptyFactory;
+    delete platformInputPipe;
+    delete config;
+    destroyWindow(window);
+    return 1;
+  }
+  ydebug("main: WebGPU instance created");
+
+  WGPUSurface surface = createSurface(instance, window);
   if (!surface) {
     yerror("Failed to create WebGPU surface");
+    wgpuInstanceRelease(instance);
     delete ptyFactory;
     delete platformInputPipe;
     delete config;
@@ -131,6 +143,7 @@ int main(int argc, char **argv) {
   appCtx.config = config;
   appCtx.platformInputPipe = platformInputPipe;
   appCtx.ptyFactory = ptyFactory;
+  appCtx.instance = instance;
   appCtx.surface = surface;
 
   // Yetty
@@ -138,6 +151,7 @@ int main(int argc, char **argv) {
   if (!yettyResult) {
     yerror("Failed to create Yetty: {}", yettyResult.error().message());
     wgpuSurfaceRelease(surface);
+    wgpuInstanceRelease(instance);
     delete ptyFactory;
     delete platformInputPipe;
     delete config;
@@ -188,6 +202,7 @@ int main(int argc, char **argv) {
   // Cleanup
   delete yetty;
   wgpuSurfaceRelease(surface);
+  wgpuInstanceRelease(instance);
   delete ptyFactory;
   glfwSetWindowUserPointer(window, nullptr);
   delete platformInputPipe;

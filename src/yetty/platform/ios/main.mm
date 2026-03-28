@@ -20,7 +20,7 @@
 
 std::string getCacheDir();
 std::string getRuntimeDir();
-WGPUSurface createSurface(CAMetalLayer* layer);
+WGPUSurface createSurface(WGPUInstance instance, CAMetalLayer* layer);
 
 // =============================================================================
 // YettyMetalView - UIView backed by CAMetalLayer
@@ -63,6 +63,7 @@ WGPUSurface createSurface(CAMetalLayer* layer);
 @property (nonatomic, assign) yetty::core::PlatformInputPipe* pipe;
 @property (nonatomic, assign) yetty::Config* config;
 @property (nonatomic, assign) yetty::PtyFactory* ptyFactory;
+@property (nonatomic, assign) WGPUInstance instance;
 @property (nonatomic, assign) WGPUSurface surface;
 @end
 
@@ -119,10 +120,21 @@ WGPUSurface createSurface(CAMetalLayer* layer);
     self.ptyFactory = *ptyFactoryResult;
     ydebug("main: PtyFactory created");
 
-    // 4. WebGPU surface (instance created internally by createSurface)
-    self.surface = createSurface(self.metalView.metalLayer);
+    // 4. WebGPU instance + surface
+    self.instance = wgpuCreateInstance(nullptr);
+    if (!self.instance) {
+        yerror("Failed to create WebGPU instance");
+        delete self.ptyFactory;
+        delete self.pipe;
+        delete self.config;
+        return;
+    }
+    ydebug("main: WebGPU instance created");
+
+    self.surface = createSurface(self.instance, self.metalView.metalLayer);
     if (!self.surface) {
         yerror("Failed to create WebGPU surface");
+        wgpuInstanceRelease(self.instance);
         delete self.ptyFactory;
         delete self.pipe;
         delete self.config;
@@ -135,12 +147,14 @@ WGPUSurface createSurface(CAMetalLayer* layer);
     appCtx.config = self.config;
     appCtx.platformInputPipe = self.pipe;
     appCtx.ptyFactory = self.ptyFactory;
+    appCtx.instance = self.instance;
     appCtx.surface = self.surface;
 
     auto yettyResult = Yetty::create(appCtx);
     if (!yettyResult) {
         yerror("Failed to create Yetty: {}", yettyResult.error().message());
         wgpuSurfaceRelease(self.surface);
+        wgpuInstanceRelease(self.instance);
         delete self.ptyFactory;
         delete self.pipe;
         delete self.config;
@@ -230,6 +244,7 @@ WGPUSurface createSurface(CAMetalLayer* layer);
     [self stopRenderLoop];
     if (self.yetty) delete self.yetty;
     if (self.surface) wgpuSurfaceRelease(self.surface);
+    if (self.instance) wgpuInstanceRelease(self.instance);
     if (self.ptyFactory) delete self.ptyFactory;
     if (self.pipe) delete self.pipe;
     if (self.config) delete self.config;

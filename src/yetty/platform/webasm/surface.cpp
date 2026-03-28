@@ -10,11 +10,9 @@ namespace yetty {
 namespace platform {
 namespace webasm {
 
-WGPUSurface createSurface() {
-    // Create instance (required by wgpuInstanceCreateSurface)
-    WGPUInstance instance = wgpuCreateInstance(nullptr);
+WGPUSurface createSurface(WGPUInstance instance) {
     if (!instance) {
-        yerror("createSurface: Failed to create WebGPU instance");
+        yerror("createSurface: null instance");
         return nullptr;
     }
 
@@ -26,10 +24,6 @@ WGPUSurface createSurface() {
     surfaceDesc.nextInChain = &canvasSource.chain;
 
     WGPUSurface surface = wgpuInstanceCreateSurface(instance, &surfaceDesc);
-
-    // Release instance - surface retains what it needs internally
-    wgpuInstanceRelease(instance);
-
     if (!surface) {
         yerror("createSurface: Failed to create surface from #canvas");
         return nullptr;

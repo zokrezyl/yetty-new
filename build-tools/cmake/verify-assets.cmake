@@ -51,12 +51,14 @@ check_file("${ASSETS_PREFIX}/DejaVuSansMNerdFontMono-Bold.ttf" "Bold font")
 check_file("${ASSETS_PREFIX}/DejaVuSansMNerdFontMono-Oblique.ttf" "Oblique font")
 check_file("${ASSETS_PREFIX}/DejaVuSansMNerdFontMono-BoldOblique.ttf" "Bold Oblique font")
 
-# Font CDB files
-check_dir("${ASSETS_PREFIX}/msdf-fonts" "Font CDB directory")
-check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Regular.cdb" "Regular font CDB")
-check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Bold.cdb" "Bold font CDB")
-check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Oblique.cdb" "Oblique font CDB")
-check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-BoldOblique.cdb" "Bold Oblique font CDB")
+# Font CDB files (only if CDB generation is enabled)
+if(CHECK_CDB)
+    check_dir("${ASSETS_PREFIX}/msdf-fonts" "Font CDB directory")
+    check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Regular.cdb" "Regular font CDB")
+    check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Bold.cdb" "Bold font CDB")
+    check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Oblique.cdb" "Oblique font CDB")
+    check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-BoldOblique.cdb" "Bold Oblique font CDB")
+endif()
 
 # Shader directory structure
 check_dir("${ASSETS_PREFIX}/shaders" "Shaders directory")

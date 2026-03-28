@@ -4,16 +4,9 @@
 #include <ytrace/ytrace.hpp>
 #import <QuartzCore/CAMetalLayer.h>
 
-WGPUSurface createSurface(CAMetalLayer* layer) {
-    if (!layer) {
-        yerror("createSurface: null layer");
-        return nullptr;
-    }
-
-    // Create instance (required by wgpuInstanceCreateSurface)
-    WGPUInstance instance = wgpuCreateInstance(nullptr);
-    if (!instance) {
-        yerror("createSurface: Failed to create WebGPU instance");
+WGPUSurface createSurface(WGPUInstance instance, CAMetalLayer* layer) {
+    if (!instance || !layer) {
+        yerror("createSurface: null instance or layer");
         return nullptr;
     }
 
@@ -25,10 +18,6 @@ WGPUSurface createSurface(CAMetalLayer* layer) {
     surfaceDesc.nextInChain = reinterpret_cast<WGPUChainedStruct*>(&metalDesc);
 
     WGPUSurface surface = wgpuInstanceCreateSurface(instance, &surfaceDesc);
-
-    // Release instance - surface retains what it needs internally
-    wgpuInstanceRelease(instance);
-
     if (!surface) {
         yerror("createSurface: wgpuInstanceCreateSurface failed");
         return nullptr;

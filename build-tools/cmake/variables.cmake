@@ -93,7 +93,7 @@ option(YETTY_ENABLE_FEATURE_YCAT      "ycat — file viewer"                   O
 
 # Build pipeline
 option(YETTY_ENABLE_FEATURE_ASSETS    "assets — runtime asset copying"       ON)
-option(YETTY_ENABLE_FEATURE_CDB_GEN   "cdb-gen — CDB font generation"       ON)
+option(YETTY_ENABLE_FEATURE_CDB_GEN   "cdb-gen — CDB font generation"       OFF)
 option(YETTY_ENABLE_FEATURE_TESTS     "tests — unit tests"                   OFF)
 option(YETTY_ENABLE_FEATURE_TOOLS     "tools — build tools"                  OFF)
 option(YETTY_ENABLE_FEATURE_DEMO      "demo — demo programs"                 OFF)

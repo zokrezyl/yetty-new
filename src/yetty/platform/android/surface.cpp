@@ -4,16 +4,9 @@
 #include <ytrace/ytrace.hpp>
 #include <android/native_window.h>
 
-WGPUSurface createSurface(ANativeWindow* window) {
-    if (!window) {
-        yerror("createSurface: null window");
-        return nullptr;
-    }
-
-    // Create instance (required by wgpuInstanceCreateSurface)
-    WGPUInstance instance = wgpuCreateInstance(nullptr);
-    if (!instance) {
-        yerror("createSurface: Failed to create WebGPU instance");
+WGPUSurface createSurface(WGPUInstance instance, ANativeWindow* window) {
+    if (!instance || !window) {
+        yerror("createSurface: null instance or window");
         return nullptr;
     }
 
@@ -25,10 +18,6 @@ WGPUSurface createSurface(ANativeWindow* window) {
     surfaceDesc.nextInChain = reinterpret_cast<WGPUChainedStruct*>(&androidDesc);
 
     WGPUSurface surface = wgpuInstanceCreateSurface(instance, &surfaceDesc);
-
-    // Release instance - surface retains what it needs internally
-    wgpuInstanceRelease(instance);
-
     if (!surface) {
         yerror("createSurface: wgpuInstanceCreateSurface failed");
         return nullptr;

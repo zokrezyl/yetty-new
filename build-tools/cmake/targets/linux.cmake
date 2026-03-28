@@ -91,14 +91,17 @@ if(YETTY_ENABLE_FEATURE_ASSETS)
 endif()
 
 # Ensure all runtime assets are in build output before yetty
-if(YETTY_ENABLE_FEATURE_CDB_GEN AND YETTY_ENABLE_FEATURE_ASSETS)
-    add_dependencies(yetty generate-cdb copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_dependencies(yetty copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
+endif()
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    add_dependencies(yetty generate-cdb)
 endif()
 
 # Verify all required assets are present
 if(YETTY_ENABLE_FEATURE_ASSETS)
     add_custom_command(TARGET yetty POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=desktop -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
+        COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=desktop -DCHECK_CDB=${YETTY_ENABLE_FEATURE_CDB_GEN} -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
         COMMENT "Verifying build assets..."
     )
 endif()
