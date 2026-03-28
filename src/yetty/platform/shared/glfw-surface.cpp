@@ -1,25 +1,38 @@
-// Linux surface.cpp - Platform-specific surface creation
+// GLFW surface.cpp - WebGPU surface creation from GLFW window
 //
-// Provides createSurface(instance, window) - creates WGPUSurface from GLFW window.
-// Yetty creates instance, calls this via SurfaceCreator, then creates adapter/device/queue.
+// Creates WGPUSurface from GLFWwindow. Uses glfwCreateWindowWGPUSurface which
+// handles platform differences (X11, Wayland, Cocoa, Win32) internally.
+// Instance is created here since glfwCreateWindowWGPUSurface requires one.
 
 #include <webgpu/webgpu.h>
 #include <ytrace/ytrace.hpp>
 #include <GLFW/glfw3.h>
 #include <glfw3webgpu.h>
 
-WGPUSurface createSurface(WGPUInstance instance, GLFWwindow* window) {
-    if (!instance || !window) {
-        yerror("createSurface: null instance or window");
+WGPUSurface createSurface(GLFWwindow* window) {
+    if (!window) {
+        yerror("createSurface: null window");
+        return nullptr;
+    }
+
+    // Create instance (required by glfwCreateWindowWGPUSurface)
+    WGPUInstance instance = wgpuCreateInstance(nullptr);
+    if (!instance) {
+        yerror("createSurface: Failed to create WebGPU instance");
         return nullptr;
     }
 
     WGPUSurface surface = glfwCreateWindowWGPUSurface(instance, window);
     if (!surface) {
         yerror("createSurface: Failed to create surface from GLFW window");
+        wgpuInstanceRelease(instance);
         return nullptr;
     }
-    ydebug("createSurface: Surface created");
 
+    // Note: Instance is released here. The surface retains what it needs internally.
+    // Yetty will create its own instance for adapter/device creation.
+    wgpuInstanceRelease(instance);
+
+    ydebug("createSurface: Surface created from GLFW window");
     return surface;
 }

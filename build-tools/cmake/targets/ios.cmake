@@ -9,21 +9,21 @@ file(MAKE_DIRECTORY ${IOS_ASSETS_DIR})
 # Add src/yetty (builds libraries, VNC included since YETTY_ANDROID=0)
 add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
 
-# Create iOS app bundle (executable, not library)
-# main.cpp has Desktop/iOS entry point that creates InitManager and calls run()
+# Platform sources — iOS-specific + shared Unix components
+set(YETTY_PLATFORM_SOURCES
+    ${YETTY_ROOT}/src/yetty/platform/ios/main.mm
+    ${YETTY_ROOT}/src/yetty/platform/ios/platform-paths.mm
+    ${YETTY_ROOT}/src/yetty/platform/ios/surface.mm
+    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.cpp
+)
+
+# Create iOS app bundle
 add_executable(yetty MACOSX_BUNDLE
     ${YETTY_CORE_SOURCES}
     ${YETTY_IOS_SOURCES}
-    # Platform abstraction sources for iOS
-    ${YETTY_ROOT}/src/yetty/platform/init-manager/ios.mm
-    ${YETTY_ROOT}/src/yetty/platform/surface-manager/ios.mm
-    ${YETTY_ROOT}/src/yetty/platform/clipboard-manager/ios.mm
-    ${YETTY_ROOT}/src/yetty/platform/fs-path-manager/ios.mm
-    ${YETTY_ROOT}/src/yetty/platform/pty-manager/ios.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/ios-app-singleton.mm
-    # Shared platform sources (libuv event loop, macos webgpu manager)
-    ${YETTY_ROOT}/src/yetty/platform/event-loop/libuv.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webgpu-manager/macos.cpp
+    ${YETTY_PLATFORM_SOURCES}
     ${YETTY_ROOT}/src/yetty/msdf-gen/generator.cpp
 )
 

@@ -27,16 +27,14 @@ if(YETTY_ENABLE_FEATURE_VNC)
     add_subdirectory(${YETTY_ROOT}/src/yetty/vnc ${CMAKE_BINARY_DIR}/src/yetty/vnc)
 endif()
 
-# Platform manager sources (new architecture)
-# Note: event-loop is included via yetty_base
+# Platform sources — Android-specific + shared Unix components
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/init-manager/android.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/android-app-singleton.cpp
-    ${YETTY_ROOT}/src/yetty/platform/surface-manager/android.cpp
-    ${YETTY_ROOT}/src/yetty/platform/pty-manager/android.cpp
-    ${YETTY_ROOT}/src/yetty/platform/fs-path-manager/android.cpp
-    ${YETTY_ROOT}/src/yetty/platform/clipboard-manager/android.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webgpu-manager/android.cpp
+    ${YETTY_ROOT}/src/yetty/platform/android/main.cpp
+    ${YETTY_ROOT}/src/yetty/platform/android/platform-paths.cpp
+    ${YETTY_ROOT}/src/yetty/platform/android/surface.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.cpp
 )
 
 # Create shared library with core sources + android platform

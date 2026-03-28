@@ -9,7 +9,6 @@ class PtyFactory;
 class ClipboardManager;
 
 namespace core {
-class EventLoop;
 class PlatformInputPipe;
 } // namespace core
 
@@ -17,13 +16,12 @@ class PlatformInputPipe;
 // Raw pointers — the app owns these objects and outlives all children.
 struct AppContext {
   Config *config = nullptr;
-  core::EventLoop *eventLoop = nullptr;
   core::PlatformInputPipe *platformInputPipe = nullptr;
   ClipboardManager *clipboardManager = nullptr;
   PtyFactory *ptyFactory = nullptr;
 
-  // WebGPU objects created by platform main()
-  WGPUInstance instance = nullptr;
+  // WebGPU surface - created by platform (requires window handle)
+  // Instance is created internally by Yetty
   WGPUSurface surface = nullptr;
 };
 

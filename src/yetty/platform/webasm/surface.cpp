@@ -1,7 +1,6 @@
-// WebAssembly surface.cpp - Platform-specific surface creation
+// WebAssembly surface.cpp - WebGPU surface from HTML canvas
 //
-// Provides createSurface(instance) - creates WGPUSurface from canvas HTML selector.
-// Yetty creates instance, calls this, then creates adapter/device/queue.
+// Creates WGPUSurface from the #canvas HTML element.
 
 #include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
@@ -11,9 +10,11 @@ namespace yetty {
 namespace platform {
 namespace webasm {
 
-WGPUSurface createSurface(WGPUInstance instance) {
+WGPUSurface createSurface() {
+    // Create instance (required by wgpuInstanceCreateSurface)
+    WGPUInstance instance = wgpuCreateInstance(nullptr);
     if (!instance) {
-        yerror("createSurface: null instance");
+        yerror("createSurface: Failed to create WebGPU instance");
         return nullptr;
     }
 
@@ -25,6 +26,10 @@ WGPUSurface createSurface(WGPUInstance instance) {
     surfaceDesc.nextInChain = &canvasSource.chain;
 
     WGPUSurface surface = wgpuInstanceCreateSurface(instance, &surfaceDesc);
+
+    // Release instance - surface retains what it needs internally
+    wgpuInstanceRelease(instance);
+
     if (!surface) {
         yerror("createSurface: Failed to create surface from #canvas");
         return nullptr;

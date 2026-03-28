@@ -13,7 +13,6 @@
 #include <thread>
 #include <yetty/app-context.hpp>
 #include <yetty/config.hpp>
-#include <yetty/core/event-loop.hpp>
 #include <yetty/core/platform-input-pipe.hpp>
 #include <yetty/core/event.hpp>
 #include <yetty/platform/pty-factory.hpp>
@@ -24,7 +23,7 @@
 
 GLFWwindow *createWindow(int width, int height, const char *title);
 void destroyWindow(GLFWwindow *window);
-WGPUSurface createSurface(WGPUInstance instance, GLFWwindow* window);
+WGPUSurface createSurface(GLFWwindow* window);
 
 void setupWindowCallbacks(GLFWwindow *window);
 void runOsEventLoop(GLFWwindow *window, std::atomic<bool> &running);
@@ -89,24 +88,11 @@ int main(int argc, char **argv) {
 
   setupWindowCallbacks(window);
 
-  // EventLoop
-  auto eventLoopResult = core::EventLoop::create();
-  if (!eventLoopResult) {
-    yerror("Failed to create EventLoop: {}",
-           eventLoopResult.error().message());
-    delete config;
-    destroyWindow(window);
-    return 1;
-  }
-  auto *eventLoop = *eventLoopResult;
-  ydebug("main: EventLoop created");
-
   // PlatformInputPipe
   auto pipeResult = core::PlatformInputPipe::create();
   if (!pipeResult) {
     yerror("Failed to create PlatformInputPipe: {}",
            pipeResult.error().message());
-    delete eventLoop;
     delete config;
     destroyWindow(window);
     return 1;
@@ -121,7 +107,6 @@ int main(int argc, char **argv) {
     yerror("Failed to create PtyFactory: {}",
            ptyFactoryResult.error().message());
     delete platformInputPipe;
-    delete eventLoop;
     delete config;
     destroyWindow(window);
     return 1;
@@ -129,28 +114,12 @@ int main(int argc, char **argv) {
   auto *ptyFactory = *ptyFactoryResult;
   ydebug("main: PtyFactory created");
 
-  // WebGPU instance
-  WGPUInstanceDescriptor instanceDesc = {};
-  WGPUInstance instance = wgpuCreateInstance(&instanceDesc);
-  if (!instance) {
-    yerror("Failed to create WebGPU instance");
-    delete ptyFactory;
-    delete platformInputPipe;
-    delete eventLoop;
-    delete config;
-    destroyWindow(window);
-    return 1;
-  }
-  ydebug("main: WebGPU instance created");
-
-  // WebGPU surface
-  WGPUSurface surface = createSurface(instance, window);
+  // WebGPU surface (instance created internally by surface creator)
+  WGPUSurface surface = createSurface(window);
   if (!surface) {
     yerror("Failed to create WebGPU surface");
-    wgpuInstanceRelease(instance);
     delete ptyFactory;
     delete platformInputPipe;
-    delete eventLoop;
     delete config;
     destroyWindow(window);
     return 1;
@@ -160,19 +129,17 @@ int main(int argc, char **argv) {
   // AppContext
   AppContext appCtx{};
   appCtx.config = config;
-  appCtx.eventLoop = eventLoop;
   appCtx.platformInputPipe = platformInputPipe;
   appCtx.ptyFactory = ptyFactory;
-  appCtx.instance = instance;
   appCtx.surface = surface;
 
   // Yetty
   auto yettyResult = Yetty::create(appCtx);
   if (!yettyResult) {
     yerror("Failed to create Yetty: {}", yettyResult.error().message());
+    wgpuSurfaceRelease(surface);
     delete ptyFactory;
     delete platformInputPipe;
-    delete eventLoop;
     delete config;
     destroyWindow(window);
     return 1;
@@ -221,11 +188,9 @@ int main(int argc, char **argv) {
   // Cleanup
   delete yetty;
   wgpuSurfaceRelease(surface);
-  wgpuInstanceRelease(instance);
   delete ptyFactory;
   glfwSetWindowUserPointer(window, nullptr);
   delete platformInputPipe;
-  delete eventLoop;
   delete config;
   destroyWindow(window);
 
