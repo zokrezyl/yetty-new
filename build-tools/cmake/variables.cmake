@@ -54,7 +54,7 @@ option(YETTY_ENABLE_LIB_LIBMAGIC    "libmagic — file type detection"         O
 
 # Core modules
 option(YETTY_ENABLE_FEATURE_BASE      "yetty_base — core utilities"          OFF)
-option(YETTY_ENABLE_FEATURE_FONT      "yetty_font — font subsystem"          OFF)
+option(YETTY_ENABLE_FEATURE_FONT      "yetty_font — font subsystem"          ON)
 option(YETTY_ENABLE_FEATURE_SHADERS   "shaders — WGSL shader sources"        ON)
 option(YETTY_ENABLE_FEATURE_MSDF_WGSL "msdf-wgsl — MSDF shader lib"         OFF)
 option(YETTY_ENABLE_FEATURE_MSDF_GEN  "msdf-gen — MSDF font generator"       OFF)
