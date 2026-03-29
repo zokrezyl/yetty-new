@@ -34,9 +34,6 @@ public:
   // Resize PTY dimensions.
   virtual void resize(uint32_t cols, uint32_t rows) = 0;
 
-  // Check if PTY/process still running.
-  virtual bool isRunning() const = 0;
-
   // Stop the PTY/process.
   virtual void stop() = 0;
 

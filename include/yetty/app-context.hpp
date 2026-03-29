@@ -22,9 +22,6 @@ struct AppContext {
     core::PlatformInputPipe* platformInputPipe = nullptr;
     ClipboardManager* clipboardManager = nullptr;
     PtyFactory* ptyFactory = nullptr;
-
-    // Paths
-    std::string shadersDir;
 };
 
 } // namespace yetty

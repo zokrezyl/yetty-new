@@ -1,5 +1,6 @@
 #include <yetty/term/text-grid-layer.hpp>
 #include <yetty/term/terminal-screen.hpp>
+#include <yetty/config.hpp>
 #include <yetty/gpu-resource-binder.hpp>
 #include <yetty/gpu-allocator.hpp>
 #include <yetty/shader-manager.hpp>
@@ -38,10 +39,11 @@ public:
         _allocator = *allocatorResult;
 
         // Create ShaderManager (don't compile yet - wait for GpuResourceSets)
+        std::string shadersDir = yettyContext.appContext.config->get<std::string>("paths/shaders", "");
         auto shaderManagerResult = ShaderManager::create(
             yettyGpuContext,
             _allocator,
-            yettyContext.appContext.shadersDir);
+            shadersDir);
         if (!shaderManagerResult) {
             return Err<void>("Failed to create ShaderManager", shaderManagerResult);
         }

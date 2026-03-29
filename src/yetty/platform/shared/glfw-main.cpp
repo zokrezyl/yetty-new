@@ -147,7 +147,6 @@ int main(int argc, char **argv) {
   appContext.config = config;
   appContext.platformInputPipe = platformInputPipe;
   appContext.ptyFactory = ptyFactory;
-  appContext.shadersDir = shadersDir;
 
   // Yetty
   auto yettyResult = Yetty::create(appContext);

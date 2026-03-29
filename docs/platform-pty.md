@@ -142,19 +142,18 @@ WebASM has no file descriptors. JSLinux VM runs in an iframe and communicates vi
 
 **VM output → Terminal screen:**
 ```
-1. JSLinux VM produces output
-2. iframe's term.write(str) called
-3. iframe sends postMessage({type:'term-output', data:str})
-4. Parent window message listener receives
-5. Data appended to JS buffer: ptyBuffers[ptyId] += data
-6. JS calls Module._webpty_data_available(ptyPointer)
-7. WebasmPty::onDataAvailable() calls _pollSource.notify()
-8. PollSource callback fires (set by EventLoop)
-9. EventLoop dispatches PollReadable to listeners
-10. Listener calls pty->read(buf, len)
-11. WebasmPty::read() calls JS pty_read_buffer() via EM_ASM
-12. Data returned from JS buffer to C++
-13. Listener feeds data to vterm_input_write()
+1. JSLinux VM produces output, calls term_write(str)
+2. iframe sends postMessage({type:'term-output', data:str})
+3. Parent window message listener receives
+4. Data appended to parent's JS buffer: ptyBuffer += data
+5. JS calls Module._webpty_data_available(ptyPointer)
+6. WebasmPty::onDataAvailable() calls _pollSource.notify()
+7. PollSource callback fires (set by EventLoop)
+8. EventLoop dispatches PollReadable to listeners
+9. Listener calls pty->read(buf, len)
+10. WebasmPty::read() calls pty_read_buffer(len) via EM_ASM
+11. Data returned from parent's JS buffer to C++
+12. Listener feeds data to vterm_input_write()
 ```
 
 **Keyboard → VM:**

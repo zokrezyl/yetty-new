@@ -294,6 +294,26 @@ Result<void> TerminalScreenImpl::init(uint32_t cols, uint32_t rows) {
       },
       this);
 
+  // Set up PTY poll - receive shell output
+  auto* eventLoop = _terminalScreenContext.terminalContext.eventLoop;
+  auto* pty = _terminalScreenContext.terminalContext.pty;
+  if (eventLoop && pty) {
+    auto ptyPollResult = eventLoop->createPtyPoll(pty->pollSource());
+    if (!ptyPollResult) {
+      return Err<void>("Failed to create PTY poll", ptyPollResult);
+    }
+    auto ptyPollId = *ptyPollResult;
+
+    if (auto res = eventLoop->registerPollListener(ptyPollId, this); !res) {
+      return Err<void>("Failed to register PTY poll listener", res);
+    }
+
+    if (auto res = eventLoop->startPoll(ptyPollId); !res) {
+      return Err<void>("Failed to start PTY poll", res);
+    }
+    ydebug("TerminalScreen: PTY poll started");
+  }
+
   auto renderResult = initRender();
   if (!renderResult) {
     return renderResult;
@@ -1017,7 +1037,21 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
     return Ok(true);
   }
 
-  return Ok(false);
+  // PTY readable - read shell output and feed to vterm
+  if (event.type == core::Event::Type::PollReadable) {
+    auto* pty = _terminalScreenContext.terminalContext.pty;
+    if (pty && _vterm) {
+      char buf[4096];
+      size_t n;
+      while ((n = pty->read(buf, sizeof(buf))) > 0) {
+        vterm_input_write(_vterm, buf, n);
+      }
+    }
+    return Ok(true);
+  }
+
+  yerror("TerminalScreen: unhandled event type {}", static_cast<int>(event.type));
+  return Err<bool>("TerminalScreen: unhandled event type");
 }
 
 Result<TerminalScreen *> TerminalScreen::createImpl(uint32_t cols,

@@ -26,7 +26,8 @@ set(YETTY_SHADERS_DIR "/assets/shaders" CACHE STRING "Shader directory path")
 set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/platform/webasm/main.cpp
     ${YETTY_ROOT}/src/yetty/platform/webasm/surface.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webasm/pty-io.cpp
+    ${YETTY_ROOT}/src/yetty/platform/webasm/webasm-pty.cpp
+    ${YETTY_ROOT}/src/yetty/platform/webasm/webasm-pty-factory.cpp
     ${YETTY_ROOT}/src/yetty/platform/webasm/window.cpp
     ${YETTY_ROOT}/src/yetty/platform/webasm/event-loop.cpp
     ${YETTY_ROOT}/src/yetty/platform/webasm/pipe.cpp
@@ -98,7 +99,7 @@ target_link_options(yetty PRIVATE
     "--preload-file=${CMAKE_BINARY_DIR}/assets@/assets"
     "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','FS','ENV','HEAPU8']"
     # "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_yetty_write','_yetty_key','_yetty_special_key','_yetty_read_input','_yetty_sync','_yetty_set_scale','_yetty_resize','_yetty_get_cols','_yetty_get_rows','_webpty_on_data']"
-    "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_webpty_on_data']"
+    "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_webpty_poll_source_notify']"
 )
 
 if(YETTY_ENABLE_FEATURE_DEMO)

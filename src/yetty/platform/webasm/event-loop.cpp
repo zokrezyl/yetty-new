@@ -1,5 +1,6 @@
 #include <yetty/core/event-loop.hpp>
 #include <yetty/core/platform-input-pipe.hpp>
+#include "webasm-pty-poll-source.hpp"
 #include <ytrace/ytrace.hpp>
 #include <emscripten/emscripten.h>
 #include <vector>
@@ -134,9 +135,24 @@ public:
         return Ok();
     }
 
-    Result<PollId> createPtyPoll(PtyPollSource* /*source*/) override {
-        // On webasm, PTY uses callback mechanism - just create a poll id
-        return createPoll();
+    Result<PollId> createPtyPoll(PtyPollSource* source) override {
+        auto pollResult = createPoll();
+        if (!pollResult) return pollResult;
+        PollId id = *pollResult;
+
+        // Cast to WebasmPtyPollSource and set callback to dispatch PollReadable
+        auto* webasmSource = static_cast<WebasmPtyPollSource*>(source);
+        webasmSource->setNotifyCallback([this, id]() {
+            // Dispatch PollReadable to registered listeners
+            Event event;
+            event.type = Event::Type::PollReadable;
+            event.poll.fd = id;  // Use poll id as fake fd
+            for (auto* listener : _pollListeners[id]) {
+                listener->onEvent(event);
+            }
+        });
+
+        return Ok(id);
     }
 
     Result<PollId> createPlatformInputPipePoll(PlatformInputPipe* pipe) override {

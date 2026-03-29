@@ -150,10 +150,6 @@ public:
         }
     }
 
-    bool isRunning() const override {
-        return _running;
-    }
-
     void stop() override {
         if (!_running) return;
         _running = false;
