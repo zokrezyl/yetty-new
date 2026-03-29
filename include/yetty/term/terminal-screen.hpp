@@ -25,6 +25,8 @@ public:
   virtual void resize(uint32_t cols, uint32_t rows) = 0;
   virtual uint32_t getCols() const = 0;
   virtual uint32_t getRows() const = 0;
+  virtual float getCellWidth() const = 0;
+  virtual float getCellHeight() const = 0;
 
   // Damage tracking
   virtual bool hasDamage() const = 0;

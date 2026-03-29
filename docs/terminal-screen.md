@@ -377,6 +377,145 @@ When `screenRow < 0` the primitive is above the viewport (already scrolled past 
 not yet popped from deque). When the storage row scrolls off the deque, the primitive
 and all its refs are destroyed.
 
+## Separation of State and Rendering
+
+TerminalScreen manages terminal state only. Rendering is delegated to RenderableLayer subclasses.
+
+### TerminalScreen (State Machine)
+
+Manages:
+- vterm state, cells, scrollback, cursor
+- YPaint primitives, cards, static overlays
+
+Exposes state via methods:
+```cpp
+const TextCell* getCellData() const;
+uint32_t getCols() const;
+uint32_t getRows() const;
+int getCursorRow() const;
+int getCursorCol() const;
+// ... etc for ypaint, cards
+```
+
+Does NOT render. Assembles layer chain and triggers render.
+
+### TerminalScreenRenderContext
+
+Passed by const reference, stored by value (copy). Created each frame by TerminalScreen.
+
+```cpp
+struct TerminalScreenRenderContext {
+    WGPUCommandEncoder encoder;   // created each frame
+    WGPUQueue queue;
+    RenderTarget target;          // configured at init
+    uint32_t width;
+    uint32_t height;
+};
+```
+
+### RenderableLayer (Base Class)
+
+Abstract base for all rendering layers. Handles composition with previous layer.
+
+```cpp
+class RenderableLayer {
+public:
+    RenderableLayer(RenderableLayer* previousLayer, TerminalScreen* terminalScreen);
+    virtual ~RenderableLayer() = default;
+
+    virtual void render(const TerminalScreenRenderContext& terminalScreenRenderContext) = 0;
+    virtual bool isDirty() const = 0;
+
+protected:
+    RenderableLayer* _previousLayer;      // nullptr for layer 0
+    TerminalScreen* _terminalScreen;      // for state access
+    RenderTarget _cacheTexture;           // optional, for cached mode
+};
+```
+
+### Layer Subclasses
+
+Each layer knows what state to request from TerminalScreen:
+
+```cpp
+class TextGridLayer : public RenderableLayer {
+    void render(const TerminalScreenRenderContext& terminalScreenRenderContext) override {
+        const TextCell* cells = _terminalScreen->getCellData();
+        uint32_t cols = _terminalScreen->getCols();
+        uint32_t rows = _terminalScreen->getRows();
+        // ... render text grid
+    }
+};
+
+class ScrollingYPaintLayer : public RenderableLayer {
+    void render(const TerminalScreenRenderContext& terminalScreenRenderContext) override {
+        if (_previousLayer) {
+            _previousLayer->render(terminalScreenRenderContext);
+        }
+        // ... render ypaint primitives on top
+    }
+};
+
+class CardsLayer : public RenderableLayer {
+    // Internally, each card is its own RenderableLayer
+    // Cards are cached individually, re-rendered only when dirty
+};
+
+class StaticYPaintLayer : public RenderableLayer {
+    // Static overlay, screen-fixed position
+};
+```
+
+### Layer Assembly
+
+TerminalScreen assembles the layer chain at init:
+
+```cpp
+// In TerminalScreen::init()
+_textGridLayer = new TextGridLayer(nullptr, this);
+_scrollingYPaintLayer = new ScrollingYPaintLayer(_textGridLayer, this);
+_cardsLayer = new CardsLayer(_scrollingYPaintLayer, this);
+_staticYPaintLayer = new StaticYPaintLayer(_cardsLayer, this);
+
+_topLayer = _staticYPaintLayer;
+```
+
+### Render Trigger
+
+TerminalScreen::render() is triggered by event loop (no arguments):
+
+```cpp
+void TerminalScreen::render() {
+    // Create encoder for this frame
+    WGPUCommandEncoderDescriptor encoderDesc = {};
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(_device, &encoderDesc);
+
+    // Build context
+    TerminalScreenRenderContext terminalScreenRenderContext;
+    terminalScreenRenderContext.encoder = encoder;
+    terminalScreenRenderContext.queue = _queue;
+    terminalScreenRenderContext.target = _renderTarget;
+    terminalScreenRenderContext.width = _width;
+    terminalScreenRenderContext.height = _height;
+
+    // Render from top layer (recursively renders layers below)
+    _topLayer->render(terminalScreenRenderContext);
+
+    // Finish and submit
+    WGPUCommandBuffer commandBuffer = wgpuCommandEncoderFinish(encoder, nullptr);
+    wgpuQueueSubmit(_queue, 1, &commandBuffer);
+}
+```
+
+### Pipeline Configuration
+
+Configurable per-layer: render to cache texture or directly to target.
+
+**Cached mode**: Layer renders to own texture, passes as input to next layer.
+**Direct mode**: Layer renders directly to surface, blending with previous content.
+
+Configuration set at init from config, not changed per-frame.
+
 ## Implementation Order
 
 1. `TextCell` in `text-cell.hpp` (rename from GridCell)

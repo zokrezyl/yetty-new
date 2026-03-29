@@ -1,10 +1,8 @@
 #include <yetty/platform/pty.hpp>
 #include <yetty/term/terminal-screen.hpp>
+#include <yetty/term/renderable-layer.hpp>
+#include <yetty/term/text-grid-layer.hpp>
 #include <yetty/core/event.hpp>
-#include <yetty/font/raster-font.hpp>
-#include <yetty/gpu-allocator.hpp>
-#include <yetty/shader-manager.hpp>
-#include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
 
 #include <algorithm>
@@ -122,6 +120,8 @@ public:
   void resize(uint32_t cols, uint32_t rows) override;
   uint32_t getCols() const override { return static_cast<uint32_t>(_cols); }
   uint32_t getRows() const override { return static_cast<uint32_t>(_rows); }
+  float getCellWidth() const override { return _cellWidth; }
+  float getCellHeight() const override { return _cellHeight; }
   bool hasDamage() const override { return _hasDamage; }
   void clearDamage() override { _hasDamage = false; }
 
@@ -164,7 +164,6 @@ public:
 private:
   void createVTerm(uint32_t cols, uint32_t rows);
   void attach(VTerm *vt);
-  void updateUniforms();
 
   void setCell(int row, int col, uint32_t glyph, uint8_t fgR, uint8_t fgG,
                uint8_t fgB, uint8_t bgR, uint8_t bgG, uint8_t bgB,
@@ -220,27 +219,16 @@ private:
   // Context with pty, GPU resources, etc.
   TerminalScreenContext _terminalScreenContext;
 
-  // GpuAllocator (owned by TerminalScreenImpl - tracks per-view GPU usage)
-  GpuAllocator* _gpuAllocator = nullptr;
-
-  // ShaderManager (owned by TerminalScreenImpl - each terminal owns its own)
-  ShaderManager* _shaderManager = nullptr;
-
-  // Raster font (owned by TerminalScreenImpl)
-  RasterFont* _rasterFont = nullptr;
-
   // Cell size in pixels
   float _cellWidth = 10.0f;
   float _cellHeight = 20.0f;
 
-  // GPU render state
-  TerminalScreenRenderState _terminalScreenRenderState;
+  // Render layer (owned by TerminalScreenImpl)
+  RenderableLayer* _renderableLayer = nullptr;
 
   // Render methods (implemented in render-terminal-screen.incl)
   Result<void> initRender();
   void cleanupRender();
-  void render();
-  Result<bool> handleRenderEvent();
 };
 
 // Render implementation
@@ -1029,9 +1017,9 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
     return Ok(false);  // Not a special key, let CharInput handle it
   }
 
-  // Render event
+  // Render event - handled by caller via render(pass)
   if (event.type == core::Event::Type::Render) {
-    return handleRenderEvent();
+    return Ok(true);
   }
 
   return Ok(false);

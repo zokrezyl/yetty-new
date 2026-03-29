@@ -1,6 +1,5 @@
 #include <yetty/font/raster-font.hpp>
-#include <yetty/gpu-allocator.hpp>
-#include <yetty/wgpu-compat.hpp>
+#include <yetty/gpu-resource-set.hpp>
 #include <ytrace/ytrace.hpp>
 
 #include <ft2build.h>
@@ -19,8 +18,7 @@ namespace yetty {
 
 namespace {
 
-// Glyph UV offset for GPU - minimal for monospace terminal
-// uvMax = uvMin + glyphSizeUV (computed in shader from uniform)
+// Glyph UV offset - minimal for monospace terminal
 struct RasterGlyphUV {
     float uvX, uvY;  // UV top-left corner
 };
@@ -30,17 +28,13 @@ static_assert(sizeof(RasterGlyphUV) == 8, "RasterGlyphUV must be 8 bytes");
 } // anonymous namespace
 
 //=============================================================================
-// RasterFontImpl
+// RasterFontImpl - CPU only, no GPU code
 //=============================================================================
 
 class RasterFontImpl : public RasterFont {
 public:
-    RasterFontImpl(WGPUDevice device, WGPUQueue queue, GpuAllocator* allocator,
-                   const std::string& ttfPath,
-                   uint32_t cellWidth, uint32_t cellHeight, bool shared)
-        : _device(device), _queue(queue), _allocator(allocator)
-        , _ttfPath(ttfPath), _cellWidth(cellWidth), _cellHeight(cellHeight)
-        , _shared(shared) {}
+    RasterFontImpl(const std::string& ttfPath, float cellWidth, float cellHeight, bool shared)
+        : _ttfPath(ttfPath), _cellWidth(cellWidth), _cellHeight(cellHeight), _shared(shared) {}
 
     ~RasterFontImpl() override {
         cleanup();
@@ -79,7 +73,7 @@ public:
         if (!_ftFace) return;
 
         // Set initial size to get metrics (use cell height as starting point)
-        FT_Set_Pixel_Sizes(_ftFace, 0, _cellHeight);
+        FT_Set_Pixel_Sizes(_ftFace, 0, static_cast<uint32_t>(_cellHeight));
 
         // Get font metrics in pixels (at current size)
         // FreeType metrics are in 26.6 fixed point (divide by 64)
@@ -92,7 +86,7 @@ public:
         if (lineHeight > 0 && targetHeight > 0) {
             _fontSize = static_cast<uint32_t>(_cellHeight * targetHeight / lineHeight);
         } else {
-            _fontSize = _cellHeight;
+            _fontSize = static_cast<uint32_t>(_cellHeight);
         }
 
         // Apply the calculated font size
@@ -112,23 +106,17 @@ public:
     // Cell size management
     //=========================================================================
 
-    void setCellSize(uint32_t cellWidth, uint32_t cellHeight) override {
+    void setCellSize(float cellWidth, float cellHeight) override {
         if (cellWidth == _cellWidth && cellHeight == _cellHeight) {
-            return;  // No change
+            return;
         }
 
         _cellWidth = cellWidth;
         _cellHeight = cellHeight;
 
-        // Recalculate font size from metrics
         updateFontSize();
-
-        // Clear and re-rasterize all loaded glyphs
         rasterizeAll();
     }
-
-    uint32_t getCellWidth() const override { return _cellWidth; }
-    uint32_t getCellHeight() const override { return _cellHeight; }
 
     //=========================================================================
     // Glyph loading
@@ -136,7 +124,7 @@ public:
 
     Result<void> loadGlyphs(const std::vector<uint32_t>& codepoints) override {
         for (uint32_t cp : codepoints) {
-            if (_glyphIndices.count(cp)) continue;  // Already loaded
+            if (_glyphIndices.count(cp)) continue;
 
             auto result = rasterizeGlyph(cp);
             if (!result) {
@@ -146,7 +134,6 @@ public:
             _loadedCodepoints.push_back(cp);
         }
 
-        // Upload to GPU
         _dirty = true;
         return Ok();
     }
@@ -159,12 +146,12 @@ public:
             codepoints.push_back(cp);
         }
 
-        // Latin-1 Supplement (0xA0-0xFF: accented chars, symbols)
+        // Latin-1 Supplement (0xA0-0xFF)
         for (uint32_t cp = 0xA0; cp <= 0xFF; ++cp) {
             codepoints.push_back(cp);
         }
 
-        // Latin Extended-A (0x100-0x17F: more accented chars)
+        // Latin Extended-A (0x100-0x17F)
         for (uint32_t cp = 0x100; cp <= 0x17F; ++cp) {
             codepoints.push_back(cp);
         }
@@ -183,10 +170,10 @@ public:
         const uint32_t extraSymbols[] = {
             0x2190, 0x2191, 0x2192, 0x2193,  // arrows
             0x2194, 0x2195, 0x21D0, 0x21D2,  // double arrows
-            0x2200, 0x2203, 0x2205, 0x2208,  // math: forall, exists, empty, element
-            0x2260, 0x2264, 0x2265, 0x2227,  // not equal, <=, >=, and
-            0x2228, 0x2229, 0x222A, 0x2248,  // or, intersection, union, approx
-            0x221E, 0x2022, 0x2026, 0x00B7,  // infinity, bullet, ellipsis, middle dot
+            0x2200, 0x2203, 0x2205, 0x2208,  // math
+            0x2260, 0x2264, 0x2265, 0x2227,
+            0x2228, 0x2229, 0x222A, 0x2248,
+            0x221E, 0x2022, 0x2026, 0x00B7,
         };
         for (uint32_t cp : extraSymbols) {
             codepoints.push_back(cp);
@@ -196,31 +183,38 @@ public:
     }
 
     //=========================================================================
-    // GPU resource access
-    //=========================================================================
-
-    //=========================================================================
-    // Statistics
-    //=========================================================================
-
-    size_t glyphCount() const override { return _loadedCodepoints.size(); }
-    uint32_t getFontSize() const override { return _cellHeight; }
-
-    //=========================================================================
-    // GPU resource set
+    // GpuResourceSet - describes what GPU resources are needed
     //=========================================================================
 
     GpuResourceSet getGpuResourceSet() const override {
         GpuResourceSet res;
         res.shared = _shared;
         res.name = "rasterFont";
-        res.texture = _textureView;
+
+        // Texture: R8 atlas
+        res.textureWidth = _atlasSize;
+        res.textureHeight = _atlasSize;
+        res.textureFormat = WGPUTextureFormat_R8Unorm;
         res.textureWgslType = "texture_2d<f32>";
-        res.sampler = _sampler;
-        res.buffer = _metadataBuffer;
-        res.bufferSize = 0x3000 * sizeof(RasterGlyphUV);  // max codepoint allocation
+        res.textureData = _atlasData.data();
+        res.textureDataSize = _atlasData.size();
+
+        // Sampler: linear filtering
+        res.samplerFilter = WGPUFilterMode_Linear;
+
+        // Buffer: glyph UV data
+        res.bufferSize = _glyphUVs.size() * sizeof(RasterGlyphUV);
         res.bufferWgslType = "array<RasterGlyphUV>";
         res.bufferReadonly = true;
+        res.bufferData = reinterpret_cast<const uint8_t*>(_glyphUVs.data());
+        res.bufferDataSize = _glyphUVs.size() * sizeof(RasterGlyphUV);
+
+        // Uniform fields
+        res.uniformFields = {
+            {"fontCellSize", "vec2<f32>", sizeof(float) * 2},
+            {"fontAtlasSize", "vec2<f32>", sizeof(float) * 2},
+        };
+
         return res;
     }
 
@@ -237,64 +231,23 @@ public:
     }
 
     uint32_t getGlyphIndex(uint32_t codepoint, Style) override {
-        return getGlyphIndex(codepoint);  // Styles not supported yet
+        return getGlyphIndex(codepoint);
     }
 
     uint32_t getGlyphIndex(uint32_t codepoint, bool, bool) override {
         return getGlyphIndex(codepoint);
     }
 
-    void uploadToGpu() override {
-        if (!_dirty && _gpuResourcesCreated) {
-            return;
-        }
-
-        if (!_gpuResourcesCreated) {
-            if (auto res = createGPUResources(); !res) {
-                yerror("RasterFont: failed to create GPU resources: {}", error_msg(res));
-                return;
-            }
-        }
-
-        WGPUQueue queue = _queue;
-
-        // Upload atlas texture data
-        WGPUTexelCopyTextureInfo destInfo = {};
-        destInfo.texture = _texture;
-        destInfo.mipLevel = 0;
-        destInfo.origin = {0, 0, 0};
-        destInfo.aspect = WGPUTextureAspect_All;
-
-        WGPUTexelCopyBufferLayout srcLayout = {};
-        srcLayout.offset = 0;
-        srcLayout.bytesPerRow = _atlasSize;  // R8 = 1 byte per pixel
-        srcLayout.rowsPerImage = _atlasSize;
-
-        WGPUExtent3D extent = {_atlasSize, _atlasSize, 1};
-
-        wgpuQueueWriteTexture(queue, &destInfo, _atlasData.data(),
-                              _atlasData.size(), &srcLayout, &extent);
-
-        // Upload UV buffer (indexed by codepoint directly)
-        if (!_glyphUVs.empty()) {
-            wgpuQueueWriteBuffer(queue, _metadataBuffer, 0,
-                                 _glyphUVs.data(),
-                                 _glyphUVs.size() * sizeof(RasterGlyphUV));
-        }
-
-        _dirty = false;
-        ydebug("RasterFont: uploaded {} glyphs to GPU", _glyphUVs.size());
-    }
+    //=========================================================================
+    // CPU data accessors
+    //=========================================================================
 
     bool isDirty() const override { return _dirty; }
     void clearDirty() override { _dirty = false; }
-
-    uint32_t getAtlasWidth() const override { return _atlasSize; }
-    uint32_t getAtlasHeight() const override { return _atlasSize; }
-
-    const std::vector<uint8_t>& getAtlasData() const override {
-        return _atlasData;
-    }
+    uint32_t getAtlasSize() const override { return _atlasSize; }
+    const std::vector<uint8_t>& getAtlasData() const override { return _atlasData; }
+    const void* getGlyphUVData() const override { return _glyphUVs.data(); }
+    size_t getGlyphUVDataSize() const override { return _glyphUVs.size() * sizeof(RasterGlyphUV); }
 
 private:
     //=========================================================================
@@ -302,13 +255,11 @@ private:
     //=========================================================================
 
     void rasterizeAll() {
-        // Clear atlas
         std::fill(_atlasData.begin(), _atlasData.end(), 0);
         _nextSlotIdx = 0;
         _glyphUVs.clear();
         _glyphIndices.clear();
 
-        // Re-rasterize all loaded codepoints
         for (uint32_t cp : _loadedCodepoints) {
             auto result = rasterizeGlyph(cp);
             if (!result) {
@@ -326,7 +277,6 @@ private:
     //=========================================================================
 
     Result<void> rasterizeGlyph(uint32_t codepoint) {
-        // Load glyph
         FT_UInt glyphIndex = FT_Get_Char_Index(_ftFace, codepoint);
         if (glyphIndex == 0) {
             return Err<void>("Glyph not found in font");
@@ -339,23 +289,20 @@ private:
         FT_GlyphSlot slot = _ftFace->glyph;
         FT_Bitmap& bitmap = slot->bitmap;
 
-        // Ensure UV array is large enough (index by codepoint directly)
         if (codepoint >= _glyphUVs.size()) {
             _glyphUVs.resize(codepoint + 1, {-1.0f, -1.0f});
         }
 
-        // Handle empty glyphs (e.g., space) - use invalid UV
         if (bitmap.width == 0 || bitmap.rows == 0) {
             _glyphUVs[codepoint] = {-1.0f, -1.0f};
             _glyphIndices[codepoint] = codepoint;
             return Ok();
         }
 
-        // Fixed cell-sized slots in atlas with 1px padding to prevent bleed
         constexpr int SLOT_PADDING = 1;
         int cellW = static_cast<int>(_cellWidth);
         int cellH = static_cast<int>(_cellHeight);
-        int slotW = cellW + SLOT_PADDING * 2;  // Cell + padding on both sides
+        int slotW = cellW + SLOT_PADDING * 2;
         int slotH = cellH + SLOT_PADDING * 2;
         int slotsPerRow = static_cast<int>(_atlasSize) / slotW;
 
@@ -365,8 +312,6 @@ private:
 
         int slotCol = _nextSlotIdx % slotsPerRow;
         int slotRow = _nextSlotIdx / slotsPerRow;
-
-        // Slot position includes padding
         int slotX = slotCol * slotW + SLOT_PADDING;
         int slotY = slotRow * slotH + SLOT_PADDING;
 
@@ -374,7 +319,7 @@ private:
             return Err<void>("Atlas is full");
         }
 
-        // Clear the entire cell slot (including padding area) to prevent artifacts
+        // Clear cell slot
         for (int y = -SLOT_PADDING; y < cellH + SLOT_PADDING; ++y) {
             for (int x = -SLOT_PADDING; x < cellW + SLOT_PADDING; ++x) {
                 int dstIdx = (slotY + y) * static_cast<int>(_atlasSize) + (slotX + x);
@@ -384,21 +329,15 @@ private:
             }
         }
 
-        // Position glyph using font metrics
+        // Position glyph
         int glyphW = static_cast<int>(bitmap.width);
         int glyphH = static_cast<int>(bitmap.rows);
         int bearingX = slot->bitmap_left;
         int bearingY = slot->bitmap_top;
+        int offsetX = std::max(0, std::min(bearingX, cellW - glyphW));
+        int offsetY = std::max(0, std::min(_baseline - bearingY, cellH - glyphH));
 
-        // Use stored baseline (calculated from font metrics in updateFontSize)
-        int offsetX = bearingX;  // Use glyph's bearing for horizontal
-        int offsetY = _baseline - bearingY;  // Position relative to baseline
-
-        // Clamp offsets to stay within cell
-        offsetX = std::max(0, std::min(offsetX, cellW - glyphW));
-        offsetY = std::max(0, std::min(offsetY, cellH - glyphH));
-
-        // Copy bitmap to atlas at cell slot position + offset
+        // Copy bitmap to atlas
         for (int y = 0; y < glyphH && (offsetY + y) < cellH; ++y) {
             for (int x = 0; x < glyphW && (offsetX + x) < cellW; ++x) {
                 int srcIdx = y * bitmap.pitch + x;
@@ -409,7 +348,6 @@ private:
             }
         }
 
-        // Store UV at codepoint index directly (points to cell slot top-left)
         _glyphUVs[codepoint] = {
             static_cast<float>(slotX) / _atlasSize,
             static_cast<float>(slotY) / _atlasSize
@@ -422,94 +360,10 @@ private:
     }
 
     //=========================================================================
-    // Create GPU resources
-    //=========================================================================
-
-    Result<void> createGPUResources() {
-        WGPUDevice device = _device;
-
-        // Create R8 texture
-        WGPUTextureDescriptor texDesc = {};
-        texDesc.label = WGPU_STR("RasterFont Atlas");
-        texDesc.size = {_atlasSize, _atlasSize, 1};
-        texDesc.mipLevelCount = 1;
-        texDesc.sampleCount = 1;
-        texDesc.dimension = WGPUTextureDimension_2D;
-        texDesc.format = WGPUTextureFormat_R8Unorm;
-        texDesc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
-
-        _texture = _allocator->createTexture(texDesc);
-        if (!_texture) {
-            return Err<void>("Failed to create RasterFont texture");
-        }
-
-        // Create texture view
-        WGPUTextureViewDescriptor viewDesc = {};
-        viewDesc.format = WGPUTextureFormat_R8Unorm;
-        viewDesc.dimension = WGPUTextureViewDimension_2D;
-        viewDesc.mipLevelCount = 1;
-        viewDesc.arrayLayerCount = 1;
-
-        _textureView = wgpuTextureCreateView(_texture, &viewDesc);
-        if (!_textureView) {
-            return Err<void>("Failed to create RasterFont texture view");
-        }
-
-        // Create sampler
-        WGPUSamplerDescriptor samplerDesc = {};
-        samplerDesc.label = WGPU_STR("RasterFont Sampler");
-        samplerDesc.addressModeU = WGPUAddressMode_ClampToEdge;
-        samplerDesc.addressModeV = WGPUAddressMode_ClampToEdge;
-        samplerDesc.addressModeW = WGPUAddressMode_ClampToEdge;
-        samplerDesc.magFilter = WGPUFilterMode_Linear;
-        samplerDesc.minFilter = WGPUFilterMode_Linear;
-        samplerDesc.mipmapFilter = WGPUMipmapFilterMode_Nearest;
-        samplerDesc.maxAnisotropy = 1;
-
-        _sampler = wgpuDeviceCreateSampler(device, &samplerDesc);
-        if (!_sampler) {
-            return Err<void>("Failed to create RasterFont sampler");
-        }
-
-        // Create metadata buffer (indexed by codepoint, need space for highest codepoint)
-        // Box drawing is at 0x2500-0x259F, block elements 0x2580-0x259F = up to 0x259F = 9631
-        // Allocate for codepoints up to 0x3000 (12288) to be safe
-        uint32_t maxCodepoint = 0x3000;
-        WGPUBufferDescriptor bufDesc = {};
-        bufDesc.label = WGPU_STR("RasterFont Metadata");
-        bufDesc.size = maxCodepoint * sizeof(RasterGlyphUV);
-        bufDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-
-        _metadataBuffer = _allocator->createBuffer(bufDesc);
-        if (!_metadataBuffer) {
-            return Err<void>("Failed to create RasterFont metadata buffer");
-        }
-
-        _gpuResourcesCreated = true;
-        return Ok();
-    }
-
-    //=========================================================================
     // Cleanup
     //=========================================================================
 
     void cleanup() {
-        if (_metadataBuffer) {
-            _allocator->releaseBuffer(_metadataBuffer);
-            _metadataBuffer = nullptr;
-        }
-        if (_sampler) {
-            wgpuSamplerRelease(_sampler);
-            _sampler = nullptr;
-        }
-        if (_textureView) {
-            wgpuTextureViewRelease(_textureView);
-            _textureView = nullptr;
-        }
-        if (_texture) {
-            _allocator->releaseTexture(_texture);
-            _texture = nullptr;
-        }
         if (_ftFace) {
             FT_Done_Face(_ftFace);
             _ftFace = nullptr;
@@ -524,53 +378,39 @@ private:
     // Private data
     //=========================================================================
 
-    WGPUDevice _device;
-    WGPUQueue _queue;
-    GpuAllocator* _allocator;
     std::string _ttfPath;
-    uint32_t _cellWidth;
-    uint32_t _cellHeight;
-    uint32_t _fontSize = 0;   // Calculated from font metrics to fit cell
-    int _baseline = 0;        // Baseline position from top of cell
+    float _cellWidth;
+    float _cellHeight;
+    uint32_t _fontSize = 0;
+    int _baseline = 0;
     bool _shared = false;
 
     // FreeType
     FT_Library _ftLibrary = nullptr;
     FT_Face _ftFace = nullptr;
 
-    // Atlas
-    static constexpr uint32_t _atlasSize = 1024;  // 1024x1024 R8 texture
+    // Atlas (CPU)
+    static constexpr uint32_t _atlasSize = 1024;
     std::vector<uint8_t> _atlasData;
 
-    // Cell slot packer state
+    // Glyph data (CPU)
     int _nextSlotIdx = 0;
-
-    // Glyph data
     std::vector<RasterGlyphUV> _glyphUVs;
-    std::unordered_map<uint32_t, uint32_t> _glyphIndices;  // codepoint -> index
-    std::vector<uint32_t> _loadedCodepoints;  // track for re-rasterization
+    std::unordered_map<uint32_t, uint32_t> _glyphIndices;
+    std::vector<uint32_t> _loadedCodepoints;
 
-    // GPU resources
-    WGPUTexture _texture = nullptr;
-    WGPUTextureView _textureView = nullptr;
-    WGPUSampler _sampler = nullptr;
-    WGPUBuffer _metadataBuffer = nullptr;
-    bool _gpuResourcesCreated = false;
     bool _dirty = false;
 };
 
 //=============================================================================
-// RasterFont::createImpl - factory entry point
+// RasterFont::createImpl
 //=============================================================================
 
-Result<RasterFont*> RasterFont::createImpl(WGPUDevice device,
-                                           WGPUQueue queue,
-                                           GpuAllocator* allocator,
-                                           const std::string& ttfPath,
-                                           uint32_t cellWidth,
-                                           uint32_t cellHeight,
+Result<RasterFont*> RasterFont::createImpl(const std::string& ttfPath,
+                                           float cellWidth,
+                                           float cellHeight,
                                            bool shared) {
-    auto* font = new RasterFontImpl(device, queue, allocator, ttfPath, cellWidth, cellHeight, shared);
+    auto* font = new RasterFontImpl(ttfPath, cellWidth, cellHeight, shared);
     if (auto res = font->init(); !res) {
         yerror("RasterFont creation failed: {}", error_msg(res));
         delete font;
