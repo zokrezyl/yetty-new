@@ -8,6 +8,9 @@
 
 namespace yetty {
 
+// Define destructor out-of-line for typeinfo
+TextGridLayer::~TextGridLayer() = default;
+
 //=============================================================================
 // TextGridLayerImpl
 //=============================================================================

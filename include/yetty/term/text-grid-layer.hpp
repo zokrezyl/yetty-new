@@ -13,12 +13,11 @@ class ShaderManager;
 // Layer 0: Renders the terminal text grid (TextCell buffer).
 class TextGridLayer : public RenderableLayer {
 public:
+    ~TextGridLayer() override;
+
     static Result<TextGridLayer*> createImpl(TerminalScreen* terminalScreen,
                                               RenderableLayer* previousLayer,
-                                              const TerminalScreenRenderContext& ctx);
-
-    void render(const TerminalScreenRenderContext& ctx) override;
-    bool isDirty() const override;
+                                              const TerminalScreenRenderContext& terminalScreenRenderContext);
 
 protected:
     TextGridLayer() = default;
