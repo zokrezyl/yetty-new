@@ -14,8 +14,8 @@ namespace yetty {
 
 class GpuResourceBinderImpl : public GpuResourceBinder {
 public:
-    GpuResourceBinderImpl(WGPUDevice device, WGPUQueue queue, GpuAllocator* allocator)
-        : _device(device), _queue(queue), _allocator(allocator) {}
+    GpuResourceBinderImpl(const YettyGpuContext& yettyGpuContext, GpuAllocator* allocator)
+        : _yettyGpuContext(yettyGpuContext), _allocator(allocator) {}
 
     ~GpuResourceBinderImpl() override {
         cleanup();
@@ -117,7 +117,7 @@ private:
             samplerDesc.minFilter = gpuResourceSet.samplerFilter;
             samplerDesc.mipmapFilter = WGPUMipmapFilterMode_Nearest;
             samplerDesc.maxAnisotropy = 1;
-            entry.sampler = wgpuDeviceCreateSampler(_device, &samplerDesc);
+            entry.sampler = wgpuDeviceCreateSampler(_yettyGpuContext.device, &samplerDesc);
 
             ydebug("GpuResourceBinder: created texture {}x{} for '{}'",
                    entry.textureWidth, entry.textureHeight, gpuResourceSet.name);
@@ -160,13 +160,13 @@ private:
             srcLayout.rowsPerImage = entry.textureHeight;
 
             WGPUExtent3D extent = {entry.textureWidth, entry.textureHeight, 1};
-            wgpuQueueWriteTexture(_queue, &destInfo, gpuResourceSet.textureData,
+            wgpuQueueWriteTexture(_yettyGpuContext.queue, &destInfo, gpuResourceSet.textureData,
                                   gpuResourceSet.textureDataSize, &srcLayout, &extent);
         }
 
         // Upload buffer data
         if (entry.buffer && gpuResourceSet.bufferData && gpuResourceSet.bufferDataSize > 0) {
-            wgpuQueueWriteBuffer(_queue, entry.buffer, 0,
+            wgpuQueueWriteBuffer(_yettyGpuContext.queue, entry.buffer, 0,
                                  gpuResourceSet.bufferData, gpuResourceSet.bufferDataSize);
         }
     }
@@ -236,14 +236,14 @@ private:
         WGPUBindGroupLayoutDescriptor layoutDesc = {};
         layoutDesc.entryCount = layoutEntries.size();
         layoutDesc.entries = layoutEntries.data();
-        _bindGroupLayout = wgpuDeviceCreateBindGroupLayout(_device, &layoutDesc);
+        _bindGroupLayout = wgpuDeviceCreateBindGroupLayout(_yettyGpuContext.device, &layoutDesc);
 
         // Create bind group
         WGPUBindGroupDescriptor groupDesc = {};
         groupDesc.layout = _bindGroupLayout;
         groupDesc.entryCount = groupEntries.size();
         groupDesc.entries = groupEntries.data();
-        _bindGroup = wgpuDeviceCreateBindGroup(_device, &groupDesc);
+        _bindGroup = wgpuDeviceCreateBindGroup(_yettyGpuContext.device, &groupDesc);
 
         _bindGroupDirty = false;
         ydebug("GpuResourceBinder: created bind group with {} bindings", binding);
@@ -275,8 +275,7 @@ private:
     // Data
     //=========================================================================
 
-    WGPUDevice _device;
-    WGPUQueue _queue;
+    YettyGpuContext _yettyGpuContext;
     GpuAllocator* _allocator;
 
     std::unordered_map<std::string, ResourceEntry> _entries;
@@ -290,10 +289,9 @@ private:
 // Factory
 //=============================================================================
 
-Result<GpuResourceBinder*> GpuResourceBinder::createImpl(WGPUDevice device,
-                                                          WGPUQueue queue,
+Result<GpuResourceBinder*> GpuResourceBinder::createImpl(const YettyGpuContext& yettyGpuContext,
                                                           GpuAllocator* allocator) {
-    auto* binder = new GpuResourceBinderImpl(device, queue, allocator);
+    auto* binder = new GpuResourceBinderImpl(yettyGpuContext, allocator);
     if (auto res = binder->init(); !res) {
         delete binder;
         return Err<GpuResourceBinder*>("Failed to init GpuResourceBinder", res);

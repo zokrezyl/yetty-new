@@ -27,8 +27,11 @@ public:
         _previousLayer = previousLayer;
         _terminalScreenRenderContext = terminalScreenRenderContext;
 
+        auto& yettyContext = terminalScreenRenderContext.terminalScreenContext.terminalContext.yettyContext;
+        auto& yettyGpuContext = yettyContext.yettyGpuContext;
+
         // Create GpuAllocator
-        auto allocatorResult = GpuAllocator::create(terminalScreenRenderContext.device);
+        auto allocatorResult = GpuAllocator::create(yettyGpuContext.device);
         if (!allocatorResult) {
             return Err<void>("Failed to create GpuAllocator", allocatorResult);
         }
@@ -36,9 +39,9 @@ public:
 
         // Create ShaderManager (don't compile yet - wait for GpuResourceSets)
         auto shaderManagerResult = ShaderManager::create(
-            terminalScreenRenderContext.gpuContext,
+            yettyGpuContext,
             _allocator,
-            terminalScreenRenderContext.shadersDir);
+            yettyContext.appContext.shadersDir);
         if (!shaderManagerResult) {
             return Err<void>("Failed to create ShaderManager", shaderManagerResult);
         }
@@ -62,8 +65,7 @@ public:
 
         // Create GpuResourceBinder
         auto binderResult = GpuResourceBinder::create(
-            terminalScreenRenderContext.device,
-            terminalScreenRenderContext.queue,
+            yettyGpuContext,
             _allocator);
         if (!binderResult) {
             return Err<void>("Failed to create GpuResourceBinder", binderResult);
@@ -156,8 +158,9 @@ private:
     }
 
     void updateUniforms(const TerminalScreenRenderContext& terminalScreenRenderContext) {
-        float width = static_cast<float>(terminalScreenRenderContext.width);
-        float height = static_cast<float>(terminalScreenRenderContext.height);
+        auto& appGpuContext = terminalScreenRenderContext.terminalScreenContext.terminalContext.yettyContext.yettyGpuContext.appGpuContext;
+        float width = static_cast<float>(appGpuContext.windowWidth);
+        float height = static_cast<float>(appGpuContext.windowHeight);
 
         // Orthographic projection
         memset(&_uniforms, 0, sizeof(_uniforms));

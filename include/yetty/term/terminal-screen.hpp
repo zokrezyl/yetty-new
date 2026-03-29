@@ -6,7 +6,7 @@
 #include <yetty/core/event-listener.hpp>
 #include <yetty/core/factory-object.hpp>
 #include <yetty/term/text-cell.hpp>
-#include <yetty/term/terminal-screen-context.hpp>
+#include <yetty/term/terminal-context.hpp>
 
 namespace yetty {
 
@@ -14,7 +14,7 @@ class TerminalScreen : public core::FactoryObject<TerminalScreen>,
                        public core::EventListener {
 public:
   static Result<TerminalScreen *> createImpl(uint32_t cols, uint32_t rows,
-                                             const TerminalScreenContext &terminalScreenContext);
+                                             const TerminalContext &terminalContext);
 
   virtual ~TerminalScreen() = default;
 

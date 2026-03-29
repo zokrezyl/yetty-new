@@ -3,7 +3,7 @@
 #include <yetty/core/factory-object.hpp>
 #include <yetty/core/result.hpp>
 #include <yetty/gpu-resource-set.hpp>
-#include <webgpu/webgpu.h>
+#include <yetty/yetty-gpu-context.hpp>
 
 namespace yetty {
 
@@ -13,8 +13,7 @@ class GpuAllocator;
 // uploads CPU data, packs uniforms, creates bind groups.
 class GpuResourceBinder : public core::FactoryObject<GpuResourceBinder> {
 public:
-    static Result<GpuResourceBinder*> createImpl(WGPUDevice device,
-                                                  WGPUQueue queue,
+    static Result<GpuResourceBinder*> createImpl(const YettyGpuContext& yettyGpuContext,
                                                   GpuAllocator* allocator);
 
     virtual ~GpuResourceBinder() = default;

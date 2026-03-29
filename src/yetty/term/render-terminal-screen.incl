@@ -10,20 +10,30 @@
 //=============================================================================
 
 Result<void> TerminalScreenImpl::initRender() {
-  auto& yettyGpuContext = _terminalScreenContext.yettyContext.gpuContext;
+  auto& yettyGpuContext = _terminalScreenContext.terminalContext.yettyContext.yettyGpuContext;
+  auto& appGpuContext = yettyGpuContext.appGpuContext;
 
   if (!yettyGpuContext.device) {
     return Err<void>("No WebGPU device in YettyGpuContext");
   }
 
+  // Configure surface
+  if (appGpuContext.surface) {
+    WGPUSurfaceConfiguration surfaceConfig = {};
+    surfaceConfig.device = yettyGpuContext.device;
+    surfaceConfig.format = yettyGpuContext.surfaceFormat;
+    surfaceConfig.usage = WGPUTextureUsage_RenderAttachment;
+    surfaceConfig.width = appGpuContext.windowWidth;
+    surfaceConfig.height = appGpuContext.windowHeight;
+    surfaceConfig.presentMode = WGPUPresentMode_Fifo;
+    wgpuSurfaceConfigure(appGpuContext.surface, &surfaceConfig);
+    ydebug("TerminalScreen: surface configured {}x{}", surfaceConfig.width, surfaceConfig.height);
+  }
+
   // Build render context for layers
-  TerminalScreenRenderContext terminalScreenRenderContext;
-  terminalScreenRenderContext.device = yettyGpuContext.device;
-  terminalScreenRenderContext.queue = yettyGpuContext.queue;
-  terminalScreenRenderContext.gpuContext = yettyGpuContext;
-  terminalScreenRenderContext.shadersDir = _terminalScreenContext.yettyContext.appContext.shadersDir;
-  terminalScreenRenderContext.width = _terminalScreenContext.gpuContext.renderTargetWidth;
-  terminalScreenRenderContext.height = _terminalScreenContext.gpuContext.renderTargetHeight;
+  TerminalScreenRenderContext terminalScreenRenderContext{
+      .terminalScreenContext = _terminalScreenContext,
+  };
 
   // Create render layer (TextGridLayer for now)
   auto renderableLayerResult = TextGridLayer::createImpl(this, nullptr, terminalScreenRenderContext);
@@ -50,7 +60,80 @@ void TerminalScreenImpl::cleanupRender() {
 }
 
 //=============================================================================
-// Render frame
+// Render frame (called by onEvent for Render events)
+//=============================================================================
+
+void TerminalScreenImpl::renderFrame() {
+  if (!_renderableLayer) {
+    yerror("TerminalScreen: renderFrame called but _renderableLayer not ready");
+    return;
+  }
+
+  auto& yettyGpuContext = _terminalScreenContext.terminalContext.yettyContext.yettyGpuContext;
+  auto surface = _terminalScreenContext.terminalContext.yettyContext.appContext.appGpuContext.surface;
+
+  if (!surface) {
+    yerror("TerminalScreen: no surface");
+    return;
+  }
+
+  // Get current surface texture
+  WGPUSurfaceTexture surfaceTexture;
+  wgpuSurfaceGetCurrentTexture(surface, &surfaceTexture);
+  if (surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
+      surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
+    yerror("TerminalScreen: failed to get surface texture, status={}", static_cast<int>(surfaceTexture.status));
+    return;
+  }
+
+  // Create texture view
+  WGPUTextureView textureView = wgpuTextureCreateView(surfaceTexture.texture, nullptr);
+  if (!textureView) {
+    yerror("TerminalScreen: failed to create texture view");
+    return;
+  }
+
+  // Create command encoder
+  WGPUCommandEncoderDescriptor encoderDesc = {};
+  WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(yettyGpuContext.device, &encoderDesc);
+
+  // Begin render pass
+  WGPURenderPassColorAttachment colorAttachment = {};
+  colorAttachment.view = textureView;
+  colorAttachment.loadOp = WGPULoadOp_Clear;
+  colorAttachment.storeOp = WGPUStoreOp_Store;
+  colorAttachment.clearValue = {0.0f, 0.0f, 0.0f, 1.0f};
+
+  WGPURenderPassDescriptor passDesc = {};
+  passDesc.colorAttachmentCount = 1;
+  passDesc.colorAttachments = &colorAttachment;
+
+  WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+
+  // Call render(pass)
+  render(pass);
+
+  // End pass
+  wgpuRenderPassEncoderEnd(pass);
+  wgpuRenderPassEncoderRelease(pass);
+
+  // Submit
+  WGPUCommandBuffer cmdBuffer = wgpuCommandEncoderFinish(encoder, nullptr);
+  wgpuQueueSubmit(yettyGpuContext.queue, 1, &cmdBuffer);
+  wgpuCommandBufferRelease(cmdBuffer);
+  wgpuCommandEncoderRelease(encoder);
+
+  // Present
+  wgpuSurfacePresent(surface);
+
+  // Cleanup
+  wgpuTextureViewRelease(textureView);
+
+  ytrace("TerminalScreen: frame rendered");
+}
+
+//=============================================================================
+// Render to pass (called by renderFrame)
 //=============================================================================
 
 void TerminalScreenImpl::render(WGPURenderPassEncoder pass) {
@@ -60,16 +143,11 @@ void TerminalScreenImpl::render(WGPURenderPassEncoder pass) {
   }
 
   // Build render context for this frame
-  TerminalScreenRenderContext terminalScreenRenderContext;
-  terminalScreenRenderContext.device = _terminalScreenContext.yettyContext.gpuContext.device;
-  terminalScreenRenderContext.queue = _terminalScreenContext.yettyContext.gpuContext.queue;
-  terminalScreenRenderContext.gpuContext = _terminalScreenContext.yettyContext.gpuContext;
-  terminalScreenRenderContext.pass = pass;
-  terminalScreenRenderContext.width = _terminalScreenContext.gpuContext.renderTargetWidth;
-  terminalScreenRenderContext.height = _terminalScreenContext.gpuContext.renderTargetHeight;
+  TerminalScreenRenderContext terminalScreenRenderContext{
+      .terminalScreenContext = _terminalScreenContext,
+      .pass = pass,
+  };
 
   // Render layers
   _renderableLayer->render(terminalScreenRenderContext);
-
-  ytrace("TerminalScreen: rendered frame {}x{}", _cols, _rows);
 }

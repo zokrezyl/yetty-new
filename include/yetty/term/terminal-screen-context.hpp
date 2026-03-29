@@ -1,18 +1,15 @@
 #pragma once
 
-#include <yetty/yetty-context.hpp>
+#include <yetty/term/terminal-context.hpp>
 #include <yetty/term/terminal-screen-gpu-context.hpp>
 
 namespace yetty {
 
-class Pty;
-
 // TerminalScreen-level context.
-// Contains copy of YettyContext plus terminal-specific state.
+// Contains copy of TerminalContext plus TerminalScreen-specific state.
 struct TerminalScreenContext {
-    YettyContext yettyContext;                  // COPY of Yetty's context
-    TerminalScreenGpuContext gpuContext;        // TerminalScreen's GPU state
-    Pty* pty = nullptr;                         // owned by Terminal, used by TerminalScreen
+    TerminalContext terminalContext;                        // COPY of Terminal's context
+    TerminalScreenGpuContext terminalScreenGpuContext;      // TerminalScreen's GPU state
 };
 
 } // namespace yetty

@@ -1,8 +1,10 @@
-#include <yetty/platform/pty.hpp>
 #include <yetty/term/terminal-screen.hpp>
+#include <yetty/term/terminal-screen-context.hpp>
 #include <yetty/term/renderable-layer.hpp>
 #include <yetty/term/text-grid-layer.hpp>
 #include <yetty/core/event.hpp>
+#include <yetty/core/event-loop.hpp>
+#include <yetty/platform/pty.hpp>
 #include <ytrace/ytrace.hpp>
 
 #include <algorithm>
@@ -107,8 +109,10 @@ static_assert(sizeof(GridUniforms) == 272, "GridUniforms must be 272 bytes");
 
 class TerminalScreenImpl : public TerminalScreen {
 public:
-  explicit TerminalScreenImpl(const TerminalScreenContext &terminalScreenContext)
-      : _terminalScreenContext(terminalScreenContext) {}
+  explicit TerminalScreenImpl(const TerminalContext &terminalContext) {
+    // Build our own context from parent - COPY includes entire hierarchy
+    _terminalScreenContext.terminalContext = terminalContext;
+  }
   ~TerminalScreenImpl() override;
 
   const char *typeName() const override { return "TerminalScreen"; }
@@ -216,7 +220,7 @@ private:
   VTermColor _defaultFg;
   VTermColor _defaultBg;
 
-  // Context with pty, GPU resources, etc.
+  // Context - stores ONLY our level, access parent via _terminalScreenContext.terminalContext
   TerminalScreenContext _terminalScreenContext;
 
   // Cell size in pixels
@@ -229,6 +233,7 @@ private:
   // Render methods (implemented in render-terminal-screen.incl)
   Result<void> initRender();
   void cleanupRender();
+  void renderFrame();
 };
 
 // Render implementation
@@ -283,8 +288,8 @@ Result<void> TerminalScreenImpl::init(uint32_t cols, uint32_t rows) {
       _vterm,
       [](const char *data, size_t len, void *user) {
         auto *self = static_cast<TerminalScreenImpl *>(user);
-        if (self->_terminalScreenContext.pty) {
-          self->_terminalScreenContext.pty->write(data, len);
+        if (self->_terminalScreenContext.terminalContext.pty) {
+          self->_terminalScreenContext.terminalContext.pty->write(data, len);
         }
       },
       this);
@@ -981,18 +986,6 @@ static VTermKey glfwKeyToVterm(int key) {
 }
 
 Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
-  // PTY readable - read data from PTY and feed to vterm
-  if (event.type == core::Event::Type::PollReadable && _terminalScreenContext.pty) {
-    char buf[65536];
-    while (true) {
-      size_t n = _terminalScreenContext.pty->read(buf, sizeof(buf));
-      if (n == 0)
-        break;
-      write(buf, n);
-    }
-    return Ok(true);
-  }
-
   // Character input (printable characters)
   if (event.type == core::Event::Type::Char) {
     if (_vterm) {
@@ -1017,8 +1010,9 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
     return Ok(false);  // Not a special key, let CharInput handle it
   }
 
-  // Render event - handled by caller via render(pass)
+  // Render event - do actual GPU frame rendering
   if (event.type == core::Event::Type::Render) {
+    renderFrame();
     return Ok(true);
   }
 
@@ -1027,8 +1021,8 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
 
 Result<TerminalScreen *> TerminalScreen::createImpl(uint32_t cols,
                                                     uint32_t rows,
-                                                    const TerminalScreenContext &terminalScreenContext) {
-  auto *screen = new TerminalScreenImpl(terminalScreenContext);
+                                                    const TerminalContext &terminalContext) {
+  auto *screen = new TerminalScreenImpl(terminalContext);
   if (auto res = screen->init(cols, rows); !res) {
     delete screen;
     return Err<TerminalScreen *>("TerminalScreen init failed", res);

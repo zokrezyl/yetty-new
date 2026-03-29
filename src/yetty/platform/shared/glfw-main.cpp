@@ -140,8 +140,10 @@ int main(int argc, char **argv) {
 
   // AppContext
   AppContext appContext{};
-  appContext.gpuContext.instance = instance;
-  appContext.gpuContext.surface = surface;
+  appContext.appGpuContext.instance = instance;
+  appContext.appGpuContext.surface = surface;
+  appContext.appGpuContext.windowWidth = static_cast<uint32_t>(width);
+  appContext.appGpuContext.windowHeight = static_cast<uint32_t>(height);
   appContext.config = config;
   appContext.platformInputPipe = platformInputPipe;
   appContext.ptyFactory = ptyFactory;

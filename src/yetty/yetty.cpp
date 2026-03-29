@@ -1,7 +1,6 @@
 #include <yetty/yetty.hpp>
 #include <yetty/yetty-context.hpp>
 #include <yetty/term/terminal.hpp>
-#include <yetty/shared-bind-group.hpp>
 #include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
 
@@ -13,12 +12,13 @@ namespace yetty {
 
 class YettyImpl : public Yetty {
 public:
-  explicit YettyImpl(const AppContext& appContext)
-      : _appContext(appContext) {}
+  explicit YettyImpl(const AppContext& appContext) {
+    // Build our context from parent - stores ONLY our level
+    _yettyContext.appContext = appContext;
+  }
 
   ~YettyImpl() override {
     delete _terminal;
-    delete _sharedBindGroup;
     if (_queue) wgpuQueueRelease(_queue);
     if (_device) wgpuDeviceRelease(_device);
     if (_adapter) wgpuAdapterRelease(_adapter);
@@ -32,14 +32,12 @@ public:
       return res;
     }
 
-    // Build YettyContext to pass to children
-    _yettyContext.appContext = _appContext;
-    _yettyContext.gpuContext.appGpuContext = _appContext.gpuContext;
-    _yettyContext.gpuContext.adapter = _adapter;
-    _yettyContext.gpuContext.device = _device;
-    _yettyContext.gpuContext.queue = _queue;
-    _yettyContext.gpuContext.surfaceFormat = _surfaceFormat;
-    _yettyContext.sharedBindGroup = _sharedBindGroup;
+    // Complete our context with owned GPU objects
+    _yettyContext.yettyGpuContext.appGpuContext = _yettyContext.appContext.appGpuContext;
+    _yettyContext.yettyGpuContext.adapter = _adapter;
+    _yettyContext.yettyGpuContext.device = _device;
+    _yettyContext.yettyGpuContext.queue = _queue;
+    _yettyContext.yettyGpuContext.surfaceFormat = _surfaceFormat;
 
     // Create terminal
     auto termResult = Terminal::create(_yettyContext);
@@ -62,8 +60,8 @@ private:
     ydebug("initWebGPU: Starting...");
 
     // Instance and surface from platform's AppGpuContext
-    auto instance = _appContext.gpuContext.instance;
-    auto surface = _appContext.gpuContext.surface;
+    auto instance = _yettyContext.appContext.appGpuContext.instance;
+    auto surface = _yettyContext.appContext.appGpuContext.surface;
 
     if (!instance) {
       return Err<void>("No WebGPU instance provided");
@@ -208,22 +206,13 @@ private:
     }
     ydebug("initWebGPU: Surface format = {}", static_cast<int>(_surfaceFormat));
 
-    // Create shared bind group (for MSDF font, shared across views)
-    auto sharedBgResult = SharedBindGroup::create(_device);
-    if (!sharedBgResult) {
-      return Err<void>("Failed to create SharedBindGroup");
-    }
-    _sharedBindGroup = *sharedBgResult;
-    ydebug("initWebGPU: SharedBindGroup created");
-
     ydebug("initWebGPU: Complete");
     return Ok();
   }
 
-  AppContext _appContext;          // COPY of platform's context
-  YettyContext _yettyContext;      // Our context to pass to children
+  // Context - stores ONLY our level, access parent via _yettyContext.appContext
+  YettyContext _yettyContext;
   Terminal* _terminal = nullptr;
-  SharedBindGroup* _sharedBindGroup = nullptr;
 
   // WebGPU state (owned by Yetty)
   WGPUAdapter _adapter = nullptr;

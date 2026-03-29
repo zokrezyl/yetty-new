@@ -16,7 +16,7 @@ class PlatformInputPipe;
 // Application-level context created by platform main() and passed to Yetty::create.
 // Contains platform-specific objects and configuration.
 struct AppContext {
-    AppGpuContext gpuContext;  // platform GPU objects (instance, surface)
+    AppGpuContext appGpuContext;  // platform GPU objects (instance, surface)
 
     Config* config = nullptr;
     core::PlatformInputPipe* platformInputPipe = nullptr;
