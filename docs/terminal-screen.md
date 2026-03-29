@@ -198,6 +198,166 @@ SpatialGrid (static ypaint) ──> Renderer ──> Layer 3 on cached Layer 2
                                            Final frame
 ```
 
+## Layer Rendering Architecture
+
+### WebGPU Objects Per Layer
+
+Each layer render step uses these WebGPU objects:
+
+| Object | Purpose |
+|--------|---------|
+| `WGPUCommandEncoder` | Records all GPU commands for the frame |
+| `WGPURenderPassEncoder` | Records draw commands within a render pass |
+| `WGPUTextureView` | Render target (intermediate texture or final surface) |
+| `WGPURenderPipeline` | Shader + render state |
+| `WGPUBindGroup` | Resources bound to shader (textures, buffers, samplers) |
+| `WGPUCommandBuffer` | Finalized commands submitted to queue |
+
+### Render Step Flow
+
+For each layer N:
+
+```cpp
+// 1. Create command encoder (once per frame, shared across layers)
+WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, &encoderDesc);
+
+// 2. Determine render target
+WGPUTextureView targetView;
+if (isLastLayer) {
+    // Render directly to surface
+    WGPUSurfaceTexture surfaceTex;
+    wgpuSurfaceGetCurrentTexture(surface, &surfaceTex);
+    targetView = wgpuTextureCreateView(surfaceTex.texture, nullptr);
+} else {
+    // Render to intermediate texture (for compositing)
+    targetView = layerTextureView[N];
+}
+
+// 3. Begin render pass
+WGPURenderPassColorAttachment colorAttachment = {
+    .view = targetView,
+    .loadOp = (N == 0) ? WGPULoadOp_Clear : WGPULoadOp_Load,
+    .storeOp = WGPUStoreOp_Store,
+};
+WGPURenderPassDescriptor passDesc = {
+    .colorAttachmentCount = 1,
+    .colorAttachments = &colorAttachment,
+};
+WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
+
+// 4. Bind resources and draw
+wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+wgpuRenderPassEncoderSetBindGroup(pass, 0, sharedBindGroup, 0, nullptr);
+wgpuRenderPassEncoderSetBindGroup(pass, 1, layerBindGroup, 0, nullptr);
+wgpuRenderPassEncoderSetVertexBuffer(pass, 0, vertexBuffer, 0, size);
+wgpuRenderPassEncoderDraw(pass, vertexCount, instanceCount, 0, 0);
+
+// 5. End render pass
+wgpuRenderPassEncoderEnd(pass);
+
+// 6. Submit (once after all layers)
+WGPUCommandBuffer cmdBuffer = wgpuCommandEncoderFinish(encoder, nullptr);
+wgpuQueueSubmit(queue, 1, &cmdBuffer);
+```
+
+### Layer Compositing
+
+Each layer (except layer 0) samples the previous layer's texture:
+
+```
+Layer N render pass:
+  Input:  Layer N-1 texture (sampled in fragment shader)
+  Output: Layer N texture (or surface if final)
+
+  Fragment shader blends:
+    layerN_content + sample(layerN-1_texture)
+```
+
+The `loadOp` determines compositing behavior:
+- `WGPULoadOp_Clear` — layer 0, start fresh
+- `WGPULoadOp_Load` — layers 1+, preserve previous content for blending
+
+### Cache Invalidation
+
+Each layer maintains a dirty flag:
+- Layer 0 dirty: terminal content changed (scroll, new text)
+- Layer 1 dirty: ypaint primitives changed
+- Layer 2 dirty: card content changed
+- Layer 3 dirty: static overlay changed
+
+When layer N is dirty, layers N through final must re-render.
+When layer N is clean, reuse cached texture — skip render pass entirely.
+
+### Simple Mode (Direct to Surface)
+
+For basic terminal rendering without overlays, skip intermediate textures:
+
+```cpp
+// Layer 0 renders directly to surface
+WGPUSurfaceTexture surfaceTex;
+wgpuSurfaceGetCurrentTexture(surface, &surfaceTex);
+targetView = wgpuTextureCreateView(surfaceTex.texture, nullptr);
+
+// Single render pass, no compositing
+WGPURenderPassColorAttachment colorAttachment = {
+    .view = targetView,
+    .loadOp = WGPULoadOp_Clear,
+    .storeOp = WGPUStoreOp_Store,
+};
+```
+
+This avoids texture allocation and compositing overhead when only text grid is needed.
+
+### GpuResourceSet Integration
+
+Resources (font atlases, cell buffers) are packaged as `GpuResourceSet`:
+
+```cpp
+struct GpuResourceSet {
+    bool shared;                  // bind group 0 or 1
+    std::string name;
+    WGPUTextureView texture;      // optional
+    std::string textureWgslType;
+    WGPUSampler sampler;          // optional
+    WGPUBuffer buffer;            // optional
+    size_t bufferSize;
+    std::string bufferWgslType;
+    bool bufferReadonly;
+};
+```
+
+ShaderManager collects GpuResourceSets and:
+1. Generates WGSL binding declarations
+2. Creates bind group layouts
+3. Creates bind groups
+
+Fonts provide CPU atlas data only. The render step creates GPU resources
+(texture, sampler, buffer) from CPU data and populates GpuResourceSet.
+
+### Render Target Management
+
+Intermediate textures for layer caching:
+
+```cpp
+struct RenderTarget {
+    WGPUTexture texture;
+    WGPUTextureView view;
+    uint32_t width, height;
+};
+
+// Create on init or resize
+WGPUTextureDescriptor desc = {
+    .size = {width, height, 1},
+    .format = surfaceFormat,
+    .usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding,
+};
+target.texture = wgpuDeviceCreateTexture(device, &desc);
+target.view = wgpuTextureCreateView(target.texture, nullptr);
+```
+
+`WGPUTextureUsage_RenderAttachment` — can render to it
+`WGPUTextureUsage_TextureBinding` — can sample from it in next layer
+
 ## Scroll Counter Detail
 
 ```

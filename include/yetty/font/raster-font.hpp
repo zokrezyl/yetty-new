@@ -1,20 +1,15 @@
 #pragma once
 
 #include <yetty/font/font.hpp>
-#include <yetty/gpu-context.hpp>
-#include <yetty/core/factory-object.hpp>
 #include <webgpu/webgpu.h>
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <vector>
 
 namespace yetty {
-class GpuAllocator;
-}
 
-namespace yetty {
+class GpuAllocator;
 
 /**
  * RasterFont - Rasterized glyph atlas font rendering
@@ -43,11 +38,16 @@ namespace yetty {
 class RasterFont : public Font {
 public:
     // Factory: loads font from TTF path
-    static Result<RasterFont*> createImpl(const GPUContext& gpu,
+    // device/queue: WebGPU handles for GPU resource creation
+    // allocator: for buffer/texture allocation tracking
+    // shared: whether this font's GpuResourceSet should be marked shared
+    static Result<RasterFont*> createImpl(WGPUDevice device,
+                                          WGPUQueue queue,
                                           GpuAllocator* allocator,
                                           const std::string& ttfPath,
                                           uint32_t cellWidth,
-                                          uint32_t cellHeight);
+                                          uint32_t cellHeight,
+                                          bool shared = false);
 
     ~RasterFont() override = default;
 
@@ -61,13 +61,6 @@ public:
 
     // Load ASCII printable range (0x20 - 0x7E)
     virtual Result<void> loadBasicLatin() = 0;
-
-    // GPU resource access
-    virtual WGPUTexture getTexture() const = 0;
-    virtual WGPUTextureView getTextureView() const = 0;
-    virtual WGPUSampler getSampler() const = 0;
-    virtual WGPUBuffer getMetadataBuffer() const = 0;
-    virtual size_t getMetadataBufferSize() const = 0;  // Size in bytes for bind group
 
     // Statistics
     virtual size_t glyphCount() const = 0;

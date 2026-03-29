@@ -264,7 +264,7 @@ public:
     ShaderManagerImpl() = default;
     ~ShaderManagerImpl() override;
 
-    Result<void> init(const GPUContext& gpu,
+    Result<void> init(const YettyGpuContext& gpu, GpuAllocator* allocator,
                       const std::string& shadersDir) noexcept;
 
     void addProvider(std::shared_ptr<ShaderProvider> provider, const std::string& dispatchName) override;
@@ -286,8 +286,8 @@ private:
     Result<void> recreatePipeline();
     std::string mergeShaders() const;
 
-    GPUContext _gpu = {};
-    GpuAllocator* _allocator = nullptr;
+    YettyGpuContext _gpu = {};
+    GpuAllocator* _allocator = nullptr;  // borrowed from caller
     std::string _shadersDir;  // Path to WGSL shader files
     std::string _baseShader;
     struct ProviderEntry {
@@ -329,10 +329,11 @@ private:
 };
 
 // Factory implementation
-Result<ShaderManager*> ShaderManager::createImpl(const GPUContext& gpu,
+Result<ShaderManager*> ShaderManager::createImpl(const YettyGpuContext& gpu,
+                                                  GpuAllocator* allocator,
                                                   const std::string& shadersDir) noexcept {
     auto* impl = new ShaderManagerImpl();
-    if (auto res = impl->init(gpu, shadersDir); !res) {
+    if (auto res = impl->init(gpu, allocator, shadersDir); !res) {
         yerror("ShaderManager creation failed: {}", error_msg(res));
         delete impl;
         return Err<ShaderManager*>("ShaderManager init failed", res);
@@ -393,7 +394,7 @@ ShaderManagerImpl::~ShaderManagerImpl() {
     }
 }
 
-Result<void> ShaderManagerImpl::init(const GPUContext& gpu,
+Result<void> ShaderManagerImpl::init(const YettyGpuContext& gpu, GpuAllocator* allocator,
                                       const std::string& shadersDir) noexcept {
     if (_initialized) {
         return Ok();
@@ -402,12 +403,12 @@ Result<void> ShaderManagerImpl::init(const GPUContext& gpu,
     if (!gpu.device) {
         return Err<void>("ShaderManager::init: null device");
     }
-    if (!gpu.allocator) {
-        return Err<void>("ShaderManager::init: null allocator in GPUContext");
+    if (!allocator) {
+        return Err<void>("ShaderManager::init: null allocator");
     }
 
     _gpu = gpu;
-    _allocator = gpu.allocator;
+    _allocator = allocator;
     _shadersDir = shadersDir;
 
     // Load base shader

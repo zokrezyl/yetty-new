@@ -35,11 +35,12 @@ static_assert(sizeof(RasterGlyphUV) == 8, "RasterGlyphUV must be 8 bytes");
 
 class RasterFontImpl : public RasterFont {
 public:
-    RasterFontImpl(const GPUContext& gpu, GpuAllocator* allocator,
+    RasterFontImpl(WGPUDevice device, WGPUQueue queue, GpuAllocator* allocator,
                    const std::string& ttfPath,
-                   uint32_t cellWidth, uint32_t cellHeight)
-        : _gpu(gpu), _allocator(allocator)
-        , _ttfPath(ttfPath), _cellWidth(cellWidth), _cellHeight(cellHeight) {}
+                   uint32_t cellWidth, uint32_t cellHeight, bool shared)
+        : _device(device), _queue(queue), _allocator(allocator)
+        , _ttfPath(ttfPath), _cellWidth(cellWidth), _cellHeight(cellHeight)
+        , _shared(shared) {}
 
     ~RasterFontImpl() override {
         cleanup();
@@ -198,18 +199,30 @@ public:
     // GPU resource access
     //=========================================================================
 
-    WGPUTexture getTexture() const override { return _texture; }
-    WGPUTextureView getTextureView() const override { return _textureView; }
-    WGPUSampler getSampler() const override { return _sampler; }
-    WGPUBuffer getMetadataBuffer() const override { return _metadataBuffer; }
-    size_t getMetadataBufferSize() const override { return _glyphUVs.size() * sizeof(RasterGlyphUV); }
-
     //=========================================================================
     // Statistics
     //=========================================================================
 
     size_t glyphCount() const override { return _loadedCodepoints.size(); }
     uint32_t getFontSize() const override { return _cellHeight; }
+
+    //=========================================================================
+    // GPU resource set
+    //=========================================================================
+
+    GpuResourceSet getGpuResourceSet() const override {
+        GpuResourceSet res;
+        res.shared = _shared;
+        res.name = "rasterFont";
+        res.texture = _textureView;
+        res.textureWgslType = "texture_2d<f32>";
+        res.sampler = _sampler;
+        res.buffer = _metadataBuffer;
+        res.bufferSize = 0x3000 * sizeof(RasterGlyphUV);  // max codepoint allocation
+        res.bufferWgslType = "array<RasterGlyphUV>";
+        res.bufferReadonly = true;
+        return res;
+    }
 
     //=========================================================================
     // Font interface
@@ -243,7 +256,7 @@ public:
             }
         }
 
-        WGPUQueue queue = _gpu.queue;
+        WGPUQueue queue = _queue;
 
         // Upload atlas texture data
         WGPUTexelCopyTextureInfo destInfo = {};
@@ -413,7 +426,7 @@ private:
     //=========================================================================
 
     Result<void> createGPUResources() {
-        WGPUDevice device = _gpu.device;
+        WGPUDevice device = _device;
 
         // Create R8 texture
         WGPUTextureDescriptor texDesc = {};
@@ -511,13 +524,15 @@ private:
     // Private data
     //=========================================================================
 
-    const GPUContext& _gpu;
+    WGPUDevice _device;
+    WGPUQueue _queue;
     GpuAllocator* _allocator;
     std::string _ttfPath;
     uint32_t _cellWidth;
     uint32_t _cellHeight;
     uint32_t _fontSize = 0;   // Calculated from font metrics to fit cell
     int _baseline = 0;        // Baseline position from top of cell
+    bool _shared = false;
 
     // FreeType
     FT_Library _ftLibrary = nullptr;
@@ -548,12 +563,14 @@ private:
 // RasterFont::createImpl - factory entry point
 //=============================================================================
 
-Result<RasterFont*> RasterFont::createImpl(const GPUContext& gpu,
+Result<RasterFont*> RasterFont::createImpl(WGPUDevice device,
+                                           WGPUQueue queue,
                                            GpuAllocator* allocator,
                                            const std::string& ttfPath,
                                            uint32_t cellWidth,
-                                           uint32_t cellHeight) {
-    auto* font = new RasterFontImpl(gpu, allocator, ttfPath, cellWidth, cellHeight);
+                                           uint32_t cellHeight,
+                                           bool shared) {
+    auto* font = new RasterFontImpl(device, queue, allocator, ttfPath, cellWidth, cellHeight, shared);
     if (auto res = font->init(); !res) {
         yerror("RasterFont creation failed: {}", error_msg(res));
         delete font;

@@ -1,36 +1,20 @@
 #pragma once
 
 #include <yetty/app-context.hpp>
-#include <yetty/core/types.hpp>
-#include <yetty/gpu-context.hpp>
+#include <yetty/yetty-gpu-context.hpp>
 
 namespace yetty {
 
-class GpuMonitor;
-class MsMsdfFont;
-class GpuMemoryManager;
-class YGuiOverlay;
 class SharedBindGroup;
+class MsMsdfFont;
 
-// Yetty-level context — created by Yetty, passed to Views.
-// Contains GPU connection and shared resources.
-// Note: GpuAllocator is per-view, not here.
-// Note: ShaderManager is per-view, not here.
+// Yetty-level context — created by Yetty, passed to children (Terminal, etc).
+// Contains copy of AppContext plus Yetty's GPU state and shared resources.
 struct YettyContext {
-  AppContext *appContext = nullptr;
-
-  GPUContext gpuContext;
-
-  // Shared resources (large objects shared across views)
-  SharedBindGroup *sharedBindGroup = nullptr;
-  MsMsdfFont *defaultMsMsdfFont = nullptr;
-
-  // Legacy - to be reviewed
-  GpuMonitor *gpuMonitor = nullptr;
-  YGuiOverlay *yguiOverlay = nullptr;
-  GpuMemoryManager *cardManager = nullptr;
-
-  core::ObjectId screenId = 0;
+    AppContext appContext;              // COPY of platform's context
+    YettyGpuContext gpuContext;         // Yetty's GPU state (adapter, device, queue)
+    SharedBindGroup* sharedBindGroup = nullptr;  // owned by Yetty
+    MsMsdfFont* defaultMsMsdfFont = nullptr;     // owned by Yetty (if created)
 };
 
 } // namespace yetty

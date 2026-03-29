@@ -2,6 +2,7 @@
 
 #include <yetty/core/factory-object.hpp>
 #include <yetty/core/result.hpp>
+#include <yetty/gpu-resource-set.hpp>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -36,6 +37,9 @@ public:
     virtual uint32_t getAtlasWidth() const = 0;
     virtual uint32_t getAtlasHeight() const = 0;
     virtual const std::vector<uint8_t>& getAtlasData() const = 0;
+
+    // GPU resource set for ShaderManager binding
+    virtual GpuResourceSet getGpuResourceSet() const = 0;
 
 protected:
     Font() = default;

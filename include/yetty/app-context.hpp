@@ -1,6 +1,6 @@
 #pragma once
 
-#include <webgpu/webgpu.h>
+#include <yetty/app-gpu-context.hpp>
 #include <string>
 
 namespace yetty {
@@ -13,20 +13,18 @@ namespace core {
 class PlatformInputPipe;
 } // namespace core
 
-// Application-level context created by platform main() and passed to yetty::create.
-// Raw pointers — the app owns these objects and outlives all children.
+// Application-level context created by platform main() and passed to Yetty::create.
+// Contains platform-specific objects and configuration.
 struct AppContext {
-  Config *config = nullptr;
-  core::PlatformInputPipe *platformInputPipe = nullptr;
-  ClipboardManager *clipboardManager = nullptr;
-  PtyFactory *ptyFactory = nullptr;
+    AppGpuContext gpuContext;  // platform GPU objects (instance, surface)
 
-  // WebGPU - instance created by platform (needed for surface), reused by Yetty
-  WGPUInstance instance = nullptr;
-  WGPUSurface surface = nullptr;
+    Config* config = nullptr;
+    core::PlatformInputPipe* platformInputPipe = nullptr;
+    ClipboardManager* clipboardManager = nullptr;
+    PtyFactory* ptyFactory = nullptr;
 
-  // Paths
-  std::string shadersDir;
+    // Paths
+    std::string shadersDir;
 };
 
 } // namespace yetty

@@ -1,5 +1,6 @@
 #include <yetty/term/terminal.hpp>
 #include <yetty/term/terminal-screen.hpp>
+#include <yetty/term/terminal-screen-context.hpp>
 #include <yetty/core/event-loop.hpp>
 #include <yetty/core/platform-input-pipe.hpp>
 #include <yetty/platform/pty-factory.hpp>
@@ -10,9 +11,8 @@ namespace yetty {
 
 class TerminalImpl : public Terminal {
 public:
-  explicit TerminalImpl(const YettyContext &yettyContext) {
-    _terminalScreenContext.yettyContext = yettyContext;
-  }
+  explicit TerminalImpl(const YettyContext& yettyContext)
+      : _yettyContext(yettyContext) {}
 
   ~TerminalImpl() override {
     _pty->stop();
@@ -21,7 +21,7 @@ public:
     delete _eventLoop;
   }
 
-  const char *typeName() const override { return "Terminal"; }
+  const char* typeName() const override { return "Terminal"; }
 
   Result<void> init() {
     ydebug("Terminal::init starting");
@@ -33,14 +33,20 @@ public:
     _eventLoop = *eventLoopResult;
     ydebug("Terminal: EventLoop created");
 
-    auto ptyResult = _terminalScreenContext.yettyContext.appContext->ptyFactory->createPty();
+    // Create PTY
+    auto ptyResult = _yettyContext.appContext.ptyFactory->createPty();
     if (!ptyResult)
       return Err<void>("Failed to create PTY", ptyResult);
     _pty = *ptyResult;
-    _terminalScreenContext.pty = _pty;
     ydebug("Terminal: PTY created");
 
-    auto screenResult = TerminalScreen::create(80, 24, _terminalScreenContext);
+    // Build TerminalScreenContext
+    TerminalScreenContext screenContext;
+    screenContext.yettyContext = _yettyContext;  // COPY
+    screenContext.pty = _pty;
+    // Note: screenContext.gpuContext is populated by TerminalScreen
+
+    auto screenResult = TerminalScreen::create(80, 24, screenContext);
     if (!screenResult)
       return Err<void>("Failed to create TerminalScreen", screenResult);
     _screen = *screenResult;
@@ -61,7 +67,7 @@ public:
     ydebug("Terminal: PTY poll started");
 
     // Setup PlatformInputPipe poll - TerminalScreen receives platform events
-    auto *pipe = _terminalScreenContext.yettyContext.appContext->platformInputPipe;
+    auto* pipe = _yettyContext.appContext.platformInputPipe;
     auto pipePollResult = _eventLoop->createPlatformInputPipePoll(pipe);
     if (!pipePollResult)
       return Err<void>("Failed to create PlatformInputPipe poll", pipePollResult);
@@ -87,19 +93,19 @@ public:
   }
 
 private:
-  TerminalScreenContext _terminalScreenContext;
-  core::EventLoop *_eventLoop = nullptr;
-  TerminalScreen *_screen = nullptr;
-  Pty *_pty = nullptr;
+  YettyContext _yettyContext;  // COPY of Yetty's context
+  core::EventLoop* _eventLoop = nullptr;
+  TerminalScreen* _screen = nullptr;
+  Pty* _pty = nullptr;
 };
 
-Result<Terminal *> Terminal::createImpl(const YettyContext &yettyCtx) {
-  auto *term = new TerminalImpl(yettyCtx);
+Result<Terminal*> Terminal::createImpl(const YettyContext& yettyCtx) {
+  auto* term = new TerminalImpl(yettyCtx);
   if (auto res = term->init(); !res) {
     delete term;
-    return Err<Terminal *>("Terminal init failed", res);
+    return Err<Terminal*>("Terminal init failed", res);
   }
-  return Ok(static_cast<Terminal *>(term));
+  return Ok(static_cast<Terminal*>(term));
 }
 
 } // namespace yetty

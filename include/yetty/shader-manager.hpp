@@ -1,7 +1,7 @@
 #pragma once
 
 #include <yetty/shader-provider.hpp>
-#include <yetty/gpu-context.hpp>
+#include <yetty/yetty-gpu-context.hpp>
 #include <yetty/core/factory-object.hpp>
 #include <yetty/core/result.hpp>
 #include <webgpu/webgpu.h>
@@ -32,8 +32,9 @@ public:
 
     // Factory - creates ShaderManagerImpl
     // shadersDir: Path to WGSL shader files (from Platform::getShadersDir())
-    // allocator comes from gpu.allocator
-    static Result<ShaderManager*> createImpl(const GPUContext& gpu,
+    // allocator: GpuAllocator for buffer allocation (owned by caller, e.g. TerminalScreen)
+    static Result<ShaderManager*> createImpl(const YettyGpuContext& gpu,
+                                              GpuAllocator* allocator,
                                               const std::string& shadersDir) noexcept;
 
     /**

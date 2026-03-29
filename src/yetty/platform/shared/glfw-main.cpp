@@ -140,11 +140,11 @@ int main(int argc, char **argv) {
 
   // AppContext
   AppContext appContext{};
+  appContext.gpuContext.instance = instance;
+  appContext.gpuContext.surface = surface;
   appContext.config = config;
   appContext.platformInputPipe = platformInputPipe;
   appContext.ptyFactory = ptyFactory;
-  appContext.instance = instance;
-  appContext.surface = surface;
   appContext.shadersDir = shadersDir;
 
   // Yetty

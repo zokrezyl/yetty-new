@@ -13,9 +13,8 @@ namespace yetty {
 
 class YettyImpl : public Yetty {
 public:
-  explicit YettyImpl(const AppContext &appContext) : _appContext(appContext) {
-    _yettyContext.appContext = &_appContext;
-  }
+  explicit YettyImpl(const AppContext& appContext)
+      : _appContext(appContext) {}
 
   ~YettyImpl() override {
     delete _terminal;
@@ -26,13 +25,21 @@ public:
     // Note: instance and surface owned by platform, not released here
   }
 
-  const char *typeName() const override { return "Yetty"; }
+  const char* typeName() const override { return "Yetty"; }
 
   Result<void> init() {
-    // Initialize WebGPU
     if (auto res = initWebGPU(); !res) {
       return res;
     }
+
+    // Build YettyContext to pass to children
+    _yettyContext.appContext = _appContext;
+    _yettyContext.gpuContext.appGpuContext = _appContext.gpuContext;
+    _yettyContext.gpuContext.adapter = _adapter;
+    _yettyContext.gpuContext.device = _device;
+    _yettyContext.gpuContext.queue = _queue;
+    _yettyContext.gpuContext.surfaceFormat = _surfaceFormat;
+    _yettyContext.sharedBindGroup = _sharedBindGroup;
 
     // Create terminal
     auto termResult = Terminal::create(_yettyContext);
@@ -54,21 +61,21 @@ private:
   Result<void> initWebGPU() {
     ydebug("initWebGPU: Starting...");
 
-    // Instance and surface provided by platform
-    _instance = _appContext.instance;
-    _surface = _appContext.surface;
+    // Instance and surface from platform's AppGpuContext
+    auto instance = _appContext.gpuContext.instance;
+    auto surface = _appContext.gpuContext.surface;
 
-    if (!_instance) {
+    if (!instance) {
       return Err<void>("No WebGPU instance provided");
     }
-    if (!_surface) {
+    if (!surface) {
       return Err<void>("No WebGPU surface provided");
     }
     ydebug("initWebGPU: Using platform instance and surface");
 
     // Request adapter
     WGPURequestAdapterOptions adapterOpts = {};
-    adapterOpts.compatibleSurface = _surface;
+    adapterOpts.compatibleSurface = surface;
     adapterOpts.powerPreference = WGPUPowerPreference_HighPerformance;
 
     bool adapterReady = false;
@@ -85,7 +92,7 @@ private:
     adapterCb.userdata2 = &adapterReady;
 
     ydebug("initWebGPU: Requesting adapter...");
-    wgpuInstanceRequestAdapter(_instance, &adapterOpts, adapterCb);
+    wgpuInstanceRequestAdapter(instance, &adapterOpts, adapterCb);
 
 #if defined(__EMSCRIPTEN__)
     while (!adapterReady) {
@@ -115,7 +122,6 @@ private:
     WGPULimits adapterLimits = {};
     wgpuAdapterGetLimits(_adapter, &adapterLimits);
 
-    // Initialize all limits to UNDEFINED (don't care), then set specific ones
     WGPULimits limits = {};
     limits.maxTextureDimension1D = WGPU_LIMIT_U32_UNDEFINED;
     limits.maxTextureDimension2D = std::min(16384u, adapterLimits.maxTextureDimension2D);
@@ -190,9 +196,9 @@ private:
     ydebug("initWebGPU: Queue obtained");
 
     // Determine surface format
-    if (_surface) {
+    if (surface) {
       WGPUSurfaceCapabilities caps = {};
-      wgpuSurfaceGetCapabilities(_surface, _adapter, &caps);
+      wgpuSurfaceGetCapabilities(surface, _adapter, &caps);
       if (caps.formatCount > 0) {
         _surfaceFormat = caps.formats[0];
       }
@@ -202,45 +208,37 @@ private:
     }
     ydebug("initWebGPU: Surface format = {}", static_cast<int>(_surfaceFormat));
 
-    // Populate GPU context
-    _yettyContext.gpuContext.device = _device;
-    _yettyContext.gpuContext.queue = _queue;
-    _yettyContext.gpuContext.surfaceFormat = _surfaceFormat;
-
     // Create shared bind group (for MSDF font, shared across views)
     auto sharedBgResult = SharedBindGroup::create(_device);
     if (!sharedBgResult) {
       return Err<void>("Failed to create SharedBindGroup");
     }
     _sharedBindGroup = *sharedBgResult;
-    _yettyContext.sharedBindGroup = _sharedBindGroup;
     ydebug("initWebGPU: SharedBindGroup created");
 
     ydebug("initWebGPU: Complete");
     return Ok();
   }
 
-  AppContext _appContext;
-  YettyContext _yettyContext;
-  Terminal *_terminal = nullptr;
-  SharedBindGroup *_sharedBindGroup = nullptr;
+  AppContext _appContext;          // COPY of platform's context
+  YettyContext _yettyContext;      // Our context to pass to children
+  Terminal* _terminal = nullptr;
+  SharedBindGroup* _sharedBindGroup = nullptr;
 
-  // WebGPU state
-  WGPUInstance _instance = nullptr;
-  WGPUSurface _surface = nullptr;
+  // WebGPU state (owned by Yetty)
   WGPUAdapter _adapter = nullptr;
   WGPUDevice _device = nullptr;
   WGPUQueue _queue = nullptr;
   WGPUTextureFormat _surfaceFormat = WGPUTextureFormat_BGRA8Unorm;
 };
 
-Result<Yetty *> Yetty::createImpl(const AppContext &appContext) {
-  auto *yetty = new YettyImpl(appContext);
+Result<Yetty*> Yetty::createImpl(const AppContext& appContext) {
+  auto* yetty = new YettyImpl(appContext);
   if (auto res = yetty->init(); !res) {
     delete yetty;
-    return Err<Yetty *>("Yetty init failed", res);
+    return Err<Yetty*>("Yetty init failed", res);
   }
-  return Ok(static_cast<Yetty *>(yetty));
+  return Ok(static_cast<Yetty*>(yetty));
 }
 
 } // namespace yetty
