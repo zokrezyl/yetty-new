@@ -73,6 +73,7 @@ public:
     virtual WGPUShaderModule getShaderModule() const = 0;
     virtual WGPURenderPipeline getGridPipeline() const = 0;
     virtual WGPUBindGroupLayout getGridBindGroupLayout() const = 0;
+    virtual WGPUBindGroup getSharedBindGroup() const = 0;
     virtual WGPUBuffer getQuadVertexBuffer() const = 0;
 
     /**

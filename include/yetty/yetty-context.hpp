@@ -6,23 +6,28 @@
 
 namespace yetty {
 
-class GpuAllocator;
 class GpuMonitor;
 class MsMsdfFont;
 class GpuMemoryManager;
 class YGuiOverlay;
+class SharedBindGroup;
 
-// Yetty-level context — created by Yetty, passed to GPUScreens.
-// Extends AppContext with GPU state and shared managers.
+// Yetty-level context — created by Yetty, passed to Views.
+// Contains GPU connection and shared resources.
+// Note: GpuAllocator is per-view, not here.
+// Note: ShaderManager is per-view, not here.
 struct YettyContext {
   AppContext *appContext = nullptr;
 
   GPUContext gpuContext;
 
-  GpuAllocator *gpuAllocator = nullptr;
+  // Shared resources (large objects shared across views)
+  SharedBindGroup *sharedBindGroup = nullptr;
+  MsMsdfFont *defaultMsMsdfFont = nullptr;
+
+  // Legacy - to be reviewed
   GpuMonitor *gpuMonitor = nullptr;
   YGuiOverlay *yguiOverlay = nullptr;
-  MsMsdfFont *defaultMsMsdfFont = nullptr;
   GpuMemoryManager *cardManager = nullptr;
 
   core::ObjectId screenId = 0;

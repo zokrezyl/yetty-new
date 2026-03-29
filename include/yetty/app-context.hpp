@@ -1,6 +1,7 @@
 #pragma once
 
 #include <webgpu/webgpu.h>
+#include <string>
 
 namespace yetty {
 
@@ -23,6 +24,9 @@ struct AppContext {
   // WebGPU - instance created by platform (needed for surface), reused by Yetty
   WGPUInstance instance = nullptr;
   WGPUSurface surface = nullptr;
+
+  // Paths
+  std::string shadersDir;
 };
 
 } // namespace yetty

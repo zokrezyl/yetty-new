@@ -4,24 +4,15 @@
 
 namespace yetty {
 
-class GpuAllocator;
-
-// Low-level GPU context - pure WebGPU handles
-// For components that only need GPU access without application-level dependencies
+// Low-level GPU context - WebGPU connection handles.
+// Created by Yetty, passed to views.
+// Note: GpuAllocator is per-view for tracking per-view GPU usage.
 struct GPUContext {
     WGPUDevice device;
     WGPUQueue queue;
     WGPUTextureFormat surfaceFormat;
-    WGPUBindGroupLayout sharedBindGroupLayout;
-    WGPUBindGroup sharedBindGroup;
-    WGPUBuffer sharedUniformBuffer;
-    uint32_t sharedUniformSize;
-
-    // GPU resource allocator
-    GpuAllocator* allocator = nullptr;
 
     // Current render target dimensions (updated before each frame)
-    // Used to clamp scissor rects during resize transitions
     uint32_t renderTargetWidth = 0;
     uint32_t renderTargetHeight = 0;
 };

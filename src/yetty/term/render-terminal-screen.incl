@@ -9,20 +9,32 @@
 
 Result<void> TerminalScreenImpl::initRender() {
   auto &gpuContext = _terminalScreenContext.yettyContext.gpuContext;
-  auto *shaderManager = _terminalScreenContext.shaderManager;
   auto *allocator = gpuContext.allocator;
 
-  if (!shaderManager) {
-    return Err<void>("ShaderManager not available");
-  }
   if (!allocator) {
     return Err<void>("GpuAllocator not available in GPUContext");
   }
 
-  // Get shared pipeline and layout from ShaderManager
-  _terminalScreenRenderState.pipeline = shaderManager->getGridPipeline();
-  _terminalScreenRenderState.bindGroupLayout = shaderManager->getGridBindGroupLayout();
-  _terminalScreenRenderState.vertexBuffer = shaderManager->getQuadVertexBuffer();
+  // Create ShaderManager (each TerminalScreen owns its own)
+  std::string shadersDir = _terminalScreenContext.yettyContext.appContext->shadersDir;
+  auto smResult = ShaderManager::createImpl(gpuContext, shadersDir);
+  if (!smResult) {
+    return Err<void>("Failed to create ShaderManager");
+  }
+  _shaderManager = *smResult;
+
+  // Compile shaders
+  if (auto res = _shaderManager->compile(); !res) {
+    delete _shaderManager;
+    _shaderManager = nullptr;
+    return Err<void>("Failed to compile shaders");
+  }
+  ydebug("TerminalScreen: ShaderManager created and compiled");
+
+  // Get pipeline and layout from our ShaderManager
+  _terminalScreenRenderState.pipeline = _shaderManager->getGridPipeline();
+  _terminalScreenRenderState.bindGroupLayout = _shaderManager->getGridBindGroupLayout();
+  _terminalScreenRenderState.vertexBuffer = _shaderManager->getQuadVertexBuffer();
 
   if (!_terminalScreenRenderState.pipeline) {
     return Err<void>("ShaderManager pipeline not ready");
@@ -182,31 +194,118 @@ void TerminalScreenImpl::cleanupRender() {
   }
 
   // pipeline, bindGroupLayout, vertexBuffer are owned by ShaderManager - don't release
+
+  // Delete our ShaderManager
+  if (_shaderManager) {
+    delete _shaderManager;
+    _shaderManager = nullptr;
+  }
+}
+
+//=============================================================================
+// Update uniforms
+//=============================================================================
+
+void TerminalScreenImpl::updateUniforms() {
+  auto &gpuContext = _terminalScreenContext.yettyContext.gpuContext;
+
+  // Build orthographic projection matrix for screen space
+  float w = static_cast<float>(gpuContext.renderTargetWidth);
+  float h = static_cast<float>(gpuContext.renderTargetHeight);
+
+  GridUniforms uniforms = {};
+
+  // Orthographic projection: maps [0,w] x [0,h] to [-1,1] x [-1,1]
+  // Column-major order for WebGPU
+  uniforms.projection[0] = 2.0f / w;
+  uniforms.projection[5] = -2.0f / h;  // Flip Y
+  uniforms.projection[10] = 1.0f;
+  uniforms.projection[12] = -1.0f;
+  uniforms.projection[13] = 1.0f;
+  uniforms.projection[15] = 1.0f;
+
+  uniforms.screenSize[0] = w;
+  uniforms.screenSize[1] = h;
+  uniforms.cellSize[0] = _cellWidth;
+  uniforms.cellSize[1] = _cellHeight;
+  uniforms.gridSize[0] = static_cast<float>(_cols);
+  uniforms.gridSize[1] = static_cast<float>(_rows);
+  uniforms.pixelRange = 4.0f;  // For MSDF, not used with raster
+  uniforms.scale = 1.0f;
+
+  // Cursor
+  uniforms.cursorPos[0] = static_cast<float>(getCursorCol());
+  uniforms.cursorPos[1] = static_cast<float>(getCursorRow());
+  uniforms.cursorVisible = isCursorVisible() ? 1.0f : 0.0f;
+  uniforms.cursorShape = static_cast<float>(getCursorShape());
+  uniforms.cursorBlink = isCursorBlink() ? 1.0f : 0.0f;
+
+  // Viewport origin (for multi-terminal layout)
+  uniforms.viewportOrigin[0] = 0.0f;
+  uniforms.viewportOrigin[1] = 0.0f;
+
+  // Selection (not implemented yet)
+  uniforms.hasSelection = 0.0f;
+  uniforms.selStart[0] = 0.0f;
+  uniforms.selStart[1] = 0.0f;
+  uniforms.selEnd[0] = 0.0f;
+  uniforms.selEnd[1] = 0.0f;
+
+  // Effects (unused)
+  uniforms.preEffectIndex = 0;
+  uniforms.postEffectIndex = 0;
+  uniforms.effectIndex = 0;
+
+  // Default colors (white on black)
+  uniforms.defaultFg = 0xFFFFFFFF;
+  uniforms.defaultBg = 0x000000FF;
+
+  // Upload uniforms
+  wgpuQueueWriteBuffer(gpuContext.queue, _terminalScreenRenderState.uniformBuffer,
+                       0, &uniforms, sizeof(GridUniforms));
 }
 
 //=============================================================================
 // Render frame
 //=============================================================================
 
-void TerminalScreenImpl::render() {
-  if (!hasDamage()) {
+void TerminalScreenImpl::render(WGPURenderPassEncoder pass) {
+  auto &gpuContext = _terminalScreenContext.yettyContext.gpuContext;
+
+  if (!_terminalScreenRenderState.pipeline || !_terminalScreenRenderState.bindGroup) {
+    yerror("render called but pipeline or bindGroup not ready");
     return;
   }
 
-  auto &gpuContext = _terminalScreenContext.yettyContext.gpuContext;
+  // Upload cell data if dirty
+  if (hasDamage()) {
+    const TextCell *cells = getCellData();
+    size_t cellCount = static_cast<size_t>(_rows * _cols);
+    wgpuQueueWriteBuffer(gpuContext.queue, _terminalScreenRenderState.cellBuffer, 0,
+                         cells, cellCount * sizeof(TextCell));
+    clearDamage();
+  }
 
-  // Upload cell data
-  const TextCell *cells = getCellData();
-  size_t cellCount = static_cast<size_t>(_rows * _cols);
-  wgpuQueueWriteBuffer(gpuContext.queue, _terminalScreenRenderState.cellBuffer, 0,
-                       cells, cellCount * sizeof(TextCell));
+  // Update uniforms every frame (cursor blink, etc.)
+  updateUniforms();
 
-  // TODO: Get surface texture and create render pass
-  // TODO: Draw fullscreen quad
-  // TODO: Submit command buffer
+  // Set pipeline
+  wgpuRenderPassEncoderSetPipeline(pass, _terminalScreenRenderState.pipeline);
 
-  clearDamage();
-  ydebug("TerminalScreen: rendered frame {}x{}", _cols, _rows);
+  // Set bind groups
+  // Group 0: shared uniforms (owned by ShaderManager)
+  wgpuRenderPassEncoderSetBindGroup(pass, 0, _shaderManager->getSharedBindGroup(), 0, nullptr);
+  // Group 1: per-terminal resources (uniforms, cells, fonts)
+  wgpuRenderPassEncoderSetBindGroup(pass, 1, _terminalScreenRenderState.bindGroup, 0, nullptr);
+
+  // Set vertex buffer (fullscreen quad from ShaderManager)
+  wgpuRenderPassEncoderSetVertexBuffer(pass, 0, _terminalScreenRenderState.vertexBuffer,
+                                        0, WGPU_WHOLE_SIZE);
+
+  // Draw fullscreen quad (6 vertices = 2 triangles)
+  wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
+
+  ytrace("TerminalScreen: rendered frame {}x{}", _cols, _rows);
 }
 
 //=============================================================================
@@ -214,6 +313,7 @@ void TerminalScreenImpl::render() {
 //=============================================================================
 
 Result<bool> TerminalScreenImpl::handleRenderEvent() {
-  render();
+  // Render events are handled by the parent calling render(pass) directly
+  // This is kept for damage tracking notification
   return Ok(true);
 }

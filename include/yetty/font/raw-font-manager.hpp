@@ -12,22 +12,18 @@ namespace yetty::font {
 
 /// RawFontManager - thread singleton for creating RawFont instances.
 /// Manages the thread-local FreeType library internally.
-class RawFontManager : public base::Object,
-                       public base::ThreadSingleton<RawFontManager> {
+class RawFontManager : public core::FactoryObject<RawFontManager> {
 public:
-    using Ptr = std::shared_ptr<RawFontManager>;
-
     ~RawFontManager() override = default;
-    const char* typeName() const override { return "RawFontManager"; }
 
-    static Result<Ptr> createImpl();
+    static Result<RawFontManager*> createImpl();
 
     /// Create a RawFont from raw TTF/OTF data.
-    virtual Result<RawFont::Ptr> createFromData(const uint8_t* data, size_t size,
-                                                 const std::string& name) = 0;
+    virtual Result<RawFont*> createFromData(const uint8_t* data, size_t size,
+                                             const std::string& name) = 0;
 
     /// Create a RawFont from a font file path.
-    virtual Result<RawFont::Ptr> createFromFile(const std::string& path) = 0;
+    virtual Result<RawFont*> createFromFile(const std::string& path) = 0;
 
 protected:
     RawFontManager() = default;

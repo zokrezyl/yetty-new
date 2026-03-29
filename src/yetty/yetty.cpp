@@ -1,6 +1,7 @@
 #include <yetty/yetty.hpp>
 #include <yetty/yetty-context.hpp>
 #include <yetty/term/terminal.hpp>
+#include <yetty/shared-bind-group.hpp>
 #include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
 
@@ -18,6 +19,7 @@ public:
 
   ~YettyImpl() override {
     delete _terminal;
+    delete _sharedBindGroup;
     if (_queue) wgpuQueueRelease(_queue);
     if (_device) wgpuDeviceRelease(_device);
     if (_adapter) wgpuAdapterRelease(_adapter);
@@ -205,6 +207,15 @@ private:
     _yettyContext.gpuContext.queue = _queue;
     _yettyContext.gpuContext.surfaceFormat = _surfaceFormat;
 
+    // Create shared bind group (for MSDF font, shared across views)
+    auto sharedBgResult = SharedBindGroup::create(_device);
+    if (!sharedBgResult) {
+      return Err<void>("Failed to create SharedBindGroup");
+    }
+    _sharedBindGroup = *sharedBgResult;
+    _yettyContext.sharedBindGroup = _sharedBindGroup;
+    ydebug("initWebGPU: SharedBindGroup created");
+
     ydebug("initWebGPU: Complete");
     return Ok();
   }
@@ -212,6 +223,7 @@ private:
   AppContext _appContext;
   YettyContext _yettyContext;
   Terminal *_terminal = nullptr;
+  SharedBindGroup *_sharedBindGroup = nullptr;
 
   // WebGPU state
   WGPUInstance _instance = nullptr;

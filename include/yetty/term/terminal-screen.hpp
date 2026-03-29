@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <webgpu/webgpu.h>
 #include <yetty/core/event-listener.hpp>
 #include <yetty/core/factory-object.hpp>
 #include <yetty/term/text-cell.hpp>
@@ -45,6 +46,9 @@ public:
   virtual void scrollDown(int lines) = 0;
   virtual void scrollToBottom() = 0;
   virtual bool isScrolledBack() const = 0;
+
+  // Rendering - called by parent with active render pass
+  virtual void render(WGPURenderPassEncoder pass) = 0;
 
 protected:
   TerminalScreen() = default;

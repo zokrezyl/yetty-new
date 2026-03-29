@@ -276,6 +276,7 @@ public:
     WGPUShaderModule getShaderModule() const override { return _shaderModule; }
     WGPURenderPipeline getGridPipeline() const override { return _gridPipeline; }
     WGPUBindGroupLayout getGridBindGroupLayout() const override { return _gridBindGroupLayout; }
+    WGPUBindGroup getSharedBindGroup() const override { return _sharedBindGroup; }
     WGPUBuffer getQuadVertexBuffer() const override { return _quadVertexBuffer; }
     const std::string& getMergedSource() const override { return _mergedSource; }
 
@@ -313,7 +314,16 @@ private:
     WGPURenderPipeline _gridPipeline = nullptr;
     WGPUPipelineLayout _pipelineLayout = nullptr;
     WGPUBindGroupLayout _gridBindGroupLayout = nullptr;
+    WGPUBindGroupLayout _sharedBindGroupLayout = nullptr;
     WGPUBuffer _quadVertexBuffer = nullptr;
+
+    // Shared bind group (group 0) resources - owned by ShaderManager
+    WGPUBuffer _sharedUniformBuffer = nullptr;
+    WGPUBuffer _dummyStorageBuffer = nullptr;
+    WGPUTexture _dummyTexture = nullptr;
+    WGPUTextureView _dummyTextureView = nullptr;
+    WGPUSampler _dummySampler = nullptr;
+    WGPUBindGroup _sharedBindGroup = nullptr;
 
     bool _initialized = false;
 };
@@ -348,9 +358,38 @@ ShaderManagerImpl::~ShaderManagerImpl() {
         wgpuBindGroupLayoutRelease(_gridBindGroupLayout);
         _gridBindGroupLayout = nullptr;
     }
-    if (_quadVertexBuffer) {
+    if (_sharedBindGroupLayout) {
+        wgpuBindGroupLayoutRelease(_sharedBindGroupLayout);
+        _sharedBindGroupLayout = nullptr;
+    }
+    if (_sharedBindGroup) {
+        wgpuBindGroupRelease(_sharedBindGroup);
+        _sharedBindGroup = nullptr;
+    }
+    if (_dummySampler) {
+        wgpuSamplerRelease(_dummySampler);
+        _dummySampler = nullptr;
+    }
+    if (_dummyTextureView) {
+        wgpuTextureViewRelease(_dummyTextureView);
+        _dummyTextureView = nullptr;
+    }
+    if (_dummyTexture) {
+        wgpuTextureRelease(_dummyTexture);
+        _dummyTexture = nullptr;
+    }
+    // Buffers released via allocator
+    if (_quadVertexBuffer && _allocator) {
         _allocator->releaseBuffer(_quadVertexBuffer);
         _quadVertexBuffer = nullptr;
+    }
+    if (_sharedUniformBuffer && _allocator) {
+        _allocator->releaseBuffer(_sharedUniformBuffer);
+        _sharedUniformBuffer = nullptr;
+    }
+    if (_dummyStorageBuffer && _allocator) {
+        _allocator->releaseBuffer(_dummyStorageBuffer);
+        _dummyStorageBuffer = nullptr;
     }
 }
 
@@ -822,7 +861,42 @@ Result<void> ShaderManagerImpl::createPipelineResources() {
     memcpy(mapped, quadVertices, sizeof(quadVertices));
     wgpuBufferUnmap(_quadVertexBuffer);
 
-    // 2. Create grid bind group layout (15 bindings)
+    // 2. Create shared bind group layout (group 0) - owned by ShaderManager
+    {
+        WGPUBindGroupLayoutEntry sharedEntries[5] = {};
+
+        sharedEntries[0].binding = 0;
+        sharedEntries[0].visibility = WGPUShaderStage_Fragment;
+        sharedEntries[0].buffer.type = WGPUBufferBindingType_Uniform;
+
+        sharedEntries[1].binding = 1;
+        sharedEntries[1].visibility = WGPUShaderStage_Fragment;
+        sharedEntries[1].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+
+        sharedEntries[2].binding = 2;
+        sharedEntries[2].visibility = WGPUShaderStage_Fragment;
+        sharedEntries[2].buffer.type = WGPUBufferBindingType_ReadOnlyStorage;
+
+        sharedEntries[3].binding = 3;
+        sharedEntries[3].visibility = WGPUShaderStage_Fragment;
+        sharedEntries[3].texture.sampleType = WGPUTextureSampleType_Float;
+        sharedEntries[3].texture.viewDimension = WGPUTextureViewDimension_2D;
+
+        sharedEntries[4].binding = 4;
+        sharedEntries[4].visibility = WGPUShaderStage_Fragment;
+        sharedEntries[4].sampler.type = WGPUSamplerBindingType_Filtering;
+
+        WGPUBindGroupLayoutDescriptor sharedLayoutDesc = {};
+        sharedLayoutDesc.label = WGPU_STR("shared bind group layout");
+        sharedLayoutDesc.entryCount = 5;
+        sharedLayoutDesc.entries = sharedEntries;
+        _sharedBindGroupLayout = wgpuDeviceCreateBindGroupLayout(device, &sharedLayoutDesc);
+        if (!_sharedBindGroupLayout) {
+            return Err<void>("Failed to create shared bind group layout");
+        }
+    }
+
+    // 3. Create grid bind group layout (15 bindings)
     WGPUBindGroupLayoutEntry entries[15] = {};
 
     // 0: Grid uniforms
@@ -911,8 +985,70 @@ Result<void> ShaderManagerImpl::createPipelineResources() {
         return Err<void>("Failed to create grid bind group layout");
     }
 
-    // 3. Create pipeline layout (group 0: shared, group 1: grid)
-    WGPUBindGroupLayout layouts[2] = { _gpu.sharedBindGroupLayout, _gridBindGroupLayout };
+    // 4a. Create dummy resources for shared bind group
+    WGPUBufferDescriptor sharedUniformDesc = {};
+    sharedUniformDesc.label = WGPU_STR("shared uniforms");
+    sharedUniformDesc.size = 32;  // SharedUniforms size
+    sharedUniformDesc.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    _sharedUniformBuffer = _allocator->createBuffer(sharedUniformDesc);
+
+    WGPUBufferDescriptor dummyBufDesc = {};
+    dummyBufDesc.label = WGPU_STR("dummy storage");
+    dummyBufDesc.size = 4;
+    dummyBufDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+    _dummyStorageBuffer = _allocator->createBuffer(dummyBufDesc);
+
+    WGPUTextureDescriptor dummyTexDesc = {};
+    dummyTexDesc.label = WGPU_STR("dummy texture");
+    dummyTexDesc.size = {1, 1, 1};
+    dummyTexDesc.format = WGPUTextureFormat_RGBA8Unorm;
+    dummyTexDesc.usage = WGPUTextureUsage_TextureBinding;
+    dummyTexDesc.dimension = WGPUTextureDimension_2D;
+    dummyTexDesc.mipLevelCount = 1;
+    dummyTexDesc.sampleCount = 1;
+    _dummyTexture = _allocator->createTexture(dummyTexDesc);
+
+    WGPUTextureViewDescriptor dummyViewDesc = {};
+    dummyViewDesc.format = WGPUTextureFormat_RGBA8Unorm;
+    dummyViewDesc.dimension = WGPUTextureViewDimension_2D;
+    dummyViewDesc.mipLevelCount = 1;
+    dummyViewDesc.arrayLayerCount = 1;
+    _dummyTextureView = wgpuTextureCreateView(_dummyTexture, &dummyViewDesc);
+
+    WGPUSamplerDescriptor dummySamplerDesc = {};
+    dummySamplerDesc.magFilter = WGPUFilterMode_Linear;
+    dummySamplerDesc.minFilter = WGPUFilterMode_Linear;
+    dummySamplerDesc.maxAnisotropy = 1;
+    _dummySampler = wgpuDeviceCreateSampler(device, &dummySamplerDesc);
+
+    // 4b. Create shared bind group
+    WGPUBindGroupEntry sharedBgEntries[5] = {};
+    sharedBgEntries[0].binding = 0;
+    sharedBgEntries[0].buffer = _sharedUniformBuffer;
+    sharedBgEntries[0].size = 32;
+    sharedBgEntries[1].binding = 1;
+    sharedBgEntries[1].buffer = _dummyStorageBuffer;
+    sharedBgEntries[1].size = 4;
+    sharedBgEntries[2].binding = 2;
+    sharedBgEntries[2].buffer = _dummyStorageBuffer;
+    sharedBgEntries[2].size = 4;
+    sharedBgEntries[3].binding = 3;
+    sharedBgEntries[3].textureView = _dummyTextureView;
+    sharedBgEntries[4].binding = 4;
+    sharedBgEntries[4].sampler = _dummySampler;
+
+    WGPUBindGroupDescriptor sharedBgDesc = {};
+    sharedBgDesc.label = WGPU_STR("shared bind group");
+    sharedBgDesc.layout = _sharedBindGroupLayout;
+    sharedBgDesc.entryCount = 5;
+    sharedBgDesc.entries = sharedBgEntries;
+    _sharedBindGroup = wgpuDeviceCreateBindGroup(device, &sharedBgDesc);
+    if (!_sharedBindGroup) {
+        return Err<void>("Failed to create shared bind group");
+    }
+
+    // 5. Create pipeline layout (group 0: shared, group 1: grid)
+    WGPUBindGroupLayout layouts[2] = { _sharedBindGroupLayout, _gridBindGroupLayout };
     WGPUPipelineLayoutDescriptor pipelineLayoutDesc = {};
     pipelineLayoutDesc.bindGroupLayoutCount = 2;
     pipelineLayoutDesc.bindGroupLayouts = layouts;

@@ -7,215 +7,248 @@
 
 namespace yetty {
 
-GpuAllocator::GpuAllocator(WGPUDevice device)
-    : _device(device) {}
+class GpuAllocatorImpl : public GpuAllocator {
+public:
+    explicit GpuAllocatorImpl(WGPUDevice device) : _device(device) {}
 
-std::string GpuAllocator::labelToString(WGPUStringView label) {
-    if (!label.data) return "(unnamed)";
-    if (label.length == WGPU_STRLEN) return std::string(label.data);
-    return std::string(label.data, label.length);
-}
+    ~GpuAllocatorImpl() override = default;
 
-WGPUBuffer GpuAllocator::createBuffer(const WGPUBufferDescriptor& desc) {
-    std::string name = labelToString(desc.label);
+    const char *typeName() const override { return "GpuAllocator"; }
 
-    WGPUBuffer buffer = wgpuDeviceCreateBuffer(_device, &desc);
-    if (!buffer) {
-        yerror("GpuAllocator: failed to create buffer '{}'", name);
-        return nullptr;
-    }
+    WGPUBuffer createBuffer(const WGPUBufferDescriptor& desc) override {
+        std::string name = labelToString(desc.label);
 
-    uint64_t size = desc.size;
-    _allocations.push_back({name, size, AllocType::Buffer, buffer});
-    _totalBytes += size;
+        WGPUBuffer buffer = wgpuDeviceCreateBuffer(_device, &desc);
+        if (!buffer) {
+            yerror("GpuAllocator: failed to create buffer '{}'", name);
+            return nullptr;
+        }
 
-    ydebug("GPU [+] buffer '{}': {} bytes ({:.2f} KB) — total: {} bytes ({:.2f} MB)",
-          name, size, size / 1024.0,
-          _totalBytes, _totalBytes / (1024.0 * 1024.0));
+        uint64_t size = desc.size;
+        _allocations.push_back({name, size, AllocType::Buffer, buffer});
+        _totalBytes += size;
 
-    return buffer;
-}
-
-void GpuAllocator::releaseBuffer(WGPUBuffer buffer) {
-    if (!buffer) return;
-
-    auto it = std::find_if(_allocations.begin(), _allocations.end(),
-        [buffer](const Allocation& a) {
-            return a.type == AllocType::Buffer && a.handle == buffer;
-        });
-
-    if (it != _allocations.end()) {
-        _totalBytes -= it->size;
-        ydebug("GPU [-] buffer '{}': {} bytes ({:.2f} KB) — total: {} bytes ({:.2f} MB)",
-              it->name, it->size, it->size / 1024.0,
+        ydebug("GPU [+] buffer '{}': {} bytes ({:.2f} KB) — total: {} bytes ({:.2f} MB)",
+              name, size, size / 1024.0,
               _totalBytes, _totalBytes / (1024.0 * 1024.0));
-        _allocations.erase(it);
-    } else {
-        ywarn("GpuAllocator: releaseBuffer called for untracked buffer");
+
+        return buffer;
     }
 
-    wgpuBufferRelease(buffer);
-}
+    void releaseBuffer(WGPUBuffer buffer) override {
+        if (!buffer) return;
 
-WGPUTexture GpuAllocator::createTexture(const WGPUTextureDescriptor& desc) {
-    std::string name = labelToString(desc.label);
+        auto it = std::find_if(_allocations.begin(), _allocations.end(),
+            [buffer](const Allocation& a) {
+                return a.type == AllocType::Buffer && a.handle == buffer;
+            });
 
-    WGPUTexture texture = wgpuDeviceCreateTexture(_device, &desc);
-    if (!texture) {
-        yerror("GpuAllocator: failed to create texture '{}'", name);
-        return nullptr;
+        if (it != _allocations.end()) {
+            _totalBytes -= it->size;
+            ydebug("GPU [-] buffer '{}': {} bytes ({:.2f} KB) — total: {} bytes ({:.2f} MB)",
+                  it->name, it->size, it->size / 1024.0,
+                  _totalBytes, _totalBytes / (1024.0 * 1024.0));
+            _allocations.erase(it);
+        } else {
+            ywarn("GpuAllocator: releaseBuffer called for untracked buffer");
+        }
+
+        wgpuBufferRelease(buffer);
     }
 
-    uint64_t size = textureBytes(desc);
-    _allocations.push_back({name, size, AllocType::Texture, texture});
-    _totalBytes += size;
+    WGPUTexture createTexture(const WGPUTextureDescriptor& desc) override {
+        std::string name = labelToString(desc.label);
 
-    ydebug("GPU [+] texture '{}': {}x{}x{} = {} bytes ({:.2f} MB) — total: {} bytes ({:.2f} MB)",
-          name,
-          desc.size.width, desc.size.height, desc.size.depthOrArrayLayers,
-          size, size / (1024.0 * 1024.0),
-          _totalBytes, _totalBytes / (1024.0 * 1024.0));
+        WGPUTexture texture = wgpuDeviceCreateTexture(_device, &desc);
+        if (!texture) {
+            yerror("GpuAllocator: failed to create texture '{}'", name);
+            return nullptr;
+        }
 
-    return texture;
-}
+        uint64_t size = textureBytes(desc);
+        _allocations.push_back({name, size, AllocType::Texture, texture});
+        _totalBytes += size;
 
-void GpuAllocator::releaseTexture(WGPUTexture texture) {
-    if (!texture) return;
-
-    auto it = std::find_if(_allocations.begin(), _allocations.end(),
-        [texture](const Allocation& a) {
-            return a.type == AllocType::Texture && a.handle == texture;
-        });
-
-    if (it != _allocations.end()) {
-        _totalBytes -= it->size;
-        ydebug("GPU [-] texture '{}': {} bytes ({:.2f} MB) — total: {} bytes ({:.2f} MB)",
-              it->name, it->size, it->size / (1024.0 * 1024.0),
+        ydebug("GPU [+] texture '{}': {}x{}x{} = {} bytes ({:.2f} MB) — total: {} bytes ({:.2f} MB)",
+              name,
+              desc.size.width, desc.size.height, desc.size.depthOrArrayLayers,
+              size, size / (1024.0 * 1024.0),
               _totalBytes, _totalBytes / (1024.0 * 1024.0));
-        _allocations.erase(it);
-    } else {
-        ywarn("GpuAllocator: releaseTexture called for untracked texture");
+
+        return texture;
     }
 
-    wgpuTextureRelease(texture);
-}
+    void releaseTexture(WGPUTexture texture) override {
+        if (!texture) return;
 
-uint64_t GpuAllocator::totalBufferBytes() const {
-    uint64_t total = 0;
-    for (const auto& a : _allocations) {
-        if (a.type == AllocType::Buffer) total += a.size;
-    }
-    return total;
-}
+        auto it = std::find_if(_allocations.begin(), _allocations.end(),
+            [texture](const Allocation& a) {
+                return a.type == AllocType::Texture && a.handle == texture;
+            });
 
-uint64_t GpuAllocator::totalTextureBytes() const {
-    uint64_t total = 0;
-    for (const auto& a : _allocations) {
-        if (a.type == AllocType::Texture) total += a.size;
-    }
-    return total;
-}
+        if (it != _allocations.end()) {
+            _totalBytes -= it->size;
+            ydebug("GPU [-] texture '{}': {} bytes ({:.2f} MB) — total: {} bytes ({:.2f} MB)",
+                  it->name, it->size, it->size / (1024.0 * 1024.0),
+                  _totalBytes, _totalBytes / (1024.0 * 1024.0));
+            _allocations.erase(it);
+        } else {
+            ywarn("GpuAllocator: releaseTexture called for untracked texture");
+        }
 
-void GpuAllocator::dumpAllocations() const {
-    ydebug("=== GPU Allocations ({} resources, {} bytes / {:.2f} MB) ===",
-          _allocations.size(), _totalBytes, _totalBytes / (1024.0 * 1024.0));
-
-    for (const auto& a : _allocations) {
-        const char* type = (a.type == AllocType::Buffer) ? "buffer" : "texture";
-        ydebug("  {:>8} {:>10} bytes ({:>8.2f} KB)  {}",
-              type, a.size, a.size / 1024.0, a.name);
+        wgpuTextureRelease(texture);
     }
 
-    ydebug("  Buffers:  {} bytes ({:.2f} MB)", totalBufferBytes(), totalBufferBytes() / (1024.0 * 1024.0));
-    ydebug("  Textures: {} bytes ({:.2f} MB)", totalTextureBytes(), totalTextureBytes() / (1024.0 * 1024.0));
-    ydebug("  Total:    {} bytes ({:.2f} MB)", _totalBytes, _totalBytes / (1024.0 * 1024.0));
-}
+    uint64_t totalAllocatedBytes() const override { return _totalBytes; }
 
-std::string GpuAllocator::dumpAllocationsToString() const {
-    std::ostringstream ss;
-    ss << std::fixed << std::setprecision(2);
-    ss << "  " << _allocations.size() << " resources, "
-       << _totalBytes << " bytes (" << (_totalBytes / (1024.0 * 1024.0)) << " MB)\n";
-
-    for (const auto& a : _allocations) {
-        const char* type = (a.type == AllocType::Buffer) ? "buf" : "tex";
-        ss << "    " << type << "  "
-           << std::setw(10) << a.size << " B  ("
-           << std::setw(8) << (a.size / 1024.0) << " KB)  "
-           << a.name << "\n";
+    uint64_t totalBufferBytes() const override {
+        uint64_t total = 0;
+        for (const auto& a : _allocations) {
+            if (a.type == AllocType::Buffer) total += a.size;
+        }
+        return total;
     }
 
-    ss << "  Buffers:  " << totalBufferBytes() << " B ("
-       << (totalBufferBytes() / (1024.0 * 1024.0)) << " MB)\n";
-    ss << "  Textures: " << totalTextureBytes() << " B ("
-       << (totalTextureBytes() / (1024.0 * 1024.0)) << " MB)\n";
-
-    return ss.str();
-}
-
-uint64_t GpuAllocator::textureBytes(const WGPUTextureDescriptor& desc) {
-    uint32_t bpp = bytesPerPixel(desc.format);
-    return static_cast<uint64_t>(desc.size.width)
-         * static_cast<uint64_t>(desc.size.height)
-         * static_cast<uint64_t>(desc.size.depthOrArrayLayers)
-         * bpp;
-}
-
-uint32_t GpuAllocator::bytesPerPixel(WGPUTextureFormat format) {
-    switch (format) {
-        case WGPUTextureFormat_RGBA8Unorm:
-        case WGPUTextureFormat_RGBA8UnormSrgb:
-        case WGPUTextureFormat_BGRA8Unorm:
-        case WGPUTextureFormat_BGRA8UnormSrgb:
-        case WGPUTextureFormat_RGBA8Snorm:
-        case WGPUTextureFormat_RGBA8Uint:
-        case WGPUTextureFormat_RGBA8Sint:
-            return 4;
-        case WGPUTextureFormat_R8Unorm:
-        case WGPUTextureFormat_R8Snorm:
-        case WGPUTextureFormat_R8Uint:
-        case WGPUTextureFormat_R8Sint:
-            return 1;
-        case WGPUTextureFormat_RG8Unorm:
-        case WGPUTextureFormat_RG8Snorm:
-        case WGPUTextureFormat_RG8Uint:
-        case WGPUTextureFormat_RG8Sint:
-            return 2;
-        case WGPUTextureFormat_RGBA16Float:
-        case WGPUTextureFormat_RGBA16Uint:
-        case WGPUTextureFormat_RGBA16Sint:
-            return 8;
-        case WGPUTextureFormat_RGBA32Float:
-        case WGPUTextureFormat_RGBA32Uint:
-        case WGPUTextureFormat_RGBA32Sint:
-            return 16;
-        case WGPUTextureFormat_R16Float:
-        case WGPUTextureFormat_R16Uint:
-        case WGPUTextureFormat_R16Sint:
-            return 2;
-        case WGPUTextureFormat_R32Float:
-        case WGPUTextureFormat_R32Uint:
-        case WGPUTextureFormat_R32Sint:
-            return 4;
-        case WGPUTextureFormat_RG16Float:
-        case WGPUTextureFormat_RG16Uint:
-        case WGPUTextureFormat_RG16Sint:
-            return 4;
-        case WGPUTextureFormat_RG32Float:
-        case WGPUTextureFormat_RG32Uint:
-        case WGPUTextureFormat_RG32Sint:
-            return 8;
-        case WGPUTextureFormat_Depth24Plus:
-        case WGPUTextureFormat_Depth32Float:
-            return 4;
-        case WGPUTextureFormat_Depth24PlusStencil8:
-        case WGPUTextureFormat_Depth32FloatStencil8:
-            return 5; // approximate
-        default:
-            ywarn("GpuAllocator: unknown texture format {}, assuming 4 bpp",
-                  static_cast<int>(format));
-            return 4;
+    uint64_t totalTextureBytes() const override {
+        uint64_t total = 0;
+        for (const auto& a : _allocations) {
+            if (a.type == AllocType::Texture) total += a.size;
+        }
+        return total;
     }
+
+    uint32_t allocationCount() const override {
+        return static_cast<uint32_t>(_allocations.size());
+    }
+
+    void dumpAllocations() const override {
+        ydebug("=== GPU Allocations ({} resources, {} bytes / {:.2f} MB) ===",
+              _allocations.size(), _totalBytes, _totalBytes / (1024.0 * 1024.0));
+
+        for (const auto& a : _allocations) {
+            const char* type = (a.type == AllocType::Buffer) ? "buffer" : "texture";
+            ydebug("  {:>8} {:>10} bytes ({:>8.2f} KB)  {}",
+                  type, a.size, a.size / 1024.0, a.name);
+        }
+
+        ydebug("  Buffers:  {} bytes ({:.2f} MB)", totalBufferBytes(), totalBufferBytes() / (1024.0 * 1024.0));
+        ydebug("  Textures: {} bytes ({:.2f} MB)", totalTextureBytes(), totalTextureBytes() / (1024.0 * 1024.0));
+        ydebug("  Total:    {} bytes ({:.2f} MB)", _totalBytes, _totalBytes / (1024.0 * 1024.0));
+    }
+
+    std::string dumpAllocationsToString() const override {
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(2);
+        ss << "  " << _allocations.size() << " resources, "
+           << _totalBytes << " bytes (" << (_totalBytes / (1024.0 * 1024.0)) << " MB)\n";
+
+        for (const auto& a : _allocations) {
+            const char* type = (a.type == AllocType::Buffer) ? "buf" : "tex";
+            ss << "    " << type << "  "
+               << std::setw(10) << a.size << " B  ("
+               << std::setw(8) << (a.size / 1024.0) << " KB)  "
+               << a.name << "\n";
+        }
+
+        ss << "  Buffers:  " << totalBufferBytes() << " B ("
+           << (totalBufferBytes() / (1024.0 * 1024.0)) << " MB)\n";
+        ss << "  Textures: " << totalTextureBytes() << " B ("
+           << (totalTextureBytes() / (1024.0 * 1024.0)) << " MB)\n";
+
+        return ss.str();
+    }
+
+private:
+    enum class AllocType { Buffer, Texture };
+
+    struct Allocation {
+        std::string name;
+        uint64_t size;
+        AllocType type;
+        void* handle;
+    };
+
+    static std::string labelToString(WGPUStringView label) {
+        if (!label.data) return "(unnamed)";
+        if (label.length == WGPU_STRLEN) return std::string(label.data);
+        return std::string(label.data, label.length);
+    }
+
+    static uint64_t textureBytes(const WGPUTextureDescriptor& desc) {
+        uint32_t bpp = bytesPerPixel(desc.format);
+        return static_cast<uint64_t>(desc.size.width)
+             * static_cast<uint64_t>(desc.size.height)
+             * static_cast<uint64_t>(desc.size.depthOrArrayLayers)
+             * bpp;
+    }
+
+    static uint32_t bytesPerPixel(WGPUTextureFormat format) {
+        switch (format) {
+            case WGPUTextureFormat_RGBA8Unorm:
+            case WGPUTextureFormat_RGBA8UnormSrgb:
+            case WGPUTextureFormat_BGRA8Unorm:
+            case WGPUTextureFormat_BGRA8UnormSrgb:
+            case WGPUTextureFormat_RGBA8Snorm:
+            case WGPUTextureFormat_RGBA8Uint:
+            case WGPUTextureFormat_RGBA8Sint:
+                return 4;
+            case WGPUTextureFormat_R8Unorm:
+            case WGPUTextureFormat_R8Snorm:
+            case WGPUTextureFormat_R8Uint:
+            case WGPUTextureFormat_R8Sint:
+                return 1;
+            case WGPUTextureFormat_RG8Unorm:
+            case WGPUTextureFormat_RG8Snorm:
+            case WGPUTextureFormat_RG8Uint:
+            case WGPUTextureFormat_RG8Sint:
+                return 2;
+            case WGPUTextureFormat_RGBA16Float:
+            case WGPUTextureFormat_RGBA16Uint:
+            case WGPUTextureFormat_RGBA16Sint:
+                return 8;
+            case WGPUTextureFormat_RGBA32Float:
+            case WGPUTextureFormat_RGBA32Uint:
+            case WGPUTextureFormat_RGBA32Sint:
+                return 16;
+            case WGPUTextureFormat_R16Float:
+            case WGPUTextureFormat_R16Uint:
+            case WGPUTextureFormat_R16Sint:
+                return 2;
+            case WGPUTextureFormat_R32Float:
+            case WGPUTextureFormat_R32Uint:
+            case WGPUTextureFormat_R32Sint:
+                return 4;
+            case WGPUTextureFormat_RG16Float:
+            case WGPUTextureFormat_RG16Uint:
+            case WGPUTextureFormat_RG16Sint:
+                return 4;
+            case WGPUTextureFormat_RG32Float:
+            case WGPUTextureFormat_RG32Uint:
+            case WGPUTextureFormat_RG32Sint:
+                return 8;
+            case WGPUTextureFormat_Depth24Plus:
+            case WGPUTextureFormat_Depth32Float:
+                return 4;
+            case WGPUTextureFormat_Depth24PlusStencil8:
+            case WGPUTextureFormat_Depth32FloatStencil8:
+                return 5;
+            default:
+                ywarn("GpuAllocator: unknown texture format {}, assuming 4 bpp",
+                      static_cast<int>(format));
+                return 4;
+        }
+    }
+
+    WGPUDevice _device;
+    std::vector<Allocation> _allocations;
+    uint64_t _totalBytes = 0;
+};
+
+Result<GpuAllocator *> GpuAllocator::createImpl(WGPUDevice device) {
+    if (!device) {
+        return Err<GpuAllocator *>("GpuAllocator: device is null");
+    }
+    return Ok(static_cast<GpuAllocator *>(new GpuAllocatorImpl(device)));
 }
 
 } // namespace yetty

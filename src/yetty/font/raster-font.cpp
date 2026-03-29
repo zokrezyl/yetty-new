@@ -1,4 +1,5 @@
 #include <yetty/font/raster-font.hpp>
+#include <yetty/gpu-allocator.hpp>
 #include <yetty/wgpu-compat.hpp>
 #include <ytrace/ytrace.hpp>
 
@@ -48,7 +49,7 @@ public:
     // Initialization
     //=========================================================================
 
-    Result<void> init() override {
+    Result<void> init() {
         // Initialize FreeType
         if (FT_Init_FreeType(&_ftLibrary)) {
             return Err<void>("Failed to initialize FreeType");

@@ -145,6 +145,7 @@ int main(int argc, char **argv) {
   appContext.ptyFactory = ptyFactory;
   appContext.instance = instance;
   appContext.surface = surface;
+  appContext.shadersDir = shadersDir;
 
   // Yetty
   auto yettyResult = Yetty::create(appContext);

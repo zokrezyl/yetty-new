@@ -139,6 +139,9 @@ public:
   void scrollToBottom() override;
   bool isScrolledBack() const override { return _scrollOffset > 0; }
 
+  // Rendering
+  void render(WGPURenderPassEncoder pass) override;
+
   // EventListener — called by EventLoop when PTY has data
   Result<bool> onEvent(const core::Event &event) override;
 
@@ -161,6 +164,7 @@ public:
 private:
   void createVTerm(uint32_t cols, uint32_t rows);
   void attach(VTerm *vt);
+  void updateUniforms();
 
   void setCell(int row, int col, uint32_t glyph, uint8_t fgR, uint8_t fgG,
                uint8_t fgB, uint8_t bgR, uint8_t bgG, uint8_t bgB,
@@ -215,6 +219,12 @@ private:
 
   // Context with pty, GPU resources, etc.
   TerminalScreenContext _terminalScreenContext;
+
+  // GpuAllocator (owned by TerminalScreenImpl - tracks per-view GPU usage)
+  GpuAllocator* _gpuAllocator = nullptr;
+
+  // ShaderManager (owned by TerminalScreenImpl - each terminal owns its own)
+  ShaderManager* _shaderManager = nullptr;
 
   // Raster font (owned by TerminalScreenImpl)
   RasterFont* _rasterFont = nullptr;

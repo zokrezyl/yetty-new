@@ -1,5 +1,5 @@
-#include <yetty/font/raw-font.h>
-#include <yetty/font/freetype.h>
+#include <yetty/font/raw-font.hpp>
+#include <yetty/font/freetype.hpp>
 #include <ytrace/ytrace.hpp>
 
 #include <ft2build.h>
@@ -106,17 +106,18 @@ private:
     mutable std::unordered_map<uint32_t, float> _advanceCache;
 };
 
-Result<RawFont::Ptr> RawFont::createImpl(const uint8_t* data, size_t size,
-                                          const std::string& name) {
+Result<RawFont*> RawFont::createImpl(const uint8_t* data, size_t size,
+                                      const std::string& name) {
     std::vector<uint8_t> fontData(data, data + size);
-    auto impl = Ptr(new RawFontImpl(std::move(fontData), name));
-    auto res = static_cast<RawFontImpl*>(impl.get())->init();
+    auto* impl = new RawFontImpl(std::move(fontData), name);
+    auto res = impl->init();
     if (!res) {
         yerror("RawFont creation failed: {}", error_msg(res));
-        return Err<Ptr>("RawFont creation failed", res);
+        delete impl;
+        return Err<RawFont*>("RawFont creation failed", res);
     }
     ytest("raw-font-created", "RawFont created successfully");
-    return Ok(std::move(impl));
+    return Ok(static_cast<RawFont*>(impl));
 }
 
 } // namespace yetty::font
