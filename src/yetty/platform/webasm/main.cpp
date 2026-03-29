@@ -360,13 +360,25 @@ int main(int argc, char** argv) {
     }
     ydebug("main: WebGPU surface created");
 
+    // Get canvas dimensions
+    int canvasWidth = EM_ASM_INT({
+        var c = document.getElementById('canvas');
+        return c ? c.width : window.innerWidth;
+    });
+    int canvasHeight = EM_ASM_INT({
+        var c = document.getElementById('canvas');
+        return c ? c.height : window.innerHeight;
+    });
+
     // AppContext
     AppContext appContext{};
     appContext.config = config;
     appContext.platformInputPipe = pipe;
     appContext.ptyFactory = ptyFactory;
-    appContext.instance = instance;
-    appContext.surface = surface;
+    appContext.appGpuContext.instance = instance;
+    appContext.appGpuContext.surface = surface;
+    appContext.appGpuContext.windowWidth = static_cast<uint32_t>(canvasWidth);
+    appContext.appGpuContext.windowHeight = static_cast<uint32_t>(canvasHeight);
 
     // Yetty
     auto yettyResult = Yetty::create(appContext);

@@ -1012,6 +1012,7 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
 
   // Render event - do actual GPU frame rendering
   if (event.type == core::Event::Type::Render) {
+    ydebug("TerminalScreen::onEvent Render - calling renderFrame");
     renderFrame();
     return Ok(true);
   }

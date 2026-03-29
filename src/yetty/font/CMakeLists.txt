@@ -13,4 +13,4 @@ target_include_directories(yetty_font PUBLIC
     ${DAWN_INCLUDE_DIR}
 )
 
-target_link_libraries(yetty_font PUBLIC ${FREETYPE_ALL_LIBS} ytrace::ytrace)
+target_link_libraries(yetty_font PUBLIC ${FREETYPE_ALL_LIBS} ytrace::ytrace webgpu)

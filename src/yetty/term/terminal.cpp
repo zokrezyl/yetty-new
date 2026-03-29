@@ -52,20 +52,6 @@ public:
     _screen = *screenResult;
     ydebug("Terminal: TerminalScreen created");
 
-    // Setup PTY poll - Terminal handles PTY data, forwards to TerminalScreen
-    auto ptyPollResult = _eventLoop->createPtyPoll(_pty->pollSource());
-    if (!ptyPollResult)
-      return Err<void>("Failed to create PTY poll", ptyPollResult);
-    _ptyPollId = *ptyPollResult;
-    ydebug("Terminal: PTY poll created");
-
-    if (auto res = _eventLoop->registerPollListener(_ptyPollId, this); !res)
-      return Err<void>("Failed to register PTY poll listener", res);
-
-    if (auto res = _eventLoop->startPoll(_ptyPollId); !res)
-      return Err<void>("Failed to start PTY poll", res);
-    ydebug("Terminal: PTY poll started");
-
     // Setup PlatformInputPipe poll - TerminalScreen receives platform events
     auto* pipe = _terminalContext.yettyContext.appContext.platformInputPipe;
     auto pipePollResult = _eventLoop->createPlatformInputPipePoll(pipe);
@@ -97,19 +83,8 @@ public:
     return Ok();
   }
 
-  // EventListener - handle PTY data
+  // EventListener - currently unused, but kept for future use
   Result<bool> onEvent(const core::Event& event) override {
-    if (event.type == core::Event::Type::PollReadable) {
-      char buf[65536];
-      while (true) {
-        size_t n = _pty->read(buf, sizeof(buf));
-        if (n == 0)
-          break;
-        _screen->write(buf, n);
-      }
-      _eventLoop->requestRender();
-      return Ok(true);
-    }
     return Err<bool>("Terminal: unexpected event type " + std::to_string(static_cast<int>(event.type)));
   }
 
@@ -119,7 +94,6 @@ private:
   core::EventLoop* _eventLoop = nullptr;
   TerminalScreen* _screen = nullptr;
   Pty* _pty = nullptr;
-  core::PollId _ptyPollId = -1;
 };
 
 Result<Terminal*> Terminal::createImpl(const YettyContext& yettyCtx) {

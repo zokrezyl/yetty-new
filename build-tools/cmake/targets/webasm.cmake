@@ -56,8 +56,16 @@ if(YETTY_ENABLE_LIB_INCBIN)
     )
 endif()
 
-if(YETTY_ENABLE_FEATURE_CDB_GEN AND YETTY_ENABLE_FEATURE_ASSETS)
-    add_dependencies(yetty generate-cdb copy-shaders copy-assets)
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    add_dependencies(yetty generate-cdb)
+endif()
+
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_dependencies(yetty copy-assets)
+endif()
+
+if(YETTY_ENABLE_FEATURE_SHADERS)
+    add_dependencies(yetty copy-shaders)
 endif()
 
 target_compile_definitions(yetty PRIVATE
