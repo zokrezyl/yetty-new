@@ -288,7 +288,7 @@ int main(int argc, char** argv) {
     // Platform paths (virtual filesystem)
     PlatformPaths paths = {
         .shadersDir = "/assets/shaders",
-        .fontsDir = "/assets/msdf-fonts",
+        .fontsDir = "/assets/fonts",
         .runtimeDir = "/tmp",
         .binDir = nullptr
     };

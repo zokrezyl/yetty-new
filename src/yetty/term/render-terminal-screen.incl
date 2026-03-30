@@ -80,6 +80,7 @@ void TerminalScreenImpl::renderFrame() {
   // Get current surface texture
   WGPUSurfaceTexture surfaceTexture;
   wgpuSurfaceGetCurrentTexture(surface, &surfaceTexture);
+  ydebug("TerminalScreen: surface texture status={}", static_cast<int>(surfaceTexture.status));
   if (surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
       surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
     yerror("TerminalScreen: failed to get surface texture, status={}", static_cast<int>(surfaceTexture.status));
@@ -111,7 +112,9 @@ void TerminalScreenImpl::renderFrame() {
   WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
 
   // Call render(pass)
+  ydebug("TerminalScreen: calling render(pass)");
   render(pass);
+  ydebug("TerminalScreen: render(pass) returned");
 
   // End pass
   wgpuRenderPassEncoderEnd(pass);
@@ -123,8 +126,10 @@ void TerminalScreenImpl::renderFrame() {
   wgpuCommandBufferRelease(cmdBuffer);
   wgpuCommandEncoderRelease(encoder);
 
-  // Present
+  // Present (not needed on WebASM - presentation happens at end of requestAnimationFrame)
+#ifndef __EMSCRIPTEN__
   wgpuSurfacePresent(surface);
+#endif
 
   // Cleanup
   wgpuTextureViewRelease(textureView);

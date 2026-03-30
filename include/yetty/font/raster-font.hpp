@@ -10,8 +10,10 @@ namespace yetty {
 // RasterFont - rasterized glyph atlas font. CPU only, no GPU code.
 class RasterFont : public Font {
 public:
-    // Factory: ttf path, cell size, shared flag
-    static Result<RasterFont*> createImpl(const std::string& ttfPath,
+    // Factory: fonts directory, font name (without face suffix or extension), cell size, shared flag
+    // Loads all faces: fontName-Regular.ttf, fontName-Bold.ttf, fontName-Oblique.ttf, fontName-BoldOblique.ttf
+    static Result<RasterFont*> createImpl(const std::string& fontsDir,
+                                          const std::string& fontName,
                                           float cellWidth,
                                           float cellHeight,
                                           bool shared);

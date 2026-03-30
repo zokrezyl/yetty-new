@@ -59,7 +59,7 @@ public:
 
     // Raster font (texture atlas rendering)
     // Cell size defaults are placeholder - caller should use setCellSize() once actual size is known
-    virtual Result<RasterFont*> getRasterFont(const std::string& ttfPath,
+    virtual Result<RasterFont*> getRasterFont(const std::string& fontName,
                                                uint32_t cellWidth = 16,
                                                uint32_t cellHeight = 32) noexcept = 0;
     virtual RasterFont* getDefaultRasterFont() noexcept = 0;

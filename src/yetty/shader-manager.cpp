@@ -772,6 +772,16 @@ Result<void> ShaderManagerImpl::compile() {
     int lineCount = static_cast<int>(std::count(_mergedSource.begin(), _mergedSource.end(), '\n')) + 1;
     ydebug("ShaderManager: compiling merged shader ({} lines)", lineCount);
 
+    // Dump merged shader for debugging
+    {
+        FILE* f = fopen("/tmp/yetty-merged-shader.wgsl", "w");
+        if (f) {
+            fwrite(_mergedSource.data(), 1, _mergedSource.size(), f);
+            fclose(f);
+            ydebug("ShaderManager: dumped merged shader to /tmp/yetty-merged-shader.wgsl");
+        }
+    }
+
     // Release old shader module if exists
     if (_shaderModule) {
         wgpuShaderModuleRelease(_shaderModule);

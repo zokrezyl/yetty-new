@@ -271,18 +271,18 @@ public:
     return _defaultVectorCoverageFont;
   }
 
-  Result<RasterFont::Ptr> getRasterFont(const std::string &ttfPath,
+  Result<RasterFont::Ptr> getRasterFont(const std::string &fontName,
                                         uint32_t cellWidth,
                                         uint32_t cellHeight) noexcept override {
-    // Cache by path only - cell size changes are handled via setCellSize()
-    auto it = _rasterFontCache.find(ttfPath);
+    // Cache by font name - cell size changes are handled via setCellSize()
+    auto it = _rasterFontCache.find(fontName);
     if (it != _rasterFontCache.end()) {
       return Ok(it->second);
     }
 
-    auto result = RasterFont::create(_gpu, _allocator, ttfPath, cellWidth, cellHeight);
+    auto result = RasterFont::create(_fontsDir, fontName, cellWidth, cellHeight, false);
     if (!result) {
-      return Err<RasterFont::Ptr>("Failed to create RasterFont: " + ttfPath, result);
+      return Err<RasterFont::Ptr>("Failed to create RasterFont: " + fontName, result);
     }
 
     auto font = std::move(*result);
@@ -295,14 +295,14 @@ public:
     // Upload to GPU
     font->uploadToGpu();
 
-    _rasterFontCache[ttfPath] = font;
+    _rasterFontCache[fontName] = font;
 
     if (!_defaultRasterFont) {
       _defaultRasterFont = font;
     }
 
     ydebug("Created RasterFont: {} (cell={}x{}, {} glyphs)",
-          ttfPath, cellWidth, cellHeight, font->glyphCount());
+          fontName, cellWidth, cellHeight, font->glyphCount());
 
     return Ok(font);
   }
@@ -415,15 +415,11 @@ private:
   }
 
   Result<void> initRasterFont() noexcept {
-    // Use the default monospace font TTF
-    std::string ttfPath = _fontsDir + "/DejaVuSansMNerdFontMono-Regular.ttf";
-
-    if (!std::filesystem::exists(ttfPath)) {
-      return Err<void>("Default TTF not found: " + ttfPath);
-    }
+    // Use the default monospace font
+    std::string fontName = "DejaVuSansMNerdFontMono";
 
     // Create with placeholder cell size - gpu-screen will call setCellSize() with actual size
-    auto result = RasterFont::create(_gpu, _allocator, ttfPath, 16, 32);
+    auto result = RasterFont::create(_fontsDir, fontName, 16, 32, false);
     if (!result) {
       return Err<void>("Failed to create RasterFont", result);
     }

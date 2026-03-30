@@ -10,6 +10,8 @@
 
 namespace yetty {
 
+class Font;
+
 class TerminalScreen : public core::FactoryObject<TerminalScreen>,
                        public core::EventListener {
 public:
@@ -42,6 +44,9 @@ public:
   virtual bool isCursorVisible() const = 0;
   virtual int getCursorShape() const = 0;
   virtual bool isCursorBlink() const = 0;
+
+  // Font access
+  virtual Font* getFont() const = 0;
 
   // Scrollback navigation
   virtual void scrollUp(int lines) = 0;

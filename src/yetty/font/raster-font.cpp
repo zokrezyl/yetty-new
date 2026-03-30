@@ -10,6 +10,14 @@
 #include <cmath>
 #include <algorithm>
 
+// Face suffixes for TTF files
+static const char* FACE_SUFFIXES[] = {
+    "-Regular.ttf",
+    "-Bold.ttf",
+    "-Oblique.ttf",
+    "-BoldOblique.ttf"
+};
+
 namespace yetty {
 
 //=============================================================================
@@ -33,8 +41,10 @@ static_assert(sizeof(RasterGlyphUV) == 8, "RasterGlyphUV must be 8 bytes");
 
 class RasterFontImpl : public RasterFont {
 public:
-    RasterFontImpl(const std::string& ttfPath, float cellWidth, float cellHeight, bool shared)
-        : _ttfPath(ttfPath), _cellWidth(cellWidth), _cellHeight(cellHeight), _shared(shared) {}
+    RasterFontImpl(const std::string& fontsDir, const std::string& fontName,
+                   float cellWidth, float cellHeight, bool shared)
+        : _fontsDir(fontsDir), _fontName(fontName),
+          _cellWidth(cellWidth), _cellHeight(cellHeight), _shared(shared) {}
 
     ~RasterFontImpl() override {
         cleanup();
@@ -50,35 +60,45 @@ public:
             return Err<void>("Failed to initialize FreeType");
         }
 
-        // Load font face
-        if (FT_New_Face(_ftLibrary, _ttfPath.c_str(), 0, &_ftFace)) {
-            FT_Done_FreeType(_ftLibrary);
-            _ftLibrary = nullptr;
-            return Err<void>("Failed to load font: " + _ttfPath);
+        // Load all font faces (Regular, Bold, Oblique, BoldOblique)
+        for (int i = 0; i < 4; ++i) {
+            std::string path = _fontsDir + "/" + _fontName + FACE_SUFFIXES[i];
+            if (FT_New_Face(_ftLibrary, path.c_str(), 0, &_ftFaces[i])) {
+                // Non-Regular faces are optional
+                if (i == 0) {
+                    cleanup();
+                    return Err<void>("Failed to load font: " + path);
+                }
+                _ftFaces[i] = nullptr;
+                ydebug("RasterFont: face not found (optional): {}", path);
+            } else {
+                ydebug("RasterFont: loaded face: {}", path);
+            }
         }
 
-        // Calculate proper font size from metrics
+        // Calculate proper font size from metrics (using Regular face)
         updateFontSize();
 
         // Initialize atlas data (R8 grayscale)
         _atlasData.resize(_atlasSize * _atlasSize, 0);
 
         ydebug("RasterFont loaded: {} (cell={}x{}, fontSize={}, baseline={}, atlas={}x{})",
-              _ttfPath, _cellWidth, _cellHeight, _fontSize, _baseline, _atlasSize, _atlasSize);
+              _fontName, _cellWidth, _cellHeight, _fontSize, _baseline, _atlasSize, _atlasSize);
 
         return Ok();
     }
 
     void updateFontSize() {
-        if (!_ftFace) return;
+        FT_Face regularFace = _ftFaces[0];
+        if (!regularFace) return;
 
         // Set initial size to get metrics (use cell height as starting point)
-        FT_Set_Pixel_Sizes(_ftFace, 0, static_cast<uint32_t>(_cellHeight));
+        FT_Set_Pixel_Sizes(regularFace, 0, static_cast<uint32_t>(_cellHeight));
 
         // Get font metrics in pixels (at current size)
         // FreeType metrics are in 26.6 fixed point (divide by 64)
-        int ascender = _ftFace->size->metrics.ascender >> 6;
-        int descender = std::abs(_ftFace->size->metrics.descender >> 6);
+        int ascender = regularFace->size->metrics.ascender >> 6;
+        int descender = std::abs(regularFace->size->metrics.descender >> 6);
         int lineHeight = ascender + descender;
 
         // Scale font size so line height fits in cell height (with small margin)
@@ -89,12 +109,16 @@ public:
             _fontSize = static_cast<uint32_t>(_cellHeight);
         }
 
-        // Apply the calculated font size
-        FT_Set_Pixel_Sizes(_ftFace, 0, _fontSize);
+        // Apply the calculated font size to all faces
+        for (int i = 0; i < 4; ++i) {
+            if (_ftFaces[i]) {
+                FT_Set_Pixel_Sizes(_ftFaces[i], 0, _fontSize);
+            }
+        }
 
         // Recalculate metrics at new size
-        ascender = _ftFace->size->metrics.ascender >> 6;
-        descender = std::abs(_ftFace->size->metrics.descender >> 6);
+        ascender = regularFace->size->metrics.ascender >> 6;
+        descender = std::abs(regularFace->size->metrics.descender >> 6);
 
         // Baseline position from top of cell (center the text vertically)
         int actualLineHeight = ascender + descender;
@@ -123,15 +147,24 @@ public:
     //=========================================================================
 
     Result<void> loadGlyphs(const std::vector<uint32_t>& codepoints) override {
-        for (uint32_t cp : codepoints) {
-            if (_glyphIndices.count(cp)) continue;
+        // Load glyphs for all available styles
+        for (int styleIdx = 0; styleIdx < 4; ++styleIdx) {
+            if (!_ftFaces[styleIdx]) continue;
+            Style style = static_cast<Style>(styleIdx);
 
-            auto result = rasterizeGlyph(cp);
-            if (!result) {
-                ywarn("Failed to rasterize glyph for U+{:04X}", cp);
-                continue;
+            for (uint32_t cp : codepoints) {
+                if (_codepointToSlot[styleIdx].count(cp)) continue;
+
+                auto result = rasterizeGlyph(cp, style);
+                if (!result) {
+                    // Not a warning for non-Regular - fallback handles it
+                    if (style == Style::Regular) {
+                        ywarn("Failed to rasterize glyph for U+{:04X}", cp);
+                    }
+                    continue;
+                }
+                _loadedGlyphs.push_back({cp, style});
             }
-            _loadedCodepoints.push_back(cp);
         }
 
         _dirty = true;
@@ -223,19 +256,28 @@ public:
     //=========================================================================
 
     uint32_t getGlyphIndex(uint32_t codepoint) override {
-        auto it = _glyphIndices.find(codepoint);
-        if (it != _glyphIndices.end()) {
+        return getGlyphIndex(codepoint, Style::Regular);
+    }
+
+    uint32_t getGlyphIndex(uint32_t codepoint, Style style) override {
+        int idx = static_cast<int>(style);
+        auto it = _codepointToSlot[idx].find(codepoint);
+        if (it != _codepointToSlot[idx].end()) {
             return it->second;
+        }
+        // Fallback to Regular if style not available
+        if (style != Style::Regular) {
+            return getGlyphIndex(codepoint, Style::Regular);
         }
         return 0;
     }
 
-    uint32_t getGlyphIndex(uint32_t codepoint, Style) override {
-        return getGlyphIndex(codepoint);
-    }
-
-    uint32_t getGlyphIndex(uint32_t codepoint, bool, bool) override {
-        return getGlyphIndex(codepoint);
+    uint32_t getGlyphIndex(uint32_t codepoint, bool bold, bool italic) override {
+        Style style = Style::Regular;
+        if (bold && italic) style = Style::BoldItalic;
+        else if (bold) style = Style::Bold;
+        else if (italic) style = Style::Italic;
+        return getGlyphIndex(codepoint, style);
     }
 
     //=========================================================================
@@ -258,44 +300,65 @@ private:
         std::fill(_atlasData.begin(), _atlasData.end(), 0);
         _nextSlotIdx = 0;
         _glyphUVs.clear();
-        _glyphIndices.clear();
+        for (int i = 0; i < 4; ++i) {
+            _codepointToSlot[i].clear();
+        }
 
-        for (uint32_t cp : _loadedCodepoints) {
-            auto result = rasterizeGlyph(cp);
+        for (const auto& [codepoint, style] : _loadedGlyphs) {
+            auto result = rasterizeGlyph(codepoint, style);
             if (!result) {
-                ywarn("Failed to re-rasterize glyph for U+{:04X}", cp);
+                ywarn("Failed to re-rasterize glyph for U+{:04X} style {}", codepoint, static_cast<int>(style));
             }
         }
 
         _dirty = true;
         ydebug("RasterFont: re-rasterized {} glyphs at cell size {}x{}",
-              _loadedCodepoints.size(), _cellWidth, _cellHeight);
+              _loadedGlyphs.size(), _cellWidth, _cellHeight);
     }
 
     //=========================================================================
     // Rasterize a single glyph into a cell-sized slot
     //=========================================================================
 
-    Result<void> rasterizeGlyph(uint32_t codepoint) {
-        FT_UInt glyphIndex = FT_Get_Char_Index(_ftFace, codepoint);
+    Result<void> rasterizeGlyph(uint32_t codepoint, Style style) {
+        int faceIdx = static_cast<int>(style);
+        FT_Face face = _ftFaces[faceIdx];
+
+        // Fallback to Regular if this face not available
+        if (!face) {
+            if (style != Style::Regular) {
+                return rasterizeGlyph(codepoint, Style::Regular);
+            }
+            return Err<void>("No font face available");
+        }
+
+        FT_UInt glyphIndex = FT_Get_Char_Index(face, codepoint);
         if (glyphIndex == 0) {
+            // Fallback to Regular if glyph not in this face
+            if (style != Style::Regular) {
+                return rasterizeGlyph(codepoint, Style::Regular);
+            }
             return Err<void>("Glyph not found in font");
         }
 
-        if (FT_Load_Glyph(_ftFace, glyphIndex, FT_LOAD_RENDER)) {
+        if (FT_Load_Glyph(face, glyphIndex, FT_LOAD_RENDER)) {
             return Err<void>("Failed to render glyph");
         }
 
-        FT_GlyphSlot slot = _ftFace->glyph;
+        FT_GlyphSlot slot = face->glyph;
         FT_Bitmap& bitmap = slot->bitmap;
 
-        if (codepoint >= _glyphUVs.size()) {
-            _glyphUVs.resize(codepoint + 1, {-1.0f, -1.0f});
-        }
+        int styleIdx = static_cast<int>(style);
+        uint32_t slotIdx = _nextSlotIdx;
 
         if (bitmap.width == 0 || bitmap.rows == 0) {
-            _glyphUVs[codepoint] = {-1.0f, -1.0f};
-            _glyphIndices[codepoint] = codepoint;
+            // Empty glyph - store with invalid UV
+            if (slotIdx >= _glyphUVs.size()) {
+                _glyphUVs.resize(slotIdx + 1, {-1.0f, -1.0f});
+            }
+            _glyphUVs[slotIdx] = {-1.0f, -1.0f};
+            _codepointToSlot[styleIdx][codepoint] = slotIdx;
+            _nextSlotIdx++;
             return Ok();
         }
 
@@ -348,11 +411,14 @@ private:
             }
         }
 
-        _glyphUVs[codepoint] = {
+        if (slotIdx >= _glyphUVs.size()) {
+            _glyphUVs.resize(slotIdx + 1, {-1.0f, -1.0f});
+        }
+        _glyphUVs[slotIdx] = {
             static_cast<float>(slotX) / _atlasSize,
             static_cast<float>(slotY) / _atlasSize
         };
-        _glyphIndices[codepoint] = codepoint;
+        _codepointToSlot[styleIdx][codepoint] = slotIdx;
 
         _nextSlotIdx++;
         _dirty = true;
@@ -364,9 +430,11 @@ private:
     //=========================================================================
 
     void cleanup() {
-        if (_ftFace) {
-            FT_Done_Face(_ftFace);
-            _ftFace = nullptr;
+        for (int i = 0; i < 4; ++i) {
+            if (_ftFaces[i]) {
+                FT_Done_Face(_ftFaces[i]);
+                _ftFaces[i] = nullptr;
+            }
         }
         if (_ftLibrary) {
             FT_Done_FreeType(_ftLibrary);
@@ -378,26 +446,27 @@ private:
     // Private data
     //=========================================================================
 
-    std::string _ttfPath;
+    std::string _fontsDir;
+    std::string _fontName;
     float _cellWidth;
     float _cellHeight;
     uint32_t _fontSize = 0;
     int _baseline = 0;
     bool _shared = false;
 
-    // FreeType
+    // FreeType - 4 faces: Regular, Bold, Italic, BoldItalic
     FT_Library _ftLibrary = nullptr;
-    FT_Face _ftFace = nullptr;
+    FT_Face _ftFaces[4] = {nullptr, nullptr, nullptr, nullptr};
 
     // Atlas (CPU)
     static constexpr uint32_t _atlasSize = 1024;
     std::vector<uint8_t> _atlasData;
 
-    // Glyph data (CPU)
+    // Glyph data (CPU) - one map per style
     int _nextSlotIdx = 0;
     std::vector<RasterGlyphUV> _glyphUVs;
-    std::unordered_map<uint32_t, uint32_t> _glyphIndices;
-    std::vector<uint32_t> _loadedCodepoints;
+    std::unordered_map<uint32_t, uint32_t> _codepointToSlot[4];
+    std::vector<std::pair<uint32_t, Style>> _loadedGlyphs;
 
     bool _dirty = false;
 };
@@ -406,11 +475,12 @@ private:
 // RasterFont::createImpl
 //=============================================================================
 
-Result<RasterFont*> RasterFont::createImpl(const std::string& ttfPath,
+Result<RasterFont*> RasterFont::createImpl(const std::string& fontsDir,
+                                           const std::string& fontName,
                                            float cellWidth,
                                            float cellHeight,
                                            bool shared) {
-    auto* font = new RasterFontImpl(ttfPath, cellWidth, cellHeight, shared);
+    auto* font = new RasterFontImpl(fontsDir, fontName, cellWidth, cellHeight, shared);
     if (auto res = font->init(); !res) {
         yerror("RasterFont creation failed: {}", error_msg(res));
         delete font;

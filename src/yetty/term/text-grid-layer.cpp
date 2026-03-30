@@ -4,7 +4,7 @@
 #include <yetty/gpu-resource-binder.hpp>
 #include <yetty/gpu-allocator.hpp>
 #include <yetty/shader-manager.hpp>
-#include <yetty/font/raster-font.hpp>
+#include <yetty/font/font.hpp>
 #include <ytrace/ytrace.hpp>
 
 namespace yetty {
@@ -49,20 +49,10 @@ public:
         }
         _shaderManager = *shaderManagerResult;
 
-        // Create Font
-        std::string fontPath = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
-        float cellWidth = _terminalScreen->getCellWidth();
-        float cellHeight = _terminalScreen->getCellHeight();
-
-        auto fontResult = RasterFont::createImpl(fontPath, cellWidth, cellHeight, false);
-        if (!fontResult) {
-            return Err<void>("Failed to create RasterFont", fontResult);
-        }
-        _font = *fontResult;
-
-        auto loadResult = static_cast<RasterFont*>(_font)->loadBasicLatin();
-        if (!loadResult) {
-            return Err<void>("Failed to load glyphs: " + error_msg(loadResult));
+        // Get font from TerminalScreen (owned by TerminalScreen)
+        _font = _terminalScreen->getFont();
+        if (!_font) {
+            return Err<void>("TerminalScreen has no font");
         }
 
         // Create GpuResourceBinder
@@ -194,7 +184,7 @@ private:
 
     void cleanup() {
         if (_binder) { delete _binder; _binder = nullptr; }
-        if (_font) { delete _font; _font = nullptr; }
+        _font = nullptr; // owned by TerminalScreen
         if (_shaderManager) { delete _shaderManager; _shaderManager = nullptr; }
         if (_allocator) { delete _allocator; _allocator = nullptr; }
     }

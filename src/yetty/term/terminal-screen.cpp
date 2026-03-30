@@ -4,6 +4,9 @@
 #include <yetty/term/text-grid-layer.hpp>
 #include <yetty/core/event.hpp>
 #include <yetty/core/event-loop.hpp>
+#include <yetty/config.hpp>
+#include <yetty/font/font.hpp>
+#include <yetty/font/raster-font.hpp>
 #include <yetty/platform/pty.hpp>
 #include <ytrace/ytrace.hpp>
 
@@ -138,6 +141,8 @@ public:
   int getCursorShape() const override { return _cursorShape; }
   bool isCursorBlink() const override { return _cursorBlink; }
 
+  Font* getFont() const override { return _font; }
+
   void scrollUp(int lines) override;
   void scrollDown(int lines) override;
   void scrollToBottom() override;
@@ -227,6 +232,9 @@ private:
   float _cellWidth = 10.0f;
   float _cellHeight = 20.0f;
 
+  // Font (owned by TerminalScreenImpl)
+  Font* _font = nullptr;
+
   // Render layer (owned by TerminalScreenImpl)
   RenderableLayer* _renderableLayer = nullptr;
 
@@ -264,6 +272,10 @@ static VTermStateCallbacks stateCallbacks = {
 
 TerminalScreenImpl::~TerminalScreenImpl() {
   cleanupRender();
+  if (_font) {
+    delete _font;
+    _font = nullptr;
+  }
   if (_vterm) {
     vterm_free(_vterm);
   } else {
@@ -312,6 +324,24 @@ Result<void> TerminalScreenImpl::init(uint32_t cols, uint32_t rows) {
       return Err<void>("Failed to start PTY poll", res);
     }
     ydebug("TerminalScreen: PTY poll started");
+  }
+
+  // Create font
+  auto* config = _terminalScreenContext.terminalContext.yettyContext.appContext.config;
+  std::string fontsDir = config->get<std::string>("paths/fonts", "");
+  std::string fontName = config->get<std::string>("font/family", "default");
+  if (fontName == "default") {
+    fontName = "DejaVuSansMNerdFontMono";
+  }
+  auto fontResult = RasterFont::createImpl(fontsDir, fontName, _cellWidth, _cellHeight, false);
+  if (!fontResult) {
+    return Err<void>("Failed to create font", fontResult);
+  }
+  _font = *fontResult;
+
+  auto loadResult = static_cast<RasterFont*>(_font)->loadBasicLatin();
+  if (!loadResult) {
+    return Err<void>("Failed to load basic latin glyphs", loadResult);
   }
 
   auto renderResult = initRender();
@@ -625,7 +655,11 @@ void TerminalScreenImpl::setCell(int row, int col, uint32_t glyph, uint8_t fgR,
     return;
 
   TextCell &cell = (*_visibleBuffer)[idx];
-  cell.glyph = glyph;
+  if (_font && glyph != GLYPH_WIDE_CONT) {
+    cell.glyph = _font->getGlyphIndex(glyph, (style & 0x01) != 0, (style & 0x02) != 0);
+  } else {
+    cell.glyph = glyph;
+  }
   cell.fgR = fgR;
   cell.fgG = fgG;
   cell.fgB = fgB;
@@ -1046,8 +1080,39 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
       while ((n = pty->read(buf, sizeof(buf))) > 0) {
         vterm_input_write(_vterm, buf, n);
       }
+      // Request render after processing PTY output
+      if (_hasDamage) {
+        _terminalScreenContext.terminalContext.eventLoop->requestRender();
+      }
     }
     return Ok(true);
+  }
+
+  // Resize - resize terminal grid and PTY
+  if (event.type == core::Event::Type::Resize) {
+    uint32_t newCols = static_cast<uint32_t>(event.resize.width / _cellWidth);
+    uint32_t newRows = static_cast<uint32_t>(event.resize.height / _cellHeight);
+    if (newCols > 0 && newRows > 0 && (newCols != static_cast<uint32_t>(_cols) || newRows != static_cast<uint32_t>(_rows))) {
+      resize(newCols, newRows);
+      auto* pty = _terminalScreenContext.terminalContext.pty;
+      if (pty) {
+        pty->resize(newCols, newRows);
+      }
+      ydebug("TerminalScreen: resized to {}x{}", newCols, newRows);
+    }
+    _terminalScreenContext.terminalContext.eventLoop->requestRender();
+    return Ok(true);
+  }
+
+  // Events we don't handle but shouldn't error on
+  if (event.type == core::Event::Type::KeyUp ||
+      event.type == core::Event::Type::MouseDown ||
+      event.type == core::Event::Type::MouseUp ||
+      event.type == core::Event::Type::MouseMove ||
+      event.type == core::Event::Type::MouseDrag ||
+      event.type == core::Event::Type::Scroll ||
+      event.type == core::Event::Type::SetFocus) {
+    return Ok(false);
   }
 
   yerror("TerminalScreen: unhandled event type {}", static_cast<int>(event.type));
