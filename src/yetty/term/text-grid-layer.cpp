@@ -76,7 +76,7 @@ public:
         // Compile shaders on first render (after GpuResourceSets are known)
         if (!_shadersCompiled) {
             if (auto compileResult = _shaderManager->compile(); !compileResult) {
-                yerror("TextGridLayer: failed to compile shaders");
+                yerror("TextGridLayer: failed to compile shaders: {}", error_msg(compileResult));
                 return;
             }
             _pipeline = _shaderManager->getGridPipeline();

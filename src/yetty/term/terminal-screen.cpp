@@ -717,7 +717,8 @@ int TerminalScreenImpl::onPutglyph(VTermGlyphInfo *info, VTermPos pos,
     std::swap(fgB, bgB);
   }
 
-  // Pack style: bits 0-4 = text attrs, bits 5-7 = font type (0 = default)
+  // Pack style: bits 0-4 = text attrs, bits 5-7 = font type
+  // Font type: 0=MSDF, 1=Bitmap, 2=Shader, 3=Card, 4=Vector, 5=Coverage, 6=Raster
   uint8_t style = 0;
   if (self->_pen.bold)
     style |= 0x01;
@@ -726,6 +727,10 @@ int TerminalScreenImpl::onPutglyph(VTermGlyphInfo *info, VTermPos pos,
   style |= (self->_pen.underline & 0x03) << 2;
   if (self->_pen.strike)
     style |= 0x10;
+  // Set font render method in style bits 5-7
+  if (self->_font) {
+    style |= (static_cast<uint8_t>(self->_font->renderMethod()) & 0x07) << 5;
+  }
 
   self->setCell(pos.row, pos.col, cp, fgR, fgG, fgB, bgR, bgG, bgB, style);
 

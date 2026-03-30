@@ -255,6 +255,8 @@ public:
     // Font interface
     //=========================================================================
 
+    FontRenderMethod renderMethod() const override { return FontRenderMethod::Raster; }
+
     uint32_t getGlyphIndex(uint32_t codepoint) override {
         return getGlyphIndex(codepoint, Style::Regular);
     }
