@@ -1,7 +1,7 @@
 # Copy runtime assets to build directory
 set(ASSETS_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(ASSETS_DST_DIR ${CMAKE_BINARY_DIR}/assets)
-set(FONTS_DST_DIR ${ASSETS_DST_DIR}/fonts)
+set(FONTS_DST_DIR ${ASSETS_DST_DIR})
 
 # Font files to copy
 set(FONT_FILES

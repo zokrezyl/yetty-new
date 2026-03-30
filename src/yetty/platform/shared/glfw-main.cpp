@@ -17,6 +17,7 @@
 #include <yetty/core/event.hpp>
 #include <yetty/platform/pty-factory.hpp>
 #include <yetty/yetty.hpp>
+#include <yetty/platform/extract-assets.hpp>
 #include <ytrace/ytrace.hpp>
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -74,6 +75,14 @@ int main(int argc, char **argv) {
   }
   auto *config = *configResult;
   ydebug("main: Config created");
+
+  // Extract embedded assets (shaders, fonts) to cache dir
+  if (auto res = platform::extractAssets(config); !res) {
+    yerror("Failed to extract assets: {}", res.error().message());
+    delete config;
+    return 1;
+  }
+  ydebug("main: Assets extracted");
 
   // Window
   int width = config->get<int>("window/width", 1280);

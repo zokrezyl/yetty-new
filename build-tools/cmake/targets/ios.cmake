@@ -17,6 +17,8 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
     ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.cpp
     ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.cpp
+    ${YETTY_ROOT}/src/yetty/incbin-assets.cpp
 )
 
 # Create iOS app bundle

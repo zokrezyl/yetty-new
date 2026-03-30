@@ -13,7 +13,7 @@
 #-----------------------------------------------------------------------------
 
 # Core / always needed
-option(YETTY_ENABLE_LIB_INCBIN      "incbin — binary embedding"             OFF)
+option(YETTY_ENABLE_LIB_INCBIN      "incbin — binary embedding"             ON)
 option(YETTY_ENABLE_LIB_ARGS        "args — command line parser"             ON)
 option(YETTY_ENABLE_LIB_LZ4         "lz4 — compression"                     OFF)
 option(YETTY_ENABLE_LIB_LIBUV       "libuv — event loop"                    ON)

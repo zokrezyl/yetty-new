@@ -412,7 +412,7 @@ Result<void> ShaderManagerImpl::init(const YettyGpuContext& gpu, GpuAllocator* a
     _shadersDir = shadersDir;
 
     // Load base shader
-    std::string shaderPath = _shadersDir + "/gpu-screen.wgsl";
+    std::string shaderPath = _shadersDir + "/terminal-screen.wgsl";
     ydebug("ShaderManager: loading shaders from {}", _shadersDir);
     if (auto res = loadBaseShader(shaderPath); !res) {
         return res;

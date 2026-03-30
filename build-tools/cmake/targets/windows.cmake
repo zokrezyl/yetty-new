@@ -29,6 +29,8 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
     ${YETTY_ROOT}/src/yetty/platform/windows/conpty.cpp
     ${YETTY_ROOT}/src/yetty/platform/windows/pipe.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.cpp
+    ${YETTY_ROOT}/src/yetty/incbin-assets.cpp
     ${YETTY_ROOT}/src/yetty/platform/windows/platform-paths.cpp
 )
 
