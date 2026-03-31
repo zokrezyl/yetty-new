@@ -2,6 +2,7 @@
 
 #include <yetty/term/terminal-screen-render-context.hpp>
 #include <yetty/core/factory-object.hpp>
+#include <yetty/core/result.hpp>
 
 namespace yetty {
 
@@ -15,7 +16,7 @@ class RenderableLayer : public core::FactoryObject<RenderableLayer> {
 public:
     virtual ~RenderableLayer() = default;
 
-    virtual void render(const TerminalScreenRenderContext& ctx) = 0;
+    virtual Result<void> render(const TerminalScreenRenderContext& terminalScreenRenderContext) = 0;
     virtual bool isDirty() const = 0;
 
 protected:

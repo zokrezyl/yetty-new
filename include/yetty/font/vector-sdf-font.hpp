@@ -21,7 +21,7 @@ namespace yetty {
  *   - Resolution independent
  *   - No atlas texture management
  *
- * Codepoint range for testing: Plane 15 PUA-A (0xF0000 - 0xF0FFF)
+ * Font render method: FontRenderMethod::Vector
  *
  * GPU buffer layout (per glyph):
  *   [u32: curveCount | flags]
@@ -57,14 +57,6 @@ public:
     virtual size_t bufferSize() const = 0;
     virtual size_t offsetTableSize() const = 0;
 
-    // PUA-A range for SDF vector font (0xF0000 - 0xF0FFF)
-    static constexpr uint32_t CODEPOINT_BASE = 0xF0000;
-    static constexpr uint32_t CODEPOINT_END  = 0xF0FFF;
-
-    // Map ASCII to SDF range: 'A' (65) -> 0xF0041
-    static constexpr uint32_t toCodepoint(uint32_t ascii) {
-        return CODEPOINT_BASE + ascii;
-    }
 };
 
 } // namespace yetty

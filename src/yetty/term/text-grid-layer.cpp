@@ -1,8 +1,8 @@
 #include <yetty/term/text-grid-layer.hpp>
 #include <yetty/term/terminal-screen.hpp>
 #include <yetty/config.hpp>
-#include <yetty/gpu-resource-binder.hpp>
 #include <yetty/gpu-allocator.hpp>
+#include <yetty/gpu-resource-binder.hpp>
 #include <yetty/shader-manager.hpp>
 #include <yetty/font/font.hpp>
 #include <ytrace/ytrace.hpp>
@@ -32,18 +32,15 @@ public:
         auto& yettyGpuContext = yettyContext.yettyGpuContext;
 
         // Create GpuAllocator
-        auto allocatorResult = GpuAllocator::create(yettyGpuContext.device);
-        if (!allocatorResult) {
-            return Err<void>("Failed to create GpuAllocator", allocatorResult);
+        auto gpuAllocatorResult = GpuAllocator::create(yettyGpuContext.device);
+        if (!gpuAllocatorResult) {
+            return Err<void>("Failed to create GpuAllocator", gpuAllocatorResult);
         }
-        _allocator = *allocatorResult;
+        _gpuAllocator = *gpuAllocatorResult;
 
-        // Create ShaderManager (don't compile yet - wait for GpuResourceSets)
+        // Create ShaderManager
         std::string shadersDir = yettyContext.appContext.config->get<std::string>("paths/shaders", "");
-        auto shaderManagerResult = ShaderManager::create(
-            yettyGpuContext,
-            _allocator,
-            shadersDir);
+        auto shaderManagerResult = ShaderManager::create(shadersDir);
         if (!shaderManagerResult) {
             return Err<void>("Failed to create ShaderManager", shaderManagerResult);
         }
@@ -56,13 +53,11 @@ public:
         }
 
         // Create GpuResourceBinder
-        auto binderResult = GpuResourceBinder::create(
-            yettyGpuContext,
-            _allocator);
-        if (!binderResult) {
-            return Err<void>("Failed to create GpuResourceBinder", binderResult);
+        auto gpuResourceBinderResult = GpuResourceBinder::create(yettyGpuContext, _gpuAllocator, _shaderManager);
+        if (!gpuResourceBinderResult) {
+            return Err<void>("Failed to create GpuResourceBinder", gpuResourceBinderResult);
         }
-        _binder = *binderResult;
+        _gpuResourceBinder = *gpuResourceBinderResult;
 
         ydebug("TextGridLayer initialized");
         return Ok();
@@ -72,42 +67,48 @@ public:
     // RenderableLayer interface
     //=========================================================================
 
-    void render(const TerminalScreenRenderContext& terminalScreenRenderContext) override {
-        // Compile shaders on first render (after GpuResourceSets are known)
-        if (!_shadersCompiled) {
-            if (auto compileResult = _shaderManager->compile(); !compileResult) {
-                yerror("TextGridLayer: failed to compile shaders: {}", error_msg(compileResult));
-                return;
-            }
-            _pipeline = _shaderManager->getGridPipeline();
-            _vertexBuffer = _shaderManager->getQuadVertexBuffer();
-            _shadersCompiled = true;
-        }
-
-        if (!_pipeline) {
-            yerror("TextGridLayer: pipeline not ready");
-            return;
-        }
-
+    Result<void> render(const TerminalScreenRenderContext& terminalScreenRenderContext) override {
         // Update uniforms from terminal state
         updateUniforms(terminalScreenRenderContext);
 
-        // Pass GpuResourceSets to binder
-        _binder->addGpuResourceSet(getGpuResourceSet());
-        _binder->addGpuResourceSet(_font->getGpuResourceSet());
+        // Submit resource sets every frame (creates on first call, uploads data on subsequent)
+        if (auto result = _gpuResourceBinder->submitGpuResourceSet(getGridUniformsResourceSet()); !result) {
+            return Err<void>("Failed to submit grid uniforms", result);
+        }
+        if (auto result = _gpuResourceBinder->submitGpuResourceSet(_font->getGpuResourceSet()); !result) {
+            return Err<void>("Failed to submit font resources", result);
+        }
+        if (auto result = _gpuResourceBinder->submitGpuResourceSet(getCellBufferResourceSet()); !result) {
+            return Err<void>("Failed to submit cell buffer", result);
+        }
 
-        // Set pipeline and bind
-        wgpuRenderPassEncoderSetPipeline(terminalScreenRenderContext.pass, _pipeline);
-        wgpuRenderPassEncoderSetBindGroup(terminalScreenRenderContext.pass, 0,
-                                           _shaderManager->getSharedBindGroup(), 0, nullptr);
-        _binder->bind(terminalScreenRenderContext.pass, 1);
+        // Finalize on first render (generates WGSL bindings, compiles shaders, creates pipeline)
+        if (!_finalized) {
+            if (auto result = _gpuResourceBinder->finalize(); !result) {
+                return Err<void>("Failed to finalize binder", result);
+            }
+            _finalized = true;
+        }
 
-        // Draw
+        WGPURenderPipeline pipeline = _gpuResourceBinder->getPipeline();
+        if (!pipeline) {
+            return Err<void>("Pipeline not ready");
+        }
+
+        // Set pipeline and bind resources
+        wgpuRenderPassEncoderSetPipeline(terminalScreenRenderContext.pass, pipeline);
+        if (auto result = _gpuResourceBinder->bind(terminalScreenRenderContext.pass, 0); !result) {
+            return Err<void>("Failed to bind", result);
+        }
+
+        // Draw quad
+        WGPUBuffer vertexBuffer = _gpuResourceBinder->getQuadVertexBuffer();
         wgpuRenderPassEncoderSetVertexBuffer(terminalScreenRenderContext.pass, 0,
-                                              _vertexBuffer, 0, WGPU_WHOLE_SIZE);
+                                              vertexBuffer, 0, WGPU_WHOLE_SIZE);
         wgpuRenderPassEncoderDraw(terminalScreenRenderContext.pass, 6, 1, 0, 0);
 
         ytrace("TextGridLayer: rendered");
+        return Ok();
     }
 
     bool isDirty() const override {
@@ -115,6 +116,36 @@ public:
     }
 
 private:
+    // Returns resource set for grid uniforms
+    GpuResourceSet getGridUniformsResourceSet() const {
+        GpuResourceSet rs;
+        rs.shared = false;
+        rs.name = "gridUniforms";
+        rs.uniformSize = sizeof(_uniforms);
+        rs.uniformWgslType = "GridUniforms";
+        rs.uniformName = "grid";
+        rs.uniformData = reinterpret_cast<const uint8_t*>(&_uniforms);
+        rs.uniformDataSize = sizeof(_uniforms);
+        return rs;
+    }
+
+    // Returns resource set for cell buffer
+    GpuResourceSet getCellBufferResourceSet() const {
+        GpuResourceSet rs;
+        rs.shared = false;
+        rs.name = "cells";
+        uint32_t rows = _terminalScreen->getRows();
+        uint32_t cols = _terminalScreen->getCols();
+        rs.bufferSize = static_cast<size_t>(rows * cols) * sizeof(TextCell);
+        rs.bufferWgslType = "array<Cell>";
+        rs.bufferName = "cellBuffer";
+        rs.bufferData = reinterpret_cast<const uint8_t*>(_terminalScreen->getCellData());
+        rs.bufferDataSize = rs.bufferSize;
+        rs.bufferReadonly = true;
+        return rs;
+    }
+
+    // Combined for backward compatibility with GpuResourceBinder
     GpuResourceSet getGpuResourceSet() const {
         GpuResourceSet gpuResourceSet;
         gpuResourceSet.shared = false;
@@ -128,7 +159,7 @@ private:
         gpuResourceSet.bufferDataSize = gpuResourceSet.bufferSize;
         gpuResourceSet.bufferReadonly = true;
 
-        // Uniforms
+        // Uniforms (legacy packed approach for binder)
         gpuResourceSet.uniformFields = {
             {"projection", "mat4x4<f32>", 64},
             {"screenSize", "vec2<f32>", 8},
@@ -175,18 +206,31 @@ private:
         _uniforms.cursorVisible = _terminalScreen->isCursorVisible() ? 1.0f : 0.0f;
         _uniforms.cursorShape = static_cast<float>(_terminalScreen->getCursorShape());
         _uniforms.cursorBlink = _terminalScreen->isCursorBlink() ? 1.0f : 0.0f;
-
-        _uniforms.pixelRange = 4.0f;
         _uniforms.scale = 1.0f;
         _uniforms.defaultFg = 0xFFFFFFFF;
         _uniforms.defaultBg = 0x000000FF;
     }
 
     void cleanup() {
-        if (_binder) { delete _binder; _binder = nullptr; }
+        if (_gpuResourceBinder) {
+            delete _gpuResourceBinder;
+            _gpuResourceBinder = nullptr;
+        } else {
+            yerror("TextGridLayerImpl: _gpuResourceBinder was null");
+        }
         _font = nullptr; // owned by TerminalScreen
-        if (_shaderManager) { delete _shaderManager; _shaderManager = nullptr; }
-        if (_allocator) { delete _allocator; _allocator = nullptr; }
+        if (_shaderManager) {
+            delete _shaderManager;
+            _shaderManager = nullptr;
+        } else {
+            yerror("TextGridLayerImpl: _shaderManager was null");
+        }
+        if (_gpuAllocator) {
+            delete _gpuAllocator;
+            _gpuAllocator = nullptr;
+        } else {
+            yerror("TextGridLayerImpl: _gpuAllocator was null");
+        }
     }
 
     //=========================================================================
@@ -194,29 +238,30 @@ private:
     //=========================================================================
 
     TerminalScreenRenderContext _terminalScreenRenderContext;
-    GpuAllocator* _allocator = nullptr;
+    GpuAllocator* _gpuAllocator = nullptr;
     ShaderManager* _shaderManager = nullptr;
+    GpuResourceBinder* _gpuResourceBinder = nullptr;
     Font* _font = nullptr;
+    bool _finalized = false;
 
-    WGPURenderPipeline _pipeline = nullptr;
-    WGPUBuffer _vertexBuffer = nullptr;
-    bool _shadersCompiled = false;
-
-    // Packed uniforms struct matching uniformFields
+    // Grid uniforms matching shader GridUniforms struct
+    // WGSL struct size must be multiple of largest alignment (16 for mat4x4<f32>)
+    // Fields = 120 bytes, padded to 128
     struct {
-        float projection[16];
-        float screenSize[2];
-        float cellSize[2];
-        float gridSize[2];
-        float cursorPos[2];
-        float cursorVisible;
-        float cursorShape;
-        float cursorBlink;
-        float pixelRange;
-        float scale;
-        uint32_t defaultFg;
-        uint32_t defaultBg;
-    } _uniforms = {};
+        float projection[16];    // mat4x4<f32>   64 bytes  offset 0
+        float screenSize[2];     // vec2<f32>      8 bytes  offset 64
+        float cellSize[2];       // vec2<f32>      8 bytes  offset 72
+        float gridSize[2];       // vec2<f32>      8 bytes  offset 80
+        float cursorPos[2];      // vec2<f32>      8 bytes  offset 88
+        float cursorVisible;     // f32            4 bytes  offset 96
+        float cursorShape;       // f32            4 bytes  offset 100
+        float cursorBlink;       // f32            4 bytes  offset 104
+        float scale;             // f32            4 bytes  offset 108
+        uint32_t defaultFg;      // u32            4 bytes  offset 112
+        uint32_t defaultBg;      // u32            4 bytes  offset 116
+        uint32_t _pad0;          //                4 bytes  offset 120
+        uint32_t _pad1;          //                4 bytes  offset 124
+    } _uniforms = {};                           // total: 128 bytes
 };
 
 //=============================================================================

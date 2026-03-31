@@ -27,7 +27,7 @@ namespace yetty {
  *   - Slightly more GPU computation per pixel
  *   - Better quality at small sizes
  *
- * Codepoint range: Plane 15 PUA-A (0xF1000 - 0xF1FFF)
+ * Font render method: FontRenderMethod::Coverage
  *
  * GPU buffer layout identical to VectorSdfFont:
  *   [u32: curveCount | flags]
@@ -62,14 +62,6 @@ public:
     virtual size_t bufferSize() const = 0;
     virtual size_t offsetTableSize() const = 0;
 
-    // PUA-A range for coverage vector font (0xF1000 - 0xF1FFF)
-    static constexpr uint32_t CODEPOINT_BASE = 0xF1000;
-    static constexpr uint32_t CODEPOINT_END  = 0xF1FFF;
-
-    // Map ASCII to coverage range: 'A' (65) -> 0xF1041
-    static constexpr uint32_t toCodepoint(uint32_t ascii) {
-        return CODEPOINT_BASE + ascii;
-    }
 };
 
 } // namespace yetty

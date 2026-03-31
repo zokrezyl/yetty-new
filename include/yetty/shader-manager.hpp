@@ -1,84 +1,55 @@
 #pragma once
 
 #include <yetty/shader-provider.hpp>
-#include <yetty/yetty-gpu-context.hpp>
 #include <yetty/core/factory-object.hpp>
 #include <yetty/core/result.hpp>
-#include <webgpu/webgpu.h>
 #include <string>
 #include <memory>
 
 namespace yetty {
 
 /**
- * ShaderManager manages the compilation and sharing of the terminal grid shader.
+ * ShaderManager - text processing only, NO GPU operations.
  *
- * It collects shader code from ShaderProvider instances (like ShaderFont) and merges
- * them with the base shader template to produce a shared shader module and pipeline.
- *
- * Features:
- * - Created via ObjectFactory with GPUContext
- * - Stored in YettyContext for access by higher-level components
- * - Providers self-register via addProvider(shared_from_this())
- * - Per-frame dirty check for hot-reload support
- * - Owns shared grid pipeline resources
+ * Collects shader code from providers, replaces placeholders, and outputs
+ * merged WGSL source code. All GPU compilation is done by GpuResourceBinder.
  */
-class GpuAllocator;
-
 class ShaderManager : public core::FactoryObject<ShaderManager> {
 public:
-
     virtual ~ShaderManager() = default;
 
-    // Factory - creates ShaderManagerImpl
-    // shadersDir: Path to WGSL shader files (from Platform::getShadersDir())
-    // allocator: GpuAllocator for buffer allocation (owned by caller, e.g. TerminalScreen)
-    static Result<ShaderManager*> createImpl(const YettyGpuContext& gpu,
-                                              GpuAllocator* allocator,
-                                              const std::string& shadersDir) noexcept;
+    // Factory - shadersDir is path to WGSL shader files
+    static Result<ShaderManager*> createImpl(const std::string& shadersDir) noexcept;
 
     /**
      * Register a shader provider.
-     * Providers self-register during their init via shared_from_this().
      * @param provider The shader provider
-     * @param dispatchName Name of the dispatch placeholder (e.g., "shaderGlyphDispatch", "plotDispatch")
+     * @param dispatchName Name of the dispatch placeholder (e.g., "shaderGlyphDispatch")
      */
     virtual void addProvider(std::shared_ptr<ShaderProvider> provider, const std::string& dispatchName) = 0;
 
     /**
-     * Add a shared library.
-     * Libraries provide reusable functions (e.g., SDF utilities).
+     * Add a shared library (reusable WGSL functions).
      */
     virtual void addLibrary(const std::string& name, const std::string& code) = 0;
 
     /**
-     * Check if any provider needs recompilation.
+     * Set WGSL binding declarations to inject into shader.
      */
-    virtual bool needsRecompile() const = 0;
+    virtual void setBindingCode(const std::string& wgslCode) = 0;
 
     /**
-     * Compile all shaders and create pipeline.
-     * Call after all providers are registered.
+     * Check if any provider changed and remerge is needed.
      */
-    virtual Result<void> compile() = 0;
+    virtual bool needsRemerge() const = 0;
 
     /**
-     * Per-frame update - checks dirty providers and recompiles if needed.
+     * Merge all shaders and return complete WGSL source.
      */
-    virtual void update() = 0;
-
-    // =========================================================================
-    // Shared resources for GPUScreen instances
-    // =========================================================================
-
-    virtual WGPUShaderModule getShaderModule() const = 0;
-    virtual WGPURenderPipeline getGridPipeline() const = 0;
-    virtual WGPUBindGroupLayout getGridBindGroupLayout() const = 0;
-    virtual WGPUBindGroup getSharedBindGroup() const = 0;
-    virtual WGPUBuffer getQuadVertexBuffer() const = 0;
+    virtual Result<std::string> merge() = 0;
 
     /**
-     * Get the merged shader source code (for debugging).
+     * Get last merged source (for debugging).
      */
     virtual const std::string& getMergedSource() const = 0;
 

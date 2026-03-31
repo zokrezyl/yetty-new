@@ -149,7 +149,7 @@ public:
   bool isScrolledBack() const override { return _scrollOffset > 0; }
 
   // Rendering
-  void render(WGPURenderPassEncoder pass) override;
+  Result<void> render(WGPURenderPassEncoder pass) override;
 
   // EventListener — called by EventLoop when PTY has data
   Result<bool> onEvent(const core::Event &event) override;
@@ -241,7 +241,7 @@ private:
   // Render methods (implemented in render-terminal-screen.incl)
   Result<void> initRender();
   void cleanupRender();
-  void renderFrame();
+  Result<void> renderFrame();
 };
 
 // Render implementation
@@ -1072,7 +1072,9 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
   // Render event - do actual GPU frame rendering
   if (event.type == core::Event::Type::Render) {
     ydebug("TerminalScreen::onEvent Render - calling renderFrame");
-    renderFrame();
+    if (auto res = renderFrame(); !res) {
+      return Err<bool>("renderFrame failed", res);
+    }
     return Ok(true);
   }
 

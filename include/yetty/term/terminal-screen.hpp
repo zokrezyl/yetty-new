@@ -55,7 +55,7 @@ public:
   virtual bool isScrolledBack() const = 0;
 
   // Rendering - called by parent with active render pass
-  virtual void render(WGPURenderPassEncoder pass) = 0;
+  virtual Result<void> render(WGPURenderPassEncoder pass) = 0;
 
 protected:
   TerminalScreen() = default;

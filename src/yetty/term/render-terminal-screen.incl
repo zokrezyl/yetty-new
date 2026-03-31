@@ -63,18 +63,16 @@ void TerminalScreenImpl::cleanupRender() {
 // Render frame (called by onEvent for Render events)
 //=============================================================================
 
-void TerminalScreenImpl::renderFrame() {
+Result<void> TerminalScreenImpl::renderFrame() {
   if (!_renderableLayer) {
-    yerror("TerminalScreen: renderFrame called but _renderableLayer not ready");
-    return;
+    return Err<void>("RenderableLayer not ready");
   }
 
   auto& yettyGpuContext = _terminalScreenContext.terminalContext.yettyContext.yettyGpuContext;
   auto surface = _terminalScreenContext.terminalContext.yettyContext.appContext.appGpuContext.surface;
 
   if (!surface) {
-    yerror("TerminalScreen: no surface");
-    return;
+    return Err<void>("No surface");
   }
 
   // Get current surface texture
@@ -83,15 +81,13 @@ void TerminalScreenImpl::renderFrame() {
   ydebug("TerminalScreen: surface texture status={}", static_cast<int>(surfaceTexture.status));
   if (surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
       surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
-    yerror("TerminalScreen: failed to get surface texture, status={}", static_cast<int>(surfaceTexture.status));
-    return;
+    return Err<void>("Failed to get surface texture, status=" + std::to_string(static_cast<int>(surfaceTexture.status)));
   }
 
   // Create texture view
   WGPUTextureView textureView = wgpuTextureCreateView(surfaceTexture.texture, nullptr);
   if (!textureView) {
-    yerror("TerminalScreen: failed to create texture view");
-    return;
+    return Err<void>("Failed to create texture view");
   }
 
   // Create command encoder
@@ -101,6 +97,7 @@ void TerminalScreenImpl::renderFrame() {
   // Begin render pass
   WGPURenderPassColorAttachment colorAttachment = {};
   colorAttachment.view = textureView;
+  colorAttachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
   colorAttachment.loadOp = WGPULoadOp_Clear;
   colorAttachment.storeOp = WGPUStoreOp_Store;
   colorAttachment.clearValue = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -111,9 +108,9 @@ void TerminalScreenImpl::renderFrame() {
 
   WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &passDesc);
 
-  // Call render(pass)
+  // Call render(pass) - track error but still cleanup GPU resources
   ydebug("TerminalScreen: calling render(pass)");
-  render(pass);
+  Result<void> renderResult = render(pass);
   ydebug("TerminalScreen: render(pass) returned");
 
   // End pass
@@ -134,17 +131,22 @@ void TerminalScreenImpl::renderFrame() {
   // Cleanup
   wgpuTextureViewRelease(textureView);
 
+  // Return render error if any
+  if (!renderResult) {
+    return Err<void>("Render failed", renderResult);
+  }
+
   ytrace("TerminalScreen: frame rendered");
+  return Ok();
 }
 
 //=============================================================================
 // Render to pass (called by renderFrame)
 //=============================================================================
 
-void TerminalScreenImpl::render(WGPURenderPassEncoder pass) {
+Result<void> TerminalScreenImpl::render(WGPURenderPassEncoder pass) {
   if (!_renderableLayer) {
-    yerror("TerminalScreen: render called but _renderableLayer not ready");
-    return;
+    return Err<void>("TerminalScreen: _renderableLayer not ready");
   }
 
   // Build render context for this frame
@@ -154,5 +156,8 @@ void TerminalScreenImpl::render(WGPURenderPassEncoder pass) {
   };
 
   // Render layers
-  _renderableLayer->render(terminalScreenRenderContext);
+  if (auto res = _renderableLayer->render(terminalScreenRenderContext); !res) {
+    return Err<void>("TerminalScreen: render failed", res);
+  }
+  return Ok();
 }
