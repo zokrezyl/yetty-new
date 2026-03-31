@@ -396,6 +396,9 @@ extern const unsigned int g${SYMBOL_NAME}Size;
     if(NOT MSVC_HANDLED)
         target_sources(${TARGET} PRIVATE ${RESOURCE_SOURCE})
         target_include_directories(${TARGET} PRIVATE ${INCBIN_INCLUDE_DIR})
+        # INCBIN reads files at compile time via inline assembly - tell CMake about dependencies
+        # This ensures the object file is rebuilt when any embedded file changes
+        set_source_files_properties(${RESOURCE_SOURCE} PROPERTIES OBJECT_DEPENDS "${FILES}")
     endif()
 
     # Generate manifest header for asset registration

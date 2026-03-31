@@ -300,10 +300,16 @@ private:
 
     void rasterizeAll() {
         std::fill(_atlasData.begin(), _atlasData.end(), 0);
-        _nextSlotIdx = 0;
+        // Reserve slot 0 for "empty/space" - getGlyphIndex returns 0 for unknown codepoints
+        _nextSlotIdx = 1;
         _glyphUVs.clear();
+        _glyphUVs.push_back({-1.0f, -1.0f});  // Slot 0 = empty (invalid UV)
         for (int i = 0; i < 4; ++i) {
             _codepointToSlot[i].clear();
+        }
+        // Map space to slot 0 (empty) for all styles
+        for (int i = 0; i < 4; ++i) {
+            _codepointToSlot[i][0x20] = 0;
         }
 
         for (const auto& [codepoint, style] : _loadedGlyphs) {

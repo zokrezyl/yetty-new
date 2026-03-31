@@ -93,7 +93,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // Render glyph if not empty
     let glyphIndex = cell.glyph;
-    if (glyphIndex > 32u) {
+    if (glyphIndex != 0u) {  // Index 0 is reserved for space
         let glyphUV = rasterFontBuffer[glyphIndex].uv;
         if (glyphUV.x >= 0.0) {
             let glyphSizeUV = vec2<f32>(grid.cellSize.x / 1024.0, grid.cellSize.y / 1024.0);
