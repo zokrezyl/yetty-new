@@ -262,6 +262,9 @@ public:
     }
 
     uint32_t getGlyphIndex(uint32_t codepoint, Style style) override {
+        // Space always returns 0
+        if (codepoint == 0x20) return 0;
+
         int idx = static_cast<int>(style);
         auto it = _codepointToSlot[idx].find(codepoint);
         if (it != _codepointToSlot[idx].end()) {

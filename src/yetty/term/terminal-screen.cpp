@@ -555,7 +555,7 @@ void TerminalScreenImpl::decompressLine(const ScrollbackLine &line,
 
   // Fill remainder with default cells
   TextCell defaultCell{};
-  defaultCell.glyph = ' ';
+  defaultCell.glyph = 0;  // Glyph index 0 = space/empty
   defaultCell.fgR = _defaultFg.rgb.red;
   defaultCell.fgG = _defaultFg.rgb.green;
   defaultCell.fgB = _defaultFg.rgb.blue;
@@ -604,7 +604,7 @@ void TerminalScreenImpl::clearBuffer(std::vector<TextCell> &buffer) {
   colorToRGB(_defaultBg, bgR, bgG, bgB);
 
   TextCell defaultCell{};
-  defaultCell.glyph = ' ';
+  defaultCell.glyph = 0;  // Glyph index 0 = space/empty
   defaultCell.fgR = fgR;
   defaultCell.fgG = fgG;
   defaultCell.fgB = fgB;
@@ -882,7 +882,7 @@ int TerminalScreenImpl::onErase(VTermRect rect, int, void *user) {
   }
 
   TextCell defaultCell{};
-  defaultCell.glyph = ' ';
+  defaultCell.glyph = 0;  // Glyph index 0 = space/empty
   defaultCell.fgR = fgR;
   defaultCell.fgG = fgG;
   defaultCell.fgB = fgB;
