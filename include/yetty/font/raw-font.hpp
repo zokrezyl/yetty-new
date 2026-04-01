@@ -1,0 +1,33 @@
+#pragma once
+
+#include <yetty/core/factory-object.hpp>
+#include <yetty/core/result.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+
+namespace yetty::font {
+
+/// RawFont - lightweight FreeType-based font for text measurement.
+/// No GPU dependencies - usable by remote clients (PDF rendering, etc.).
+class RawFont : public core::FactoryObject<RawFont> {
+public:
+    ~RawFont() override = default;
+
+    /// Create from raw TTF/OTF data.
+    static Result<RawFont*> createImpl(const uint8_t* data, size_t size, const std::string& name);
+
+    /// Font name.
+    virtual const std::string& name() const = 0;
+
+    /// Text measurement.
+    virtual float measureTextWidth(const std::string& text, float fontSize) = 0;
+    virtual float fontAscent(float fontSize) = 0;
+    virtual float fontDescent(float fontSize) = 0;
+
+protected:
+    RawFont() = default;
+};
+
+} // namespace yetty::font
