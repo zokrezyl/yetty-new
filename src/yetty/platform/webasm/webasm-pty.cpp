@@ -50,8 +50,6 @@ Result<void> WebasmPty::init(Config* config) {
             }
             // Handle term-ready: iframe is loaded, send pending resize
             if (e.data && e.data.type === 'term-ready') {
-                console.log('[webasm-pty] term-ready received, sending resize ' +
-                            window.ptyPendingCols + 'x' + window.ptyPendingRows);
                 window.ptyReady = true;
                 var iframe = document.getElementById('jslinux-pty');
                 if (iframe && iframe.contentWindow) {
@@ -113,20 +111,16 @@ void WebasmPty::write(const char* data, size_t len) {
 }
 
 void WebasmPty::resize(uint32_t cols, uint32_t rows) {
-    ydebug("WebasmPty::resize({}, {})", cols, rows);
     _cols = cols;
     _rows = rows;
 
     EM_ASM({
         var cols = $0;
         var rows = $1;
-        // Always update pending size
         window.ptyPendingCols = cols;
         window.ptyPendingRows = rows;
 
-        // Only send if iframe is ready
         if (window.ptyReady) {
-            console.log('[webasm-pty] resize: sending ' + cols + 'x' + rows);
             var iframe = document.getElementById('jslinux-pty');
             if (iframe && iframe.contentWindow) {
                 iframe.contentWindow.postMessage({
@@ -135,8 +129,6 @@ void WebasmPty::resize(uint32_t cols, uint32_t rows) {
                     rows: rows
                 }, '*');
             }
-        } else {
-            console.log('[webasm-pty] resize: deferred ' + cols + 'x' + rows + ' (iframe not ready)');
         }
     }, cols, rows);
 }
