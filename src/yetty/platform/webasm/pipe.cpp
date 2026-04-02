@@ -44,6 +44,11 @@ public:
 
     void setEventLoop(EventLoop* loop) override {
         _eventLoop = loop;
+        // If there's pending data from before setEventLoop was called, schedule callback now
+        if (_eventLoop && !_buffer.empty() && !_callbackPending) {
+            _callbackPending = true;
+            emscripten_async_call(onDataAvailable, this, 0);
+        }
     }
 
 private:
