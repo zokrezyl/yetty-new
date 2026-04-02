@@ -29,6 +29,9 @@ Result<void> WebasmPty::init(Config* config) {
 
         // Buffer in parent window (like kernel buffer on Unix)
         window.ptyBuffer = "";
+        window.ptyReady = false;
+        window.ptyPendingCols = cols;
+        window.ptyPendingRows = rows;
 
         // Read from buffer - called by C++ via EM_ASM
         window.pty_read_buffer = function(maxLen) {
@@ -44,6 +47,18 @@ Result<void> WebasmPty::init(Config* config) {
                 if (!data || data.length === 0) return;
                 window.ptyBuffer += data;
                 Module._webpty_poll_source_notify(pollSourcePointer);
+            }
+            // Handle term-ready: iframe is loaded, send pending resize
+            if (e.data && e.data.type === 'term-ready') {
+                window.ptyReady = true;
+                var iframe = document.getElementById('jslinux-pty');
+                if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({
+                        type: 'term-resize',
+                        cols: window.ptyPendingCols,
+                        rows: window.ptyPendingRows
+                    }, '*');
+                }
             }
         });
 
@@ -102,13 +117,18 @@ void WebasmPty::resize(uint32_t cols, uint32_t rows) {
     EM_ASM({
         var cols = $0;
         var rows = $1;
-        var iframe = document.getElementById('jslinux-pty');
-        if (iframe && iframe.contentWindow) {
-            iframe.contentWindow.postMessage({
-                type: 'term-resize',
-                cols: cols,
-                rows: rows
-            }, '*');
+        window.ptyPendingCols = cols;
+        window.ptyPendingRows = rows;
+
+        if (window.ptyReady) {
+            var iframe = document.getElementById('jslinux-pty');
+            if (iframe && iframe.contentWindow) {
+                iframe.contentWindow.postMessage({
+                    type: 'term-resize',
+                    cols: cols,
+                    rows: rows
+                }, '*');
+            }
         }
     }, cols, rows);
 }

@@ -68,10 +68,6 @@ public:
         // No-op on desktop - EventLoop polls the fd directly
     }
 
-    void setListener(EventListener* /*listener*/) override {
-        // No-op on desktop - EventLoop uses poll infrastructure
-    }
-
 private:
     int _readFd = -1;
     int _writeFd = -1;

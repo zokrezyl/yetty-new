@@ -46,10 +46,10 @@ else()
 endif()
 
 # Font files
-check_file("${ASSETS_PREFIX}/DejaVuSansMNerdFontMono-Regular.ttf" "Regular font")
-check_file("${ASSETS_PREFIX}/DejaVuSansMNerdFontMono-Bold.ttf" "Bold font")
-check_file("${ASSETS_PREFIX}/DejaVuSansMNerdFontMono-Oblique.ttf" "Oblique font")
-check_file("${ASSETS_PREFIX}/DejaVuSansMNerdFontMono-BoldOblique.ttf" "Bold Oblique font")
+check_file("${ASSETS_PREFIX}/fonts/DejaVuSansMNerdFontMono-Regular.ttf" "Regular font")
+check_file("${ASSETS_PREFIX}/fonts/DejaVuSansMNerdFontMono-Bold.ttf" "Bold font")
+check_file("${ASSETS_PREFIX}/fonts/DejaVuSansMNerdFontMono-Oblique.ttf" "Oblique font")
+check_file("${ASSETS_PREFIX}/fonts/DejaVuSansMNerdFontMono-BoldOblique.ttf" "Bold Oblique font")
 
 # Font CDB files (only if CDB generation is enabled)
 if(CHECK_CDB)

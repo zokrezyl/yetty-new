@@ -160,7 +160,6 @@
                     console_resize_event();
                     if (resizeCount >= 10) {
                         clearInterval(resizeInterval);
-                        // Import local files after VM has booted
                         importLocalFiles();
                     }
                 }, 200);
@@ -272,6 +271,11 @@
         // Handle messages from parent
         window.addEventListener('message', function(e) {
             if (e.data.type === 'term-resize') {
+                // Update term dimensions BEFORE calling console_resize_event
+                if (term && e.data.cols && e.data.rows) {
+                    term.cols = e.data.cols;
+                    term.rows = e.data.rows;
+                }
                 if (console_resize_event) {
                     console_resize_event();
                 }

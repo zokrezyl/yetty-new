@@ -18,7 +18,8 @@ class EventLoop : public FactoryObject<EventLoop> {
 public:
   using Ptr = std::shared_ptr<EventLoop>;
 
-  static Result<EventLoop*> createImpl() noexcept;
+  // Create EventLoop with optional pipe - if non-null, EventLoop sets up polling internally
+  static Result<EventLoop*> createImpl(PlatformInputPipe* pipe = nullptr) noexcept;
 
   virtual ~EventLoop() = default;
 
@@ -81,12 +82,9 @@ public:
   // This allows immediate re-render without waiting for the frame timer
   virtual void requestRender() = 0;
 
-  // Platform input pipe poll - receives events from main/platform thread
-  // Desktop: uses uv_poll on pipe->readFd()
-  // Webasm: pipe triggers listener via emscripten_async_call
-  virtual Result<PollId> createPlatformInputPipePoll(PlatformInputPipe* pipe) = 0;
-  virtual Result<void> startPlatformInputPipePoll(PollId id) = 0;
-  virtual Result<void> registerPlatformInputPipePollListener(PollId id, EventListener* listener) = 0;
+  // Called by PlatformInputPipe when data is available (webasm only)
+  // Reads Event structs from pipe and calls dispatch() for each
+  virtual void onPlatformInputPipeReadable() = 0;
 
 protected:
   EventLoop() = default;

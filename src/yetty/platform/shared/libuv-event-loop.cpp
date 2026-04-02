@@ -37,7 +37,7 @@ struct TimerHandle {
 
 class EventLoopImpl : public EventLoop {
 public:
-    EventLoopImpl() {
+    explicit EventLoopImpl(PlatformInputPipe* pipe) : _platformInputPipe(pipe) {
         _loop = uv_default_loop();
 
         // Initialize render async handle
@@ -51,6 +51,17 @@ public:
         uv_signal_init(_loop, &_sigtermHandle);
         uv_signal_start(&_sigintHandle, onSignal, SIGINT);
         uv_signal_start(&_sigtermHandle, onSignal, SIGTERM);
+
+        // Set up pipe polling if pipe provided
+        if (_platformInputPipe && _platformInputPipe->readFd() >= 0) {
+            _pipePoll = std::make_unique<PollHandle>();
+            _pipePoll->fd = _platformInputPipe->readFd();
+            _pipePoll->owner = this;
+            uv_poll_init(_loop, &_pipePoll->poll, _pipePoll->fd);
+            _pipePoll->poll.data = _pipePoll.get();
+            uv_poll_start(&_pipePoll->poll, UV_READABLE, onPipePollCallback);
+            ydebug("EventLoop: pipe poll set up for fd={}", _pipePoll->fd);
+        }
     }
 
     ~EventLoopImpl() override {
@@ -371,30 +382,8 @@ public:
         uv_async_send(&_renderAsync);
     }
 
-    Result<PollId> createPlatformInputPipePoll(PlatformInputPipe* pipe) override {
-        _platformInputPipe = pipe;
-
-        auto pollResult = createPoll();
-        if (!pollResult) return pollResult;
-        PollId id = *pollResult;
-
-        if (auto res = configPoll(id, pipe->readFd()); !res) {
-            destroyPoll(id);
-            return Err<PollId>("createPlatformInputPipePoll: configPoll failed", res);
-        }
-
-        _platformInputPipePollId = id;
-        pipe->setEventLoop(this);
-        ydebug("EventLoop: created PlatformInputPipePoll id={} fd={}", id, pipe->readFd());
-        return Ok(id);
-    }
-
-    Result<void> startPlatformInputPipePoll(PollId id) override {
-        return startPoll(id);
-    }
-
-    Result<void> registerPlatformInputPipePollListener(PollId id, EventListener* listener) override {
-        return registerPollListener(id, listener);
+    void onPlatformInputPipeReadable() override {
+        // No-op on Linux - libuv callback handles it
     }
 
 private:
@@ -404,6 +393,23 @@ private:
             self->dispatch(Event::renderEvent());
         } else {
             ywarn("EventLoop::onRenderAsync: render signal but not pending");
+        }
+    }
+
+    static void onPipePollCallback(uv_poll_t* handle, int status, int events) {
+        auto* ph = static_cast<PollHandle*>(handle->data);
+
+        if (status < 0) {
+            yerror("EventLoop::onPipePollCallback: error status={} for fd={}", status, ph->fd);
+            return;
+        }
+
+        if (events & UV_READABLE) {
+            Event pipeEvent;
+            while (ph->owner->_platformInputPipe->read(&pipeEvent, sizeof(pipeEvent)) == sizeof(pipeEvent)) {
+                ydebug("EventLoop: dispatching pipe event type={}", static_cast<int>(pipeEvent.type));
+                ph->owner->dispatch(pipeEvent);
+            }
         }
     }
 
@@ -417,24 +423,6 @@ private:
             return;
         }
 
-        // Check if this is the PlatformInputPipe poll
-        if (ph->owner->_platformInputPipe &&
-            ph->fd == ph->owner->_platformInputPipe->readFd()) {
-            if (events & UV_READABLE) {
-                Event pipeEvent;
-                while (ph->owner->_platformInputPipe->read(&pipeEvent, sizeof(pipeEvent)) == sizeof(pipeEvent)) {
-                    ydebug("EventLoop: pipe event type={}", static_cast<int>(pipeEvent.type));
-                    for (auto *listener : ph->listeners) {
-                        listener->onEvent(pipeEvent);
-                    }
-                }
-            } else {
-                yerror("EventLoop: unexpected event {} on PlatformInputPipe fd={}", events, ph->fd);
-            }
-            return;
-        }
-
-        // Regular poll (PTY, etc.)
         if (events & UV_READABLE) {
             Event event;
             event.type = Event::Type::PollReadable;
@@ -483,7 +471,7 @@ private:
 
     // Platform input pipe - receives events from main thread
     PlatformInputPipe* _platformInputPipe = nullptr;
-    PollId _platformInputPipePollId = -1;
+    std::unique_ptr<PollHandle> _pipePoll;
 
     // Render async - for immediate re-render without waiting for timer
     uv_async_t _renderAsync;
@@ -494,8 +482,8 @@ private:
     uv_signal_t _sigtermHandle;
 };
 
-Result<EventLoop*> EventLoop::createImpl() noexcept {
-    return Ok(static_cast<EventLoop*>(new EventLoopImpl()));
+Result<EventLoop*> EventLoop::createImpl(PlatformInputPipe* pipe) noexcept {
+    return Ok(static_cast<EventLoop*>(new EventLoopImpl(pipe)));
 }
 
 } // namespace core

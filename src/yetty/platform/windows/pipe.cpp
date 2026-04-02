@@ -57,15 +57,10 @@ public:
         _eventLoop = loop;
     }
 
-    void setListener(EventListener* listener) override {
-        _listener = listener;
-    }
-
 private:
     HANDLE _hRead = INVALID_HANDLE_VALUE;
     HANDLE _hWrite = INVALID_HANDLE_VALUE;
     EventLoop* _eventLoop = nullptr;
-    EventListener* _listener = nullptr;
 };
 
 Result<PlatformInputPipe*> PlatformInputPipe::create() {
