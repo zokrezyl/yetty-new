@@ -22,8 +22,10 @@
             var size;
             if (term) {
                 size = term.getSize();
+                log("term_get_size() called, returning: " + size[0] + "x" + size[1]);
             } else {
                 size = [80, 25]; // fallback
+                log("term_get_size() called, no term, returning fallback: 80x25");
             }
             return size;
         }
@@ -93,6 +95,9 @@
             var cols = parseInt(params["cols"]) || 80;
             var rows = parseInt(params["rows"]) || 25;
 
+            log("start_vm: URL params cols=" + params["cols"] + " rows=" + params["rows"]);
+            log("start_vm: Creating Term with " + cols + "x" + rows);
+
             term = new Term({
                 cols: cols,
                 rows: rows,
@@ -100,6 +105,7 @@
             });
             term.setKeyHandler(term_handler);
             term.open(document.getElementById("term_container"));
+            log("start_vm: Term created, actual size=" + term.cols + "x" + term.rows);
 
             var vm_file;
             switch(cpu) {
@@ -129,14 +135,18 @@
         }
 
         function initVM(cfg_url, mem, cols, rows) {
+            log("initVM called: cfg=" + cfg_url + " mem=" + mem + " cols=" + cols + " rows=" + rows);
+            log("Current term size: " + (term ? term.cols + "x" + term.rows : "no term"));
             try {
                 console_write1 = Module.cwrap('console_queue_char', null, ['number']);
                 fs_import_file = Module.cwrap('fs_import_file', null, ['string', 'number', 'number']);
                 net_write_packet = Module.cwrap('net_write_packet', null, ['number', 'number']);
                 net_set_carrier = Module.cwrap('net_set_carrier', null, ['number']);
                 console_resize_event = Module.cwrap('console_resize_event', null, []);
+                log("WASM functions wrapped successfully");
 
                 term.setResizeHandler(function(cols, rows) {
+                    log("resizeHandler called: " + cols + "x" + rows);
                     if (console_resize_event) {
                         console_resize_event();
                     }
@@ -157,9 +167,11 @@
                 var resizeCount = 0;
                 var resizeInterval = setInterval(function() {
                     resizeCount++;
+                    log("Boot resize " + resizeCount + "/10, term=" + term.cols + "x" + term.rows);
                     console_resize_event();
                     if (resizeCount >= 10) {
                         clearInterval(resizeInterval);
+                        log("Boot resize complete, final size: " + term.cols + "x" + term.rows);
                         // Import local files after VM has booted
                         importLocalFiles();
                     }
@@ -272,8 +284,19 @@
         // Handle messages from parent
         window.addEventListener('message', function(e) {
             if (e.data.type === 'term-resize') {
+                log("term-resize received: " + e.data.cols + "x" + e.data.rows);
+                // Update term dimensions BEFORE calling console_resize_event
+                if (term && e.data.cols && e.data.rows) {
+                    term.cols = e.data.cols;
+                    term.rows = e.data.rows;
+                    log("Updated term to " + term.cols + "x" + term.rows);
+                }
                 if (console_resize_event) {
+                    log("Calling console_resize_event, term_get_size will return: " +
+                        (term ? term.cols + "x" + term.rows : "no term"));
                     console_resize_event();
+                } else {
+                    log("console_resize_event not ready yet");
                 }
             }
             if (e.data.type === 'import-file') {
