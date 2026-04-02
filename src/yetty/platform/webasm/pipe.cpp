@@ -21,8 +21,8 @@ public:
         const char* bytes = static_cast<const char*>(data);
         _buffer.insert(_buffer.end(), bytes, bytes + size);
 
-        // Schedule async callback to notify listener
-        if (!_callbackPending && _listener) {
+        // Schedule async callback to notify EventLoop
+        if (!_callbackPending && _eventLoop) {
             _callbackPending = true;
             emscripten_async_call(onDataAvailable, this, 0);
         }
@@ -46,10 +46,6 @@ public:
         _eventLoop = loop;
     }
 
-    void setListener(EventListener* listener) override {
-        _listener = listener;
-    }
-
 private:
     static void onDataAvailable(void* arg) {
         auto* self = static_cast<WebasmPlatformInputPipe*>(arg);
@@ -60,18 +56,11 @@ private:
             return;
         }
 
-        // Read Event structs from buffer and dispatch (mirrors libuv-event-loop.cpp)
-        Event pipeEvent;
-        while (self->_buffer.size() >= sizeof(Event)) {
-            std::memcpy(&pipeEvent, self->_buffer.data(), sizeof(Event));
-            self->_buffer.erase(self->_buffer.begin(), self->_buffer.begin() + sizeof(Event));
-            ydebug("PlatformInputPipe: dispatching event type={}", static_cast<int>(pipeEvent.type));
-            self->_eventLoop->dispatch(pipeEvent);
-        }
+        // Notify EventLoop - it will read and dispatch
+        self->_eventLoop->onPlatformInputPipeReadable();
     }
 
     EventLoop* _eventLoop = nullptr;
-    EventListener* _listener = nullptr;
     std::vector<char> _buffer;
     bool _callbackPending = false;
 };

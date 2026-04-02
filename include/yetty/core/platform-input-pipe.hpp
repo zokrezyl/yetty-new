@@ -22,9 +22,8 @@ public:
     // Get read fd for polling (desktop only, returns -1 on webasm)
     virtual int readFd() const = 0;
 
-    // Called by EventLoop to connect (webasm needs these for dispatch)
+    // Called by EventLoop to connect (webasm needs this for notification)
     virtual void setEventLoop(EventLoop* loop) = 0;
-    virtual void setListener(EventListener* listener) = 0;
 
     // Platform-specific factory
     static Result<PlatformInputPipe*> create();

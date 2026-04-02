@@ -18,12 +18,19 @@ struct EventTypeHash {
 
 class EventLoopImpl : public EventLoop {
 public:
-    EventLoopImpl() = default;
+    explicit EventLoopImpl(PlatformInputPipe* pipe) : _platformInputPipe(pipe) {}
     ~EventLoopImpl() override = default;
 
     Result<void> start() override {
         ydebug("EventLoop::start (webasm) - setting up emscripten main loop");
         _running = true;
+
+        // Set up pipe notification if pipe provided
+        if (_platformInputPipe) {
+            _platformInputPipe->setEventLoop(this);
+            ydebug("EventLoop: pipe notification set up");
+        }
+
         // Set up browser main loop - runs at ~60fps via requestAnimationFrame
         // The callback fires timer events for registered timers
         emscripten_set_main_loop_arg(mainLoopCallback, this, 0, true);
@@ -155,26 +162,14 @@ public:
         return Ok(id);
     }
 
-    Result<PollId> createPlatformInputPipePoll(PlatformInputPipe* pipe) override {
-        auto pollResult = createPoll();
-        if (!pollResult) return pollResult;
-        PollId id = *pollResult;
-        _platformInputPipe = pipe;
-        _platformInputPipePollId = id;
-        pipe->setEventLoop(this);
-        return Ok(id);
-    }
+    void onPlatformInputPipeReadable() override {
+        if (!_platformInputPipe) return;
 
-    Result<void> startPlatformInputPipePoll(PollId /*id*/) override {
-        return Ok();  // No-op on webasm - pipe triggers listener directly
-    }
-
-    Result<void> registerPlatformInputPipePollListener(PollId id, EventListener* listener) override {
-        if (_platformInputPipe) {
-            _platformInputPipe->setListener(listener);
+        Event event;
+        while (_platformInputPipe->read(&event, sizeof(event)) == sizeof(event)) {
+            ydebug("EventLoop: dispatching pipe event type={}", static_cast<int>(event.type));
+            dispatch(event);
         }
-        _pollListeners[id].push_back(listener);
-        return Ok();
     }
 
     // Timer
@@ -283,12 +278,11 @@ private:
     PollId _nextPollId = 1;
     bool _running = false;
     PlatformInputPipe* _platformInputPipe = nullptr;
-    PollId _platformInputPipePollId = -1;
 };
 
 // Factory
-Result<EventLoop*> EventLoop::createImpl() noexcept {
-    return Ok(static_cast<EventLoop*>(new EventLoopImpl()));
+Result<EventLoop*> EventLoop::createImpl(PlatformInputPipe* pipe) noexcept {
+    return Ok(static_cast<EventLoop*>(new EventLoopImpl(pipe)));
 }
 
 } // namespace core

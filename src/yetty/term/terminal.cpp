@@ -28,8 +28,9 @@ public:
   Result<void> init() {
     ydebug("Terminal::init starting");
 
-    // Create EventLoop
-    auto eventLoopResult = core::EventLoop::create();
+    // Create EventLoop with pipe
+    auto* pipe = _terminalContext.yettyContext.appContext.platformInputPipe;
+    auto eventLoopResult = core::EventLoop::create(pipe);
     if (!eventLoopResult)
       return Err<void>("Failed to create EventLoop", eventLoopResult);
     _eventLoop = *eventLoopResult;
@@ -52,20 +53,24 @@ public:
     _screen = *screenResult;
     ydebug("Terminal: TerminalScreen created");
 
-    // Setup PlatformInputPipe poll - TerminalScreen receives platform events
-    auto* pipe = _terminalContext.yettyContext.appContext.platformInputPipe;
-    auto pipePollResult = _eventLoop->createPlatformInputPipePoll(pipe);
-    if (!pipePollResult)
-      return Err<void>("Failed to create PlatformInputPipe poll", pipePollResult);
-    auto pipePollId = *pipePollResult;
-    ydebug("Terminal: PlatformInputPipe poll created");
-
-    if (auto res = _eventLoop->registerPlatformInputPipePollListener(pipePollId, _screen); !res)
-      return Err<void>("Failed to register PlatformInputPipe poll listener", res);
-
-    if (auto res = _eventLoop->startPlatformInputPipePoll(pipePollId); !res)
-      return Err<void>("Failed to start PlatformInputPipe poll", res);
-    ydebug("Terminal: PlatformInputPipe poll started");
+    // Register TerminalScreen for platform input events (dispatched by type)
+    if (auto res = _eventLoop->registerListener(core::Event::Type::KeyDown, _screen); !res)
+      return Err<void>("Failed to register KeyDown listener", res);
+    if (auto res = _eventLoop->registerListener(core::Event::Type::KeyUp, _screen); !res)
+      return Err<void>("Failed to register KeyUp listener", res);
+    if (auto res = _eventLoop->registerListener(core::Event::Type::Char, _screen); !res)
+      return Err<void>("Failed to register Char listener", res);
+    if (auto res = _eventLoop->registerListener(core::Event::Type::MouseDown, _screen); !res)
+      return Err<void>("Failed to register MouseDown listener", res);
+    if (auto res = _eventLoop->registerListener(core::Event::Type::MouseUp, _screen); !res)
+      return Err<void>("Failed to register MouseUp listener", res);
+    if (auto res = _eventLoop->registerListener(core::Event::Type::MouseMove, _screen); !res)
+      return Err<void>("Failed to register MouseMove listener", res);
+    if (auto res = _eventLoop->registerListener(core::Event::Type::Scroll, _screen); !res)
+      return Err<void>("Failed to register Scroll listener", res);
+    if (auto res = _eventLoop->registerListener(core::Event::Type::Resize, _screen); !res)
+      return Err<void>("Failed to register Resize listener", res);
+    ydebug("Terminal: input event listeners registered");
 
     // Register TerminalScreen for Render events
     if (auto res = _eventLoop->registerListener(core::Event::Type::Render, _screen); !res)
