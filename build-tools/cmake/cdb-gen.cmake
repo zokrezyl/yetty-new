@@ -3,7 +3,7 @@
 # Outputs to ${CMAKE_BINARY_DIR}/assets/msdf-fonts/
 
 set(CDB_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets/msdf-fonts")
-set(FONT_DIR "${YETTY_ROOT}/assets")
+set(FONT_DIR "${YETTY_ROOT}/assets/fonts")
 
 set(FONT_FILES
     "${FONT_DIR}/DejaVuSansMNerdFontMono-Regular.ttf"

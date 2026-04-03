@@ -1,0 +1,68 @@
+# Yetty Terminal Configuration - Android
+# ========================================
+# Android-specific configuration for yetty.
+# Uses Termux shell when available.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Font Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+font:
+  family: "default"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rendering Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+rendering:
+  damage-tracking: true
+  show-fps: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Terminal Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+scrollback:
+  lines: 5000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shell Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+shell:
+  # Termux shell path - requires Termux to be installed
+  path: "/data/data/com.termux/files/usr/bin/bash"
+
+  env:
+    TERM: "xterm-256color"
+    COLORTERM: "truecolor"
+    # Termux environment setup
+    PREFIX: "/data/data/com.termux/files/usr"
+    HOME: "/data/data/com.termux/files/home"
+    PATH: "/data/data/com.termux/files/usr/bin:/data/data/com.termux/files/usr/bin/applets"
+    LD_LIBRARY_PATH: "/data/data/com.termux/files/usr/lib"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Plugins Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+plugins:
+  path: ""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RPC Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+rpc:
+  socket-path: ""
+  enabled: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shader Preloading Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+shaders:
+  preload:
+    cards:
+      - "0x0000-texture"
+      - "0x0003-ydraw"
+    glyphs: []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Debug Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+debug:
+  damage-rects: false

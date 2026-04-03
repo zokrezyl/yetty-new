@@ -9,8 +9,12 @@
 #include <yetty/core/platform-input-pipe.hpp>
 #include <yetty/core/event.hpp>
 #include <yetty/platform/pty-factory.hpp>
+#include <yetty/platform/extract-assets.hpp>
 #include <yetty/yetty.hpp>
 #include <ytrace/ytrace.hpp>
+
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/android_sink.h>
 
 #include <android/looper.h>
 #include <android/input.h>
@@ -23,6 +27,7 @@
 #include <atomic>
 #include <future>
 #include <cmath>
+#include <filesystem>
 
 std::string getCacheDir();
 std::string getRuntimeDir();
@@ -170,6 +175,15 @@ int32_t handleInputEvent(android_app* app, AInputEvent* event) {
 } // anonymous namespace
 
 void android_main(android_app* app) {
+    // Enable ytrace by default on Android
+    setenv("YTRACE_DEFAULT_ON", "yes", 1);
+
+    // Initialize spdlog with Android logcat sink
+    auto android_sink = std::make_shared<spdlog::sinks::android_sink_mt>("yetty");
+    auto logger = std::make_shared<spdlog::logger>("yetty", android_sink);
+    logger->set_level(spdlog::level::debug);
+    spdlog::set_default_logger(logger);
+
     using namespace yetty;
 
     AppState state;
@@ -178,9 +192,21 @@ void android_main(android_app* app) {
     app->onInputEvent = handleInputEvent;
 
     // 1. Config FIRST (before anything else)
-    auto cacheDir = getCacheDir();
-    auto runtimeDir = getRuntimeDir();
-    PlatformPaths paths = {cacheDir.c_str(), cacheDir.c_str(), runtimeDir.c_str(), nullptr};
+    namespace fs = std::filesystem;
+    auto cacheDir = fs::path(getCacheDir());
+    auto runtimeDir = fs::path(getRuntimeDir());
+    auto shadersDir = (cacheDir / "shaders").string();
+    auto fontsDir = (cacheDir / "fonts").string();
+
+    fs::create_directories(cacheDir);
+    fs::create_directories(runtimeDir);
+    fs::create_directories(fontsDir);
+
+    auto runtimeDirStr = runtimeDir.string();
+    PlatformPaths paths = {.shadersDir = shadersDir.c_str(),
+                           .fontsDir = fontsDir.c_str(),
+                           .runtimeDir = runtimeDirStr.c_str(),
+                           .binDir = nullptr};
 
     auto configResult = Config::create(0, nullptr, &paths);
     if (!configResult) {
@@ -189,6 +215,14 @@ void android_main(android_app* app) {
     }
     auto* config = *configResult;
     ydebug("main: Config created");
+
+    // Extract embedded assets (fonts, shaders) to cache directory
+    if (auto res = platform::extractAssets(config); !res) {
+        yerror("Failed to extract assets: {}", res.error().message());
+        delete config;
+        return;
+    }
+    ydebug("main: Assets extracted");
 
     // 2. Wait for window (main thread)
     while (!app->destroyRequested && !state.window) {
@@ -258,8 +292,8 @@ void android_main(android_app* app) {
     appContext.ptyFactory = ptyFactory;
     appContext.appGpuContext.instance = instance;
     appContext.appGpuContext.surface = surface;
-    appContext.appGpuContext.windowWidth = static_cast<uint32_t>(windowWidth);
-    appContext.appGpuContext.windowHeight = static_cast<uint32_t>(windowHeight);
+    appContext.appGpuContext.surfaceWidth = static_cast<uint32_t>(windowWidth);
+    appContext.appGpuContext.surfaceHeight = static_cast<uint32_t>(windowHeight);
 
     auto yettyResult = Yetty::create(appContext);
     if (!yettyResult) {
@@ -274,16 +308,7 @@ void android_main(android_app* app) {
     auto* yetty = *yettyResult;
     ydebug("main: Yetty created");
 
-    // 8. Initial resize event
-    {
-        auto event = core::Event::resizeEvent(
-            static_cast<float>(windowWidth),
-            static_cast<float>(windowHeight));
-        state.pipe->write(&event, sizeof(event));
-        ydebug("main: Posted initial resize {}x{}", windowWidth, windowHeight);
-    }
-
-    // 9. Render thread - just calls yetty->run()
+    // 8. Render thread - just calls yetty->run()
     std::atomic<bool> running{true};
     std::thread renderThread([yetty, &running]() {
         ydebug("Render thread started");
@@ -294,6 +319,15 @@ void android_main(android_app* app) {
         running = false;
         ydebug("Render thread finished");
     });
+
+    // 9. Initial resize event (after render thread starts, like desktop)
+    {
+        auto event = core::Event::resizeEvent(
+            static_cast<float>(windowWidth),
+            static_cast<float>(windowHeight));
+        state.pipe->write(&event, sizeof(event));
+        ydebug("main: Posted initial resize {}x{}", windowWidth, windowHeight);
+    }
 
     // 10. Main thread: ALooper event loop
     state.running = true;

@@ -436,20 +436,16 @@ start_emulator() {
             -netspeed full \
             -qemu -k en-us &
     else
-        # Normal mode: headless emulator + scrcpy for display
-        # Uses headless qemu binary (no libpulse dependency)
-        # scrcpy provides the visual display with full input support
-        info "Launching emulator in headless mode..."
+        # Normal mode: emulator with window
+        info "Launching emulator with window..."
         info "  - GPU mode: $gpu_mode"
-        info "  - Display via scrcpy (will launch after boot)"
         "$emulator_bin" -avd "$AVD_NAME" \
-            -no-window \
-            -no-audio \
             -gpu "$gpu_mode" \
             -no-snapshot-load \
             -skin 1920x1080 \
             -netdelay none \
-            -netspeed full &
+            -netspeed full \
+            -qemu -k en-us &
     fi
     EMULATOR_PID=$!
 
@@ -548,6 +544,15 @@ install_and_run() {
         adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME"
         sleep 3
 
+        # Verify yetty is actually running
+        if adb shell pidof "$PACKAGE_NAME" >/dev/null 2>&1; then
+            success "Yetty is running! (PID: $(adb shell pidof $PACKAGE_NAME))"
+        else
+            error "Yetty failed to start!"
+            info "Check logs: adb logcat -s yetty"
+            return 1
+        fi
+
         # Check if VNC port is listening
         if nc -z localhost $VNC_PORT 2>/dev/null; then
             success "Yetty VNC server is listening on port $VNC_PORT"
@@ -579,8 +584,16 @@ install_and_run() {
     else
         info "Starting Yetty..."
         adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME"
+        sleep 2
 
-        success "Yetty is running!"
+        # Verify yetty is actually running
+        if adb shell pidof "$PACKAGE_NAME" >/dev/null 2>&1; then
+            success "Yetty is running! (PID: $(adb shell pidof $PACKAGE_NAME))"
+        else
+            error "Yetty failed to start!"
+            info "Check logs: adb logcat -s yetty"
+            return 1
+        fi
 
         # Launch scrcpy for display
         if command -v scrcpy &>/dev/null; then

@@ -3,7 +3,7 @@
 # This runs BEFORE incbin so the GLOB finds the CDB files
 
 set(PREBUILT_CDB_DIR "${CMAKE_BINARY_DIR}/assets/msdf-fonts")
-set(FONT_DIR "${YETTY_ROOT}/assets")
+set(FONT_DIR "${YETTY_ROOT}/assets/fonts")
 
 set(CDB_FILES
     "DejaVuSansMNerdFontMono-Regular.cdb"
