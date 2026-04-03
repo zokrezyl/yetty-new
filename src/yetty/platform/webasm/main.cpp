@@ -377,8 +377,8 @@ int main(int argc, char** argv) {
     appContext.ptyFactory = ptyFactory;
     appContext.appGpuContext.instance = instance;
     appContext.appGpuContext.surface = surface;
-    appContext.appGpuContext.windowWidth = static_cast<uint32_t>(canvasWidth);
-    appContext.appGpuContext.windowHeight = static_cast<uint32_t>(canvasHeight);
+    appContext.appGpuContext.surfaceWidth = static_cast<uint32_t>(canvasWidth);
+    appContext.appGpuContext.surfaceHeight = static_cast<uint32_t>(canvasHeight);
 
     // Yetty
     auto yettyResult = Yetty::create(appContext);

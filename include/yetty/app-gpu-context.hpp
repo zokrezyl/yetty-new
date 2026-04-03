@@ -9,8 +9,12 @@ namespace yetty {
 struct AppGpuContext {
     WGPUInstance instance = nullptr;  // created by platform
     WGPUSurface surface = nullptr;    // created by platform (null for headless)
-    uint32_t windowWidth = 0;         // initial window width
-    uint32_t windowHeight = 0;        // initial window height
+
+    // Surface dimensions in actual pixels (not screen coordinates).
+    // On HiDPI displays: surfaceWidth/Height = windowWidth/Height * contentScale.
+    // These come from glfwGetFramebufferSize() and are used for wgpuSurfaceConfigure().
+    uint32_t surfaceWidth = 0;
+    uint32_t surfaceHeight = 0;
 };
 
 } // namespace yetty
