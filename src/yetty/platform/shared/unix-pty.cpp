@@ -11,7 +11,11 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <util.h>
+#else
 #include <pty.h>
+#endif
 #include <cstring>
 #include <vector>
 

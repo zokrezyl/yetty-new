@@ -151,8 +151,12 @@ int main(int argc, char **argv) {
   AppContext appContext{};
   appContext.appGpuContext.instance = instance;
   appContext.appGpuContext.surface = surface;
-  appContext.appGpuContext.windowWidth = static_cast<uint32_t>(width);
-  appContext.appGpuContext.windowHeight = static_cast<uint32_t>(height);
+
+  // Get framebuffer size (actual pixels, not screen coordinates)
+  int fbWidth, fbHeight;
+  glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+  appContext.appGpuContext.surfaceWidth = static_cast<uint32_t>(fbWidth);
+  appContext.appGpuContext.surfaceHeight = static_cast<uint32_t>(fbHeight);
   appContext.config = config;
   appContext.platformInputPipe = platformInputPipe;
   appContext.ptyFactory = ptyFactory;

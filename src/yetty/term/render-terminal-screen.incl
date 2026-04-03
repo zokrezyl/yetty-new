@@ -23,8 +23,8 @@ Result<void> TerminalScreenImpl::initRender() {
     surfaceConfig.device = yettyGpuContext.device;
     surfaceConfig.format = yettyGpuContext.surfaceFormat;
     surfaceConfig.usage = WGPUTextureUsage_RenderAttachment;
-    surfaceConfig.width = appGpuContext.windowWidth;
-    surfaceConfig.height = appGpuContext.windowHeight;
+    surfaceConfig.width = appGpuContext.surfaceWidth;
+    surfaceConfig.height = appGpuContext.surfaceHeight;
     surfaceConfig.presentMode = WGPUPresentMode_Fifo;
     wgpuSurfaceConfigure(appGpuContext.surface, &surfaceConfig);
     ydebug("TerminalScreen: surface configured {}x{}", surfaceConfig.width, surfaceConfig.height);

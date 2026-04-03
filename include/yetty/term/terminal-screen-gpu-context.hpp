@@ -9,7 +9,7 @@ class RasterFont;
 // TerminalScreen-level GPU context.
 // Contains only TerminalScreen's OWN decorations.
 // Access parent GPU context via terminalContext.yettyContext.yettyGpuContext
-// Access window dimensions via terminalContext.yettyContext.yettyGpuContext.appGpuContext.windowWidth/Height
+// Access surface dimensions via terminalContext.yettyContext.yettyGpuContext.appGpuContext.surfaceWidth/Height
 struct TerminalScreenGpuContext {
     GpuAllocator* allocator = nullptr;      // created/owned by TerminalScreen
     ShaderManager* shaderManager = nullptr; // created/owned by TerminalScreen

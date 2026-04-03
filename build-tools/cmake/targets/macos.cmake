@@ -10,9 +10,6 @@ if(YETTY_ENABLE_LIB_LIBMAGIC)
     include(${YETTY_ROOT}/build-tools/cmake/Libmagic.cmake)
 endif()
 
-# Add src/yetty (builds libraries)
-add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
-
 # Desktop-specific subdirectories
 if(YETTY_ENABLE_FEATURE_GPU)
     add_subdirectory(${YETTY_ROOT}/src/yetty/gpu ${CMAKE_BINARY_DIR}/src/yetty/gpu)
@@ -41,6 +38,7 @@ set(YETTY_PLATFORM_SOURCES
 
 # Create executable with core sources + platform
 add_executable(yetty
+    ${YETTY_SOURCES}
     ${YETTY_CORE_SOURCES}
     ${YETTY_DESKTOP_SOURCES}
     ${YETTY_PLATFORM_SOURCES}
@@ -88,8 +86,11 @@ if(YETTY_ENABLE_FEATURE_ASSETS)
 endif()
 
 # Ensure all runtime assets are in build output before yetty
-if(YETTY_ENABLE_FEATURE_CDB_GEN AND YETTY_ENABLE_FEATURE_ASSETS)
-    add_dependencies(yetty generate-cdb copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_dependencies(yetty copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
+endif()
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    add_dependencies(yetty generate-cdb)
 endif()
 
 # Verify all required assets are present

@@ -137,8 +137,8 @@ add_custom_command(TARGET yetty PRE_LINK
 add_custom_command(TARGET yetty POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${YETTY_ROOT}/build-tools/web/index.html ${CMAKE_BINARY_DIR}/index.html
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${YETTY_ROOT}/build-tools/web/serve.py ${CMAKE_BINARY_DIR}/serve.py
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${YETTY_ROOT}/docs/favicon.ico ${CMAKE_BINARY_DIR}/favicon.ico
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${YETTY_ROOT}/docs/apple-touch-icon.jpg ${CMAKE_BINARY_DIR}/apple-touch-icon.jpg
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${YETTY_ROOT}/assets/favicon.ico ${CMAKE_BINARY_DIR}/favicon.ico
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${YETTY_ROOT}/assets/apple-touch-icon.jpg ${CMAKE_BINARY_DIR}/apple-touch-icon.jpg
 )
 
 # Copy JSLinux files to build output
