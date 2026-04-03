@@ -147,8 +147,15 @@ WGPUSurface createSurface(WGPUInstance instance, CAMetalLayer* layer);
     appCtx.config = self.config;
     appCtx.platformInputPipe = self.pipe;
     appCtx.ptyFactory = self.ptyFactory;
-    appCtx.instance = self.instance;
-    appCtx.surface = self.surface;
+    appCtx.appGpuContext.instance = self.instance;
+    appCtx.appGpuContext.surface = self.surface;
+
+    // Get drawable size in actual pixels (not points)
+    CGSize drawableSize = self.metalView.bounds.size;
+    drawableSize.width *= self.metalView.metalLayer.contentsScale;
+    drawableSize.height *= self.metalView.metalLayer.contentsScale;
+    appCtx.appGpuContext.surfaceWidth = static_cast<uint32_t>(drawableSize.width);
+    appCtx.appGpuContext.surfaceHeight = static_cast<uint32_t>(drawableSize.height);
 
     auto yettyResult = Yetty::create(appCtx);
     if (!yettyResult) {

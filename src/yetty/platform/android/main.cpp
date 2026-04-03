@@ -15,6 +15,7 @@
 #include <android/looper.h>
 #include <android/input.h>
 #include <android/keycodes.h>
+#include <android/native_window.h>
 #include <android_native_app_glue.h>
 #include <webgpu/webgpu.h>
 
@@ -250,8 +251,10 @@ void android_main(android_app* app) {
     appContext.config = config;
     appContext.platformInputPipe = state.pipe;
     appContext.ptyFactory = ptyFactory;
-    appContext.instance = instance;
-    appContext.surface = surface;
+    appContext.appGpuContext.instance = instance;
+    appContext.appGpuContext.surface = surface;
+    appContext.appGpuContext.surfaceWidth = static_cast<uint32_t>(ANativeWindow_getWidth(state.window));
+    appContext.appGpuContext.surfaceHeight = static_cast<uint32_t>(ANativeWindow_getHeight(state.window));
 
     auto yettyResult = Yetty::create(appContext);
     if (!yettyResult) {
