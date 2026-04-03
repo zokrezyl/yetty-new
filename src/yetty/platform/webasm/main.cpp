@@ -19,6 +19,12 @@
 using namespace yetty;
 using namespace yetty::core;
 
+// Forward declarations for window.cpp functions (needed by onResize in anonymous namespace)
+namespace yetty::platform::webasm {
+void getFramebufferSize(int& width, int& height);
+bool updateCanvasSize();
+}
+
 namespace {
 
 //=============================================================================
@@ -225,19 +231,17 @@ EM_BOOL onResize(int, const EmscriptenUiEvent*, void* userData) {
     auto* pipe = static_cast<PlatformInputPipe*>(userData);
     if (!pipe) return EM_FALSE;
 
-    int width = EM_ASM_INT({
-        var c = document.getElementById('canvas');
-        return c ? c.width : window.innerWidth;
-    });
-    int height = EM_ASM_INT({
-        var c = document.getElementById('canvas');
-        return c ? c.height : window.innerHeight;
-    });
+    // First update the canvas size to match container, then read new dimensions
+    yetty::platform::webasm::updateCanvasSize();
+
+    int width, height;
+    yetty::platform::webasm::getFramebufferSize(width, height);
 
     Event event = Event::resizeEvent(
         static_cast<float>(width),
         static_cast<float>(height));
     pipe->write(&event, sizeof(event));
+    ydebug("onResize: Posted resize event {}x{}", width, height);
 
     return EM_FALSE;
 }
@@ -269,6 +273,7 @@ namespace webasm {
 bool createWindow(Config* config);
 void destroyWindow();
 void getFramebufferSize(int& width, int& height);
+bool updateCanvasSize();
 
 WGPUSurface createSurface(WGPUInstance instance);
 

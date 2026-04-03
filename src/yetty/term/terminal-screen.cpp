@@ -1095,17 +1095,47 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
     return Ok(true);
   }
 
-  // Resize - resize terminal grid and PTY
+  // Resize - reconfigure surface and resize terminal grid/PTY
   if (event.type == core::Event::Type::Resize) {
-    uint32_t newCols = static_cast<uint32_t>(event.resize.width / _cellWidth);
-    uint32_t newRows = static_cast<uint32_t>(event.resize.height / _cellHeight);
-    if (newCols > 0 && newRows > 0 && (newCols != static_cast<uint32_t>(_cols) || newRows != static_cast<uint32_t>(_rows))) {
-      resize(newCols, newRows);
-      auto* pty = _terminalScreenContext.terminalContext.pty;
-      if (pty) {
-        pty->resize(newCols, newRows);
+    if (event.resize.width <= 0 || event.resize.height <= 0) {
+      yerror("TerminalScreen: resize with zero dimensions {}x{}", event.resize.width, event.resize.height);
+      return Err<bool>("Resize with zero dimensions");
+    }
+    if (!_terminalScreenContext.terminalContext.yettyContext.yettyGpuContext.appGpuContext.surface) {
+      yerror("TerminalScreen: no surface for resize");
+      return Err<bool>("No surface for resize");
+    }
+    if (!_terminalScreenContext.terminalContext.yettyContext.yettyGpuContext.device) {
+      yerror("TerminalScreen: no device for resize");
+      return Err<bool>("No device for resize");
+    }
+
+    // Reconfigure surface
+    WGPUSurfaceConfiguration surfaceConfig = {};
+    surfaceConfig.device = _terminalScreenContext.terminalContext.yettyContext.yettyGpuContext.device;
+    surfaceConfig.format = _terminalScreenContext.terminalContext.yettyContext.yettyGpuContext.surfaceFormat;
+    surfaceConfig.usage = WGPUTextureUsage_RenderAttachment;
+    surfaceConfig.width = static_cast<uint32_t>(event.resize.width);
+    surfaceConfig.height = static_cast<uint32_t>(event.resize.height);
+    surfaceConfig.presentMode = WGPUPresentMode_Fifo;
+    wgpuSurfaceConfigure(_terminalScreenContext.terminalContext.yettyContext.yettyGpuContext.appGpuContext.surface, &surfaceConfig);
+    ydebug("TerminalScreen: surface {}x{}", surfaceConfig.width, surfaceConfig.height);
+
+    // Resize grid and PTY
+    uint32_t cols = static_cast<uint32_t>(event.resize.width / _cellWidth);
+    uint32_t rows = static_cast<uint32_t>(event.resize.height / _cellHeight);
+    if (cols == 0 || rows == 0) {
+      yerror("TerminalScreen: resize resulted in zero grid {}x{}", cols, rows);
+      return Err<bool>("Resize resulted in zero grid dimensions");
+    }
+    if (cols != static_cast<uint32_t>(_cols) || rows != static_cast<uint32_t>(_rows)) {
+      resize(cols, rows);
+      if (_terminalScreenContext.terminalContext.pty) {
+        _terminalScreenContext.terminalContext.pty->resize(cols, rows);
+      } else {
+        yerror("TerminalScreen: no PTY for resize");
       }
-      ydebug("TerminalScreen: resized to {}x{}", newCols, newRows);
+      ydebug("TerminalScreen: grid {}x{}", cols, rows);
     }
     _terminalScreenContext.terminalContext.eventLoop->requestRender();
     return Ok(true);

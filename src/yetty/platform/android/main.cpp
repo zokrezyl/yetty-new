@@ -8,6 +8,7 @@
 #include <yetty/config.hpp>
 #include <yetty/core/platform-input-pipe.hpp>
 #include <yetty/core/event.hpp>
+#include <yetty/incbin-assets.hpp>
 #include <yetty/platform/pty-factory.hpp>
 #include <yetty/platform/extract-assets.hpp>
 #include <yetty/yetty.hpp>
@@ -28,12 +29,56 @@
 #include <future>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <dlfcn.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 std::string getCacheDir();
 std::string getRuntimeDir();
 WGPUSurface createSurface(WGPUInstance instance, ANativeWindow* window);
 
 namespace {
+
+std::string getNativeLibDir() {
+    Dl_info info;
+    if (dladdr((void*)getNativeLibDir, &info) && info.dli_fname) {
+        std::string path = info.dli_fname;
+        auto pos = path.rfind('/');
+        if (pos != std::string::npos) {
+            return path.substr(0, pos);
+        }
+    }
+    return "";
+}
+
+void setupToyboxSymlinks(const std::string& binDir, const std::string& nativeLibDir) {
+    namespace fs = std::filesystem;
+    fs::create_directories(binDir);
+
+    std::string toyboxPath = nativeLibDir + "/libtoybox.so";
+    if (access(toyboxPath.c_str(), X_OK) != 0) {
+        yerror("toybox not found at {}", toyboxPath);
+        return;
+    }
+
+    const char* commands[] = {
+        "sh", "cat", "ls", "pwd", "echo", "env", "mkdir", "rm", "cp", "mv",
+        "chmod", "touch", "head", "tail", "grep", "sed", "sort", "wc", "tr",
+        "cut", "find", "xargs", "ps", "kill", "sleep", "date", "uname", "id",
+        "basename", "dirname", "realpath", "test", "true", "false", "clear",
+        nullptr
+    };
+
+    for (int i = 0; commands[i]; i++) {
+        std::string linkPath = binDir + "/" + commands[i];
+        unlink(linkPath.c_str());
+        if (symlink(toyboxPath.c_str(), linkPath.c_str()) == 0) {
+            ydebug("Created symlink: {} -> {}", linkPath, toyboxPath);
+        }
+    }
+    ydebug("Toybox symlinks created in {}", binDir);
+}
 
 struct AppState {
     std::atomic<bool> running{false};
@@ -159,6 +204,19 @@ void handleAppCmd(android_app* app, int32_t cmd) {
         case APP_CMD_TERM_WINDOW:
             state->window = nullptr;
             break;
+        case APP_CMD_CONFIG_CHANGED:
+        case APP_CMD_WINDOW_RESIZED:
+            // Handle rotation, split-screen, or window resize
+            if (state->window && state->pipe) {
+                int32_t newWidth = ANativeWindow_getWidth(state->window);
+                int32_t newHeight = ANativeWindow_getHeight(state->window);
+                ydebug("handleAppCmd: Window resized to {}x{}", newWidth, newHeight);
+                auto event = yetty::core::Event::resizeEvent(
+                    static_cast<float>(newWidth),
+                    static_cast<float>(newHeight));
+                state->pipe->write(&event, sizeof(event));
+            }
+            break;
     }
 }
 
@@ -191,22 +249,54 @@ void android_main(android_app* app) {
     app->onAppCmd = handleAppCmd;
     app->onInputEvent = handleInputEvent;
 
-    // 1. Config FIRST (before anything else)
+    // 1. Setup paths and toybox
     namespace fs = std::filesystem;
     auto cacheDir = fs::path(getCacheDir());
     auto runtimeDir = fs::path(getRuntimeDir());
     auto shadersDir = (cacheDir / "shaders").string();
     auto fontsDir = (cacheDir / "fonts").string();
+    auto binDir = (cacheDir / "bin").string();
 
     fs::create_directories(cacheDir);
     fs::create_directories(runtimeDir);
     fs::create_directories(fontsDir);
 
+    // Setup toybox symlinks (only once, if not already done)
+    auto nativeLibDir = getNativeLibDir();
+    std::string shLink = binDir + "/sh";
+    if (access(shLink.c_str(), F_OK) != 0) {
+        setupToyboxSymlinks(binDir, nativeLibDir);
+    }
+
+    ydebug("main: Toybox ready in {}", binDir);
+
+    // Set HOME so config can find XDG config path
+    setenv("HOME", cacheDir.string().c_str(), 1);
+
+    // Extract default config before Config::create
+    auto configDir = cacheDir / ".config" / "yetty";
+    fs::create_directories(configDir);
+    auto configPath = configDir / "config.yaml";
+    if (!fs::exists(configPath)) {
+        auto assetsResult = IncbinAssets::create();
+        if (assetsResult) {
+            auto* assets = *assetsResult;
+            auto configData = assets->getString("default-config.yaml");
+            if (!configData.empty()) {
+                std::ofstream out(configPath);
+                out.write(configData.data(), configData.size());
+                ydebug("main: Extracted default config to {}", configPath.string());
+            }
+            delete assets;
+        }
+    }
+
     auto runtimeDirStr = runtimeDir.string();
+    auto binDirStr = binDir;
     PlatformPaths paths = {.shadersDir = shadersDir.c_str(),
                            .fontsDir = fontsDir.c_str(),
                            .runtimeDir = runtimeDirStr.c_str(),
-                           .binDir = nullptr};
+                           .binDir = binDirStr.c_str()};
 
     auto configResult = Config::create(0, nullptr, &paths);
     if (!configResult) {
