@@ -119,7 +119,7 @@ void handleMotionEvent(AppState* state, AInputEvent* event) {
                 break;
             case AMOTION_EVENT_ACTION_MOVE:
                 ev.type = Event::Type::MouseMove;
-                ev.mouseMove = {x, y, 0};
+                ev.mouse = {x, y, 0, 0};
                 state->pipe->write(&ev, sizeof(ev));
                 break;
         }

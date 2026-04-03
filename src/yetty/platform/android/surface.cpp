@@ -10,12 +10,12 @@ WGPUSurface createSurface(WGPUInstance instance, ANativeWindow* window) {
         return nullptr;
     }
 
-    WGPUSurfaceDescriptorFromAndroidNativeWindow androidDesc = {};
-    androidDesc.chain.sType = WGPUSType_SurfaceDescriptorFromAndroidNativeWindow;
-    androidDesc.window = window;
+    WGPUSurfaceSourceAndroidNativeWindow androidSource = {};
+    androidSource.chain.sType = WGPUSType_SurfaceSourceAndroidNativeWindow;
+    androidSource.window = window;
 
     WGPUSurfaceDescriptor surfaceDesc = {};
-    surfaceDesc.nextInChain = reinterpret_cast<WGPUChainedStruct*>(&androidDesc);
+    surfaceDesc.nextInChain = &androidSource.chain;
 
     WGPUSurface surface = wgpuInstanceCreateSurface(instance, &surfaceDesc);
     if (!surface) {

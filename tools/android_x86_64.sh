@@ -436,21 +436,20 @@ start_emulator() {
             -netspeed full \
             -qemu -k en-us &
     else
-        # Normal mode with Qt GUI
-        # -skin 1920x1080: landscape fullscreen
-        # -screen touch: single-touch mode (still has Ctrl pinch-zoom issue)
-        # -netdelay none -netspeed full: ensure network is enabled with no throttling
-        # -qemu -k en-us: keyboard layout
-        info "Launching emulator (this may take a minute)..."
+        # Normal mode: headless emulator + scrcpy for display
+        # Uses headless qemu binary (no libpulse dependency)
+        # scrcpy provides the visual display with full input support
+        info "Launching emulator in headless mode..."
         info "  - GPU mode: $gpu_mode"
+        info "  - Display via scrcpy (will launch after boot)"
         "$emulator_bin" -avd "$AVD_NAME" \
+            -no-window \
+            -no-audio \
             -gpu "$gpu_mode" \
             -no-snapshot-load \
             -skin 1920x1080 \
-            -screen touch \
             -netdelay none \
-            -netspeed full \
-            -qemu -k en-us -usb -device usb-mouse &
+            -netspeed full &
     fi
     EMULATOR_PID=$!
 
@@ -582,6 +581,15 @@ install_and_run() {
         adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME"
 
         success "Yetty is running!"
+
+        # Launch scrcpy for display
+        if command -v scrcpy &>/dev/null; then
+            info "Launching scrcpy for display..."
+            scrcpy --window-title "Yetty Android" &
+        else
+            warn "scrcpy not installed. Install with: sudo apt install scrcpy"
+            warn "Then run 'scrcpy' manually to view the emulator display"
+        fi
     fi
 
     echo ""

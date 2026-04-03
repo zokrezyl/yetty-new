@@ -1,5 +1,8 @@
 # Android build target
 
+# Disable desktop-only libraries
+set(YETTY_ENABLE_LIB_GLFW OFF CACHE BOOL "" FORCE)
+
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
 # native_app_glue from Android NDK
@@ -19,8 +22,7 @@ endif()
 set(ANDROID_ASSETS_DIR "${ANDROID_BUILD_DIR}/assets")
 file(MAKE_DIRECTORY ${ANDROID_ASSETS_DIR})
 
-# Add src/yetty (builds libraries)
-add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
+# Note: src/yetty is already added by shared.cmake
 
 # VNC server/client support
 if(YETTY_ENABLE_FEATURE_VNC)
@@ -41,10 +43,10 @@ set(YETTY_PLATFORM_SOURCES
 
 # Create shared library with core sources + android platform
 add_library(yetty SHARED
+    ${YETTY_SOURCES}
     ${YETTY_CORE_SOURCES}
     ${YETTY_ANDROID_SOURCES}
     ${YETTY_PLATFORM_SOURCES}
-    ${YETTY_ROOT}/src/yetty/msdf-gen/generator.cpp
 )
 
 target_include_directories(yetty PRIVATE ${YETTY_INCLUDES} ${YETTY_RENDERER_INCLUDES} ${JPEG_INCLUDE_DIRS} ${BROTLI_INCLUDE_DIR})
