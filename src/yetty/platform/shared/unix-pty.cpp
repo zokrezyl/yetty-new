@@ -2,6 +2,7 @@
 
 #include <yetty/platform/pty.hpp>
 #include <yetty/platform/pty-factory.hpp>
+#include <yetty/config.hpp>
 #include "fd-pty-poll-source.hpp"
 #include <ytrace/ytrace.hpp>
 
@@ -73,8 +74,8 @@ public:
         stop();
     }
 
-    Result<void> init(Config* /*config*/) {
-        _shell = "/bin/bash";
+    Result<void> init(Config* config) {
+        _shell = config->get<std::string>("shell/path", "/bin/bash");
         _cols = 80;
         _rows = 24;
 

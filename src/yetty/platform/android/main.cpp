@@ -15,6 +15,7 @@
 #include <android/looper.h>
 #include <android/input.h>
 #include <android/keycodes.h>
+#include <android/native_window.h>
 #include <android_native_app_glue.h>
 #include <webgpu/webgpu.h>
 
@@ -245,13 +246,20 @@ void android_main(android_app* app) {
     }
     ydebug("main: WebGPU surface created");
 
-    // 6. AppContext + Yetty (main thread)
+    // 6. Get window dimensions
+    int32_t windowWidth = ANativeWindow_getWidth(state.window);
+    int32_t windowHeight = ANativeWindow_getHeight(state.window);
+    ydebug("main: Window size {}x{}", windowWidth, windowHeight);
+
+    // 7. AppContext + Yetty (main thread)
     AppContext appContext{};
     appContext.config = config;
     appContext.platformInputPipe = state.pipe;
     appContext.ptyFactory = ptyFactory;
-    appContext.instance = instance;
-    appContext.surface = surface;
+    appContext.appGpuContext.instance = instance;
+    appContext.appGpuContext.surface = surface;
+    appContext.appGpuContext.windowWidth = static_cast<uint32_t>(windowWidth);
+    appContext.appGpuContext.windowHeight = static_cast<uint32_t>(windowHeight);
 
     auto yettyResult = Yetty::create(appContext);
     if (!yettyResult) {
@@ -266,7 +274,16 @@ void android_main(android_app* app) {
     auto* yetty = *yettyResult;
     ydebug("main: Yetty created");
 
-    // 8. Render thread - just calls yetty->run()
+    // 8. Initial resize event
+    {
+        auto event = core::Event::resizeEvent(
+            static_cast<float>(windowWidth),
+            static_cast<float>(windowHeight));
+        state.pipe->write(&event, sizeof(event));
+        ydebug("main: Posted initial resize {}x{}", windowWidth, windowHeight);
+    }
+
+    // 9. Render thread - just calls yetty->run()
     std::atomic<bool> running{true};
     std::thread renderThread([yetty, &running]() {
         ydebug("Render thread started");
@@ -278,7 +295,7 @@ void android_main(android_app* app) {
         ydebug("Render thread finished");
     });
 
-    // 9. Main thread: ALooper event loop
+    // 10. Main thread: ALooper event loop
     state.running = true;
     while (running && !app->destroyRequested) {
         int events;

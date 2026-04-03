@@ -3,6 +3,21 @@
 
 # Note: variables.cmake is included from root CMakeLists.txt
 
+# Determine platform name for config file selection
+if(YETTY_ANDROID)
+    set(YETTY_PLATFORM "android")
+elseif(YETTY_IOS)
+    set(YETTY_PLATFORM "ios")
+elseif(EMSCRIPTEN)
+    set(YETTY_PLATFORM "webasm")
+elseif(WIN32)
+    set(YETTY_PLATFORM "windows")
+elseif(APPLE)
+    set(YETTY_PLATFORM "macos")
+else()
+    set(YETTY_PLATFORM "linux")
+endif()
+
 # Auto-generate MSDF CDB fonts if not present (must run before incbin)
 if(YETTY_ENABLE_FEATURE_MSDF_GEN)
     include(${YETTY_ROOT}/build-tools/cmake/prepare-assets.cmake)
@@ -239,10 +254,14 @@ function(yetty_embed_assets TARGET)
         return()
     endif()
 
-    # Embed logo and default config
+    # Embed logo and default config (platform-specific if exists)
+    set(DEFAULT_CONFIG_FILE "${YETTY_ROOT}/assets/default-config-${YETTY_PLATFORM}.yaml")
+    if(NOT EXISTS "${DEFAULT_CONFIG_FILE}")
+        set(DEFAULT_CONFIG_FILE "${YETTY_ROOT}/assets/default-config.yaml")
+    endif()
     incbin_add_resources(${TARGET}
         Logo "${YETTY_ROOT}/docs/logo.jpeg"
-        DefaultConfig "${YETTY_ROOT}/assets/default-config.yaml"
+        DefaultConfig "${DEFAULT_CONFIG_FILE}"
     )
 
     # Embed shaders from source
