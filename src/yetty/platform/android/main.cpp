@@ -8,13 +8,19 @@
 #include <yetty/config.hpp>
 #include <yetty/core/platform-input-pipe.hpp>
 #include <yetty/core/event.hpp>
+#include <yetty/incbin-assets.hpp>
 #include <yetty/platform/pty-factory.hpp>
+#include <yetty/platform/extract-assets.hpp>
 #include <yetty/yetty.hpp>
 #include <ytrace/ytrace.hpp>
+
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/android_sink.h>
 
 #include <android/looper.h>
 #include <android/input.h>
 #include <android/keycodes.h>
+#include <android/native_window.h>
 #include <android_native_app_glue.h>
 #include <webgpu/webgpu.h>
 
@@ -22,6 +28,12 @@
 #include <atomic>
 #include <future>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <dlfcn.h>
+#include <jni.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 std::string getCacheDir();
 std::string getRuntimeDir();
@@ -29,15 +41,81 @@ WGPUSurface createSurface(WGPUInstance instance, ANativeWindow* window);
 
 namespace {
 
+std::string getNativeLibDir() {
+    Dl_info info;
+    if (dladdr((void*)getNativeLibDir, &info) && info.dli_fname) {
+        std::string path = info.dli_fname;
+        auto pos = path.rfind('/');
+        if (pos != std::string::npos) {
+            return path.substr(0, pos);
+        }
+    }
+    return "";
+}
+
+void setupToyboxSymlinks(const std::string& binDir, const std::string& nativeLibDir) {
+    namespace fs = std::filesystem;
+    fs::create_directories(binDir);
+
+    std::string toyboxPath = nativeLibDir + "/libtoybox.so";
+    if (access(toyboxPath.c_str(), X_OK) != 0) {
+        yerror("toybox not found at {}", toyboxPath);
+        return;
+    }
+
+    const char* commands[] = {
+        "sh", "cat", "ls", "pwd", "echo", "env", "mkdir", "rm", "cp", "mv",
+        "chmod", "touch", "head", "tail", "grep", "sed", "sort", "wc", "tr",
+        "cut", "find", "xargs", "ps", "kill", "sleep", "date", "uname", "id",
+        "basename", "dirname", "realpath", "test", "true", "false", "clear",
+        nullptr
+    };
+
+    for (int i = 0; commands[i]; i++) {
+        std::string linkPath = binDir + "/" + commands[i];
+        unlink(linkPath.c_str());
+        if (symlink(toyboxPath.c_str(), linkPath.c_str()) == 0) {
+            ydebug("Created symlink: {} -> {}", linkPath, toyboxPath);
+        }
+    }
+    ydebug("Toybox symlinks created in {}", binDir);
+}
+
 struct AppState {
     std::atomic<bool> running{false};
     yetty::core::PlatformInputPipe* pipe = nullptr;
     ANativeWindow* window = nullptr;
+    android_app* app = nullptr;
     bool pinchActive = false;
     float lastPinchDistance = 0.0f;
     float lastPinchCenterX = 0.0f;
     float lastPinchCenterY = 0.0f;
 };
+
+void showSoftKeyboard(android_app* app) {
+    JNIEnv* env;
+    app->activity->vm->AttachCurrentThread(&env, nullptr);
+
+    jclass activityClass = env->GetObjectClass(app->activity->clazz);
+    jmethodID getSystemService = env->GetMethodID(activityClass, "getSystemService",
+        "(Ljava/lang/String;)Ljava/lang/Object;");
+
+    jstring serviceName = env->NewStringUTF("input_method");
+    jobject inputMethodManager = env->CallObjectMethod(app->activity->clazz,
+        getSystemService, serviceName);
+
+    if (inputMethodManager) {
+        jclass immClass = env->GetObjectClass(inputMethodManager);
+        jmethodID toggleSoftInput = env->GetMethodID(immClass, "toggleSoftInput", "(II)V");
+        env->CallVoidMethod(inputMethodManager, toggleSoftInput, 2, 0); // SHOW_FORCED=2
+        env->DeleteLocalRef(immClass);
+        env->DeleteLocalRef(inputMethodManager);
+    }
+    env->DeleteLocalRef(serviceName);
+    env->DeleteLocalRef(activityClass);
+
+    app->activity->vm->DetachCurrentThread();
+}
 
 int translateKeyCode(int keyCode) {
     switch (keyCode) {
@@ -115,10 +193,14 @@ void handleMotionEvent(AppState* state, AInputEvent* event) {
                 ev.type = Event::Type::MouseUp;
                 ev.mouse = {x, y, 0, 0};
                 state->pipe->write(&ev, sizeof(ev));
+                // Show soft keyboard on tap
+                if (state->app) {
+                    showSoftKeyboard(state->app);
+                }
                 break;
             case AMOTION_EVENT_ACTION_MOVE:
                 ev.type = Event::Type::MouseMove;
-                ev.mouseMove = {x, y, 0};
+                ev.mouse = {x, y, 0, 0};
                 state->pipe->write(&ev, sizeof(ev));
                 break;
         }
@@ -142,6 +224,59 @@ void handleKeyEvent(AppState* state, AInputEvent* event) {
     ev.type = (action == AKEY_EVENT_ACTION_DOWN) ? Event::Type::KeyDown : Event::Type::KeyUp;
     ev.key = {translateKeyCode(keyCode), mods, 0};
     state->pipe->write(&ev, sizeof(ev));
+
+    // Also send Char event for printable characters
+    if (action == AKEY_EVENT_ACTION_DOWN) {
+        uint32_t codepoint = 0;
+        bool isShift = (metaState & AMETA_SHIFT_ON) != 0;
+
+        if (keyCode >= AKEYCODE_A && keyCode <= AKEYCODE_Z) {
+            codepoint = isShift ? ('A' + keyCode - AKEYCODE_A) : ('a' + keyCode - AKEYCODE_A);
+        } else if (keyCode >= AKEYCODE_0 && keyCode <= AKEYCODE_9) {
+            // Shifted number keys for symbols
+            if (isShift) {
+                const char shifted[] = ")!@#$%^&*(";
+                codepoint = shifted[keyCode - AKEYCODE_0];
+            } else {
+                codepoint = '0' + keyCode - AKEYCODE_0;
+            }
+        } else if (keyCode == AKEYCODE_SPACE) {
+            codepoint = ' ';
+        } else if (keyCode == AKEYCODE_ENTER) {
+            codepoint = '\r';
+        } else if (keyCode == AKEYCODE_TAB) {
+            codepoint = '\t';
+        } else if (keyCode == AKEYCODE_MINUS) {
+            codepoint = isShift ? '_' : '-';
+        } else if (keyCode == AKEYCODE_EQUALS) {
+            codepoint = isShift ? '+' : '=';
+        } else if (keyCode == AKEYCODE_LEFT_BRACKET) {
+            codepoint = isShift ? '{' : '[';
+        } else if (keyCode == AKEYCODE_RIGHT_BRACKET) {
+            codepoint = isShift ? '}' : ']';
+        } else if (keyCode == AKEYCODE_BACKSLASH) {
+            codepoint = isShift ? '|' : '\\';
+        } else if (keyCode == AKEYCODE_SEMICOLON) {
+            codepoint = isShift ? ':' : ';';
+        } else if (keyCode == AKEYCODE_APOSTROPHE) {
+            codepoint = isShift ? '"' : '\'';
+        } else if (keyCode == AKEYCODE_COMMA) {
+            codepoint = isShift ? '<' : ',';
+        } else if (keyCode == AKEYCODE_PERIOD) {
+            codepoint = isShift ? '>' : '.';
+        } else if (keyCode == AKEYCODE_SLASH) {
+            codepoint = isShift ? '?' : '/';
+        } else if (keyCode == AKEYCODE_GRAVE) {
+            codepoint = isShift ? '~' : '`';
+        }
+
+        if (codepoint > 0) {
+            Event charEv;
+            charEv.type = Event::Type::Char;
+            charEv.chr = {codepoint, mods};
+            state->pipe->write(&charEv, sizeof(charEv));
+        }
+    }
 }
 
 void handleAppCmd(android_app* app, int32_t cmd) {
@@ -152,6 +287,19 @@ void handleAppCmd(android_app* app, int32_t cmd) {
             break;
         case APP_CMD_TERM_WINDOW:
             state->window = nullptr;
+            break;
+        case APP_CMD_CONFIG_CHANGED:
+        case APP_CMD_WINDOW_RESIZED:
+            // Handle rotation, split-screen, or window resize
+            if (state->window && state->pipe) {
+                int32_t newWidth = ANativeWindow_getWidth(state->window);
+                int32_t newHeight = ANativeWindow_getHeight(state->window);
+                ydebug("handleAppCmd: Window resized to {}x{}", newWidth, newHeight);
+                auto event = yetty::core::Event::resizeEvent(
+                    static_cast<float>(newWidth),
+                    static_cast<float>(newHeight));
+                state->pipe->write(&event, sizeof(event));
+            }
             break;
     }
 }
@@ -169,17 +317,71 @@ int32_t handleInputEvent(android_app* app, AInputEvent* event) {
 } // anonymous namespace
 
 void android_main(android_app* app) {
+    // Enable ytrace by default on Android
+    setenv("YTRACE_DEFAULT_ON", "yes", 1);
+
+    // Initialize spdlog with Android logcat sink
+    auto android_sink = std::make_shared<spdlog::sinks::android_sink_mt>("yetty");
+    auto logger = std::make_shared<spdlog::logger>("yetty", android_sink);
+    logger->set_level(spdlog::level::debug);
+    spdlog::set_default_logger(logger);
+
     using namespace yetty;
 
     AppState state;
+    state.app = app;
     app->userData = &state;
     app->onAppCmd = handleAppCmd;
     app->onInputEvent = handleInputEvent;
 
-    // 1. Config FIRST (before anything else)
-    auto cacheDir = getCacheDir();
-    auto runtimeDir = getRuntimeDir();
-    PlatformPaths paths = {cacheDir.c_str(), cacheDir.c_str(), runtimeDir.c_str(), nullptr};
+    // 1. Setup paths and toybox
+    namespace fs = std::filesystem;
+    auto cacheDir = fs::path(getCacheDir());
+    auto runtimeDir = fs::path(getRuntimeDir());
+    auto shadersDir = (cacheDir / "shaders").string();
+    auto fontsDir = (cacheDir / "fonts").string();
+    auto binDir = (cacheDir / "bin").string();
+
+    fs::create_directories(cacheDir);
+    fs::create_directories(runtimeDir);
+    fs::create_directories(fontsDir);
+
+    // Setup toybox symlinks (only once, if not already done)
+    auto nativeLibDir = getNativeLibDir();
+    std::string shLink = binDir + "/sh";
+    if (access(shLink.c_str(), F_OK) != 0) {
+        setupToyboxSymlinks(binDir, nativeLibDir);
+    }
+
+    ydebug("main: Toybox ready in {}", binDir);
+
+    // Set HOME so config can find XDG config path
+    setenv("HOME", cacheDir.string().c_str(), 1);
+
+    // Extract default config before Config::create
+    auto configDir = cacheDir / ".config" / "yetty";
+    fs::create_directories(configDir);
+    auto configPath = configDir / "config.yaml";
+    if (!fs::exists(configPath)) {
+        auto assetsResult = IncbinAssets::create();
+        if (assetsResult) {
+            auto* assets = *assetsResult;
+            auto configData = assets->getString("default-config.yaml");
+            if (!configData.empty()) {
+                std::ofstream out(configPath);
+                out.write(configData.data(), configData.size());
+                ydebug("main: Extracted default config to {}", configPath.string());
+            }
+            delete assets;
+        }
+    }
+
+    auto runtimeDirStr = runtimeDir.string();
+    auto binDirStr = binDir;
+    PlatformPaths paths = {.shadersDir = shadersDir.c_str(),
+                           .fontsDir = fontsDir.c_str(),
+                           .runtimeDir = runtimeDirStr.c_str(),
+                           .binDir = binDirStr.c_str()};
 
     auto configResult = Config::create(0, nullptr, &paths);
     if (!configResult) {
@@ -188,6 +390,14 @@ void android_main(android_app* app) {
     }
     auto* config = *configResult;
     ydebug("main: Config created");
+
+    // Extract embedded assets (fonts, shaders) to cache directory
+    if (auto res = platform::extractAssets(config); !res) {
+        yerror("Failed to extract assets: {}", res.error().message());
+        delete config;
+        return;
+    }
+    ydebug("main: Assets extracted");
 
     // 2. Wait for window (main thread)
     while (!app->destroyRequested && !state.window) {
@@ -245,13 +455,20 @@ void android_main(android_app* app) {
     }
     ydebug("main: WebGPU surface created");
 
-    // 6. AppContext + Yetty (main thread)
+    // 6. Get window dimensions
+    int32_t windowWidth = ANativeWindow_getWidth(state.window);
+    int32_t windowHeight = ANativeWindow_getHeight(state.window);
+    ydebug("main: Window size {}x{}", windowWidth, windowHeight);
+
+    // 7. AppContext + Yetty (main thread)
     AppContext appContext{};
     appContext.config = config;
     appContext.platformInputPipe = state.pipe;
     appContext.ptyFactory = ptyFactory;
-    appContext.instance = instance;
-    appContext.surface = surface;
+    appContext.appGpuContext.instance = instance;
+    appContext.appGpuContext.surface = surface;
+    appContext.appGpuContext.surfaceWidth = static_cast<uint32_t>(windowWidth);
+    appContext.appGpuContext.surfaceHeight = static_cast<uint32_t>(windowHeight);
 
     auto yettyResult = Yetty::create(appContext);
     if (!yettyResult) {
@@ -278,7 +495,16 @@ void android_main(android_app* app) {
         ydebug("Render thread finished");
     });
 
-    // 9. Main thread: ALooper event loop
+    // 9. Initial resize event (after render thread starts, like desktop)
+    {
+        auto event = core::Event::resizeEvent(
+            static_cast<float>(windowWidth),
+            static_cast<float>(windowHeight));
+        state.pipe->write(&event, sizeof(event));
+        ydebug("main: Posted initial resize {}x{}", windowWidth, windowHeight);
+    }
+
+    // 10. Main thread: ALooper event loop
     state.running = true;
     while (running && !app->destroyRequested) {
         int events;

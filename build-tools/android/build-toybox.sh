@@ -174,8 +174,7 @@ chmod +x "$TOYBOX_BIN"
 # Also copy to jniLibs as .so for execution (Android SELinux allows executing from lib/)
 JNILIBS_DIR="$BUILD_DIR/jniLibs/$ANDROID_ABI"
 mkdir -p "$JNILIBS_DIR"
-cp "$TOYBOX_BIN" "$JNILIBS_DIR/libtoybox.so"
-chmod +x "$JNILIBS_DIR/libtoybox.so"
+install -m 755 "$TOYBOX_BIN" "$JNILIBS_DIR/libtoybox.so"
 echo "Copied toybox to jniLibs: $JNILIBS_DIR/libtoybox.so"
 
 # Note: Do NOT create symlinks here!

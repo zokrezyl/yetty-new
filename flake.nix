@@ -36,7 +36,7 @@
           includeEmulator = true;
           includeSystemImages = true;
           systemImageTypes = [ "google_apis" ];
-          abiVersions = [ "arm64-v8a" ];
+          abiVersions = [ "arm64-v8a" "x86_64" ];
         };
 
         androidSdk = androidComposition.androidsdk;

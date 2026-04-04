@@ -27,12 +27,16 @@ Result<void> TerminalScreenImpl::initRender() {
     surfaceConfig.height = appGpuContext.surfaceHeight;
     surfaceConfig.presentMode = WGPUPresentMode_Fifo;
     wgpuSurfaceConfigure(appGpuContext.surface, &surfaceConfig);
-    ydebug("TerminalScreen: surface configured {}x{}", surfaceConfig.width, surfaceConfig.height);
+    _surfaceWidth = surfaceConfig.width;
+    _surfaceHeight = surfaceConfig.height;
+    ydebug("TerminalScreen: surface configured {}x{}", _surfaceWidth, _surfaceHeight);
   }
 
   // Build render context for layers
   TerminalScreenRenderContext terminalScreenRenderContext{
       .terminalScreenContext = _terminalScreenContext,
+      .surfaceWidth = _surfaceWidth,
+      .surfaceHeight = _surfaceHeight,
   };
 
   // Create render layer (TextGridLayer for now)
@@ -153,6 +157,8 @@ Result<void> TerminalScreenImpl::render(WGPURenderPassEncoder pass) {
   TerminalScreenRenderContext terminalScreenRenderContext{
       .terminalScreenContext = _terminalScreenContext,
       .pass = pass,
+      .surfaceWidth = _surfaceWidth,
+      .surfaceHeight = _surfaceHeight,
   };
 
   // Render layers

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <yetty/msdf-glyph-data.h>
+#include <yetty/msdf-glyph-data.hpp>
 #include <string>
 #include <vector>
 #include <functional>

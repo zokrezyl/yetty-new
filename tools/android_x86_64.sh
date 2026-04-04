@@ -436,21 +436,16 @@ start_emulator() {
             -netspeed full \
             -qemu -k en-us &
     else
-        # Normal mode with Qt GUI
-        # -skin 1920x1080: landscape fullscreen
-        # -screen touch: single-touch mode (still has Ctrl pinch-zoom issue)
-        # -netdelay none -netspeed full: ensure network is enabled with no throttling
-        # -qemu -k en-us: keyboard layout
-        info "Launching emulator (this may take a minute)..."
+        # Normal mode: emulator with window
+        info "Launching emulator with window..."
         info "  - GPU mode: $gpu_mode"
         "$emulator_bin" -avd "$AVD_NAME" \
             -gpu "$gpu_mode" \
             -no-snapshot-load \
             -skin 1920x1080 \
-            -screen touch \
             -netdelay none \
             -netspeed full \
-            -qemu -k en-us -usb -device usb-mouse &
+            -qemu -k en-us &
     fi
     EMULATOR_PID=$!
 
@@ -549,6 +544,15 @@ install_and_run() {
         adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME"
         sleep 3
 
+        # Verify yetty is actually running
+        if adb shell pidof "$PACKAGE_NAME" >/dev/null 2>&1; then
+            success "Yetty is running! (PID: $(adb shell pidof $PACKAGE_NAME))"
+        else
+            error "Yetty failed to start!"
+            info "Check logs: adb logcat -s yetty"
+            return 1
+        fi
+
         # Check if VNC port is listening
         if nc -z localhost $VNC_PORT 2>/dev/null; then
             success "Yetty VNC server is listening on port $VNC_PORT"
@@ -580,8 +584,25 @@ install_and_run() {
     else
         info "Starting Yetty..."
         adb shell am start -n "$PACKAGE_NAME/$ACTIVITY_NAME"
+        sleep 2
 
-        success "Yetty is running!"
+        # Verify yetty is actually running
+        if adb shell pidof "$PACKAGE_NAME" >/dev/null 2>&1; then
+            success "Yetty is running! (PID: $(adb shell pidof $PACKAGE_NAME))"
+        else
+            error "Yetty failed to start!"
+            info "Check logs: adb logcat -s yetty"
+            return 1
+        fi
+
+        # Launch scrcpy for display
+        if command -v scrcpy &>/dev/null; then
+            info "Launching scrcpy for display..."
+            scrcpy --window-title "Yetty Android" &
+        else
+            warn "scrcpy not installed. Install with: sudo apt install scrcpy"
+            warn "Then run 'scrcpy' manually to view the emulator display"
+        fi
     fi
 
     echo ""

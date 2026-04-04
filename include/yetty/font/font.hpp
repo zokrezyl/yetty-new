@@ -7,6 +7,11 @@
 
 namespace yetty {
 
+// Space glyph index - ALL font implementations MUST return this value for space (U+0020).
+// This allows terminal code to use a single constant for empty/blank cells without
+// querying each font. Font implementations must map codepoint 0x20 to this index.
+constexpr uint32_t SPACE_GLYPH_INDEX = 0;
+
 // Font render method - must match RENDER_METHOD_* in terminal-screen.wgsl
 // Encoded in cell style byte bits 5-7
 enum class FontRenderMethod : uint8_t {

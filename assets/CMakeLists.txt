@@ -5,10 +5,10 @@ set(FONTS_DST_DIR ${ASSETS_DST_DIR}/fonts)
 
 # Font files to copy
 set(FONT_FILES
-    ${ASSETS_SRC_DIR}/DejaVuSansMNerdFontMono-Regular.ttf
-    ${ASSETS_SRC_DIR}/DejaVuSansMNerdFontMono-Bold.ttf
-    ${ASSETS_SRC_DIR}/DejaVuSansMNerdFontMono-Oblique.ttf
-    ${ASSETS_SRC_DIR}/DejaVuSansMNerdFontMono-BoldOblique.ttf
+    ${ASSETS_SRC_DIR}/fonts/DejaVuSansMNerdFontMono-Regular.ttf
+    ${ASSETS_SRC_DIR}/fonts/DejaVuSansMNerdFontMono-Bold.ttf
+    ${ASSETS_SRC_DIR}/fonts/DejaVuSansMNerdFontMono-Oblique.ttf
+    ${ASSETS_SRC_DIR}/fonts/DejaVuSansMNerdFontMono-BoldOblique.ttf
 )
 
 # Create custom target to copy assets

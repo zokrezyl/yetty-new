@@ -47,6 +47,31 @@ public:
         // Find existing by name
         for (size_t i = 0; i < _resourceSets.size(); i++) {
             if (_resourceSets[i].name == gpuResourceSet.name) {
+                // Check if storage buffer needs resize
+                if (gpuResourceSet.bufferSize > 0 &&
+                    gpuResourceSet.bufferSize != _entries[i].storageBufferSize) {
+                    // Buffer size changed - recreate buffer
+                    if (_entries[i].storageBuffer) {
+                        wgpuBufferRelease(_entries[i].storageBuffer);
+                        _entries[i].storageBuffer = nullptr;
+                    }
+                    std::string storageLabel = gpuResourceSet.name + "_storage";
+                    WGPUBufferDescriptor bufferDescriptor = {};
+                    bufferDescriptor.label = WGPU_STR(storageLabel.c_str());
+                    bufferDescriptor.size = gpuResourceSet.bufferSize;
+                    bufferDescriptor.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
+                    _entries[i].storageBuffer = _gpuAllocator->createBuffer(bufferDescriptor);
+                    _entries[i].storageBufferSize = gpuResourceSet.bufferSize;
+                    // Recreate bind group since buffer changed
+                    if (_bindGroup) {
+                        wgpuBindGroupRelease(_bindGroup);
+                        _bindGroup = nullptr;
+                    }
+                    if (auto result = createBindGroup(); !result) {
+                        return Err<void>("Failed to recreate bind group after buffer resize", result);
+                    }
+                    ydebug("GpuResourceBinder: resized storage buffer '{}' to {} bytes, recreated bind group", gpuResourceSet.name, gpuResourceSet.bufferSize);
+                }
                 _resourceSets[i] = gpuResourceSet;
                 return uploadData(i);
             }

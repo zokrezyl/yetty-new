@@ -120,6 +120,7 @@ static void scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
 }
 
 static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
+    ydebug("framebufferSizeCallback: {}x{}", width, height);
     auto* pipe = static_cast<core::PlatformInputPipe*>(glfwGetWindowUserPointer(window));
     if (!pipe) {
         yerror("framebufferSizeCallback: null platformInputPipe");
@@ -127,6 +128,7 @@ static void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
     }
     auto event = core::Event::resizeEvent(static_cast<float>(width), static_cast<float>(height));
     pipe->write(&event, sizeof(event));
+    ydebug("framebufferSizeCallback: event written");
 }
 
 static void windowCloseCallback(GLFWwindow* window) {
