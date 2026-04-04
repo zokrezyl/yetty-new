@@ -181,9 +181,8 @@ private:
     }
 
     void updateUniforms(const TerminalScreenRenderContext& terminalScreenRenderContext) {
-        auto& appGpuContext = terminalScreenRenderContext.terminalScreenContext.terminalContext.yettyContext.yettyGpuContext.appGpuContext;
-        float width = static_cast<float>(appGpuContext.surfaceWidth);
-        float height = static_cast<float>(appGpuContext.surfaceHeight);
+        float width = static_cast<float>(terminalScreenRenderContext.surfaceWidth);
+        float height = static_cast<float>(terminalScreenRenderContext.surfaceHeight);
 
         // Orthographic projection
         memset(&_uniforms, 0, sizeof(_uniforms));

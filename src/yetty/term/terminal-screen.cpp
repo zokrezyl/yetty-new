@@ -187,6 +187,8 @@ private:
   void clearBuffer(std::vector<TextCell> &buffer);
   void switchToScreen(bool alt);
   void resizeInternal(int rows, int cols, VTermStateFields *fields);
+  void resizeBuffer(int bufidx, int newRows, int newCols, bool active, VTermStateFields *fields);
+  int linePopcount(const std::vector<TextCell> &buffer, int row, int cols) const;
 
   void composeViewBuffer();
   void decompressLine(const ScrollbackLine &line, int viewRow);
@@ -219,6 +221,7 @@ private:
   int _cursorShape = 1; // VTERM_PROP_CURSORSHAPE_BLOCK
   bool _isAltScreen = false;
   bool _hasDamage = false;
+  bool _reflow = true;
 
   // Pen state
   Pen _pen;
@@ -231,6 +234,10 @@ private:
   // Cell size in pixels
   float _cellWidth = 10.0f;
   float _cellHeight = 20.0f;
+
+  // Current surface size (updated on resize)
+  uint32_t _surfaceWidth = 0;
+  uint32_t _surfaceHeight = 0;
 
   // Font (owned by TerminalScreenImpl)
   Font* _font = nullptr;
@@ -415,42 +422,249 @@ void TerminalScreenImpl::resize(uint32_t cols, uint32_t rows) {
   }
 }
 
-void TerminalScreenImpl::resizeInternal(int rows, int cols,
-                                        VTermStateFields *fields) {
-  if (rows == _rows && cols == _cols && !_primaryBuffer.empty())
-    return;
+int TerminalScreenImpl::linePopcount(const std::vector<TextCell> &buffer, int row, int cols) const {
+  int col = cols - 1;
+  while (col >= 0) {
+    size_t idx = static_cast<size_t>(row * cols + col);
+    if (idx < buffer.size() && buffer[idx].glyph != SPACE_GLYPH_INDEX) {
+      break;
+    }
+    col--;
+  }
+  return col + 1;
+}
 
-  bool altActive = _isAltScreen;
+void TerminalScreenImpl::resizeBuffer(int bufidx, int newRows, int newCols,
+                                      bool active, VTermStateFields *fields) {
+  int oldRows = _rows;
+  int oldCols = _cols;
 
-  // TODO: reflow logic from old resizeBuffer — for now simple resize
-  size_t newSize = static_cast<size_t>(rows * cols);
-  _primaryBuffer.resize(newSize);
-  clearBuffer(_primaryBuffer);
+  std::vector<TextCell> &oldBuffer = (bufidx == 0) ? _primaryBuffer : _altBuffer;
+  VTermLineInfo *oldLineinfo = fields ? fields->lineinfos[bufidx] : nullptr;
 
-  if (!_altBuffer.empty()) {
-    _altBuffer.resize(newSize);
-    clearBuffer(_altBuffer);
+  std::vector<TextCell> newBuffer(static_cast<size_t>(newRows * newCols));
+  clearBuffer(newBuffer);
+
+  VTermLineInfo *newLineinfo = nullptr;
+  if (fields) {
+    newLineinfo = static_cast<VTermLineInfo *>(
+        calloc(static_cast<size_t>(newRows), sizeof(VTermLineInfo)));
   }
 
-  // Handle lineinfo resize for vterm
-  if (fields) {
-    for (int i = 0; i < 2; i++) {
-      if (fields->lineinfos[i]) {
-        free(fields->lineinfos[i]);
-        fields->lineinfos[i] = static_cast<VTermLineInfo *>(
-            calloc(static_cast<size_t>(rows), sizeof(VTermLineInfo)));
+  int oldRow = oldRows - 1;
+  int newRow = newRows - 1;
+
+  VTermPos oldCursor = {_cursorRow, _cursorCol};
+  VTermPos newCursor = {-1, -1};
+
+  int finalBlankRow = newRows;
+
+  while (oldRow >= 0 && !oldBuffer.empty()) {
+    int oldRowEnd = oldRow;
+
+    while (_reflow && oldLineinfo && oldRow >= 0 && oldLineinfo[oldRow].continuation) {
+      oldRow--;
+    }
+    int oldRowStart = oldRow;
+
+    int width = 0;
+    for (int row = oldRowStart; row <= oldRowEnd; row++) {
+      if (_reflow && row < (oldRows - 1) && oldLineinfo && oldLineinfo[row + 1].continuation) {
+        width += oldCols;
+      } else {
+        width += linePopcount(oldBuffer, row, oldCols);
       }
     }
+
+    if (finalBlankRow == (newRow + 1) && width == 0) {
+      finalBlankRow = newRow;
+    }
+
+    int newHeight = _reflow ? (width ? (width + newCols - 1) / newCols : 1) : 1;
+
+    int newRowEnd = newRow;
+    int newRowStart = newRow - newHeight + 1;
+
+    oldRow = oldRowStart;
+    int oldCol = 0;
+
+    int spareRows = newRows - finalBlankRow;
+
+    if (newRowStart < 0 && spareRows >= 0 &&
+        (!active || newCursor.row == -1 || (newCursor.row - newRowStart) < newRows)) {
+      int downwards = -newRowStart;
+      if (downwards > spareRows) downwards = spareRows;
+      int rowcount = newRows - downwards;
+
+      for (int r = rowcount - 1; r >= 0; r--) {
+        for (int c = 0; c < newCols; c++) {
+          newBuffer[(r + downwards) * newCols + c] = newBuffer[r * newCols + c];
+        }
+        if (newLineinfo) {
+          newLineinfo[r + downwards] = newLineinfo[r];
+        }
+      }
+
+      newRow += downwards;
+      newRowStart += downwards;
+      newRowEnd += downwards;
+
+      if (newCursor.row >= 0) newCursor.row += downwards;
+      finalBlankRow += downwards;
+    }
+
+    if (newRowStart < 0) {
+      if (oldRowStart <= oldCursor.row && oldCursor.row <= oldRowEnd) {
+        newCursor.row = 0;
+        newCursor.col = oldCursor.col;
+        if (newCursor.col >= newCols) newCursor.col = newCols - 1;
+      }
+      break;
+    }
+
+    for (newRow = newRowStart, oldRow = oldRowStart; newRow <= newRowEnd; newRow++) {
+      int count = (width >= newCols) ? newCols : width;
+      width -= count;
+
+      int newCol = 0;
+
+      while (count > 0) {
+        size_t oldIdx = static_cast<size_t>(oldRow * oldCols + oldCol);
+        size_t newIdx = static_cast<size_t>(newRow * newCols + newCol);
+
+        if (oldIdx < oldBuffer.size() && newIdx < newBuffer.size()) {
+          newBuffer[newIdx] = oldBuffer[oldIdx];
+        }
+
+        if (oldCursor.row == oldRow && oldCursor.col == oldCol) {
+          newCursor.row = newRow;
+          newCursor.col = newCol;
+        }
+
+        oldCol++;
+        if (oldCol == oldCols) {
+          oldRow++;
+          if (!_reflow) {
+            newCol++;
+            break;
+          }
+          oldCol = 0;
+        }
+
+        newCol++;
+        count--;
+      }
+
+      if (oldCursor.row == oldRow && oldCursor.col >= oldCol) {
+        newCursor.row = newRow;
+        newCursor.col = oldCursor.col - oldCol + newCol;
+        if (newCursor.col >= newCols) newCursor.col = newCols - 1;
+      }
+
+      if (newLineinfo) {
+        newLineinfo[newRow].continuation = (newRow > newRowStart) ? 1 : 0;
+      }
+    }
+
+    oldRow = oldRowStart - 1;
+    newRow = newRowStart - 1;
+  }
+
+  if (oldCursor.row <= oldRow) {
+    newCursor.row = 0;
+    newCursor.col = oldCursor.col;
+    if (newCursor.col >= newCols) newCursor.col = newCols - 1;
+  }
+
+  if (active && (newCursor.row == -1 || newCursor.col == -1)) {
+    newCursor.row = 0;
+    newCursor.col = 0;
+  }
+
+  if (oldRow >= 0 && bufidx == 0) {
+    _visibleBuffer = &oldBuffer;
+    for (int row = 0; row <= oldRow; row++) {
+      pushLineToScrollback(row);
+    }
+    if (active) {
+      newCursor.row -= (oldRow + 1);
+      if (newCursor.row < 0) newCursor.row = 0;
+    }
+  }
+
+  if (newRow >= 0) {
+    int moveRows = newRows - newRow - 1;
+    for (int r = 0; r < moveRows; r++) {
+      for (int c = 0; c < newCols; c++) {
+        newBuffer[r * newCols + c] = newBuffer[(r + newRow + 1) * newCols + c];
+      }
+      if (newLineinfo) {
+        newLineinfo[r] = newLineinfo[r + newRow + 1];
+      }
+    }
+
+    newCursor.row -= (newRow + 1);
+    if (newCursor.row < 0) newCursor.row = 0;
+
+    for (int r = moveRows; r < newRows; r++) {
+      for (int c = 0; c < newCols; c++) {
+        size_t idx = static_cast<size_t>(r * newCols + c);
+        newBuffer[idx].glyph = SPACE_GLYPH_INDEX;
+      }
+      if (newLineinfo) {
+        newLineinfo[r] = VTermLineInfo{};
+      }
+    }
+  }
+
+  if (bufidx == 0) {
+    _primaryBuffer = std::move(newBuffer);
+  } else {
+    _altBuffer = std::move(newBuffer);
+  }
+
+  if (fields && oldLineinfo) {
+    free(oldLineinfo);
+    fields->lineinfos[bufidx] = newLineinfo;
+  }
+
+  if (active) {
+    _cursorRow = newCursor.row;
+    _cursorCol = newCursor.col;
+  }
+}
+
+void TerminalScreenImpl::resizeInternal(int rows, int cols, VTermStateFields *fields) {
+  if (rows == _rows && cols == _cols && !_primaryBuffer.empty()) {
+    return;
+  }
+
+  ydebug("TerminalScreen::resizeInternal {}x{} -> {}x{} isAltScreen={}", _cols, _rows, cols, rows, _isAltScreen);
+
+  int oldRows = _rows;
+  bool altscreenActive = _isAltScreen;
+
+  resizeBuffer(0, rows, cols, !altscreenActive, fields);
+
+  if (!_altBuffer.empty()) {
+    resizeBuffer(1, rows, cols, altscreenActive, fields);
+  } else if (rows != oldRows && fields && fields->lineinfos[1]) {
+    free(fields->lineinfos[1]);
+    fields->lineinfos[1] = static_cast<VTermLineInfo *>(
+        calloc(static_cast<size_t>(rows), sizeof(VTermLineInfo)));
   }
 
   _rows = rows;
   _cols = cols;
 
-  _viewBuffer.resize(newSize);
+  size_t numCells = static_cast<size_t>(rows * cols);
+  _viewBuffer.clear();
+  _viewBuffer.resize(numCells);
   _scratchBuffer.resize(cols);
-  _visibleBuffer = altActive ? &_altBuffer : &_primaryBuffer;
 
-  if (!altActive) {
+  _visibleBuffer = altscreenActive ? &_altBuffer : &_primaryBuffer;
+
+  if (!altscreenActive) {
     _scrollOffset = 0;
   }
 
@@ -555,7 +769,7 @@ void TerminalScreenImpl::decompressLine(const ScrollbackLine &line,
 
   // Fill remainder with default cells
   TextCell defaultCell{};
-  defaultCell.glyph = 0;  // Glyph index 0 = space/empty
+  defaultCell.glyph = SPACE_GLYPH_INDEX;
   defaultCell.fgR = _defaultFg.rgb.red;
   defaultCell.fgG = _defaultFg.rgb.green;
   defaultCell.fgB = _defaultFg.rgb.blue;
@@ -604,7 +818,7 @@ void TerminalScreenImpl::clearBuffer(std::vector<TextCell> &buffer) {
   colorToRGB(_defaultBg, bgR, bgG, bgB);
 
   TextCell defaultCell{};
-  defaultCell.glyph = 0;  // Glyph index 0 = space/empty
+  defaultCell.glyph = SPACE_GLYPH_INDEX;
   defaultCell.fgR = fgR;
   defaultCell.fgG = fgG;
   defaultCell.fgB = fgB;
@@ -882,7 +1096,7 @@ int TerminalScreenImpl::onErase(VTermRect rect, int, void *user) {
   }
 
   TextCell defaultCell{};
-  defaultCell.glyph = 0;  // Glyph index 0 = space/empty
+  defaultCell.glyph = SPACE_GLYPH_INDEX;
   defaultCell.fgR = fgR;
   defaultCell.fgG = fgG;
   defaultCell.fgB = fgB;
@@ -1119,7 +1333,9 @@ Result<bool> TerminalScreenImpl::onEvent(const core::Event &event) {
     surfaceConfig.height = static_cast<uint32_t>(event.resize.height);
     surfaceConfig.presentMode = WGPUPresentMode_Fifo;
     wgpuSurfaceConfigure(_terminalScreenContext.terminalContext.yettyContext.yettyGpuContext.appGpuContext.surface, &surfaceConfig);
-    ydebug("TerminalScreen: surface {}x{}", surfaceConfig.width, surfaceConfig.height);
+    _surfaceWidth = surfaceConfig.width;
+    _surfaceHeight = surfaceConfig.height;
+    ydebug("TerminalScreen: surface {}x{}", _surfaceWidth, _surfaceHeight);
 
     // Resize grid and PTY
     uint32_t cols = static_cast<uint32_t>(event.resize.width / _cellWidth);

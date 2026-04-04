@@ -31,6 +31,7 @@
 #include <filesystem>
 #include <fstream>
 #include <dlfcn.h>
+#include <jni.h>
 #include <unistd.h>
 #include <sys/stat.h>
 
@@ -84,11 +85,37 @@ struct AppState {
     std::atomic<bool> running{false};
     yetty::core::PlatformInputPipe* pipe = nullptr;
     ANativeWindow* window = nullptr;
+    android_app* app = nullptr;
     bool pinchActive = false;
     float lastPinchDistance = 0.0f;
     float lastPinchCenterX = 0.0f;
     float lastPinchCenterY = 0.0f;
 };
+
+void showSoftKeyboard(android_app* app) {
+    JNIEnv* env;
+    app->activity->vm->AttachCurrentThread(&env, nullptr);
+
+    jclass activityClass = env->GetObjectClass(app->activity->clazz);
+    jmethodID getSystemService = env->GetMethodID(activityClass, "getSystemService",
+        "(Ljava/lang/String;)Ljava/lang/Object;");
+
+    jstring serviceName = env->NewStringUTF("input_method");
+    jobject inputMethodManager = env->CallObjectMethod(app->activity->clazz,
+        getSystemService, serviceName);
+
+    if (inputMethodManager) {
+        jclass immClass = env->GetObjectClass(inputMethodManager);
+        jmethodID toggleSoftInput = env->GetMethodID(immClass, "toggleSoftInput", "(II)V");
+        env->CallVoidMethod(inputMethodManager, toggleSoftInput, 2, 0); // SHOW_FORCED=2
+        env->DeleteLocalRef(immClass);
+        env->DeleteLocalRef(inputMethodManager);
+    }
+    env->DeleteLocalRef(serviceName);
+    env->DeleteLocalRef(activityClass);
+
+    app->activity->vm->DetachCurrentThread();
+}
 
 int translateKeyCode(int keyCode) {
     switch (keyCode) {
@@ -166,6 +193,10 @@ void handleMotionEvent(AppState* state, AInputEvent* event) {
                 ev.type = Event::Type::MouseUp;
                 ev.mouse = {x, y, 0, 0};
                 state->pipe->write(&ev, sizeof(ev));
+                // Show soft keyboard on tap
+                if (state->app) {
+                    showSoftKeyboard(state->app);
+                }
                 break;
             case AMOTION_EVENT_ACTION_MOVE:
                 ev.type = Event::Type::MouseMove;
@@ -193,6 +224,59 @@ void handleKeyEvent(AppState* state, AInputEvent* event) {
     ev.type = (action == AKEY_EVENT_ACTION_DOWN) ? Event::Type::KeyDown : Event::Type::KeyUp;
     ev.key = {translateKeyCode(keyCode), mods, 0};
     state->pipe->write(&ev, sizeof(ev));
+
+    // Also send Char event for printable characters
+    if (action == AKEY_EVENT_ACTION_DOWN) {
+        uint32_t codepoint = 0;
+        bool isShift = (metaState & AMETA_SHIFT_ON) != 0;
+
+        if (keyCode >= AKEYCODE_A && keyCode <= AKEYCODE_Z) {
+            codepoint = isShift ? ('A' + keyCode - AKEYCODE_A) : ('a' + keyCode - AKEYCODE_A);
+        } else if (keyCode >= AKEYCODE_0 && keyCode <= AKEYCODE_9) {
+            // Shifted number keys for symbols
+            if (isShift) {
+                const char shifted[] = ")!@#$%^&*(";
+                codepoint = shifted[keyCode - AKEYCODE_0];
+            } else {
+                codepoint = '0' + keyCode - AKEYCODE_0;
+            }
+        } else if (keyCode == AKEYCODE_SPACE) {
+            codepoint = ' ';
+        } else if (keyCode == AKEYCODE_ENTER) {
+            codepoint = '\r';
+        } else if (keyCode == AKEYCODE_TAB) {
+            codepoint = '\t';
+        } else if (keyCode == AKEYCODE_MINUS) {
+            codepoint = isShift ? '_' : '-';
+        } else if (keyCode == AKEYCODE_EQUALS) {
+            codepoint = isShift ? '+' : '=';
+        } else if (keyCode == AKEYCODE_LEFT_BRACKET) {
+            codepoint = isShift ? '{' : '[';
+        } else if (keyCode == AKEYCODE_RIGHT_BRACKET) {
+            codepoint = isShift ? '}' : ']';
+        } else if (keyCode == AKEYCODE_BACKSLASH) {
+            codepoint = isShift ? '|' : '\\';
+        } else if (keyCode == AKEYCODE_SEMICOLON) {
+            codepoint = isShift ? ':' : ';';
+        } else if (keyCode == AKEYCODE_APOSTROPHE) {
+            codepoint = isShift ? '"' : '\'';
+        } else if (keyCode == AKEYCODE_COMMA) {
+            codepoint = isShift ? '<' : ',';
+        } else if (keyCode == AKEYCODE_PERIOD) {
+            codepoint = isShift ? '>' : '.';
+        } else if (keyCode == AKEYCODE_SLASH) {
+            codepoint = isShift ? '?' : '/';
+        } else if (keyCode == AKEYCODE_GRAVE) {
+            codepoint = isShift ? '~' : '`';
+        }
+
+        if (codepoint > 0) {
+            Event charEv;
+            charEv.type = Event::Type::Char;
+            charEv.chr = {codepoint, mods};
+            state->pipe->write(&charEv, sizeof(charEv));
+        }
+    }
 }
 
 void handleAppCmd(android_app* app, int32_t cmd) {
@@ -245,6 +329,7 @@ void android_main(android_app* app) {
     using namespace yetty;
 
     AppState state;
+    state.app = app;
     app->userData = &state;
     app->onAppCmd = handleAppCmd;
     app->onInputEvent = handleInputEvent;
