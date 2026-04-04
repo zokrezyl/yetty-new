@@ -136,6 +136,17 @@ static void windowCloseCallback(GLFWwindow* window) {
     ydebug("Window close requested");
 }
 
+static void windowRefreshCallback(GLFWwindow* window) {
+    auto* pipe = static_cast<core::PlatformInputPipe*>(glfwGetWindowUserPointer(window));
+    if (!pipe) {
+        yerror("windowRefreshCallback: null platformInputPipe");
+        return;
+    }
+    auto event = core::Event::renderEvent();
+    pipe->write(&event, sizeof(event));
+    ydebug("windowRefreshCallback: render event written");
+}
+
 } // anonymous namespace
 
 // Set up all GLFW callbacks for the window
@@ -147,6 +158,7 @@ void setupWindowCallbacks(GLFWwindow* window) {
     glfwSetScrollCallback(window, scrollCallback);
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
     glfwSetWindowCloseCallback(window, windowCloseCallback);
+    glfwSetWindowRefreshCallback(window, windowRefreshCallback);
     ydebug("OS event loop: Callbacks set up");
 }
 
