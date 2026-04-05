@@ -1,0 +1,94 @@
+#pragma once
+
+#include <yetty/core/result.hpp>
+#include <yetty/core/factory-object.hpp>
+#include <cstdint>
+#include <vector>
+
+namespace yetty {
+
+// Constants for image atlas
+constexpr uint32_t IMAGE_ATLAS_SIZE = 2048;       // 2048x2048 = 16MB RGBA8
+
+// Opaque handle for texture atlas regions
+struct TextureHandle {
+    uint32_t id;
+
+    bool isValid() const { return id != 0; }
+    static TextureHandle invalid() { return {0}; }
+};
+
+// Atlas position (returned by getAtlasPosition after createAtlas)
+struct AtlasPosition {
+    uint32_t x;
+    uint32_t y;
+};
+
+// Configuration for GpuTextureManager
+struct GpuTextureConfig {
+    uint32_t initialAtlasSize = IMAGE_ATLAS_SIZE;  // 2048x2048
+    uint32_t maxAtlasSize = 8192;                  // Max atlas dimension
+};
+
+/**
+ * GpuTextureManager - CPU-side texture atlas packer.
+ *
+ * Protocol:
+ *   1. Cards call allocate(w, h) to declare their texture size → TextureHandle
+ *   2. gpu-screen calls createAtlas() when texture cards enter/exit (Loop 3)
+ *   3. Cards call write(handle, pixels) to push pixel data into the atlas
+ *   4. GpuMemoryManager aggregates into GpuResourceSet for GPU upload
+ */
+class GpuTextureManager : public core::FactoryObject<GpuTextureManager> {
+public:
+    using Config = GpuTextureConfig;
+
+    static Result<GpuTextureManager*> createImpl(Config config = {});
+
+    virtual ~GpuTextureManager() = default;
+
+    // =========================================================================
+    // Card API — called by individual cards
+    // =========================================================================
+
+    // Allocate a texture handle with declared size (RGBA8, width * height * 4 bytes)
+    virtual Result<TextureHandle> allocate(uint32_t width, uint32_t height) = 0;
+
+    // Write pixels into the atlas region for this handle (RGBA8, width * height * 4 bytes)
+    virtual Result<void> write(TextureHandle handle, const uint8_t* pixels) = 0;
+
+    // Get the atlas position assigned by createAtlas (for card metadata)
+    virtual AtlasPosition getAtlasPosition(TextureHandle handle) const = 0;
+
+    // =========================================================================
+    // gpu-screen API — called by gpu-screen / GpuMemoryManager
+    // =========================================================================
+
+    // Clear all texture handles. Called before cards re-allocate on layout change.
+    virtual void clearHandles() = 0;
+
+    // Pack atlas layout from all allocated handles and right-size the atlas.
+    // Called after all cards have re-allocated.
+    virtual Result<void> createAtlas() = 0;
+
+    // =========================================================================
+    // Accessors
+    // =========================================================================
+    virtual uint32_t atlasWidth() const = 0;
+    virtual uint32_t atlasHeight() const = 0;
+    virtual const uint8_t* atlasData() const = 0;
+    virtual uint32_t atlasDataSize() const = 0;
+
+    struct Stats {
+        uint32_t textureCount;
+        uint32_t atlasWidth;
+        uint32_t atlasHeight;
+        uint32_t usedPixels;
+    };
+    virtual Stats getStats() const = 0;
+
+protected:
+    GpuTextureManager() = default;
+};
+
+}  // namespace yetty

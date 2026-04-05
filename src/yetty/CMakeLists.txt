@@ -35,6 +35,9 @@ set(YETTY_SOURCES
     ${YETTY_ROOT}/src/yetty/tree-like.cpp
     ${YETTY_ROOT}/src/yetty/gpu-allocator.cpp
     ${YETTY_ROOT}/src/yetty/gpu-resource-binder.cpp
+    ${YETTY_ROOT}/src/yetty/gpu-memory-manager.cpp
+    ${YETTY_ROOT}/src/yetty/gpu-buffer-manager.cpp
+    ${YETTY_ROOT}/src/yetty/gpu-texture-manager.cpp
     ${YETTY_ROOT}/src/yetty/shader-manager.cpp
     ${YETTY_ROOT}/src/yetty/shared-bind-group.cpp
 )
