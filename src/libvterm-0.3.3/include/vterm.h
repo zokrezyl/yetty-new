@@ -73,6 +73,8 @@ static inline void vterm_color_rgb(VTermColor *col, uint8_t red, uint8_t green, 
   col->blue = blue;
 }
 
+int vterm_color_is_equal(const VTermColor *a, const VTermColor *b);
+
 typedef enum {
   /* VTERM_VALUETYPE_NONE = 0 */
   VTERM_VALUETYPE_BOOL = 1,
