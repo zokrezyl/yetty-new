@@ -104,7 +104,8 @@ static int lookup_colour(const VTermState *state, int palette, const long args[]
       return argcount ? 1 : 0;
     }
 
-    vterm_color_indexed(col, args[0]);
+    /* yetty: lookup RGB from palette instead of storing index */
+    lookup_colour_palette(state, args[0], col);
 
     return argcount ? 1 : 0;
 
@@ -147,11 +148,13 @@ static void setpenattr_col(VTermState *state, VTermAttr attr, VTermColor color)
   setpenattr(state, attr, VTERM_VALUETYPE_COLOR, &val);
 }
 
+/* yetty: convert indexed to RGB immediately */
 static void set_pen_col_ansi(VTermState *state, VTermAttr attr, long col)
 {
   VTermColor *colp = (attr == VTERM_ATTR_BACKGROUND) ? &state->pen.bg : &state->pen.fg;
 
-  vterm_color_indexed(colp, col);
+  /* yetty: lookup RGB from palette instead of storing index */
+  *colp = state->colors[col];
 
   setpenattr_col(state, attr, *colp);
 }
@@ -208,24 +211,10 @@ INTERNAL void vterm_state_savepen(VTermState *state, int save)
   }
 }
 
+/* yetty: simplified - colors are always RGB */
 int vterm_color_is_equal(const VTermColor *a, const VTermColor *b)
 {
-  /* First make sure that the two colours are of the same type (RGB/Indexed) */
-  if (a->type != b->type) {
-    return false;
-  }
-
-  /* Depending on the type inspect the corresponding members */
-  if (VTERM_COLOR_IS_INDEXED(a)) {
-    return a->indexed.idx == b->indexed.idx;
-  }
-  else if (VTERM_COLOR_IS_RGB(a)) {
-    return    (a->rgb.red   == b->rgb.red)
-           && (a->rgb.green == b->rgb.green)
-           && (a->rgb.blue  == b->rgb.blue);
-  }
-
-  return 0;
+  return a->red == b->red && a->green == b->green && a->blue == b->blue;
 }
 
 void vterm_state_get_default_colors(const VTermState *state, VTermColor *default_fg, VTermColor *default_bg)
@@ -239,19 +228,13 @@ void vterm_state_get_palette_color(const VTermState *state, int index, VTermColo
   lookup_colour_palette(state, index, col);
 }
 
+/* yetty: simplified - no type field */
 void vterm_state_set_default_colors(VTermState *state, const VTermColor *default_fg, const VTermColor *default_bg)
 {
-  if(default_fg) {
+  if(default_fg)
     state->default_fg = *default_fg;
-    state->default_fg.type = (state->default_fg.type & ~VTERM_COLOR_DEFAULT_MASK)
-                           | VTERM_COLOR_DEFAULT_FG;
-  }
-
-  if(default_bg) {
+  if(default_bg)
     state->default_bg = *default_bg;
-    state->default_bg.type = (state->default_bg.type & ~VTERM_COLOR_DEFAULT_MASK)
-                           | VTERM_COLOR_DEFAULT_BG;
-  }
 }
 
 void vterm_state_set_palette_color(VTermState *state, int index, const VTermColor *col)
@@ -260,13 +243,7 @@ void vterm_state_set_palette_color(VTermState *state, int index, const VTermColo
     state->colors[index] = *col;
 }
 
-void vterm_state_convert_color_to_rgb(const VTermState *state, VTermColor *col)
-{
-  if (VTERM_COLOR_IS_INDEXED(col)) { /* Convert indexed colors to RGB */
-    lookup_colour_palette(state, col->indexed.idx, col);
-  }
-  col->type &= VTERM_COLOR_TYPE_MASK; /* Reset any metadata but the type */
-}
+/* yetty: removed vterm_state_convert_color_to_rgb - colors are always RGB */
 
 void vterm_state_set_bold_highbright(VTermState *state, int bold_is_highbright)
 {
@@ -292,14 +269,11 @@ INTERNAL void vterm_state_setpen(VTermState *state, const long args[], int argco
       vterm_state_resetpen(state);
       break;
 
-    case 1: { // Bold on
-      const VTermColor *fg = &state->pen.fg;
+    case 1: // Bold on
       state->pen.bold = 1;
       setpenattr_bool(state, VTERM_ATTR_BOLD, 1);
-      if(!VTERM_COLOR_IS_DEFAULT_FG(fg) && VTERM_COLOR_IS_INDEXED(fg) && fg->indexed.idx < 8 && state->bold_is_highbright)
-        set_pen_col_ansi(state, VTERM_ATTR_FOREGROUND, fg->indexed.idx + (state->pen.bold ? 8 : 0));
+      /* yetty: removed bold_is_highbright - not compatible with RGB-only colors */
       break;
-    }
 
     case 3: // Italic on
       state->pen.italic = 1;
@@ -468,36 +442,14 @@ INTERNAL void vterm_state_setpen(VTermState *state, const long args[], int argco
   }
 }
 
+/* yetty: simplified - colors are always RGB */
 static int vterm_state_getpen_color(const VTermColor *col, int argi, long args[], int fg)
 {
-    /* Do nothing if the given color is the default color */
-    if (( fg && VTERM_COLOR_IS_DEFAULT_FG(col)) ||
-        (!fg && VTERM_COLOR_IS_DEFAULT_BG(col))) {
-        return argi;
-    }
-
-    /* Decide whether to send an indexed color or an RGB color */
-    if (VTERM_COLOR_IS_INDEXED(col)) {
-        const uint8_t idx = col->indexed.idx;
-        if (idx < 8) {
-            args[argi++] = (idx + (fg ? 30 : 40));
-        }
-        else if (idx < 16) {
-            args[argi++] = (idx - 8 + (fg ? 90 : 100));
-        }
-        else {
-            args[argi++] = CSI_ARG_FLAG_MORE | (fg ? 38 : 48);
-            args[argi++] = CSI_ARG_FLAG_MORE | 5;
-            args[argi++] = idx;
-        }
-    }
-    else if (VTERM_COLOR_IS_RGB(col)) {
-        args[argi++] = CSI_ARG_FLAG_MORE | (fg ? 38 : 48);
-        args[argi++] = CSI_ARG_FLAG_MORE | 2;
-        args[argi++] = CSI_ARG_FLAG_MORE | col->rgb.red;
-        args[argi++] = CSI_ARG_FLAG_MORE | col->rgb.green;
-        args[argi++] = col->rgb.blue;
-    }
+    args[argi++] = CSI_ARG_FLAG_MORE | (fg ? 38 : 48);
+    args[argi++] = CSI_ARG_FLAG_MORE | 2;
+    args[argi++] = CSI_ARG_FLAG_MORE | col->red;
+    args[argi++] = CSI_ARG_FLAG_MORE | col->green;
+    args[argi++] = col->blue;
     return argi;
 }
 

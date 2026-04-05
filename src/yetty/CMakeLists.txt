@@ -38,6 +38,7 @@ set(YETTY_SOURCES
     ${YETTY_ROOT}/src/yetty/gpu-memory-manager.cpp
     ${YETTY_ROOT}/src/yetty/gpu-buffer-manager.cpp
     ${YETTY_ROOT}/src/yetty/gpu-texture-manager.cpp
+    ${YETTY_ROOT}/src/yetty/msdf-atlas.cpp
     ${YETTY_ROOT}/src/yetty/shader-manager.cpp
     ${YETTY_ROOT}/src/yetty/shared-bind-group.cpp
 )

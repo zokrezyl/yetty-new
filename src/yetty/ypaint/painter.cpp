@@ -37,11 +37,11 @@ namespace yetty::ypaint {
 
 class PainterImpl : public Painter {
 public:
-  PainterImpl(FontManager::Ptr fontManager, GpuAllocator::Ptr allocator,
-              GpuMemoryManager::Ptr cardMgr, uint32_t metaSlotIndex,
+  PainterImpl(font::FontManager* fontManager,
+              GpuMemoryManager* gpuMemoryManager, uint32_t metaSlotIndex,
               bool scrollingMode = false)
-      : _fontManager(std::move(fontManager)),
-        _gpuAllocator(std::move(allocator)), _cardMgr(std::move(cardMgr)),
+      : _fontManager(fontManager),
+        _gpuMemoryManager(gpuMemoryManager),
         _metaSlotIndex(metaSlotIndex), _scrollingMode(scrollingMode) {
     // Create canvas for grid management
     auto canvasResult = Canvas::create(scrollingMode);
@@ -96,23 +96,13 @@ private:
 // Factory
 //=============================================================================
 
-Result<Painter::Ptr> Painter::createImpl(FontManager::Ptr fontManager,
-                                         GpuAllocator::Ptr allocator,
-                                         GpuMemoryManager::Ptr cardMgr,
-                                         uint32_t metaSlotIndex,
-                                         bool scrollingMode) {
-  ytest("painter-created-with-cardmgr", "Painter created successfully");
-  return Ok(
-      Ptr(new PainterImpl(std::move(fontManager), std::move(allocator),
-                          std::move(cardMgr), metaSlotIndex, scrollingMode)));
-}
-
-Result<Painter::Ptr> Painter::createImpl(FontManager::Ptr fontManager,
-                                         GpuAllocator::Ptr allocator,
-                                         bool scrollingMode) {
-  ytest("painter-created-standalone", "Painter created successfully");
-  return Ok(Ptr(new PainterImpl(std::move(fontManager), std::move(allocator),
-                                GpuMemoryManager::Ptr{}, 0, scrollingMode)));
+Result<Painter*> Painter::createImpl(font::FontManager* fontManager,
+                                     GpuMemoryManager* gpuMemoryManager,
+                                     uint32_t metaSlotIndex,
+                                     bool scrollingMode) {
+  ytest("painter-created", "Painter created successfully");
+  return Ok<Painter*>(new PainterImpl(fontManager, gpuMemoryManager,
+                                      metaSlotIndex, scrollingMode));
 }
 
 } // namespace yetty::ypaint

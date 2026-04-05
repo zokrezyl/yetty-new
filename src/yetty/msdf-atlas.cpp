@@ -1,7 +1,5 @@
-#include <yetty/msdf-atlas.h>
-#include <yetty/gpu-allocator.h>
+#include <yetty/msdf-atlas.hpp>
 #include <yetty/cdb-wrapper.hpp>
-#include <yetty/wgpu-compat.h>
 #include <ytrace/ytrace.hpp>
 
 #include <cstring>
@@ -17,8 +15,7 @@ namespace yetty {
 
 class MsdfAtlasImpl : public MsdfAtlas {
 public:
-    explicit MsdfAtlasImpl(GpuAllocator::Ptr allocator)
-        : _allocator(std::move(allocator)) {
+    MsdfAtlasImpl() {
         // Initialize atlas
         _atlasData.resize(_atlasWidth * _atlasHeight * 4, 0);
 
@@ -42,12 +39,6 @@ public:
 
     ~MsdfAtlasImpl() override {
         closeAllCdbs();
-
-        // Clean up WebGPU resources
-        if (_glyphMetadataBuffer) _allocator->releaseBuffer(_glyphMetadataBuffer);
-        if (_sampler) wgpuSamplerRelease(_sampler);
-        if (_textureView) wgpuTextureViewRelease(_textureView);
-        if (_texture) _allocator->releaseTexture(_texture);
     }
 
     //=========================================================================
@@ -235,195 +226,8 @@ public:
     }
 
     //=========================================================================
-    // GPU resources
-    //=========================================================================
-
-    Result<void> createTexture(WGPUDevice device, WGPUQueue queue) override {
-        // Release old resources if they exist
-        if (_textureView) {
-            wgpuTextureViewRelease(_textureView);
-            _textureView = nullptr;
-        }
-        if (_texture) {
-            _allocator->releaseTexture(_texture);
-            _texture = nullptr;
-        }
-        if (_sampler) {
-            wgpuSamplerRelease(_sampler);
-            _sampler = nullptr;
-        }
-
-        size_t textureBytes = _atlasWidth * _atlasHeight * 4;
-        ydebug("GPU_ALLOC MsdfAtlas: atlasTexture={}x{} RGBA8 = {} bytes ({:.2f} MB)",
-              _atlasWidth, _atlasHeight, textureBytes, textureBytes / (1024.0 * 1024.0));
-
-        WGPUTextureDescriptor texDesc = {};
-        texDesc.label = WGPU_STR("MsdfAtlas");
-        texDesc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
-        texDesc.dimension = WGPUTextureDimension_2D;
-        texDesc.size = {_atlasWidth, _atlasHeight, 1};
-        texDesc.format = WGPUTextureFormat_RGBA8Unorm;
-        texDesc.mipLevelCount = 1;
-        texDesc.sampleCount = 1;
-
-        _texture = _allocator->createTexture(texDesc);
-        if (!_texture) {
-            return Err<void>("Failed to create MsdfAtlas texture");
-        }
-
-        // Upload atlas data
-        {
-            WGPUTexelCopyTextureInfo dest = {};
-            dest.texture = _texture;
-            dest.mipLevel = 0;
-            dest.origin = {0, 0, 0};
-            dest.aspect = WGPUTextureAspect_All;
-
-            WGPUTexelCopyBufferLayout layout = {};
-            layout.offset = 0;
-            layout.bytesPerRow = _atlasWidth * 4;
-            layout.rowsPerImage = _atlasHeight;
-
-            WGPUExtent3D extent = {_atlasWidth, _atlasHeight, 1};
-            wgpuQueueWriteTexture(queue, &dest,
-                                  _atlasData.data(), _atlasData.size(),
-                                  &layout, &extent);
-        }
-
-        // Create texture view
-        WGPUTextureViewDescriptor viewDesc = {};
-        viewDesc.format = WGPUTextureFormat_RGBA8Unorm;
-        viewDesc.dimension = WGPUTextureViewDimension_2D;
-        viewDesc.baseMipLevel = 0;
-        viewDesc.mipLevelCount = 1;
-        viewDesc.baseArrayLayer = 0;
-        viewDesc.arrayLayerCount = 1;
-        viewDesc.aspect = WGPUTextureAspect_All;
-
-        _textureView = wgpuTextureCreateView(_texture, &viewDesc);
-        if (!_textureView) {
-            return Err<void>("Failed to create MsdfAtlas texture view");
-        }
-
-        // Create sampler
-        WGPUSamplerDescriptor samplerDesc = {};
-        samplerDesc.label = WGPU_STR("MsdfAtlas Sampler");
-        samplerDesc.addressModeU = WGPUAddressMode_ClampToEdge;
-        samplerDesc.addressModeV = WGPUAddressMode_ClampToEdge;
-        samplerDesc.addressModeW = WGPUAddressMode_ClampToEdge;
-        samplerDesc.magFilter = WGPUFilterMode_Linear;
-        samplerDesc.minFilter = WGPUFilterMode_Linear;
-        samplerDesc.mipmapFilter = WGPUMipmapFilterMode_Linear;
-        samplerDesc.lodMinClamp = 0.0f;
-        samplerDesc.lodMaxClamp = 1.0f;
-        samplerDesc.maxAnisotropy = 1;
-
-        _sampler = wgpuDeviceCreateSampler(device, &samplerDesc);
-        if (!_sampler) {
-            return Err<void>("Failed to create MsdfAtlas sampler");
-        }
-
-        _textureWidth = _atlasWidth;
-        _textureHeight = _atlasHeight;
-        _resourceVersion++;
-        ydebug("Created MsdfAtlas texture {}x{}", _atlasWidth, _atlasHeight);
-        return Ok();
-    }
-
-    Result<void> createGlyphMetadataBuffer(WGPUDevice device) override {
-        if (_glyphMetadataBuffer) {
-            _allocator->releaseBuffer(_glyphMetadataBuffer);
-            _glyphMetadataBuffer = nullptr;
-        }
-
-        _bufferGlyphCount = static_cast<uint32_t>(_glyphMetadata.size()) + 256;
-        size_t bufferSize = _bufferGlyphCount * sizeof(GlyphMetadataGPU);
-
-        ydebug("GPU_ALLOC MsdfAtlas: glyphMetadataBuffer={} glyphs * {} bytes = {} bytes ({:.2f} MB)",
-              _bufferGlyphCount, sizeof(GlyphMetadataGPU), bufferSize, bufferSize / (1024.0 * 1024.0));
-
-        WGPUBufferDescriptor bufDesc = {};
-        bufDesc.label = WGPU_STR("MsdfAtlas Glyph Metadata");
-        bufDesc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
-        bufDesc.size = bufferSize;
-        bufDesc.mappedAtCreation = true;
-
-        _glyphMetadataBuffer = _allocator->createBuffer(bufDesc);
-        if (!_glyphMetadataBuffer) {
-            return Err<void>("Failed to create MsdfAtlas metadata buffer");
-        }
-
-        void* mapped = wgpuBufferGetMappedRange(_glyphMetadataBuffer, 0, bufferSize);
-        if (!mapped) {
-            _allocator->releaseBuffer(_glyphMetadataBuffer);
-            _glyphMetadataBuffer = nullptr;
-            return Err<void>("Failed to map glyph metadata buffer");
-        }
-        std::memcpy(mapped, _glyphMetadata.data(), _glyphMetadata.size() * sizeof(GlyphMetadataGPU));
-        wgpuBufferUnmap(_glyphMetadataBuffer);
-
-        _resourceVersion++;
-        ydebug("Created MsdfAtlas metadata buffer ({} glyphs, {} bytes)", _bufferGlyphCount, bufferSize);
-        return Ok();
-    }
-
-    Result<void> uploadPendingGlyphs(WGPUDevice device, WGPUQueue queue) override {
-        if (!_dirty) return Ok();
-
-        // Check if atlas grew and texture needs to be recreated
-        if (_atlasWidth > _textureWidth || _atlasHeight > _textureHeight) {
-            ydebug("Atlas grew from {}x{} to {}x{}, recreating GPU texture",
-                  _textureWidth, _textureHeight, _atlasWidth, _atlasHeight);
-            auto result = createTexture(device, queue);
-            if (!result) {
-                return Err<void>("Failed to recreate texture after atlas growth", result);
-            }
-        } else if (_texture) {
-            // Re-upload to existing texture
-            WGPUTexelCopyTextureInfo dest = {};
-            dest.texture = _texture;
-            dest.mipLevel = 0;
-            dest.origin = {0, 0, 0};
-            dest.aspect = WGPUTextureAspect_All;
-
-            WGPUTexelCopyBufferLayout layout = {};
-            layout.offset = 0;
-            layout.bytesPerRow = _atlasWidth * 4;
-            layout.rowsPerImage = _atlasHeight;
-
-            WGPUExtent3D extent = {_atlasWidth, _atlasHeight, 1};
-            wgpuQueueWriteTexture(queue, &dest,
-                                  _atlasData.data(), _atlasData.size(),
-                                  &layout, &extent);
-        }
-
-        // Update metadata buffer if it exists and has space
-        if (_glyphMetadataBuffer) {
-            if (_glyphMetadata.size() <= _bufferGlyphCount) {
-                wgpuQueueWriteBuffer(queue, _glyphMetadataBuffer, 0,
-                                     _glyphMetadata.data(),
-                                     _glyphMetadata.size() * sizeof(GlyphMetadataGPU));
-            } else {
-                auto result = createGlyphMetadataBuffer(device);
-                if (!result) {
-                    return Err<void>("Failed to recreate glyph metadata buffer", result);
-                }
-            }
-        }
-
-        _dirty = false;
-        _resourceVersion++;
-        return Ok();
-    }
-
-    //=========================================================================
     // Accessors
     //=========================================================================
-
-    WGPUTexture getTexture() const override { return _texture; }
-    WGPUTextureView getTextureView() const override { return _textureView; }
-    WGPUSampler getSampler() const override { return _sampler; }
-    WGPUBuffer getGlyphMetadataBuffer() const override { return _glyphMetadataBuffer; }
 
     bool isDirty() const override { return _dirty; }
     void clearDirty() override { _dirty = false; }
@@ -438,7 +242,6 @@ public:
 
     const std::vector<GlyphMetadataGPU>& getGlyphMetadata() const override { return _glyphMetadata; }
     uint32_t getGlyphCount() const override { return static_cast<uint32_t>(_glyphMetadata.size()); }
-    uint32_t getBufferGlyphCount() const override { return _bufferGlyphCount; }
     uint32_t getResourceVersion() const override { return _resourceVersion; }
 
 private:
@@ -510,9 +313,6 @@ private:
     // Private data
     //=========================================================================
 
-    // GPU allocator
-    GpuAllocator::Ptr _allocator;
-
     // CDB readers (indexed by fontId)
     std::vector<CdbReader::Ptr> _cdbFiles;
 
@@ -522,7 +322,7 @@ private:
     // Reverse mapping: glyph index -> codepoint (shared across all fonts)
     std::unordered_map<uint32_t, uint32_t> _indexToCodepoint;
 
-    // GPU metadata for all loaded glyphs
+    // Glyph metadata for all loaded glyphs
     std::vector<GlyphMetadataGPU> _glyphMetadata;
 
     // Dirty flag
@@ -547,24 +347,17 @@ private:
     uint32_t _shelfMinX = 0;  // Left bound for shelf wrapping (advances on width-only growth)
     static constexpr uint32_t ATLAS_PADDING = 2;
 
-    // WebGPU resources
-    WGPUTexture _texture = nullptr;
-    WGPUTextureView _textureView = nullptr;
-    WGPUSampler _sampler = nullptr;
-    WGPUBuffer _glyphMetadataBuffer = nullptr;
-    uint32_t _bufferGlyphCount = 0;
+    // Resource version (for tracking changes)
     uint32_t _resourceVersion = 0;
-    uint32_t _textureWidth = 0;
-    uint32_t _textureHeight = 0;
 };
 
 //=============================================================================
-// MsdfAtlas::createImpl - ObjectFactory entry point
+// MsdfAtlas::createImpl - FactoryObject entry point
 //=============================================================================
 
-Result<MsdfAtlas::Ptr> MsdfAtlas::createImpl(ContextType&, GpuAllocator::Ptr allocator) {
+Result<MsdfAtlas*> MsdfAtlas::createImpl() {
     ytest("msdf-atlas-created", "MsdfAtlas created successfully");
-    return Ok(Ptr(new MsdfAtlasImpl(std::move(allocator))));
+    return Ok<MsdfAtlas*>(new MsdfAtlasImpl());
 }
 
 } // namespace yetty

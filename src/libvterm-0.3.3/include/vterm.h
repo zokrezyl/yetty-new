@@ -61,151 +61,17 @@ static inline void vterm_rect_move(VTermRect *rect, int row_delta, int col_delta
   rect->start_col += col_delta; rect->end_col += col_delta;
 }
 
-/**
- * Bit-field describing the content of the tagged union `VTermColor`.
- */
-typedef enum {
-  /**
-   * If the lower bit of `type` is not set, the colour is 24-bit RGB.
-   */
-  VTERM_COLOR_RGB = 0x00,
-
-  /**
-   * The colour is an index into a palette of 256 colours.
-   */
-  VTERM_COLOR_INDEXED = 0x01,
-
-  /**
-   * Mask that can be used to extract the RGB/Indexed bit.
-   */
-  VTERM_COLOR_TYPE_MASK = 0x01,
-
-  /**
-   * If set, indicates that this colour should be the default foreground
-   * color, i.e. there was no SGR request for another colour. When
-   * rendering this colour it is possible to ignore "idx" and just use a
-   * colour that is not in the palette.
-   */
-  VTERM_COLOR_DEFAULT_FG = 0x02,
-
-  /**
-   * If set, indicates that this colour should be the default background
-   * color, i.e. there was no SGR request for another colour. A common
-   * option when rendering this colour is to not render a background at
-   * all, for example by rendering the window transparently at this spot.
-   */
-  VTERM_COLOR_DEFAULT_BG = 0x04,
-
-  /**
-   * Mask that can be used to extract the default foreground/background bit.
-   */
-  VTERM_COLOR_DEFAULT_MASK = 0x06
-} VTermColorType;
-
-/**
- * Returns true if the VTERM_COLOR_RGB `type` flag is set, indicating that the
- * given VTermColor instance is an indexed colour.
- */
-#define VTERM_COLOR_IS_INDEXED(col) \
-  (((col)->type & VTERM_COLOR_TYPE_MASK) == VTERM_COLOR_INDEXED)
-
-/**
- * Returns true if the VTERM_COLOR_INDEXED `type` flag is set, indicating that
- * the given VTermColor instance is an rgb colour.
- */
-#define VTERM_COLOR_IS_RGB(col) \
-  (((col)->type & VTERM_COLOR_TYPE_MASK) == VTERM_COLOR_RGB)
-
-/**
- * Returns true if the VTERM_COLOR_DEFAULT_FG `type` flag is set, indicating
- * that the given VTermColor instance corresponds to the default foreground
- * color.
- */
-#define VTERM_COLOR_IS_DEFAULT_FG(col) \
-  (!!((col)->type & VTERM_COLOR_DEFAULT_FG))
-
-/**
- * Returns true if the VTERM_COLOR_DEFAULT_BG `type` flag is set, indicating
- * that the given VTermColor instance corresponds to the default background
- * color.
- */
-#define VTERM_COLOR_IS_DEFAULT_BG(col) \
-  (!!((col)->type & VTERM_COLOR_DEFAULT_BG))
-
-/**
- * Tagged union storing either an RGB color or an index into a colour palette.
- * In order to convert indexed colours to RGB, you may use the
- * vterm_state_convert_color_to_rgb() or vterm_screen_convert_color_to_rgb()
- * functions which lookup the RGB colour from the palette maintained by a
- * VTermState or VTermScreen instance.
- */
-typedef union {
-  /**
-   * Tag indicating which union member is actually valid. This variable
-   * coincides with the `type` member of the `rgb` and the `indexed` struct
-   * in memory. Please use the `VTERM_COLOR_IS_*` test macros to check whether
-   * a particular type flag is set.
-   */
-  uint8_t type;
-
-  /**
-   * Valid if `VTERM_COLOR_IS_RGB(type)` is true. Holds the RGB colour values.
-   */
-  struct {
-    /**
-     * Same as the top-level `type` member stored in VTermColor.
-     */
-    uint8_t type;
-
-    /**
-     * The actual 8-bit red, green, blue colour values.
-     */
-    uint8_t red, green, blue;
-  } rgb;
-
-  /**
-   * If `VTERM_COLOR_IS_INDEXED(type)` is true, this member holds the index into
-   * the colour palette.
-   */
-  struct {
-    /**
-     * Same as the top-level `type` member stored in VTermColor.
-     */
-    uint8_t type;
-
-    /**
-     * Index into the colour map.
-     */
-    uint8_t idx;
-  } indexed;
+/* yetty: VTermColor simplified to plain RGB only */
+typedef struct {
+  uint8_t red, green, blue;
 } VTermColor;
 
-/**
- * Constructs a new VTermColor instance representing the given RGB values.
- */
-static inline void vterm_color_rgb(VTermColor *col, uint8_t red, uint8_t green,
-                                   uint8_t blue)
+static inline void vterm_color_rgb(VTermColor *col, uint8_t red, uint8_t green, uint8_t blue)
 {
-  col->type = VTERM_COLOR_RGB;
-  col->rgb.red   = red;
-  col->rgb.green = green;
-  col->rgb.blue  = blue;
+  col->red = red;
+  col->green = green;
+  col->blue = blue;
 }
-
-/**
- * Construct a new VTermColor instance representing an indexed color with the
- * given index.
- */
-static inline void vterm_color_indexed(VTermColor *col, uint8_t idx)
-{
-  col->type = VTERM_COLOR_INDEXED;
-  col->indexed.idx = idx;
-}
-
-/**
- * Compares two colours. Returns true if the colors are equal, false otherwise.
- */
-int vterm_color_is_equal(const VTermColor *a, const VTermColor *b);
 
 typedef enum {
   /* VTERM_VALUETYPE_NONE = 0 */
@@ -477,17 +343,7 @@ void vterm_state_focus_in(VTermState *state);
 void vterm_state_focus_out(VTermState *state);
 const VTermLineInfo *vterm_state_get_lineinfo(const VTermState *state, int row);
 
-/**
- * Makes sure that the given color `col` is indeed an RGB colour. After this
- * function returns, VTERM_COLOR_IS_RGB(col) will return true, while all other
- * flags stored in `col->type` will have been reset.
- *
- * @param state is the VTermState instance from which the colour palette should
- * be extracted.
- * @param col is a pointer at the VTermColor instance that should be converted
- * to an RGB colour.
- */
-void vterm_state_convert_color_to_rgb(const VTermState *state, VTermColor *col);
+/* yetty: removed vterm_state_convert_color_to_rgb - colors are always RGB */
 
 void vterm_state_set_selection_callbacks(VTermState *state, const VTermSelectionCallbacks *callbacks, void *user,
     char *buffer, size_t buflen);
@@ -498,19 +354,19 @@ void vterm_state_send_selection(VTermState *state, VTermSelectionMask mask, VTer
 // Screen layer
 // ------------
 
+/* yetty: removed reverse, font, dwl, dhl; added default_fg, default_bg, font_type */
 typedef struct {
-    unsigned int bold      : 1;
-    unsigned int underline : 2;
-    unsigned int italic    : 1;
-    unsigned int blink     : 1;
-    unsigned int reverse   : 1;
-    unsigned int conceal   : 1;
-    unsigned int strike    : 1;
-    unsigned int font      : 4; /* 0 to 9 */
-    unsigned int dwl       : 1; /* On a DECDWL or DECDHL line */
-    unsigned int dhl       : 2; /* On a DECDHL line (1=top 2=bottom) */
-    unsigned int small     : 1;
-    unsigned int baseline  : 2;
+    unsigned int bold       : 1;
+    unsigned int underline  : 2;
+    unsigned int italic     : 1;
+    unsigned int blink      : 1;
+    unsigned int conceal    : 1;
+    unsigned int strike     : 1;
+    unsigned int small      : 1;
+    unsigned int baseline   : 2;
+    unsigned int default_fg : 1;
+    unsigned int default_bg : 1;
+    unsigned int font_type  : 4;
 } VTermScreenCellAttrs;
 
 enum {
@@ -526,12 +382,28 @@ enum {
   VTERM_BASELINE_LOWER,
 };
 
+/* yetty: modified for direct buffer upload - 12 bytes */
 typedef struct {
-  uint32_t chars[VTERM_MAX_CHARS_PER_CELL];
-  char     width;
-  VTermScreenCellAttrs attrs;
-  VTermColor fg, bg;
+  uint32_t glyph_index;      /* 4 bytes: glyph index from resolver */
+  VTermColor fg;             /* 3 bytes: RGB */
+  VTermColor bg;             /* 3 bytes: RGB */
+  VTermScreenCellAttrs attrs; /* 2 bytes: packed attributes */
 } VTermScreenCell;
+
+/* Resolved glyph from callback */
+typedef struct {
+  uint32_t glyph_index;
+  uint8_t font_type;
+} VTermResolvedGlyph;
+
+/* Glyph resolver callback type */
+typedef VTermResolvedGlyph (*VTermGlyphResolver)(
+    const uint32_t *chars,
+    int count,
+    int bold,
+    int italic,
+    void *user
+);
 
 typedef struct {
   int (*damage)(VTermRect rect, void *user);
@@ -545,7 +417,8 @@ typedef struct {
   int (*sb_clear)(void* user);
 } VTermScreenCallbacks;
 
-VTermScreen *vterm_obtain_screen(VTerm *vt);
+/* yetty: added resolver and user params for glyph index resolution */
+VTermScreen *vterm_obtain_screen(VTerm *vt, VTermGlyphResolver resolver, void *resolver_user);
 
 void  vterm_screen_set_callbacks(VTermScreen *screen, const VTermScreenCallbacks *callbacks, void *user);
 void *vterm_screen_get_cbdata(VTermScreen *screen);
@@ -578,21 +451,23 @@ void   vterm_screen_reset(VTermScreen *screen, int hard);
 size_t vterm_screen_get_chars(const VTermScreen *screen, uint32_t *chars, size_t len, const VTermRect rect);
 size_t vterm_screen_get_text(const VTermScreen *screen, char *str, size_t len, const VTermRect rect);
 
+/* yetty: removed REVERSE, FONT; added DEFAULT_FG, DEFAULT_BG, FONT_TYPE */
 typedef enum {
   VTERM_ATTR_BOLD_MASK       = 1 << 0,
   VTERM_ATTR_UNDERLINE_MASK  = 1 << 1,
   VTERM_ATTR_ITALIC_MASK     = 1 << 2,
   VTERM_ATTR_BLINK_MASK      = 1 << 3,
-  VTERM_ATTR_REVERSE_MASK    = 1 << 4,
+  VTERM_ATTR_CONCEAL_MASK    = 1 << 4,
   VTERM_ATTR_STRIKE_MASK     = 1 << 5,
-  VTERM_ATTR_FONT_MASK       = 1 << 6,
-  VTERM_ATTR_FOREGROUND_MASK = 1 << 7,
-  VTERM_ATTR_BACKGROUND_MASK = 1 << 8,
-  VTERM_ATTR_CONCEAL_MASK    = 1 << 9,
-  VTERM_ATTR_SMALL_MASK      = 1 << 10,
-  VTERM_ATTR_BASELINE_MASK   = 1 << 11,
+  VTERM_ATTR_SMALL_MASK      = 1 << 6,
+  VTERM_ATTR_BASELINE_MASK   = 1 << 7,
+  VTERM_ATTR_DEFAULT_FG_MASK = 1 << 8,
+  VTERM_ATTR_DEFAULT_BG_MASK = 1 << 9,
+  VTERM_ATTR_FONT_TYPE_MASK  = 1 << 10,
+  VTERM_ATTR_FOREGROUND_MASK = 1 << 11,
+  VTERM_ATTR_BACKGROUND_MASK = 1 << 12,
 
-  VTERM_ALL_ATTRS_MASK = (1 << 12) - 1
+  VTERM_ALL_ATTRS_MASK = (1 << 13) - 1
 } VTermAttrMask;
 
 int vterm_screen_get_attrs_extent(const VTermScreen *screen, VTermRect *extent, VTermPos pos, VTermAttrMask attrs);
@@ -601,17 +476,17 @@ int vterm_screen_get_cell(const VTermScreen *screen, VTermPos pos, VTermScreenCe
 
 int vterm_screen_is_eol(const VTermScreen *screen, VTermPos pos);
 
-/**
- * Same as vterm_state_convert_color_to_rgb(), but takes a `screen` instead of a `state`
- * instance.
- */
-void vterm_screen_convert_color_to_rgb(const VTermScreen *screen, VTermColor *col);
+/* yetty: removed vterm_screen_convert_color_to_rgb - colors are always RGB */
 
 /**
  * Similar to vterm_state_set_default_colors(), but also resets colours in the
  * screen buffer(s)
  */
 void vterm_screen_set_default_colors(VTermScreen *screen, const VTermColor *default_fg, const VTermColor *default_bg);
+
+/* yetty: direct buffer access for upload */
+const VTermScreenCell *vterm_screen_get_buffer(const VTermScreen *screen);
+size_t vterm_screen_get_buffer_size(const VTermScreen *screen);
 
 // ---------
 // Utilities

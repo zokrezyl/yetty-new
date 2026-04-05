@@ -170,20 +170,13 @@ public:
   static constexpr uint32_t FLAG_CUSTOM_ATLAS = 32;
 
   //=========================================================================
-  // Factory methods
+  // Factory method
   //=========================================================================
 
-  // Full factory — with GPU card manager for buffer lifecycle.
-  static Result<Ptr> createImpl(FontManager::Ptr fontManager,
-                                GpuAllocator::Ptr allocator,
-                                GpuMemoryManager::Ptr cardMgr,
-                                uint32_t metaSlotIndex,
-                                bool scrollingMode = false);
-
-  // Lightweight factory — no GPU card manager (for offline/file writers).
-  static Result<Ptr> createImpl(FontManager::Ptr fontManager,
-                                GpuAllocator::Ptr allocator,
-                                bool scrollingMode = false);
+  static Result<Painter*> createImpl(font::FontManager* fontManager,
+                                     GpuMemoryManager* gpuMemoryManager,
+                                     uint32_t metaSlotIndex,
+                                     bool scrollingMode = false);
 
   ~Painter() override = default;
   const char *typeName() const override { return "Painter"; }

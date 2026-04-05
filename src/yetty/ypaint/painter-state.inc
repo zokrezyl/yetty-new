@@ -3,7 +3,11 @@
 //=========================================================================
 
 uint32_t primitiveCount() const override {
-  return _canvas ? _canvas->primitiveCount() : 0;
+  if (!_canvas) {
+    yerror("primitiveCount: _canvas is null");
+    return 0;
+  }
+  return _canvas->primitiveCount();
 }
 
 uint32_t glyphCount() const override {
@@ -21,6 +25,8 @@ void setSceneBounds(float minX, float minY, float maxX, float maxY) override {
   _hasExplicitBounds = true;
   if (_canvas) {
     _canvas->setSceneBounds(minX, minY, maxX, maxY);
+  } else {
+    yerror("setSceneBounds: _canvas is null - bounds not applied to canvas");
   }
 }
 bool hasExplicitBounds() const override { return _hasExplicitBounds; }
@@ -30,6 +36,8 @@ void setGridCellSize(float sizeX, float sizeY) override {
   _cellSizeY = sizeY;
   if (_canvas) {
     _canvas->setCellSize(sizeX, sizeY);
+  } else {
+    yerror("setGridCellSize: _canvas is null - cell size not applied to canvas");
   }
 }
 float gridCellSizeX() const override { return _cellSizeX; }
@@ -50,6 +58,8 @@ void setMaxPrimsPerCell(uint32_t max) override {
   _maxPrimsPerCell = max;
   if (_canvas) {
     _canvas->setMaxPrimsPerCell(max);
+  } else {
+    yerror("setMaxPrimsPerCell: _canvas is null - max prims not applied to canvas");
   }
 }
 uint32_t maxPrimsPerCell() const override { return _maxPrimsPerCell; }
@@ -59,14 +69,20 @@ uint32_t maxPrimsPerCell() const override { return _maxPrimsPerCell; }
 //=========================================================================
 
 const std::vector<uint32_t> &gridStaging() const override {
-  if (_canvas && _canvas->isDirty()) {
+  if (!_canvas) {
+    yerror("gridStaging: _canvas is null - returning empty");
+    return _emptyGridStaging;
+  }
+  if (_canvas->isDirty()) {
     const_cast<PainterImpl *>(this)->rebuildPackedGrid();
   }
-  return _canvas ? _canvas->gridStaging() : _emptyGridStaging;
+  return _canvas->gridStaging();
 }
 void clearGridStaging() override {
   if (_canvas) {
     _canvas->clearStaging();
+  } else {
+    yerror("clearGridStaging: _canvas is null");
   }
 }
 const std::vector<YPaintGlyph> &glyphs() const override { return _glyphs; }
@@ -83,6 +99,7 @@ void buildPrimStaging(std::vector<uint32_t> &out) const override {
     _canvas->buildPrimStaging(out);
     const_cast<PainterImpl *>(this)->_primStagingCache = out;
   } else {
+    yerror("buildPrimStaging: _canvas is null - returning empty");
     out.clear();
     const_cast<PainterImpl *>(this)->_primStagingCache.clear();
   }
@@ -106,6 +123,8 @@ void setCursorPosition(uint16_t col, uint16_t row) override {
   _cursorRow = row;
   if (_canvas) {
     _canvas->setCursorPosition(col, row);
+  } else {
+    yerror("setCursorPosition: _canvas is null - cursor position not applied to canvas");
   }
 }
 
@@ -113,7 +132,11 @@ uint16_t cursorCol() const override { return _cursorCol; }
 uint16_t cursorRow() const override { return _cursorRow; }
 
 uint32_t sceneHeightInLines() const override {
-  return _canvas ? _canvas->heightInLines() : 0;
+  if (!_canvas) {
+    yerror("sceneHeightInLines: _canvas is null");
+    return 0;
+  }
+  return _canvas->heightInLines();
 }
 
 //=========================================================================
@@ -131,7 +154,11 @@ uint32_t gridHeight() const override { return _gridHeight; }
 
 // GPU buffer offsets (in float words)
 uint32_t gpuPrimitiveOffset() const override {
-  return _primHandle.isValid() ? _primHandle.offset / sizeof(float) : 0;
+  if (!_primHandle.isValid()) {
+    yerror("gpuPrimitiveOffset: _primHandle is invalid");
+    return 0;
+  }
+  return _primHandle.offset / sizeof(float);
 }
 uint32_t gpuGridOffset() const override { return _gpuGridOffset; }
 uint32_t gpuGlyphOffset() const override { return _gpuGlyphOffset; }

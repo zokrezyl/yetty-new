@@ -102,8 +102,12 @@ Result<void> addText(float x, float y, const std::string &text,
     cursorX += glyph._advance * scale;
   }
 
-  if (glyphsAdded > 0 && _canvas) {
-    _canvas->markDirty(); // invalidate grid
+  if (glyphsAdded > 0) {
+    if (_canvas) {
+      _canvas->markDirty(); // invalidate grid
+    } else {
+      yerror("addText: added {} glyphs but _canvas is null", glyphsAdded);
+    }
   }
 
   return Ok();
@@ -225,6 +229,8 @@ Result<void> addRotatedText(float x, float y, const std::string &text,
     // Add to canvas - it handles grid placement
     if (_canvas) {
       _canvas->addPrimitive(std::move(primData), minX, minY, maxX, maxY);
+    } else {
+      return Err<void>("addRotatedText: _canvas is null");
     }
 
     // Update scene bounds

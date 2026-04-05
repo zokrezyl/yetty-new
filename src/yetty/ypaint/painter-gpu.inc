@@ -4,20 +4,33 @@
 
 // Compute GPU buffer size for primitives
 uint32_t primGpuSize() const {
-  return _canvas ? _canvas->primGpuSize() : 0;
+  if (!_canvas) {
+    ydebug("primGpuSize: _canvas is null, returning 0");
+    return 0;
+  }
+  return _canvas->primGpuSize();
 }
 
 // Write primitives to GPU buffer using canvas staging
-void writePrimsGPU(float *buf, uint32_t bufBytes) {
-  if (!_canvas)
-    return;
+Result<void> writePrimsGPU(float *buf, uint32_t bufBytes) {
+  if (!_canvas) {
+    return Err<void>("writePrimsGPU: _canvas is null");
+  }
+  if (!buf) {
+    return Err<void>("writePrimsGPU: buf is null");
+  }
+  if (bufBytes == 0) {
+    return Err<void>("writePrimsGPU: bufBytes is 0");
+  }
 
   // Use canvas to build prim staging
   std::vector<uint32_t> staging;
   _canvas->buildPrimStaging(staging);
 
-  if (staging.empty())
-    return;
+  if (staging.empty()) {
+    ydebug("writePrimsGPU: staging is empty, nothing to write");
+    return Ok();
+  }
 
   // Copy staging data to GPU buffer
   uint32_t wordCount = std::min(static_cast<uint32_t>(staging.size()),
@@ -32,12 +45,13 @@ void writePrimsGPU(float *buf, uint32_t bufBytes) {
   for (uint32_t i = 0; i < primCount && i < staging.size(); i++) {
     _primWordOffsets.push_back(staging[i]);
   }
+  return Ok();
 }
 
 Result<void> declareBufferNeeds() override {
-  if (!_cardMgr)
+  if (!_gpuMemoryManager)
     return Err<void>("declareBufferNeeds: no GpuMemoryManager");
-  auto bufMgr = _cardMgr->bufferManager();
+  auto bufMgr = _gpuMemoryManager->bufferManager();
 
   // Reset handles — they will be re-allocated
   _primHandle = BufferHandle::invalid();
@@ -71,9 +85,9 @@ Result<void> declareBufferNeeds() override {
 }
 
 Result<void> allocateBuffers() override {
-  if (!_cardMgr)
+  if (!_gpuMemoryManager)
     return Err<void>("allocateBuffers: no GpuMemoryManager");
-  auto bufMgr = _cardMgr->bufferManager();
+  auto bufMgr = _gpuMemoryManager->bufferManager();
 
   // Allocate and write compact prim data
   {
@@ -90,7 +104,9 @@ Result<void> allocateBuffers() override {
              _primHandle.offset / sizeof(float));
 
       float *buf = reinterpret_cast<float *>(_primHandle.data);
-      writePrimsGPU(buf, _primHandle.size);
+      if (auto res = writePrimsGPU(buf, _primHandle.size); !res) {
+        return Err<void>("allocateBuffers: writePrimsGPU failed", res);
+      }
       bufMgr->markBufferDirty(_primHandle);
     }
   }
@@ -120,10 +136,14 @@ Result<void> allocateBuffers() override {
 }
 
 Result<void> allocateTextures() override {
-  if (!_cardMgr)
-    return Ok();
+  if (!_gpuMemoryManager) {
+    return Err<void>("allocateTextures: no GpuMemoryManager");
+  }
 
-  auto texMgr = _cardMgr->textureManager();
+  auto texMgr = _gpuMemoryManager->textureManager();
+  if (!texMgr) {
+    return Err<void>("allocateTextures: textureManager is null");
+  }
 
   // Allocate custom MSDF atlas if present
   if (_customAtlas) {
@@ -132,23 +152,31 @@ Result<void> allocateTextures() override {
     const auto &atlasData = _customAtlas->getAtlasData();
     if (!atlasData.empty() && atlasW > 0 && atlasH > 0) {
       auto allocResult = texMgr->allocate(atlasW, atlasH);
-      if (!allocResult)
+      if (!allocResult) {
         return Err<void>("allocateTextures: msdf atlas failed", allocResult);
+      }
       _atlasTextureHandle = *allocResult;
       _allocatedAtlasW = atlasW;
       _allocatedAtlasH = atlasH;
+    } else {
+      return Err<void>("allocateTextures: _customAtlas exists but invalid - atlasData.empty=" +
+                       std::to_string(atlasData.empty()) + " atlasW=" + std::to_string(atlasW) +
+                       " atlasH=" + std::to_string(atlasH));
     }
   }
 
   // Allocate texture space for each pending image
   for (auto &pi : _pendingImages) {
-    if (pi.pixelWidth == 0 || pi.pixelHeight == 0 || pi.pixels.empty())
-      continue;
+    if (pi.pixelWidth == 0 || pi.pixelHeight == 0 || pi.pixels.empty()) {
+      return Err<void>("allocateTextures: invalid pending image - pixelWidth=" +
+                       std::to_string(pi.pixelWidth) + " pixelHeight=" + std::to_string(pi.pixelHeight) +
+                       " pixels.empty=" + std::to_string(pi.pixels.empty()));
+    }
     auto allocResult = texMgr->allocate(pi.pixelWidth, pi.pixelHeight);
     if (!allocResult) {
-      ywarn("allocateTextures: image {}x{} failed: {}", pi.pixelWidth,
-            pi.pixelHeight, allocResult.error().message());
-      continue;
+      return Err<void>("allocateTextures: image allocation failed for " +
+                       std::to_string(pi.pixelWidth) + "x" + std::to_string(pi.pixelHeight),
+                       allocResult);
     }
     pi.texHandle = *allocResult;
   }
@@ -157,10 +185,14 @@ Result<void> allocateTextures() override {
 }
 
 Result<void> writeTextures() override {
-  if (!_cardMgr)
-    return Ok();
+  if (!_gpuMemoryManager) {
+    return Err<void>("writeTextures: no GpuMemoryManager");
+  }
 
-  auto texMgr = _cardMgr->textureManager();
+  auto texMgr = _gpuMemoryManager->textureManager();
+  if (!texMgr) {
+    return Err<void>("writeTextures: textureManager is null");
+  }
 
   // Write custom MSDF atlas
   if (_atlasTextureHandle.isValid() && _customAtlas) {
@@ -170,6 +202,8 @@ Result<void> writeTextures() override {
           !res) {
         return Err<void>("writeTextures: msdf atlas write failed", res);
       }
+    } else {
+      return Err<void>("writeTextures: _atlasTextureHandle valid and _customAtlas exists but atlasData is empty");
     }
 
     // Now that the atlas is packed, write the atlas header into derived
@@ -190,19 +224,29 @@ Result<void> writeTextures() override {
           static_cast<uint32_t>(glyphMeta.size()), 0};
       std::memcpy(base, atlasHeader, sizeof(atlasHeader));
 
-      _cardMgr->bufferManager()->markBufferDirty(_derivedHandle);
+      _gpuMemoryManager->bufferManager()->markBufferDirty(_derivedHandle);
+    } else {
+      return Err<void>("writeTextures: _derivedHandle.isValid=" + std::to_string(_derivedHandle.isValid()) +
+                       " _gpuAtlasHeaderOffset=" + std::to_string(_gpuAtlasHeaderOffset));
     }
+  } else if (_customAtlas && !_atlasTextureHandle.isValid()) {
+    return Err<void>("writeTextures: _customAtlas exists but _atlasTextureHandle is invalid");
+  } else if (_atlasTextureHandle.isValid() && !_customAtlas) {
+    return Err<void>("writeTextures: _atlasTextureHandle valid but _customAtlas is null");
   }
 
   // Write image pixels and update Image primitives with atlas coords
   for (auto &pi : _pendingImages) {
-    if (!pi.texHandle.isValid() || pi.primId == 0)
-      continue;
+    if (!pi.texHandle.isValid()) {
+      return Err<void>("writeTextures: pending image has invalid texHandle");
+    }
+    if (pi.primId == 0) {
+      return Err<void>("writeTextures: pending image has primId=0");
+    }
 
     // Write pixel data to atlas
     if (auto res = texMgr->write(pi.texHandle, pi.pixels.data()); !res) {
-      ywarn("writeTextures: image write failed: {}", res.error().message());
-      continue;
+      return Err<void>("writeTextures: image write failed", res);
     }
 
     // Update Image primitive with real atlas coordinates
@@ -220,7 +264,7 @@ Result<void> writeTextures() override {
 }
 
 Result<void> writeBuffers() override {
-  if (!_cardMgr)
+  if (!_gpuMemoryManager)
     return Err<void>("writeBuffers: no GpuMemoryManager");
 
   ydebug("writeBuffers: bufferDirty={} metaDirty={} primHandle={} "
@@ -229,7 +273,7 @@ Result<void> writeBuffers() override {
          _derivedHandle.isValid(), _scrollingMode);
 
   if (_bufferDirty) {
-    auto bufMgr = _cardMgr->bufferManager();
+    auto bufMgr = _gpuMemoryManager->bufferManager();
 
     // Check if we have primitives
     bool hasPrims = _canvas && !_canvas->empty();
@@ -237,8 +281,12 @@ Result<void> writeBuffers() override {
     if (_primHandle.isValid() && hasPrims) {
       ydebug("writeBuffers: re-writing prims");
       float *buf = reinterpret_cast<float *>(_primHandle.data);
-      writePrimsGPU(buf, _primHandle.size);
+      if (auto res = writePrimsGPU(buf, _primHandle.size); !res) {
+        return Err<void>("writeBuffers: writePrimsGPU failed", res);
+      }
       bufMgr->markBufferDirty(_primHandle);
+    } else if (hasPrims && !_primHandle.isValid()) {
+      return Err<void>("writeBuffers: hasPrims but _primHandle is invalid");
     }
 
     // Rebuild packed grid if dirty (important after scrolling!)
@@ -269,7 +317,7 @@ Result<void> writeBuffers() override {
 }
 
 bool needsBufferRealloc() const override {
-  if (!_cardMgr)
+  if (!_gpuMemoryManager)
     return false;
   uint32_t primNeeded = primGpuSize();
   if (_primHandle.isValid()) {
