@@ -355,18 +355,18 @@ void vterm_state_send_selection(VTermState *state, VTermSelectionMask mask, VTer
 // ------------
 
 /* yetty: removed reverse, font, dwl, dhl; added default_fg, default_bg, font_type */
-typedef struct {
-    unsigned int bold       : 1;
-    unsigned int underline  : 2;
-    unsigned int italic     : 1;
-    unsigned int blink      : 1;
-    unsigned int conceal    : 1;
-    unsigned int strike     : 1;
-    unsigned int small      : 1;
-    unsigned int baseline   : 2;
-    unsigned int default_fg : 1;
-    unsigned int default_bg : 1;
-    unsigned int font_type  : 4;
+typedef struct __attribute__((packed)) {
+    uint16_t bold       : 1;
+    uint16_t underline  : 2;
+    uint16_t italic     : 1;
+    uint16_t blink      : 1;
+    uint16_t conceal    : 1;
+    uint16_t strike     : 1;
+    uint16_t small      : 1;
+    uint16_t baseline   : 2;
+    uint16_t default_fg : 1;
+    uint16_t default_bg : 1;
+    uint16_t font_type  : 4;
 } VTermScreenCellAttrs;
 
 enum {
@@ -383,7 +383,7 @@ enum {
 };
 
 /* yetty: modified for direct buffer upload - 12 bytes */
-typedef struct {
+typedef struct __attribute__((packed)) {
   uint32_t glyph_index;      /* 4 bytes: glyph index from resolver */
   VTermColor fg;             /* 3 bytes: RGB */
   VTermColor bg;             /* 3 bytes: RGB */

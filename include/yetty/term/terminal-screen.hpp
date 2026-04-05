@@ -5,7 +5,7 @@
 #include <webgpu/webgpu.h>
 #include <yetty/core/event-listener.hpp>
 #include <yetty/core/factory-object.hpp>
-#include <yetty/term/text-cell.hpp>
+#include <vterm.h>
 #include <yetty/term/terminal-context.hpp>
 
 namespace yetty {
@@ -35,8 +35,9 @@ public:
   virtual void clearDamage() = 0;
 
   // Cell data access — flat contiguous buffer, zero-copy GPU upload
-  virtual const TextCell *getCellData() const = 0;
-  virtual TextCell getCell(int row, int col) const = 0;
+  virtual const VTermScreenCell *getCellData() const = 0;
+  virtual VTermScreenCell getCell(int row, int col) const = 0;
+  virtual VTermScreen *getScreen() const = 0;
 
   // Cursor state
   virtual int getCursorRow() const = 0;

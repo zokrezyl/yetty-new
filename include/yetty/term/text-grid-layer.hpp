@@ -10,7 +10,7 @@ class Font;
 class GpuAllocator;
 class ShaderManager;
 
-// Layer 0: Renders the terminal text grid (TextCell buffer).
+// Layer 0: Renders the terminal text grid (VTermScreenCell buffer).
 class TextGridLayer : public RenderableLayer {
 public:
     ~TextGridLayer() override;
