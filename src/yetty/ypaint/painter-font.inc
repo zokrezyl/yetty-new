@@ -5,12 +5,12 @@
 int registerFont(const std::string &cdbPath, const std::string &ttfPath,
                  MsdfCdbProvider::Ptr provider) {
   if (!_customAtlas) {
-    auto atlasRes = MsdfAtlas::create(_gpuAllocator);
+    auto atlasRes = MsdfAtlas::create();
     if (!atlasRes) {
       yerror("registerFont: failed to create custom atlas");
       return -1;
     }
-    _customAtlas = *atlasRes;
+    _customAtlas = atlasRes.value();
     _flags |= FLAG_CUSTOM_ATLAS;
   }
   return _customAtlas->registerCdb(cdbPath, ttfPath, std::move(provider));
@@ -45,11 +45,11 @@ Result<int> addFont(const std::string &ttfPath) {
   }
 
   if (!_customAtlas) {
-    auto atlasRes = MsdfAtlas::create(_gpuAllocator);
+    auto atlasRes = MsdfAtlas::create();
     if (!atlasRes) {
       return Err<int>("addFont: failed to create custom atlas");
     }
-    _customAtlas = *atlasRes;
+    _customAtlas = atlasRes.value();
     _flags |= FLAG_CUSTOM_ATLAS;
   }
 

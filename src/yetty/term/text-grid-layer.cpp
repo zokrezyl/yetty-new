@@ -136,7 +136,7 @@ private:
         rs.name = "cells";
         uint32_t rows = _terminalScreen->getRows();
         uint32_t cols = _terminalScreen->getCols();
-        rs.bufferSize = static_cast<size_t>(rows * cols) * sizeof(TextCell);
+        rs.bufferSize = vterm_screen_get_buffer_size(_terminalScreen->getScreen());
         rs.bufferWgslType = "array<Cell>";
         rs.bufferName = "cellBuffer";
         rs.bufferData = reinterpret_cast<const uint8_t*>(_terminalScreen->getCellData());
@@ -154,7 +154,7 @@ private:
         // Cells buffer
         uint32_t rows = _terminalScreen->getRows();
         uint32_t cols = _terminalScreen->getCols();
-        gpuResourceSet.bufferSize = static_cast<size_t>(rows * cols) * sizeof(TextCell);
+        gpuResourceSet.bufferSize = vterm_screen_get_buffer_size(_terminalScreen->getScreen());
         gpuResourceSet.bufferData = reinterpret_cast<const uint8_t*>(_terminalScreen->getCellData());
         gpuResourceSet.bufferDataSize = gpuResourceSet.bufferSize;
         gpuResourceSet.bufferReadonly = true;

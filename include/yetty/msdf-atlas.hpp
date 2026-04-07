@@ -2,9 +2,8 @@
 
 #include <yetty/msdf-glyph-data.hpp>
 #include <yetty/msdf-cdb-provider.hpp>
-#include <yetty/gpu-allocator.hpp>
 #include <yetty/core/factory-object.hpp>
-#include <webgpu/webgpu.h>
+#include <yetty/core/result.hpp>
 
 #include <string>
 #include <vector>
@@ -13,17 +12,17 @@
 namespace yetty {
 
 //=============================================================================
-// MsdfAtlas - standalone MSDF atlas/CDB/GPU engine
+// MsdfAtlas - CPU-side MSDF atlas manager
 //
 // Manages: dynamic atlas with shelf packing, CDB file loading (fontId-based),
-// GPU resources (texture, metadata buffer, sampler), glyph metadata.
+// glyph metadata. CPU-only - provides data for GpuResourceBinder.
 //
 // Composed by MsMsdfFont (terminal) and YDrawBase (multi-font text).
 // Header = interface, implementation in msdf-atlas.cpp (MsdfAtlasImpl).
 //=============================================================================
 class MsdfAtlas : public core::FactoryObject<MsdfAtlas> {
 public:
-    static Result<MsdfAtlas*> createImpl(GpuAllocator* allocator);
+    static Result<MsdfAtlas*> createImpl();
 
     ~MsdfAtlas() override = default;
 
@@ -56,16 +55,6 @@ public:
     // --- Reverse lookup ---
     virtual uint32_t getCodepoint(uint32_t glyphIndex) const = 0;
 
-    // --- GPU resources ---
-    virtual Result<void> createTexture(WGPUDevice device, WGPUQueue queue) = 0;
-    virtual Result<void> createGlyphMetadataBuffer(WGPUDevice device) = 0;
-    virtual Result<void> uploadPendingGlyphs(WGPUDevice device, WGPUQueue queue) = 0;
-
-    virtual WGPUTexture getTexture() const = 0;
-    virtual WGPUTextureView getTextureView() const = 0;
-    virtual WGPUSampler getSampler() const = 0;
-    virtual WGPUBuffer getGlyphMetadataBuffer() const = 0;
-
     // --- Atlas state ---
     virtual bool isDirty() const = 0;
     virtual void clearDirty() = 0;
@@ -82,7 +71,6 @@ public:
     // --- Glyph metadata ---
     virtual const std::vector<GlyphMetadataGPU>& getGlyphMetadata() const = 0;
     virtual uint32_t getGlyphCount() const = 0;
-    virtual uint32_t getBufferGlyphCount() const = 0;
     virtual uint32_t getResourceVersion() const = 0;
 };
 

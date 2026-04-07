@@ -24,19 +24,7 @@ constexpr uint32_t GLYPH_WIDE_CONT = 0xFFFE;
 
 // Scrollback line storage
 struct ScrollbackLine {
-  std::vector<TextCell> cells;
-};
-
-// Pen state for current text attributes
-struct Pen {
-  VTermColor fg;
-  VTermColor bg;
-  bool bold = false;
-  bool italic = false;
-  uint8_t underline = 0;
-  bool strike = false;
-  bool reverse = false;
-  bool blink = false;
+  std::vector<VTermScreenCell> cells;
 };
 
 //=============================================================================
@@ -132,8 +120,9 @@ public:
   bool hasDamage() const override { return _hasDamage; }
   void clearDamage() override { _hasDamage = false; }
 
-  const TextCell *getCellData() const override;
-  TextCell getCell(int row, int col) const override;
+  const VTermScreenCell *getCellData() const override;
+  VTermScreenCell getCell(int row, int col) const override;
+  VTermScreen *getScreen() const override { return _screen; }
 
   int getCursorRow() const override { return _cursorRow; }
   int getCursorCol() const override { return _cursorCol; }
@@ -146,7 +135,7 @@ public:
   void scrollUp(int lines) override;
   void scrollDown(int lines) override;
   void scrollToBottom() override;
-  bool isScrolledBack() const override { return _scrollOffset > 0; }
+  bool isScrolledBack() const override { return false; /* TODO */ }
 
   // Rendering
   Result<void> render(WGPURenderPassEncoder pass) override;
@@ -154,62 +143,31 @@ public:
   // EventListener — called by EventLoop when PTY has data
   Result<bool> onEvent(const core::Event &event) override;
 
-  // VTerm state callbacks (static, called by libvterm)
-  static int onPutglyph(VTermGlyphInfo *info, VTermPos pos, void *user);
-  static int onMoveCursor(VTermPos pos, VTermPos oldpos, int visible,
-                          void *user);
-  static int onScrollRect(VTermRect rect, int downward, int rightward,
-                          void *user);
-  static int onMoveRect(VTermRect dest, VTermRect src, void *user);
-  static int onErase(VTermRect rect, int selective, void *user);
-  static int onInitPen(void *user);
-  static int onSetPenAttr(VTermAttr attr, VTermValue *val, void *user);
+  // VTerm screen callbacks (static, called by libvterm screen layer)
+  static int onDamage(VTermRect rect, void *user);
+  static int onMoveCursor(VTermPos pos, VTermPos oldpos, int visible, void *user);
   static int onSetTermProp(VTermProp prop, VTermValue *val, void *user);
   static int onBell(void *user);
-  static int onResize(int rows, int cols, VTermStateFields *fields, void *user);
-  static int onSetLineInfo(int row, const VTermLineInfo *newinfo,
-                           const VTermLineInfo *oldinfo, void *user);
+  static int onResize(int rows, int cols, void *user);
+  static int onSbPushline(int cols, const VTermScreenCell *cells, void *user);
+  static int onSbPopline(int cols, VTermScreenCell *cells, void *user);
+
+  // Glyph resolver callback
+  static VTermResolvedGlyph glyphResolver(const uint32_t *chars, int count,
+                                          int bold, int italic, void *user);
 
 private:
-  void createVTerm(uint32_t cols, uint32_t rows);
-  void attach(VTerm *vt);
-
-  void setCell(int row, int col, uint32_t glyph, uint8_t fgR, uint8_t fgG,
-               uint8_t fgB, uint8_t bgR, uint8_t bgG, uint8_t bgB,
-               uint8_t style);
-
-  void colorToRGB(const VTermColor &color, uint8_t &r, uint8_t &g, uint8_t &b);
-
   size_t cellIndex(int row, int col) const {
     return static_cast<size_t>(row * _cols + col);
   }
 
-  void clearBuffer(std::vector<TextCell> &buffer);
-  void switchToScreen(bool alt);
-  void resizeInternal(int rows, int cols, VTermStateFields *fields);
-  void resizeBuffer(int bufidx, int newRows, int newCols, bool active, VTermStateFields *fields);
-  int linePopcount(const std::vector<TextCell> &buffer, int row, int cols) const;
-
-  void composeViewBuffer();
-  void decompressLine(const ScrollbackLine &line, int viewRow);
-  void pushLineToScrollback(int row);
-
-  // VTerm
+  // VTerm - screen layer manages buffers directly
   VTerm *_vterm = nullptr;
-  VTermState *_state = nullptr;
+  VTermScreen *_screen = nullptr;
 
-  // Flat contiguous buffers — GPU-ready via getCellData()
-  std::vector<TextCell> _primaryBuffer;
-  std::vector<TextCell> _altBuffer;
-  std::vector<TextCell> _viewBuffer;
-  std::vector<TextCell> _scratchBuffer;
-  std::vector<TextCell> *_visibleBuffer = nullptr;
-
-  // Scrollback
+  // Scrollback storage (viewing TODO)
   std::deque<ScrollbackLine> _scrollback;
   size_t _maxScrollback = 10000;
-  int _scrollOffset = 0;
-  bool _viewBufferDirty = false;
 
   // Screen state
   int _rows = 0;
@@ -219,12 +177,10 @@ private:
   bool _cursorVisible = true;
   bool _cursorBlink = true;
   int _cursorShape = 1; // VTERM_PROP_CURSORSHAPE_BLOCK
-  bool _isAltScreen = false;
   bool _hasDamage = false;
   bool _reflow = true;
 
-  // Pen state
-  Pen _pen;
+  // Default colors for scrollback
   VTermColor _defaultFg;
   VTermColor _defaultBg;
 
@@ -258,18 +214,16 @@ private:
 // VTerm state callbacks struct
 //=============================================================================
 
-static VTermStateCallbacks stateCallbacks = {
-    .putglyph = TerminalScreenImpl::onPutglyph,
+/* yetty: screen callbacks - putglyph/erase/etc now handled by screen layer */
+static VTermScreenCallbacks screenCallbacks = {
+    .damage = TerminalScreenImpl::onDamage,
+    .moverect = nullptr,
     .movecursor = TerminalScreenImpl::onMoveCursor,
-    .scrollrect = TerminalScreenImpl::onScrollRect,
-    .moverect = TerminalScreenImpl::onMoveRect,
-    .erase = TerminalScreenImpl::onErase,
-    .initpen = TerminalScreenImpl::onInitPen,
-    .setpenattr = TerminalScreenImpl::onSetPenAttr,
     .settermprop = TerminalScreenImpl::onSetTermProp,
     .bell = TerminalScreenImpl::onBell,
     .resize = TerminalScreenImpl::onResize,
-    .setlineinfo = TerminalScreenImpl::onSetLineInfo,
+    .sb_pushline = TerminalScreenImpl::onSbPushline,
+    .sb_popline = TerminalScreenImpl::onSbPopline,
     .sb_clear = nullptr,
 };
 
@@ -291,16 +245,27 @@ TerminalScreenImpl::~TerminalScreenImpl() {
 }
 
 Result<void> TerminalScreenImpl::init(uint32_t cols, uint32_t rows) {
+  _rows = static_cast<int>(rows);
+  _cols = static_cast<int>(cols);
+
   vterm_color_rgb(&_defaultFg, 204, 204, 204);
   vterm_color_rgb(&_defaultBg, 15, 15, 35);
-  _pen.fg = _defaultFg;
-  _pen.bg = _defaultBg;
-  _isAltScreen = false;
 
-  createVTerm(cols, rows);
+  _vterm = vterm_new(_rows, _cols);
   if (!_vterm) {
     return Err<void>("TerminalScreen: failed to create vterm");
   }
+
+  vterm_set_utf8(_vterm, 1);
+
+  // Screen layer with glyph resolver - screen manages buffers
+  _screen = vterm_obtain_screen(_vterm, glyphResolver, this);
+  vterm_screen_set_callbacks(_screen, &screenCallbacks, this);
+  vterm_screen_enable_altscreen(_screen, 1);
+  vterm_screen_enable_reflow(_screen, _reflow);
+
+
+  vterm_screen_reset(_screen, 1);
 
   // Set up vterm output callback to write directly to PTY
   vterm_output_set_callback(
@@ -359,50 +324,6 @@ Result<void> TerminalScreenImpl::init(uint32_t cols, uint32_t rows) {
   return Ok();
 }
 
-void TerminalScreenImpl::createVTerm(uint32_t cols, uint32_t rows) {
-  if (_vterm)
-    return;
-
-  _rows = static_cast<int>(rows);
-  _cols = static_cast<int>(cols);
-
-  // Allocate buffers
-  size_t numCells = static_cast<size_t>(_rows * _cols);
-  _primaryBuffer.resize(numCells);
-  clearBuffer(_primaryBuffer);
-  _viewBuffer.resize(numCells);
-  _scratchBuffer.resize(_cols);
-  _visibleBuffer = &_primaryBuffer;
-
-  _vterm = vterm_new(_rows, _cols);
-  if (!_vterm)
-    return;
-
-  vterm_set_utf8(_vterm, 1);
-  attach(_vterm);
-}
-
-void TerminalScreenImpl::attach(VTerm *vt) {
-  _vterm = vt;
-  _state = vterm_obtain_state(vt);
-
-  vterm_state_set_callbacks(_state, &stateCallbacks, this);
-
-  vterm_state_get_default_colors(_state, &_defaultFg, &_defaultBg);
-
-  // Convert indexed default colors to RGB
-  if (VTERM_COLOR_IS_INDEXED(&_defaultFg)) {
-    vterm_state_convert_color_to_rgb(_state, &_defaultFg);
-  }
-  if (VTERM_COLOR_IS_INDEXED(&_defaultBg)) {
-    vterm_state_convert_color_to_rgb(_state, &_defaultBg);
-  }
-
-  _pen.fg = _defaultFg;
-  _pen.bg = _defaultBg;
-
-  vterm_state_reset(_state, 1);
-}
 
 //=============================================================================
 // Write / resize
@@ -417,542 +338,40 @@ void TerminalScreenImpl::write(const char *data, size_t len) {
 void TerminalScreenImpl::resize(uint32_t cols, uint32_t rows) {
   if (_vterm) {
     vterm_set_size(_vterm, static_cast<int>(rows), static_cast<int>(cols));
-  } else {
-    resizeInternal(static_cast<int>(rows), static_cast<int>(cols), nullptr);
   }
 }
 
-int TerminalScreenImpl::linePopcount(const std::vector<TextCell> &buffer, int row, int cols) const {
-  int col = cols - 1;
-  while (col >= 0) {
-    size_t idx = static_cast<size_t>(row * cols + col);
-    if (idx < buffer.size() && buffer[idx].glyph != SPACE_GLYPH_INDEX) {
-      break;
-    }
-    col--;
-  }
-  return col + 1;
-}
-
-void TerminalScreenImpl::resizeBuffer(int bufidx, int newRows, int newCols,
-                                      bool active, VTermStateFields *fields) {
-  int oldRows = _rows;
-  int oldCols = _cols;
-
-  std::vector<TextCell> &oldBuffer = (bufidx == 0) ? _primaryBuffer : _altBuffer;
-  VTermLineInfo *oldLineinfo = fields ? fields->lineinfos[bufidx] : nullptr;
-
-  std::vector<TextCell> newBuffer(static_cast<size_t>(newRows * newCols));
-  clearBuffer(newBuffer);
-
-  VTermLineInfo *newLineinfo = nullptr;
-  if (fields) {
-    newLineinfo = static_cast<VTermLineInfo *>(
-        calloc(static_cast<size_t>(newRows), sizeof(VTermLineInfo)));
-  }
-
-  int oldRow = oldRows - 1;
-  int newRow = newRows - 1;
-
-  VTermPos oldCursor = {_cursorRow, _cursorCol};
-  VTermPos newCursor = {-1, -1};
-
-  int finalBlankRow = newRows;
-
-  while (oldRow >= 0 && !oldBuffer.empty()) {
-    int oldRowEnd = oldRow;
-
-    while (_reflow && oldLineinfo && oldRow >= 0 && oldLineinfo[oldRow].continuation) {
-      oldRow--;
-    }
-    int oldRowStart = oldRow;
-
-    int width = 0;
-    for (int row = oldRowStart; row <= oldRowEnd; row++) {
-      if (_reflow && row < (oldRows - 1) && oldLineinfo && oldLineinfo[row + 1].continuation) {
-        width += oldCols;
-      } else {
-        width += linePopcount(oldBuffer, row, oldCols);
-      }
-    }
-
-    if (finalBlankRow == (newRow + 1) && width == 0) {
-      finalBlankRow = newRow;
-    }
-
-    int newHeight = _reflow ? (width ? (width + newCols - 1) / newCols : 1) : 1;
-
-    int newRowEnd = newRow;
-    int newRowStart = newRow - newHeight + 1;
-
-    oldRow = oldRowStart;
-    int oldCol = 0;
-
-    int spareRows = newRows - finalBlankRow;
-
-    if (newRowStart < 0 && spareRows >= 0 &&
-        (!active || newCursor.row == -1 || (newCursor.row - newRowStart) < newRows)) {
-      int downwards = -newRowStart;
-      if (downwards > spareRows) downwards = spareRows;
-      int rowcount = newRows - downwards;
-
-      for (int r = rowcount - 1; r >= 0; r--) {
-        for (int c = 0; c < newCols; c++) {
-          newBuffer[(r + downwards) * newCols + c] = newBuffer[r * newCols + c];
-        }
-        if (newLineinfo) {
-          newLineinfo[r + downwards] = newLineinfo[r];
-        }
-      }
-
-      newRow += downwards;
-      newRowStart += downwards;
-      newRowEnd += downwards;
-
-      if (newCursor.row >= 0) newCursor.row += downwards;
-      finalBlankRow += downwards;
-    }
-
-    if (newRowStart < 0) {
-      if (oldRowStart <= oldCursor.row && oldCursor.row <= oldRowEnd) {
-        newCursor.row = 0;
-        newCursor.col = oldCursor.col;
-        if (newCursor.col >= newCols) newCursor.col = newCols - 1;
-      }
-      break;
-    }
-
-    for (newRow = newRowStart, oldRow = oldRowStart; newRow <= newRowEnd; newRow++) {
-      int count = (width >= newCols) ? newCols : width;
-      width -= count;
-
-      int newCol = 0;
-
-      while (count > 0) {
-        size_t oldIdx = static_cast<size_t>(oldRow * oldCols + oldCol);
-        size_t newIdx = static_cast<size_t>(newRow * newCols + newCol);
-
-        if (oldIdx < oldBuffer.size() && newIdx < newBuffer.size()) {
-          newBuffer[newIdx] = oldBuffer[oldIdx];
-        }
-
-        if (oldCursor.row == oldRow && oldCursor.col == oldCol) {
-          newCursor.row = newRow;
-          newCursor.col = newCol;
-        }
-
-        oldCol++;
-        if (oldCol == oldCols) {
-          oldRow++;
-          if (!_reflow) {
-            newCol++;
-            break;
-          }
-          oldCol = 0;
-        }
-
-        newCol++;
-        count--;
-      }
-
-      if (oldCursor.row == oldRow && oldCursor.col >= oldCol) {
-        newCursor.row = newRow;
-        newCursor.col = oldCursor.col - oldCol + newCol;
-        if (newCursor.col >= newCols) newCursor.col = newCols - 1;
-      }
-
-      if (newLineinfo) {
-        newLineinfo[newRow].continuation = (newRow > newRowStart) ? 1 : 0;
-      }
-    }
-
-    oldRow = oldRowStart - 1;
-    newRow = newRowStart - 1;
-  }
-
-  if (oldCursor.row <= oldRow) {
-    newCursor.row = 0;
-    newCursor.col = oldCursor.col;
-    if (newCursor.col >= newCols) newCursor.col = newCols - 1;
-  }
-
-  if (active && (newCursor.row == -1 || newCursor.col == -1)) {
-    newCursor.row = 0;
-    newCursor.col = 0;
-  }
-
-  if (oldRow >= 0 && bufidx == 0) {
-    _visibleBuffer = &oldBuffer;
-    for (int row = 0; row <= oldRow; row++) {
-      pushLineToScrollback(row);
-    }
-    if (active) {
-      newCursor.row -= (oldRow + 1);
-      if (newCursor.row < 0) newCursor.row = 0;
-    }
-  }
-
-  if (newRow >= 0) {
-    int moveRows = newRows - newRow - 1;
-    for (int r = 0; r < moveRows; r++) {
-      for (int c = 0; c < newCols; c++) {
-        newBuffer[r * newCols + c] = newBuffer[(r + newRow + 1) * newCols + c];
-      }
-      if (newLineinfo) {
-        newLineinfo[r] = newLineinfo[r + newRow + 1];
-      }
-    }
-
-    newCursor.row -= (newRow + 1);
-    if (newCursor.row < 0) newCursor.row = 0;
-
-    for (int r = moveRows; r < newRows; r++) {
-      for (int c = 0; c < newCols; c++) {
-        size_t idx = static_cast<size_t>(r * newCols + c);
-        newBuffer[idx].glyph = SPACE_GLYPH_INDEX;
-      }
-      if (newLineinfo) {
-        newLineinfo[r] = VTermLineInfo{};
-      }
-    }
-  }
-
-  if (bufidx == 0) {
-    _primaryBuffer = std::move(newBuffer);
-  } else {
-    _altBuffer = std::move(newBuffer);
-  }
-
-  if (fields && oldLineinfo) {
-    free(oldLineinfo);
-    fields->lineinfos[bufidx] = newLineinfo;
-  }
-
-  if (active) {
-    _cursorRow = newCursor.row;
-    _cursorCol = newCursor.col;
-  }
-}
-
-void TerminalScreenImpl::resizeInternal(int rows, int cols, VTermStateFields *fields) {
-  if (rows == _rows && cols == _cols && !_primaryBuffer.empty()) {
-    return;
-  }
-
-  ydebug("TerminalScreen::resizeInternal {}x{} -> {}x{} isAltScreen={}", _cols, _rows, cols, rows, _isAltScreen);
-
-  int oldRows = _rows;
-  bool altscreenActive = _isAltScreen;
-
-  resizeBuffer(0, rows, cols, !altscreenActive, fields);
-
-  if (!_altBuffer.empty()) {
-    resizeBuffer(1, rows, cols, altscreenActive, fields);
-  } else if (rows != oldRows && fields && fields->lineinfos[1]) {
-    free(fields->lineinfos[1]);
-    fields->lineinfos[1] = static_cast<VTermLineInfo *>(
-        calloc(static_cast<size_t>(rows), sizeof(VTermLineInfo)));
-  }
-
-  _rows = rows;
-  _cols = cols;
-
-  size_t numCells = static_cast<size_t>(rows * cols);
-  _viewBuffer.clear();
-  _viewBuffer.resize(numCells);
-  _scratchBuffer.resize(cols);
-
-  _visibleBuffer = altscreenActive ? &_altBuffer : &_primaryBuffer;
-
-  if (!altscreenActive) {
-    _scrollOffset = 0;
-  }
-
-  _hasDamage = true;
-  _viewBufferDirty = true;
-}
 
 //=============================================================================
 // Cell access — zero-copy GPU upload path
 //=============================================================================
 
-const TextCell *TerminalScreenImpl::getCellData() const {
-  if (_scrollOffset > 0) {
-    const_cast<TerminalScreenImpl *>(this)->composeViewBuffer();
-    return _viewBuffer.data();
-  }
-  if (_visibleBuffer) {
-    return _visibleBuffer->data();
-  }
-  return nullptr;
+const VTermScreenCell *TerminalScreenImpl::getCellData() const {
+  return vterm_screen_get_buffer(_screen);
 }
 
-TextCell TerminalScreenImpl::getCell(int row, int col) const {
+VTermScreenCell TerminalScreenImpl::getCell(int row, int col) const {
   if (row < 0 || row >= _rows || col < 0 || col >= _cols) {
-    return TextCell{};
+    return VTermScreenCell{};
   }
-  const TextCell *data = getCellData();
-  return data ? data[cellIndex(row, col)] : TextCell{};
+  const VTermScreenCell *data = getCellData();
+  return data ? data[cellIndex(row, col)] : VTermScreenCell{};
 }
 
 //=============================================================================
-// Scrollback navigation
+// Scrollback navigation (TODO: implement viewing later)
 //=============================================================================
 
-void TerminalScreenImpl::scrollUp(int lines) {
-  int maxOffset = static_cast<int>(_scrollback.size());
-  int newOffset = std::min(_scrollOffset + lines, maxOffset);
-  if (newOffset != _scrollOffset) {
-    _scrollOffset = newOffset;
-    _viewBufferDirty = true;
-    _hasDamage = true;
-  }
-}
-
-void TerminalScreenImpl::scrollDown(int lines) {
-  int newOffset = std::max(_scrollOffset - lines, 0);
-  if (newOffset != _scrollOffset) {
-    _scrollOffset = newOffset;
-    _viewBufferDirty = true;
-    _hasDamage = true;
-  }
-}
-
-void TerminalScreenImpl::scrollToBottom() {
-  if (_scrollOffset != 0) {
-    _scrollOffset = 0;
-    _viewBufferDirty = true;
-    _hasDamage = true;
-  }
-}
+void TerminalScreenImpl::scrollUp(int) {}
+void TerminalScreenImpl::scrollDown(int) {}
+void TerminalScreenImpl::scrollToBottom() {}
 
 //=============================================================================
-// View buffer composition (when scrolled back)
+// VTerm screen callbacks - handled by libvterm screen layer
 //=============================================================================
 
-void TerminalScreenImpl::composeViewBuffer() {
-  if (!_viewBufferDirty)
-    return;
-
-  int sbSize = static_cast<int>(_scrollback.size());
-  int sbLinesToShow = std::min(_scrollOffset, _rows);
-
-  // Fill top rows from scrollback
-  for (int viewRow = 0; viewRow < sbLinesToShow; viewRow++) {
-    int sbIndex = sbSize - _scrollOffset + viewRow;
-    if (sbIndex >= 0 && sbIndex < sbSize) {
-      decompressLine(_scrollback[sbIndex], viewRow);
-    }
-  }
-
-  // Fill bottom rows from visible buffer
-  int visibleStart = sbLinesToShow;
-  int visibleLines = _rows - sbLinesToShow;
-  if (visibleLines > 0 && _visibleBuffer) {
-    size_t dstOffset = static_cast<size_t>(visibleStart * _cols);
-    std::memcpy(&_viewBuffer[dstOffset], _visibleBuffer->data(),
-                static_cast<size_t>(visibleLines * _cols) * sizeof(TextCell));
-  }
-
-  _viewBufferDirty = false;
-}
-
-void TerminalScreenImpl::decompressLine(const ScrollbackLine &line,
-                                        int viewRow) {
-  size_t dstOffset = static_cast<size_t>(viewRow * _cols);
-  int lineCols = std::min(static_cast<int>(line.cells.size()), _cols);
-
-  if (lineCols > 0) {
-    std::memcpy(&_viewBuffer[dstOffset], line.cells.data(),
-                static_cast<size_t>(lineCols) * sizeof(TextCell));
-  }
-
-  // Fill remainder with default cells
-  TextCell defaultCell{};
-  defaultCell.glyph = SPACE_GLYPH_INDEX;
-  defaultCell.fgR = _defaultFg.rgb.red;
-  defaultCell.fgG = _defaultFg.rgb.green;
-  defaultCell.fgB = _defaultFg.rgb.blue;
-  defaultCell.bgR = _defaultBg.rgb.red;
-  defaultCell.bgG = _defaultBg.rgb.green;
-  defaultCell.bgB = _defaultBg.rgb.blue;
-  defaultCell.alpha = 255;
-  defaultCell.style = 0;
-
-  for (int col = lineCols; col < _cols; col++) {
-    _viewBuffer[dstOffset + col] = defaultCell;
-  }
-}
-
-void TerminalScreenImpl::pushLineToScrollback(int row) {
-  if (!_visibleBuffer)
-    return;
-
-  ScrollbackLine line;
-  line.cells.resize(_cols);
-  size_t srcOffset = static_cast<size_t>(row * _cols);
-  std::memcpy(line.cells.data(), &(*_visibleBuffer)[srcOffset],
-              _cols * sizeof(TextCell));
-
-  _scrollback.push_back(std::move(line));
-
-  if (_scrollOffset > 0) {
-    _scrollOffset++;
-  }
-
-  while (_scrollback.size() > _maxScrollback) {
-    _scrollback.pop_front();
-    if (_scrollOffset > static_cast<int>(_scrollback.size())) {
-      _scrollOffset = static_cast<int>(_scrollback.size());
-    }
-  }
-}
-
-//=============================================================================
-// Buffer helpers
-//=============================================================================
-
-void TerminalScreenImpl::clearBuffer(std::vector<TextCell> &buffer) {
-  uint8_t fgR, fgG, fgB, bgR, bgG, bgB;
-  colorToRGB(_defaultFg, fgR, fgG, fgB);
-  colorToRGB(_defaultBg, bgR, bgG, bgB);
-
-  TextCell defaultCell{};
-  defaultCell.glyph = SPACE_GLYPH_INDEX;
-  defaultCell.fgR = fgR;
-  defaultCell.fgG = fgG;
-  defaultCell.fgB = fgB;
-  defaultCell.bgR = bgR;
-  defaultCell.bgG = bgG;
-  defaultCell.bgB = bgB;
-  defaultCell.alpha = 255;
-  defaultCell.style = 0;
-
-  std::fill(buffer.begin(), buffer.end(), defaultCell);
-}
-
-void TerminalScreenImpl::switchToScreen(bool alt) {
-  if (_isAltScreen == alt)
-    return;
-
-  _isAltScreen = alt;
-
-  if (alt) {
-    if (_altBuffer.empty()) {
-      _altBuffer.resize(static_cast<size_t>(_rows * _cols));
-    }
-    _visibleBuffer = &_altBuffer;
-    clearBuffer(_altBuffer);
-    _scrollOffset = 0;
-  } else {
-    _visibleBuffer = &_primaryBuffer;
-  }
-
-  _hasDamage = true;
-  _viewBufferDirty = true;
-}
-
-//=============================================================================
-// Cell manipulation
-//=============================================================================
-
-void TerminalScreenImpl::setCell(int row, int col, uint32_t glyph, uint8_t fgR,
-                                 uint8_t fgG, uint8_t fgB, uint8_t bgR,
-                                 uint8_t bgG, uint8_t bgB, uint8_t style) {
-  if (row < 0 || row >= _rows || col < 0 || col >= _cols)
-    return;
-  if (!_visibleBuffer)
-    return;
-
-  size_t idx = cellIndex(row, col);
-  if (idx >= _visibleBuffer->size())
-    return;
-
-  TextCell &cell = (*_visibleBuffer)[idx];
-  if (_font && glyph != GLYPH_WIDE_CONT) {
-    cell.glyph = _font->getGlyphIndex(glyph, (style & 0x01) != 0, (style & 0x02) != 0);
-  } else {
-    cell.glyph = glyph;
-  }
-  cell.fgR = fgR;
-  cell.fgG = fgG;
-  cell.fgB = fgB;
-  cell.bgR = bgR;
-  cell.bgG = bgG;
-  cell.bgB = bgB;
-  cell.alpha = 255;
-  cell.style = style;
-}
-
-void TerminalScreenImpl::colorToRGB(const VTermColor &color, uint8_t &r,
-                                    uint8_t &g, uint8_t &b) {
-  if (VTERM_COLOR_IS_DEFAULT_FG(&color)) {
-    r = _defaultFg.rgb.red;
-    g = _defaultFg.rgb.green;
-    b = _defaultFg.rgb.blue;
-  } else if (VTERM_COLOR_IS_DEFAULT_BG(&color)) {
-    r = _defaultBg.rgb.red;
-    g = _defaultBg.rgb.green;
-    b = _defaultBg.rgb.blue;
-  } else if (VTERM_COLOR_IS_INDEXED(&color)) {
-    VTermColor rgb = color;
-    if (_state) {
-      vterm_state_convert_color_to_rgb(_state, &rgb);
-    }
-    r = rgb.rgb.red;
-    g = rgb.rgb.green;
-    b = rgb.rgb.blue;
-  } else {
-    r = color.rgb.red;
-    g = color.rgb.green;
-    b = color.rgb.blue;
-  }
-}
-
-//=============================================================================
-// VTerm state callbacks
-//=============================================================================
-
-int TerminalScreenImpl::onPutglyph(VTermGlyphInfo *info, VTermPos pos,
-                                   void *user) {
+int TerminalScreenImpl::onDamage(VTermRect, void *user) {
   auto *self = static_cast<TerminalScreenImpl *>(user);
-
-  uint32_t cp = info->chars[0];
-  if (cp == 0)
-    cp = ' ';
-
-  uint8_t fgR, fgG, fgB, bgR, bgG, bgB;
-  self->colorToRGB(self->_pen.fg, fgR, fgG, fgB);
-  self->colorToRGB(self->_pen.bg, bgR, bgG, bgB);
-
-  if (self->_pen.reverse) {
-    std::swap(fgR, bgR);
-    std::swap(fgG, bgG);
-    std::swap(fgB, bgB);
-  }
-
-  // Pack style: bits 0-4 = text attrs, bits 5-7 = font type
-  // Font type: 0=MSDF, 1=Bitmap, 2=Shader, 3=Card, 4=Vector, 5=Coverage, 6=Raster
-  uint8_t style = 0;
-  if (self->_pen.bold)
-    style |= 0x01;
-  if (self->_pen.italic)
-    style |= 0x02;
-  style |= (self->_pen.underline & 0x03) << 2;
-  if (self->_pen.strike)
-    style |= 0x10;
-  // Set font render method in style bits 5-7
-  if (self->_font) {
-    style |= (static_cast<uint8_t>(self->_font->renderMethod()) & 0x07) << 5;
-  }
-
-  self->setCell(pos.row, pos.col, cp, fgR, fgG, fgB, bgR, bgG, bgB, style);
-
-  for (int i = 1; i < info->width; i++) {
-    self->setCell(pos.row, pos.col + i, GLYPH_WIDE_CONT, fgR, fgG, fgB, bgR,
-                  bgG, bgB, style);
-  }
-
   self->_hasDamage = true;
   return 1;
 }
@@ -967,219 +386,6 @@ int TerminalScreenImpl::onMoveCursor(VTermPos pos, VTermPos, int visible,
   return 1;
 }
 
-int TerminalScreenImpl::onScrollRect(VTermRect rect, int downward, int,
-                                     void *user) {
-  auto *self = static_cast<TerminalScreenImpl *>(user);
-
-  bool isFullWidth = (rect.start_col == 0 && rect.end_col == self->_cols);
-
-  if (downward > 0 && rect.start_row == 0 && isFullWidth) {
-    for (int i = 0; i < downward && i < rect.end_row; i++) {
-      self->pushLineToScrollback(i);
-    }
-  } else if (downward < 0 && rect.start_row == 0 && isFullWidth) {
-    int upAmount = -downward;
-    for (int i = 0; i < upAmount && i < rect.end_row; i++) {
-      self->pushLineToScrollback(i);
-    }
-  }
-
-  // Return 0 — let vterm handle via moverect/erase
-  return 0;
-}
-
-int TerminalScreenImpl::onMoveRect(VTermRect dest, VTermRect src, void *user) {
-  auto *self = static_cast<TerminalScreenImpl *>(user);
-
-  int height = src.end_row - src.start_row;
-  int width = src.end_col - src.start_col;
-  int cols = self->_cols;
-  int rows = self->_rows;
-
-  if (height <= 0 || width <= 0)
-    return 1;
-  if (src.start_row < 0 || src.end_row > rows)
-    return 1;
-  if (dest.start_row < 0 || dest.start_row + height > rows)
-    return 1;
-  if (src.start_col < 0 || src.end_col > cols)
-    return 1;
-  if (dest.start_col < 0 || dest.start_col + width > cols)
-    return 1;
-  if (!self->_visibleBuffer)
-    return 1;
-
-  // Ultra-fast path: full-width move — single memmove
-  if (src.start_col == 0 && dest.start_col == 0 && width == cols) {
-    size_t srcIdx = self->cellIndex(src.start_row, 0);
-    size_t dstIdx = self->cellIndex(dest.start_row, 0);
-    size_t totalCells = static_cast<size_t>(height) * cols;
-    std::memmove(&(*self->_visibleBuffer)[dstIdx],
-                 &(*self->_visibleBuffer)[srcIdx],
-                 totalCells * sizeof(TextCell));
-  }
-  // Fast path: full-width, row-by-row memmove
-  else if (src.start_col == dest.start_col && width == cols) {
-    if (dest.start_row < src.start_row) {
-      for (int row = 0; row < height; row++) {
-        size_t si = self->cellIndex(src.start_row + row, 0);
-        size_t di = self->cellIndex(dest.start_row + row, 0);
-        std::memmove(&(*self->_visibleBuffer)[di], &(*self->_visibleBuffer)[si],
-                     width * sizeof(TextCell));
-      }
-    } else {
-      for (int row = height - 1; row >= 0; row--) {
-        size_t si = self->cellIndex(src.start_row + row, 0);
-        size_t di = self->cellIndex(dest.start_row + row, 0);
-        std::memmove(&(*self->_visibleBuffer)[di], &(*self->_visibleBuffer)[si],
-                     width * sizeof(TextCell));
-      }
-    }
-  }
-  // General case: scratch buffer
-  else {
-    if (static_cast<int>(self->_scratchBuffer.size()) < width) {
-      self->_scratchBuffer.resize(width);
-    }
-    bool copyForward =
-        (dest.start_row < src.start_row) ||
-        (dest.start_row == src.start_row && dest.start_col <= src.start_col);
-
-    auto copyRow = [&](int row) {
-      size_t si =
-          self->cellIndex((copyForward ? src.start_row + row
-                                       : src.start_row + height - 1 - row),
-                          src.start_col);
-      size_t di =
-          self->cellIndex((copyForward ? dest.start_row + row
-                                       : dest.start_row + height - 1 - row),
-                          dest.start_col);
-      std::memcpy(self->_scratchBuffer.data(), &(*self->_visibleBuffer)[si],
-                  width * sizeof(TextCell));
-      std::memcpy(&(*self->_visibleBuffer)[di], self->_scratchBuffer.data(),
-                  width * sizeof(TextCell));
-    };
-
-    for (int row = 0; row < height; row++) {
-      copyRow(row);
-    }
-  }
-
-  self->_hasDamage = true;
-  self->_viewBufferDirty = true;
-  return 1;
-}
-
-int TerminalScreenImpl::onErase(VTermRect rect, int, void *user) {
-  auto *self = static_cast<TerminalScreenImpl *>(user);
-
-  if (!self->_visibleBuffer)
-    return 1;
-
-  int startRow = std::max(0, rect.start_row);
-  int endRow = std::min(self->_rows, rect.end_row);
-  int startCol = std::max(0, rect.start_col);
-  int endCol = std::min(self->_cols, rect.end_col);
-  int width = endCol - startCol;
-  int cols = self->_cols;
-
-  if (width <= 0 || startRow >= endRow)
-    return 1;
-
-  uint8_t fgR, fgG, fgB, bgR, bgG, bgB;
-  self->colorToRGB(self->_pen.fg, fgR, fgG, fgB);
-  self->colorToRGB(self->_pen.bg, bgR, bgG, bgB);
-  if (self->_pen.reverse) {
-    std::swap(fgR, bgR);
-    std::swap(fgG, bgG);
-    std::swap(fgB, bgB);
-  }
-
-  TextCell defaultCell{};
-  defaultCell.glyph = SPACE_GLYPH_INDEX;
-  defaultCell.fgR = fgR;
-  defaultCell.fgG = fgG;
-  defaultCell.fgB = fgB;
-  defaultCell.bgR = bgR;
-  defaultCell.bgG = bgG;
-  defaultCell.bgB = bgB;
-  defaultCell.alpha = 255;
-  defaultCell.style = 0;
-
-  if (startCol == 0 && endCol == cols) {
-    for (int row = startRow; row < endRow; row++) {
-      size_t off = static_cast<size_t>(row * cols);
-      std::fill(self->_visibleBuffer->begin() + static_cast<ptrdiff_t>(off),
-                self->_visibleBuffer->begin() +
-                    static_cast<ptrdiff_t>(off + cols),
-                defaultCell);
-    }
-  } else {
-    for (int row = startRow; row < endRow; row++) {
-      size_t off = static_cast<size_t>(row * cols);
-      for (int col = startCol; col < endCol; col++) {
-        (*self->_visibleBuffer)[off + col] = defaultCell;
-      }
-    }
-  }
-
-  self->_hasDamage = true;
-  if (self->_scrollOffset > 0) {
-    self->_viewBufferDirty = true;
-  }
-
-  return 1;
-}
-
-int TerminalScreenImpl::onInitPen(void *user) {
-  auto *self = static_cast<TerminalScreenImpl *>(user);
-  self->_pen.fg = self->_defaultFg;
-  self->_pen.bg = self->_defaultBg;
-  self->_pen.bold = false;
-  self->_pen.italic = false;
-  self->_pen.underline = 0;
-  self->_pen.strike = false;
-  self->_pen.reverse = false;
-  self->_pen.blink = false;
-  return 1;
-}
-
-int TerminalScreenImpl::onSetPenAttr(VTermAttr attr, VTermValue *val,
-                                     void *user) {
-  auto *self = static_cast<TerminalScreenImpl *>(user);
-
-  switch (attr) {
-  case VTERM_ATTR_BOLD:
-    self->_pen.bold = val->boolean != 0;
-    break;
-  case VTERM_ATTR_ITALIC:
-    self->_pen.italic = val->boolean != 0;
-    break;
-  case VTERM_ATTR_UNDERLINE:
-    self->_pen.underline = static_cast<uint8_t>(val->number & 0x03);
-    break;
-  case VTERM_ATTR_STRIKE:
-    self->_pen.strike = val->boolean != 0;
-    break;
-  case VTERM_ATTR_REVERSE:
-    self->_pen.reverse = val->boolean != 0;
-    break;
-  case VTERM_ATTR_BLINK:
-    self->_pen.blink = val->boolean != 0;
-    break;
-  case VTERM_ATTR_FOREGROUND:
-    self->_pen.fg = val->color;
-    break;
-  case VTERM_ATTR_BACKGROUND:
-    self->_pen.bg = val->color;
-    break;
-  default:
-    break;
-  }
-
-  return 1;
-}
-
 int TerminalScreenImpl::onSetTermProp(VTermProp prop, VTermValue *val,
                                       void *user) {
   auto *self = static_cast<TerminalScreenImpl *>(user);
@@ -1190,25 +396,83 @@ int TerminalScreenImpl::onSetTermProp(VTermProp prop, VTermValue *val,
     self->_cursorBlink = val->boolean != 0;
   } else if (prop == VTERM_PROP_CURSORSHAPE) {
     self->_cursorShape = val->number;
-  } else if (prop == VTERM_PROP_ALTSCREEN) {
-    self->switchToScreen(val->boolean != 0);
   }
+  /* ALTSCREEN handled by screen layer */
 
   return 1;
 }
 
 int TerminalScreenImpl::onBell(void *) { return 1; }
 
-int TerminalScreenImpl::onResize(int rows, int cols, VTermStateFields *fields,
-                                 void *user) {
+int TerminalScreenImpl::onResize(int rows, int cols, void *user) {
   auto *self = static_cast<TerminalScreenImpl *>(user);
-  self->resizeInternal(rows, cols, fields);
+  self->_rows = rows;
+  self->_cols = cols;
+  self->_hasDamage = true;
   return 1;
 }
 
-int TerminalScreenImpl::onSetLineInfo(int, const VTermLineInfo *,
-                                      const VTermLineInfo *, void *) {
+int TerminalScreenImpl::onSbPushline(int cols, const VTermScreenCell *cells,
+                                     void *user) {
+  auto *self = static_cast<TerminalScreenImpl *>(user);
+
+  ScrollbackLine line;
+  line.cells.resize(cols);
+  std::memcpy(line.cells.data(), cells, cols * sizeof(VTermScreenCell));
+
+  self->_scrollback.push_back(std::move(line));
+
+  while (self->_scrollback.size() > self->_maxScrollback) {
+    self->_scrollback.pop_front();
+  }
+
   return 1;
+}
+
+int TerminalScreenImpl::onSbPopline(int cols, VTermScreenCell *cells,
+                                    void *user) {
+  auto *self = static_cast<TerminalScreenImpl *>(user);
+
+  if (self->_scrollback.empty())
+    return 0;
+
+  ScrollbackLine &line = self->_scrollback.back();
+  int copyCount = std::min(cols, static_cast<int>(line.cells.size()));
+  std::memcpy(cells, line.cells.data(), copyCount * sizeof(VTermScreenCell));
+
+  // Fill remainder with empty cells if scrollback line shorter than cols
+  if (copyCount < cols) {
+    VTermScreenCell empty{};
+    empty.glyph_index = 0;
+    empty.fg = self->_defaultFg;
+    empty.bg = self->_defaultBg;
+    for (int i = copyCount; i < cols; i++) {
+      cells[i] = empty;
+    }
+  }
+
+  self->_scrollback.pop_back();
+  return 1;
+}
+
+VTermResolvedGlyph TerminalScreenImpl::glyphResolver(const uint32_t *chars,
+                                                     int count, int bold,
+                                                     int italic, void *user) {
+  auto *self = static_cast<TerminalScreenImpl *>(user);
+
+  VTermResolvedGlyph result;
+
+  if (!self->_font) {
+    result.glyph_index = 0xFFFFFFFF;
+    result.font_type = 0;
+    return result;
+  }
+
+  uint32_t codepoint = (count > 0 && chars[0]) ? chars[0] : ' ';
+  result.glyph_index = self->_font->getGlyphIndex(codepoint, bold, italic);
+  result.font_type = static_cast<uint8_t>(self->_font->renderMethod());
+
+  return result;
 }
 
 //=============================================================================

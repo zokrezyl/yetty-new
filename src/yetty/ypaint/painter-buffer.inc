@@ -209,6 +209,8 @@ void clear() override {
   // Clear canvas
   if (_canvas) {
     _canvas->clear();
+  } else {
+    yerror("clear: _canvas is null");
   }
 
   // Clear glyph data

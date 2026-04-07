@@ -3,6 +3,10 @@
 //=========================================================================
 
 Result<void> flushMetadata() {
+  if (!_gpuMemoryManager) {
+    return Err<void>("flushMetadata: _gpuMemoryManager is null");
+  }
+
   // Pack zoom as f16 in upper 16 bits of flags
   uint32_t zoomBits;
   {
@@ -34,18 +38,38 @@ Result<void> flushMetadata() {
         _viewPanY / std::max(contentH, 1e-6f) * 16384.0f, -32768.0f, 32767.0f));
   }
 
-  uint32_t primOffset =
-      _primHandle.isValid() ? _primHandle.offset / sizeof(float) : 0;
+  uint32_t primCount = primitiveCount();
+  uint32_t primOffset = 0;
+  if (primCount > 0) {
+    if (!_primHandle.isValid()) {
+      return Err<void>("flushMetadata: have " + std::to_string(primCount) +
+                       " primitives but _primHandle is invalid");
+    }
+    primOffset = _primHandle.offset / sizeof(float);
+  }
+
+  // Validate glyph state
+  uint32_t glyphCount = static_cast<uint32_t>(_glyphs.size());
+  if (glyphCount > 0 && _gpuGlyphOffset == 0) {
+    return Err<void>("flushMetadata: have " + std::to_string(glyphCount) +
+                     " glyphs but _gpuGlyphOffset is 0");
+  }
+
+  // Validate grid state
+  if ((_gridWidth > 0 || _gridHeight > 0) && _gpuGridOffset == 0) {
+    return Err<void>("flushMetadata: grid is " + std::to_string(_gridWidth) + "x" +
+                     std::to_string(_gridHeight) + " but _gpuGridOffset is 0");
+  }
 
   YPaintMetadata meta = {};
   meta.primitiveOffset = primOffset;
-  meta.primitiveCount = primitiveCount();
+  meta.primitiveCount = primCount;
   meta.gridOffset = _gpuGridOffset;
   meta.gridWidth = _gridWidth;
   meta.gridHeight = _gridHeight;
   meta.cellSizeXY = YPaintMetadata::packCellSize(_cellSizeX, _cellSizeY);
   meta.glyphOffset = _gpuGlyphOffset;
-  meta.glyphCount = static_cast<uint32_t>(_glyphs.size());
+  meta.glyphCount = glyphCount;
   std::memcpy(&meta.sceneMinX, &_sceneMinX, sizeof(float));
   std::memcpy(&meta.sceneMinY, &_sceneMinY, sizeof(float));
   std::memcpy(&meta.sceneMaxX, &_sceneMaxX, sizeof(float));
@@ -69,12 +93,16 @@ Result<void> flushMetadata() {
          meta.gridWidth, meta.gridHeight, meta.glyphOffset, meta.glyphCount,
          _sceneMinX, _sceneMinY, _sceneMaxX, _sceneMaxY);
 
-  return _cardMgr->writeMetadata(MetadataHandle{_metaSlotIndex * 64, 64},
+  return _gpuMemoryManager->writeMetadata(MetadataHandle{_metaSlotIndex * 64, 64},
                                  &meta, sizeof(meta));
 }
 
 uint32_t computeDerivedSize() const {
-  const auto &gridStaging = _canvas ? _canvas->gridStaging() : _emptyGridStaging;
+  if (!_canvas) {
+    yerror("computeDerivedSize: _canvas is null - returning 0");
+    return 0;
+  }
+  const auto &gridStaging = _canvas->gridStaging();
   uint32_t gridBytes =
       static_cast<uint32_t>(gridStaging.size()) * sizeof(uint32_t);
   uint32_t glyphBytes =
@@ -93,8 +121,14 @@ Result<void> writeDerived() {
   if (!_derivedHandle.isValid()) {
     return Err<void>("writeDerived: derived handle not allocated");
   }
+  if (!_derivedHandle.data) {
+    return Err<void>("writeDerived: _derivedHandle.data is null");
+  }
 
-  const auto &gridStaging = _canvas ? _canvas->gridStaging() : _emptyGridStaging;
+  if (!_canvas) {
+    return Err<void>("writeDerived: _canvas is null");
+  }
+  const auto &gridStaging = _canvas->gridStaging();
 
   uint8_t *base = _derivedHandle.data;
   uint32_t offset = 0;
@@ -155,23 +189,37 @@ Result<void> writeDerived() {
     uint32_t *gridPtr = reinterpret_cast<uint32_t *>(base + offset);
     uint32_t gridSize = static_cast<uint32_t>(gridStaging.size());
     uint32_t numCells = _gridWidth * _gridHeight;
-    if (!_primWordOffsets.empty() && numCells <= gridSize) {
+    if (numCells > gridSize) {
+      return Err<void>("writeDerived: numCells=" + std::to_string(numCells) +
+                       " > gridSize=" + std::to_string(gridSize));
+    }
+    if (!_primWordOffsets.empty()) {
       for (uint32_t ci = 0; ci < numCells; ci++) {
         uint32_t packedOff = gridPtr[ci];
-        if (packedOff >= gridSize)
-          continue;
+        if (packedOff >= gridSize) {
+          return Err<void>("writeDerived: cell " + std::to_string(ci) +
+                           " has packedOff=" + std::to_string(packedOff) +
+                           " >= gridSize=" + std::to_string(gridSize));
+        }
         uint32_t cnt = gridPtr[packedOff];
         for (uint32_t j = 0; j < cnt; j++) {
           uint32_t idx = packedOff + 1 + j;
-          if (idx >= gridSize)
-            break;
+          if (idx >= gridSize) {
+            return Err<void>("writeDerived: cell " + std::to_string(ci) +
+                             " entry " + std::to_string(j) + " idx=" + std::to_string(idx) +
+                             " >= gridSize=" + std::to_string(gridSize));
+          }
           uint32_t rawVal = gridPtr[idx];
           if ((rawVal & 0x80000000u) != 0) {
+            // Glyph reference, not a primitive - skip translation
             continue;
           }
-          if (rawVal < static_cast<uint32_t>(_primWordOffsets.size())) {
-            gridPtr[idx] = _primWordOffsets[rawVal];
+          if (rawVal >= static_cast<uint32_t>(_primWordOffsets.size())) {
+            return Err<void>("writeDerived: cell " + std::to_string(ci) +
+                             " entry " + std::to_string(j) + " rawVal=" + std::to_string(rawVal) +
+                             " >= _primWordOffsets.size=" + std::to_string(_primWordOffsets.size()));
           }
+          gridPtr[idx] = _primWordOffsets[rawVal];
         }
       }
     }
@@ -203,7 +251,13 @@ Result<void> writeDerived() {
 
     if (_atlasTextureHandle.isValid()) {
       // Texture already allocated — write actual atlas position
-      auto texMgr = _cardMgr->textureManager();
+      if (!_gpuMemoryManager) {
+        return Err<void>("writeDerived: _gpuMemoryManager is null");
+      }
+      auto texMgr = _gpuMemoryManager->textureManager();
+      if (!texMgr) {
+        return Err<void>("writeDerived: textureManager is null");
+      }
       auto atlasPos = texMgr->getAtlasPosition(_atlasTextureHandle);
       uint32_t msdfAtlasW = _customAtlas->getAtlasWidth();
       uint32_t msdfAtlasH = _customAtlas->getAtlasHeight();
@@ -214,9 +268,9 @@ Result<void> writeDerived() {
           static_cast<uint32_t>(glyphMeta.size()), 0};
       std::memcpy(base + offset, atlasHeader, sizeof(atlasHeader));
     } else {
-      // Texture not yet allocated — zero-fill, writeTextures() will fill
-      // later
-      std::memset(base + offset, 0, atlasHeaderBytes);
+      // Texture not yet allocated - ERROR: allocateTextures() should have been called first
+      return Err<void>("writeDerived: _customAtlas exists but _atlasTextureHandle is invalid - "
+                       "allocateTextures() must be called before writeDerived()");
     }
     offset += atlasHeaderBytes;
 
@@ -265,14 +319,13 @@ uint32_t _bgColor = 0xFF2E1A1A;
 uint32_t _flags = 0;
 
 // Font state
-FontManager::Ptr _fontManager;
-MsMsdfFont::Ptr _font;
-MsdfAtlas::Ptr _atlas;
+font::FontManager* _fontManager = nullptr;
+font::MsMsdfFont* _font = nullptr;
+MsdfAtlas* _atlas = nullptr;
 std::unordered_map<std::string, int> _fontIdCache;
 
 // Custom atlas
-MsdfAtlas::Ptr _customAtlas;
-GpuAllocator::Ptr _gpuAllocator;
+MsdfAtlas* _customAtlas = nullptr;
 
 // TTF font metrics cache (fontId -> hhea ascender/descender)
 std::unordered_map<int, TtfMetrics> _ttfMetricsCache;
@@ -284,7 +337,7 @@ std::unordered_map<int, int> _userFontIdMap;
 std::unordered_map<int, int> _bufferFontIdMap;
 
 // GPU state (managed by lifecycle methods)
-GpuMemoryManager::Ptr _cardMgr;
+GpuMemoryManager* _gpuMemoryManager = nullptr;
 uint32_t _metaSlotIndex = 0;
 BufferHandle _primHandle = BufferHandle::invalid();
 BufferHandle _derivedHandle = BufferHandle::invalid();

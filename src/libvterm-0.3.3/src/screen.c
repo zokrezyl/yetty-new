@@ -9,13 +9,15 @@
 #define UNICODE_SPACE 0x20
 #define UNICODE_LINEFEED 0x0a
 
+/* yetty: wide character continuation marker */
+#define GLYPH_WIDE_CONT 0xFFFEu
+
 #undef DEBUG_REFLOW
 
-/* State of the pen at some moment in time, also used in a cell */
+/* State of the pen at some moment in time - kept for attribute tracking */
 typedef struct
 {
-  /* After the bitfield */
-  VTermColor   fg, bg;
+  VTermColor   fg, bg; /* yetty: always RGB, converted immediately in setpenattr */
 
   unsigned int bold      : 1;
   unsigned int underline : 2;
@@ -28,18 +30,12 @@ typedef struct
   unsigned int small     : 1;
   unsigned int baseline  : 2;
 
-  /* Extra state storage that isn't strictly pen-related */
   unsigned int protected_cell : 1;
   unsigned int dwl            : 1; /* on a DECDWL or DECDHL line */
   unsigned int dhl            : 2; /* on a DECDHL line (1=top 2=bottom) */
 } ScreenPen;
 
-/* Internal representation of a screen cell */
-typedef struct
-{
-  uint32_t chars[VTERM_MAX_CHARS_PER_CELL];
-  ScreenPen pen;
-} ScreenCell;
+/* yetty: VTermScreenCell removed, using VTermScreenCell directly */
 
 struct VTermScreen
 {
@@ -62,24 +58,43 @@ struct VTermScreen
   unsigned int reflow : 1;
 
   /* Primary and Altscreen. buffers[1] is lazily allocated as needed */
-  ScreenCell *buffers[2];
+  VTermScreenCell *buffers[2];
 
   /* buffer will == buffers[0] or buffers[1], depending on altscreen */
-  ScreenCell *buffer;
+  VTermScreenCell *buffer;
 
   /* buffer for a single screen row used in scrollback storage callbacks */
   VTermScreenCell *sb_buffer;
 
   ScreenPen pen;
+
+  /* yetty: glyph resolver callback */
+  VTermGlyphResolver glyph_resolver;
+  void *resolver_user;
 };
 
-static inline void clearcell(const VTermScreen *screen, ScreenCell *cell)
+/* yetty: colors are now always RGB, no conversion needed */
+
+/* yetty: modified for new cell format */
+static inline void clearcell(VTermScreen *screen, VTermScreenCell *cell)
 {
-  cell->chars[0] = 0;
-  cell->pen = screen->pen;
+  cell->glyph_index = 0;
+  cell->fg = screen->pen.fg;
+  cell->bg = screen->pen.bg;
+  cell->attrs.bold = screen->pen.bold;
+  cell->attrs.underline = screen->pen.underline;
+  cell->attrs.italic = screen->pen.italic;
+  cell->attrs.blink = screen->pen.blink;
+  cell->attrs.conceal = screen->pen.conceal;
+  cell->attrs.strike = screen->pen.strike;
+  cell->attrs.small = screen->pen.small;
+  cell->attrs.baseline = screen->pen.baseline;
+  cell->attrs.default_fg = 0;
+  cell->attrs.default_bg = 0;
+  cell->attrs.font_type = 0;
 }
 
-static inline ScreenCell *getcell(const VTermScreen *screen, int row, int col)
+static inline VTermScreenCell *getcell(const VTermScreen *screen, int row, int col)
 {
   if(row < 0 || row >= screen->rows)
     return NULL;
@@ -88,9 +103,9 @@ static inline ScreenCell *getcell(const VTermScreen *screen, int row, int col)
   return screen->buffer + (screen->cols * row) + col;
 }
 
-static ScreenCell *alloc_buffer(VTermScreen *screen, int rows, int cols)
+static VTermScreenCell *alloc_buffer(VTermScreen *screen, int rows, int cols)
 {
-  ScreenCell *new_buffer = vterm_allocator_malloc(screen->vt, sizeof(ScreenCell) * rows * cols);
+  VTermScreenCell *new_buffer = vterm_allocator_malloc(screen->vt, sizeof(VTermScreenCell) * rows * cols);
 
   for(int row = 0; row < rows; row++) {
     for(int col = 0; col < cols; col++) {
@@ -170,24 +185,66 @@ static void damagescreen(VTermScreen *screen)
   damagerect(screen, rect);
 }
 
+/* yetty: modified for new cell format */
 static int putglyph(VTermGlyphInfo *info, VTermPos pos, void *user)
 {
   VTermScreen *screen = user;
-  ScreenCell *cell = getcell(screen, pos.row, pos.col);
+  VTermScreenCell *cell = getcell(screen, pos.row, pos.col);
 
   if(!cell)
     return 0;
 
-  int i;
-  for(i = 0; i < VTERM_MAX_CHARS_PER_CELL && info->chars[i]; i++) {
-    cell->chars[i] = info->chars[i];
-    cell->pen = screen->pen;
-  }
-  if(i < VTERM_MAX_CHARS_PER_CELL)
-    cell->chars[i] = 0;
+  /* count chars for resolver */
+  int count = 0;
+  while(count < VTERM_MAX_CHARS_PER_CELL && info->chars[count])
+    count++;
+  if(count == 0) count = 1;
 
-  for(int col = 1; col < info->width; col++)
-    getcell(screen, pos.row, pos.col + col)->chars[0] = (uint32_t)-1;
+  /* resolve glyph */
+  uint32_t glyph_index;
+  uint8_t font_type = 0;
+  if(screen->glyph_resolver) {
+    VTermResolvedGlyph resolved = screen->glyph_resolver(
+      info->chars, count, screen->pen.bold, screen->pen.italic, screen->resolver_user);
+    glyph_index = resolved.glyph_index;
+    font_type = resolved.font_type;
+  } else {
+    glyph_index = info->chars[0] ? info->chars[0] : UNICODE_SPACE;
+  }
+
+  /* get colors, handle reverse */
+  VTermColor fg = screen->pen.fg;
+  VTermColor bg = screen->pen.bg;
+  if(screen->pen.reverse ^ screen->global_reverse) {
+    VTermColor tmp = fg; fg = bg; bg = tmp;
+  }
+
+  /* fill cell */
+  cell->glyph_index = glyph_index;
+  cell->fg = fg;
+  cell->bg = bg;
+  cell->attrs.bold = screen->pen.bold;
+  cell->attrs.underline = screen->pen.underline;
+  cell->attrs.italic = screen->pen.italic;
+  cell->attrs.blink = screen->pen.blink;
+  cell->attrs.conceal = screen->pen.conceal;
+  cell->attrs.strike = screen->pen.strike;
+  cell->attrs.small = screen->pen.small;
+  cell->attrs.baseline = screen->pen.baseline;
+  cell->attrs.default_fg = 0;
+  cell->attrs.default_bg = 0;
+  cell->attrs.font_type = font_type;
+
+  /* wide char continuation */
+  for(int col = 1; col < info->width; col++) {
+    VTermScreenCell *cont = getcell(screen, pos.row, pos.col + col);
+    if(cont) {
+      cont->glyph_index = GLYPH_WIDE_CONT;
+      cont->fg = fg;
+      cont->bg = bg;
+      cont->attrs = cell->attrs;
+    }
+  }
 
   VTermRect rect = {
     .start_row = pos.row,
@@ -195,10 +252,6 @@ static int putglyph(VTermGlyphInfo *info, VTermPos pos, void *user)
     .start_col = pos.col,
     .end_col   = pos.col+info->width,
   };
-
-  cell->pen.protected_cell = info->protected_cell;
-  cell->pen.dwl            = info->dwl;
-  cell->pen.dhl            = info->dhl;
 
   damagerect(screen, rect);
 
@@ -244,7 +297,7 @@ static int moverect_internal(VTermRect dest, VTermRect src, void *user)
   for(int row = init_row; row != test_row; row += inc_row)
     memmove(getcell(screen, row, dest.start_col),
             getcell(screen, row + downward, src.start_col),
-            cols * sizeof(ScreenCell));
+            cols * sizeof(VTermScreenCell));
 
   return 1;
 }
@@ -267,27 +320,41 @@ static int moverect_user(VTermRect dest, VTermRect src, void *user)
   return 1;
 }
 
+/* yetty: modified for new cell format */
 static int erase_internal(VTermRect rect, int selective, void *user)
 {
   VTermScreen *screen = user;
+  (void)selective; /* yetty: protected_cell not tracked in new format */
+
+  VTermColor fg = screen->pen.fg;
+  VTermColor bg = screen->pen.bg;
+  if(screen->pen.reverse ^ screen->global_reverse) {
+    VTermColor tmp = fg; fg = bg; bg = tmp;
+  }
 
   for(int row = rect.start_row; row < screen->state->rows && row < rect.end_row; row++) {
     const VTermLineInfo *info = vterm_state_get_lineinfo(screen->state, row);
+    /* yetty: TODO encode info->doublewidth, info->doubleheight if needed */
+    (void)info;
 
     for(int col = rect.start_col; col < rect.end_col; col++) {
-      ScreenCell *cell = getcell(screen, row, col);
+      VTermScreenCell *cell = getcell(screen, row, col);
+      if(!cell) continue;
 
-      if(selective && cell->pen.protected_cell)
-        continue;
-
-      cell->chars[0] = 0;
-      cell->pen = (ScreenPen){
-        /* Only copy .fg and .bg; leave things like rv in reset state */
-        .fg = screen->pen.fg,
-        .bg = screen->pen.bg,
-      };
-      cell->pen.dwl = info->doublewidth;
-      cell->pen.dhl = info->doubleheight;
+      cell->glyph_index = 0;
+      cell->fg = fg;
+      cell->bg = bg;
+      cell->attrs.bold = screen->pen.bold;
+      cell->attrs.underline = screen->pen.underline;
+      cell->attrs.italic = screen->pen.italic;
+      cell->attrs.blink = screen->pen.blink;
+      cell->attrs.conceal = screen->pen.conceal;
+      cell->attrs.strike = screen->pen.strike;
+      cell->attrs.small = screen->pen.small;
+      cell->attrs.baseline = screen->pen.baseline;
+      cell->attrs.default_fg = 0;
+      cell->attrs.default_bg = 0;
+      cell->attrs.font_type = 0;
     }
   }
 
@@ -494,10 +561,10 @@ static int bell(void *user)
 
 /* How many cells are non-blank
  * Returns the position of the first blank cell in the trailing blank end */
-static int line_popcount(ScreenCell *buffer, int row, int rows, int cols)
+static int line_popcount(VTermScreenCell *buffer, int row, int rows, int cols)
 {
   int col = cols - 1;
-  while(col >= 0 && buffer[row * cols + col].chars[0] == 0)
+  while(col >= 0 && buffer[row * cols + col].glyph_index == 0)
     col--;
   return col + 1;
 }
@@ -509,10 +576,10 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
   int old_rows = screen->rows;
   int old_cols = screen->cols;
 
-  ScreenCell *old_buffer = screen->buffers[bufidx];
+  VTermScreenCell *old_buffer = screen->buffers[bufidx];
   VTermLineInfo *old_lineinfo = statefields->lineinfos[bufidx];
 
-  ScreenCell *new_buffer = vterm_allocator_malloc(screen->vt, sizeof(ScreenCell) * new_rows * new_cols);
+  VTermScreenCell *new_buffer = vterm_allocator_malloc(screen->vt, sizeof(VTermScreenCell) * new_rows * new_cols);
   VTermLineInfo *new_lineinfo = vterm_allocator_malloc(screen->vt, sizeof(new_lineinfo[0]) * new_rows);
 
   int old_row = old_rows - 1;
@@ -577,7 +644,7 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
       fprintf(stderr, "  scroll %d rows +%d downwards\n", rowcount, downwards);
 #endif
 
-      memmove(&new_buffer[downwards * new_cols], &new_buffer[0],   rowcount * new_cols * sizeof(ScreenCell));
+      memmove(&new_buffer[downwards * new_cols], &new_buffer[0],   rowcount * new_cols * sizeof(VTermScreenCell));
       memmove(&new_lineinfo[downwards],          &new_lineinfo[0], rowcount            * sizeof(new_lineinfo[0]));
 
       new_row += downwards;
@@ -686,32 +753,10 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
         break;
 
       VTermPos pos = { .row = new_row };
-      for(pos.col = 0; pos.col < old_cols && pos.col < new_cols; pos.col += screen->sb_buffer[pos.col].width) {
+      for(pos.col = 0; pos.col < old_cols && pos.col < new_cols; pos.col++) {
         VTermScreenCell *src = &screen->sb_buffer[pos.col];
-        ScreenCell *dst = &new_buffer[pos.row * new_cols + pos.col];
-
-        for(int i = 0; i < VTERM_MAX_CHARS_PER_CELL; i++) {
-          dst->chars[i] = src->chars[i];
-          if(!src->chars[i])
-            break;
-        }
-
-        dst->pen.bold      = src->attrs.bold;
-        dst->pen.underline = src->attrs.underline;
-        dst->pen.italic    = src->attrs.italic;
-        dst->pen.blink     = src->attrs.blink;
-        dst->pen.reverse   = src->attrs.reverse ^ screen->global_reverse;
-        dst->pen.conceal   = src->attrs.conceal;
-        dst->pen.strike    = src->attrs.strike;
-        dst->pen.font      = src->attrs.font;
-        dst->pen.small     = src->attrs.small;
-        dst->pen.baseline  = src->attrs.baseline;
-
-        dst->pen.fg = src->fg;
-        dst->pen.bg = src->bg;
-
-        if(src->width == 2 && pos.col < (new_cols-1))
-          (dst + 1)->chars[0] = (uint32_t) -1;
+        VTermScreenCell *dst = &new_buffer[pos.row * new_cols + pos.col];
+        *dst = *src;
       }
       for( ; pos.col < new_cols; pos.col++)
         clearcell(screen, &new_buffer[pos.row * new_cols + pos.col]);
@@ -724,7 +769,7 @@ static void resize_buffer(VTermScreen *screen, int bufidx, int new_rows, int new
   if(new_row >= 0) {
     /* Scroll new rows back up to the top and fill in blanks at the bottom */
     int moverows = new_rows - new_row - 1;
-    memmove(&new_buffer[0], &new_buffer[(new_row + 1) * new_cols], moverows * new_cols * sizeof(ScreenCell));
+    memmove(&new_buffer[0], &new_buffer[(new_row + 1) * new_cols], moverows * new_cols * sizeof(VTermScreenCell));
     memmove(&new_lineinfo[0], &new_lineinfo[new_row + 1], moverows * sizeof(new_lineinfo[0]));
 
     new_cursor.row -= (new_row + 1);
@@ -805,14 +850,9 @@ static int setlineinfo(int row, const VTermLineInfo *newinfo, const VTermLineInf
 {
   VTermScreen *screen = user;
 
+  /* yetty: dwl/dhl attrs removed, just handle damage and erase */
   if(newinfo->doublewidth != oldinfo->doublewidth ||
      newinfo->doubleheight != oldinfo->doubleheight) {
-    for(int col = 0; col < screen->cols; col++) {
-      ScreenCell *cell = getcell(screen, row, col);
-      cell->pen.dwl = newinfo->doublewidth;
-      cell->pen.dhl = newinfo->doubleheight;
-    }
-
     VTermRect rect = {
       .start_row = row,
       .end_row   = row + 1,
@@ -934,22 +974,18 @@ static size_t _get_chars(const VTermScreen *screen, const int utf8, void *buffer
 
   for(int row = rect.start_row; row < rect.end_row; row++) {
     for(int col = rect.start_col; col < rect.end_col; col++) {
-      ScreenCell *cell = getcell(screen, row, col);
+      VTermScreenCell *cell = getcell(screen, row, col);
 
-      if(cell->chars[0] == 0)
-        // Erased cell, might need a space
+      if(cell->glyph_index == 0)
         padding++;
-      else if(cell->chars[0] == (uint32_t)-1)
-        // Gap behind a double-width char, do nothing
+      else if(cell->glyph_index == GLYPH_WIDE_CONT)
         ;
       else {
         while(padding) {
           PUT(UNICODE_SPACE);
           padding--;
         }
-        for(int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell->chars[i]; i++) {
-          PUT(cell->chars[i]);
-        }
+        PUT(cell->glyph_index);
       }
     }
 
@@ -973,62 +1009,37 @@ size_t vterm_screen_get_text(const VTermScreen *screen, char *str, size_t len, c
 }
 
 /* Copy internal to external representation of a screen cell */
+/* yetty: buffer now stores VTermScreenCell directly, just copy */
 int vterm_screen_get_cell(const VTermScreen *screen, VTermPos pos, VTermScreenCell *cell)
 {
-  ScreenCell *intcell = getcell(screen, pos.row, pos.col);
+  VTermScreenCell *intcell = getcell(screen, pos.row, pos.col);
   if(!intcell)
     return 0;
 
-  for(int i = 0; i < VTERM_MAX_CHARS_PER_CELL; i++) {
-    cell->chars[i] = intcell->chars[i];
-    if(!intcell->chars[i])
-      break;
-  }
-
-  cell->attrs.bold      = intcell->pen.bold;
-  cell->attrs.underline = intcell->pen.underline;
-  cell->attrs.italic    = intcell->pen.italic;
-  cell->attrs.blink     = intcell->pen.blink;
-  cell->attrs.reverse   = intcell->pen.reverse ^ screen->global_reverse;
-  cell->attrs.conceal   = intcell->pen.conceal;
-  cell->attrs.strike    = intcell->pen.strike;
-  cell->attrs.font      = intcell->pen.font;
-  cell->attrs.small     = intcell->pen.small;
-  cell->attrs.baseline  = intcell->pen.baseline;
-
-  cell->attrs.dwl = intcell->pen.dwl;
-  cell->attrs.dhl = intcell->pen.dhl;
-
-  cell->fg = intcell->pen.fg;
-  cell->bg = intcell->pen.bg;
-
-  if(pos.col < (screen->cols - 1) &&
-     getcell(screen, pos.row, pos.col + 1)->chars[0] == (uint32_t)-1)
-    cell->width = 2;
-  else
-    cell->width = 1;
-
+  *cell = *intcell;
   return 1;
 }
 
 int vterm_screen_is_eol(const VTermScreen *screen, VTermPos pos)
 {
-  /* This cell is EOL if this and every cell to the right is black */
+  /* This cell is EOL if this and every cell to the right is empty */
   for(; pos.col < screen->cols; pos.col++) {
-    ScreenCell *cell = getcell(screen, pos.row, pos.col);
-    if(cell->chars[0] != 0)
+    VTermScreenCell *cell = getcell(screen, pos.row, pos.col);
+    if(cell->glyph_index != 0)
       return 0;
   }
 
   return 1;
 }
 
-VTermScreen *vterm_obtain_screen(VTerm *vt)
+VTermScreen *vterm_obtain_screen(VTerm *vt, VTermGlyphResolver resolver, void *resolver_user)
 {
   if(vt->screen)
     return vt->screen;
 
   VTermScreen *screen = screen_new(vt);
+  screen->glyph_resolver = resolver;
+  screen->resolver_user = resolver_user;
   vt->screen = screen;
 
   return screen;
@@ -1099,31 +1110,34 @@ void vterm_screen_set_damage_merge(VTermScreen *screen, VTermDamageSize size)
   screen->damage_merge = size;
 }
 
-static int attrs_differ(VTermAttrMask attrs, ScreenCell *a, ScreenCell *b)
+/* yetty: use attrs field instead of pen; removed reverse and font */
+static int attrs_differ(VTermAttrMask attrs, VTermScreenCell *a, VTermScreenCell *b)
 {
-  if((attrs & VTERM_ATTR_BOLD_MASK)       && (a->pen.bold != b->pen.bold))
+  if((attrs & VTERM_ATTR_BOLD_MASK)       && (a->attrs.bold != b->attrs.bold))
     return 1;
-  if((attrs & VTERM_ATTR_UNDERLINE_MASK)  && (a->pen.underline != b->pen.underline))
+  if((attrs & VTERM_ATTR_UNDERLINE_MASK)  && (a->attrs.underline != b->attrs.underline))
     return 1;
-  if((attrs & VTERM_ATTR_ITALIC_MASK)     && (a->pen.italic != b->pen.italic))
+  if((attrs & VTERM_ATTR_ITALIC_MASK)     && (a->attrs.italic != b->attrs.italic))
     return 1;
-  if((attrs & VTERM_ATTR_BLINK_MASK)      && (a->pen.blink != b->pen.blink))
+  if((attrs & VTERM_ATTR_BLINK_MASK)      && (a->attrs.blink != b->attrs.blink))
     return 1;
-  if((attrs & VTERM_ATTR_REVERSE_MASK)    && (a->pen.reverse != b->pen.reverse))
+  if((attrs & VTERM_ATTR_CONCEAL_MASK)    && (a->attrs.conceal != b->attrs.conceal))
     return 1;
-  if((attrs & VTERM_ATTR_CONCEAL_MASK)    && (a->pen.conceal != b->pen.conceal))
+  if((attrs & VTERM_ATTR_STRIKE_MASK)     && (a->attrs.strike != b->attrs.strike))
     return 1;
-  if((attrs & VTERM_ATTR_STRIKE_MASK)     && (a->pen.strike != b->pen.strike))
+  if((attrs & VTERM_ATTR_SMALL_MASK)      && (a->attrs.small != b->attrs.small))
     return 1;
-  if((attrs & VTERM_ATTR_FONT_MASK)       && (a->pen.font != b->pen.font))
+  if((attrs & VTERM_ATTR_BASELINE_MASK)   && (a->attrs.baseline != b->attrs.baseline))
     return 1;
-  if((attrs & VTERM_ATTR_FOREGROUND_MASK) && !vterm_color_is_equal(&a->pen.fg, &b->pen.fg))
+  if((attrs & VTERM_ATTR_DEFAULT_FG_MASK) && (a->attrs.default_fg != b->attrs.default_fg))
     return 1;
-  if((attrs & VTERM_ATTR_BACKGROUND_MASK) && !vterm_color_is_equal(&a->pen.bg, &b->pen.bg))
+  if((attrs & VTERM_ATTR_DEFAULT_BG_MASK) && (a->attrs.default_bg != b->attrs.default_bg))
     return 1;
-  if((attrs & VTERM_ATTR_SMALL_MASK)    && (a->pen.small != b->pen.small))
+  if((attrs & VTERM_ATTR_FONT_TYPE_MASK)  && (a->attrs.font_type != b->attrs.font_type))
     return 1;
-  if((attrs & VTERM_ATTR_BASELINE_MASK)    && (a->pen.baseline != b->pen.baseline))
+  if((attrs & VTERM_ATTR_FOREGROUND_MASK) && !vterm_color_is_equal(&a->fg, &b->fg))
+    return 1;
+  if((attrs & VTERM_ATTR_BACKGROUND_MASK) && !vterm_color_is_equal(&a->bg, &b->bg))
     return 1;
 
   return 0;
@@ -1131,7 +1145,7 @@ static int attrs_differ(VTermAttrMask attrs, ScreenCell *a, ScreenCell *b)
 
 int vterm_screen_get_attrs_extent(const VTermScreen *screen, VTermRect *extent, VTermPos pos, VTermAttrMask attrs)
 {
-  ScreenCell *target = getcell(screen, pos.row, pos.col);
+  VTermScreenCell *target = getcell(screen, pos.row, pos.col);
 
   // TODO: bounds check
   extent->start_row = pos.row;
@@ -1157,20 +1171,18 @@ int vterm_screen_get_attrs_extent(const VTermScreen *screen, VTermRect *extent, 
   return 1;
 }
 
-void vterm_screen_convert_color_to_rgb(const VTermScreen *screen, VTermColor *col)
-{
-  vterm_state_convert_color_to_rgb(screen->state, col);
-}
+/* yetty: removed vterm_screen_convert_color_to_rgb - colors are always RGB */
 
-static void reset_default_colours(VTermScreen *screen, ScreenCell *buffer)
+/* yetty: use attrs.default_fg/bg flags instead of VTermColor type field */
+static void reset_default_colours(VTermScreen *screen, VTermScreenCell *buffer)
 {
-  for(int row = 0; row <= screen->rows - 1; row++)
-    for(int col = 0; col <= screen->cols - 1; col++) {
-      ScreenCell *cell = &buffer[row * screen->cols + col];
-      if(VTERM_COLOR_IS_DEFAULT_FG(&cell->pen.fg))
-        cell->pen.fg = screen->pen.fg;
-      if(VTERM_COLOR_IS_DEFAULT_BG(&cell->pen.bg))
-        cell->pen.bg = screen->pen.bg;
+  for(int row = 0; row < screen->rows; row++)
+    for(int col = 0; col < screen->cols; col++) {
+      VTermScreenCell *cell = &buffer[row * screen->cols + col];
+      if(cell->attrs.default_fg)
+        cell->fg = screen->pen.fg;
+      if(cell->attrs.default_bg)
+        cell->bg = screen->pen.bg;
     }
 }
 
@@ -1178,19 +1190,23 @@ void vterm_screen_set_default_colors(VTermScreen *screen, const VTermColor *defa
 {
   vterm_state_set_default_colors(screen->state, default_fg, default_bg);
 
-  if(default_fg && VTERM_COLOR_IS_DEFAULT_FG(&screen->pen.fg)) {
+  if(default_fg)
     screen->pen.fg = *default_fg;
-    screen->pen.fg.type = (screen->pen.fg.type & ~VTERM_COLOR_DEFAULT_MASK)
-                        | VTERM_COLOR_DEFAULT_FG;
-  }
 
-  if(default_bg && VTERM_COLOR_IS_DEFAULT_BG(&screen->pen.bg)) {
+  if(default_bg)
     screen->pen.bg = *default_bg;
-    screen->pen.bg.type = (screen->pen.bg.type & ~VTERM_COLOR_DEFAULT_MASK)
-                        | VTERM_COLOR_DEFAULT_BG;
-  }
 
   reset_default_colours(screen, screen->buffers[0]);
   if(screen->buffers[1])
     reset_default_colours(screen, screen->buffers[1]);
+}
+
+const VTermScreenCell *vterm_screen_get_buffer(const VTermScreen *screen)
+{
+  return screen->buffer;
+}
+
+size_t vterm_screen_get_buffer_size(const VTermScreen *screen)
+{
+  return (size_t)screen->rows * (size_t)screen->cols * sizeof(VTermScreenCell);
 }

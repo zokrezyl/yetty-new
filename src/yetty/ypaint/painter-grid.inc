@@ -3,16 +3,28 @@
 //=========================================================================
 
 uint32_t cellX(float worldX) const {
-  if (_gridWidth == 0 || _cellSizeX <= 0)
+  if (_gridWidth == 0) {
+    yerror("cellX: _gridWidth is 0");
     return 0;
+  }
+  if (_cellSizeX <= 0) {
+    yerror("cellX: _cellSizeX={} is invalid", _cellSizeX);
+    return 0;
+  }
   return static_cast<uint32_t>(
       std::clamp((worldX - _sceneMinX) / _cellSizeX, 0.0f,
                  static_cast<float>(_gridWidth - 1)));
 }
 
 uint32_t cellY(float worldY) const {
-  if (_gridHeight == 0 || _cellSizeY <= 0)
+  if (_gridHeight == 0) {
+    yerror("cellY: _gridHeight is 0");
     return 0;
+  }
+  if (_cellSizeY <= 0) {
+    yerror("cellY: _cellSizeY={} is invalid", _cellSizeY);
+    return 0;
+  }
   return static_cast<uint32_t>(
       std::clamp((worldY - _sceneMinY) / _cellSizeY, 0.0f,
                  static_cast<float>(_gridHeight - 1)));
@@ -20,8 +32,13 @@ uint32_t cellY(float worldY) const {
 
 // Scroll N lines in scrolling mode - delegated to canvas
 void scrollLines(uint16_t numLines) override {
-  if (!_canvas || numLines == 0)
+  if (numLines == 0) {
+    return; // Valid no-op
+  }
+  if (!_canvas) {
+    yerror("scrollLines: _canvas is null");
     return;
+  }
 
   ydebug("scrollLines: removing {} lines, cursor was ({},{})",
          numLines, _cursorCol, _cursorRow);
@@ -36,8 +53,10 @@ void scrollLines(uint16_t numLines) override {
 }
 
 void rebuildPackedGrid() {
-  if (!_canvas)
+  if (!_canvas) {
+    yerror("rebuildPackedGrid: _canvas is null");
     return;
+  }
 
   // Use canvas to rebuild with glyph bounds callback
   uint32_t glyphCount = static_cast<uint32_t>(_glyphs.size());
