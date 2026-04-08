@@ -1,16 +1,15 @@
-# sdf-primitives.yaml — Single source of truth for ypaint-c SDF primitives
+# sdf-primitives.yaml — Single source of truth for ypaint SDF primitives
 #
 # Each entry defines:
 #   - name: Primitive name (PascalCase)
 #   - type: Numeric type ID for GPU dispatch
-#   - category: sdf2d | sdf3d | glyph | composite
-#   - args: Fields for SDF calculation (buffer layout after type+layer)
-#   - shader.code: WGSL SDF implementation (p = sample point, {field} = substitution)
+#   - category: sdf2d | sdf3d
+#   - args: Fields for SDF calculation (geometry params)
+#   - shader.code: WGSL SDF implementation (p = sample point, args as params)
+#   - aabb.code: C code for AABB computation (p = geometry args pointer, expand = strokeWidth/2)
 #
-# Common rendering fields (prepended by generator, same for all primitives):
-#   fillColor (u32), strokeColor (u32), strokeWidth (f32)
-#
-# Buffer layout: [type:u32][layer:u32][fillColor][strokeColor][strokeWidth][args...]
+# Buffer layout: [type:u32][zOrder:u32][fillColor:u32][strokeColor:u32][strokeWidth:f32][args...]
+# Geometry offset = 5 (after type + zOrder + fillColor + strokeColor + strokeWidth)
 
 # =============================================================================
 # 2D SDF Primitives
@@ -25,7 +24,14 @@
     - { name: r,  type: f32 }
   shader:
     code: |
-      return length(p - vec2<f32>({cx}, {cy})) - {r};
+      return length(p - vec2<f32>(cx, cy)) - r;
+  aabb:
+    code: |
+      float r = p[2] + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r;
+      *maxY = p[1] + r;
 
 - name: Box
   type: 1
@@ -38,8 +44,16 @@
     - { name: round, type: f32 }
   shader:
     code: |
-      let d = abs(p - vec2<f32>({cx}, {cy})) - vec2<f32>({hw}, {hh}) + {round};
-      return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - {round};
+      let d = abs(p - vec2<f32>(cx, cy)) - vec2<f32>(hw, hh) + round;
+      return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - round;
+  aabb:
+    code: |
+      float hw = p[2] + p[4] + expand;
+      float hh = p[3] + p[4] + expand;
+      *minX = p[0] - hw;
+      *minY = p[1] - hh;
+      *maxX = p[0] + hw;
+      *maxY = p[1] + hh;
 
 - name: Segment
   type: 2
@@ -51,12 +65,18 @@
     - { name: y1, type: f32 }
   shader:
     code: |
-      let a = vec2<f32>({x0}, {y0});
-      let b = vec2<f32>({x1}, {y1});
+      let a = vec2<f32>(x0, y0);
+      let b = vec2<f32>(x1, y1);
       let pa = p - a;
       let ba = b - a;
       let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
       return length(pa - ba * h);
+  aabb:
+    code: |
+      *minX = fminf(p[0], p[2]) - expand;
+      *minY = fminf(p[1], p[3]) - expand;
+      *maxX = fmaxf(p[0], p[2]) + expand;
+      *maxY = fmaxf(p[1], p[3]) + expand;
 
 - name: Triangle
   type: 3
@@ -70,9 +90,9 @@
     - { name: cy, type: f32 }
   shader:
     code: |
-      let p0 = vec2<f32>({ax}, {ay});
-      let p1 = vec2<f32>({bx}, {by});
-      let p2 = vec2<f32>({cx}, {cy});
+      let p0 = vec2<f32>(ax, ay);
+      let p1 = vec2<f32>(bx, by);
+      let p2 = vec2<f32>(cx, cy);
       let e0 = p1 - p0; let e1 = p2 - p1; let e2 = p0 - p2;
       let v0 = p - p0; let v1 = p - p1; let v2 = p - p2;
       let pq0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0.0, 1.0);
@@ -84,6 +104,16 @@
           vec2<f32>(dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x))),
           vec2<f32>(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)));
       return -sqrt(d.x) * sign(d.y);
+  aabb:
+    code: |
+      float minx = fminf(fminf(p[0], p[2]), p[4]);
+      float miny = fminf(fminf(p[1], p[3]), p[5]);
+      float maxx = fmaxf(fmaxf(p[0], p[2]), p[4]);
+      float maxy = fmaxf(fmaxf(p[1], p[3]), p[5]);
+      *minX = minx - expand;
+      *minY = miny - expand;
+      *maxX = maxx + expand;
+      *maxY = maxy + expand;
 
 - name: Ellipse
   type: 6
@@ -95,8 +125,8 @@
     - { name: ry, type: f32 }
   shader:
     code: |
-      let center = vec2<f32>({cx}, {cy});
-      let ab = vec2<f32>({rx}, {ry});
+      let center = vec2<f32>(cx, cy);
+      let ab = vec2<f32>(rx, ry);
       if (abs(ab.x - ab.y) < 0.001) { return length(p - center) - ab.x; }
       var pp = abs(p - center);
       var aab = ab;
@@ -126,6 +156,12 @@
       }
       let r = aab * vec2<f32>(co, sqrt(1.0 - co * co));
       return length(r - pp) * sign(pp.y - r.y);
+  aabb:
+    code: |
+      *minX = p[0] - p[2] - expand;
+      *minY = p[1] - p[3] - expand;
+      *maxX = p[0] + p[2] + expand;
+      *maxY = p[1] + p[3] + expand;
 
 - name: Arc
   type: 7
@@ -139,11 +175,18 @@
     - { name: rb,   type: f32 }
   shader:
     code: |
-      let center = vec2<f32>({cx}, {cy});
-      let sc = vec2<f32>({sc_x}, {sc_y});
+      let center = vec2<f32>(cx, cy);
+      let sc = vec2<f32>(sc_x, sc_y);
       var pp = abs(p - center);
-      if (sc.y * pp.x > sc.x * pp.y) { return length(pp - sc * {ra}) - {rb}; }
-      return abs(length(pp) - {ra}) - {rb};
+      if (sc.y * pp.x > sc.x * pp.y) { return length(pp - sc * ra) - rb; }
+      return abs(length(pp) - ra) - rb;
+  aabb:
+    code: |
+      float r = fmaxf(p[4], p[5]) + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r;
+      *maxY = p[1] + r;
 
 - name: RoundedBox
   type: 8
@@ -159,14 +202,23 @@
     - { name: r3, type: f32 }
   shader:
     code: |
-      let center = vec2<f32>({cx}, {cy});
-      let b = vec2<f32>({hw}, {hh});
-      let r = vec4<f32>({r0}, {r1}, {r2}, {r3});
+      let center = vec2<f32>(cx, cy);
+      let b = vec2<f32>(hw, hh);
+      let r = vec4<f32>(r0, r1, r2, r3);
       var pp = p - center;
       var rr = select(r.zw, r.xy, pp.x > 0.0).xyxy;
       rr.x = select(rr.y, rr.x, pp.y > 0.0);
       let q = abs(pp) - b + rr.x;
       return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0))) - rr.x;
+  aabb:
+    code: |
+      float maxR = fmaxf(fmaxf(p[4], p[5]), fmaxf(p[6], p[7]));
+      float hw = p[2] + maxR + expand;
+      float hh = p[3] + maxR + expand;
+      *minX = p[0] - hw;
+      *minY = p[1] - hh;
+      *maxX = p[0] + hw;
+      *maxY = p[1] + hh;
 
 - name: Rhombus
   type: 9
@@ -178,11 +230,19 @@
     - { name: by, type: f32 }
   shader:
     code: |
-      var pp = abs(p - vec2<f32>({cx}, {cy}));
-      var bb = vec2<f32>({bx}, -{by});
+      var pp = abs(p - vec2<f32>(cx, cy));
+      var bb = vec2<f32>(bx, -by);
       let h = clamp((dot(bb, pp) + bb.y * bb.y) / dot(bb, bb), 0.0, 1.0);
       pp -= bb * vec2<f32>(h, h - 1.0);
       return length(pp) * sign(pp.x);
+  aabb:
+    code: |
+      float hw = p[2] + expand;
+      float hh = p[3] + expand;
+      *minX = p[0] - hw;
+      *minY = p[1] - hh;
+      *maxX = p[0] + hw;
+      *maxY = p[1] + hh;
 
 - name: Pentagon
   type: 10
@@ -194,12 +254,19 @@
   shader:
     code: |
       let k = vec3<f32>(0.809016994, 0.587785252, 0.726542528);
-      var pp = p - vec2<f32>({cx}, {cy});
+      var pp = p - vec2<f32>(cx, cy);
       pp.x = abs(pp.x);
       pp -= 2.0 * min(dot(vec2<f32>(-k.x, k.y), pp), 0.0) * vec2<f32>(-k.x, k.y);
       pp -= 2.0 * min(dot(vec2<f32>(k.x, k.y), pp), 0.0) * vec2<f32>(k.x, k.y);
-      pp -= vec2<f32>(clamp(pp.x, -{r} * k.z, {r} * k.z), {r});
+      pp -= vec2<f32>(clamp(pp.x, -r * k.z, r * k.z), r);
       return length(pp) * sign(pp.y);
+  aabb:
+    code: |
+      float r = p[2] + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r;
+      *maxY = p[1] + r;
 
 - name: Hexagon
   type: 11
@@ -211,10 +278,17 @@
   shader:
     code: |
       let k = vec3<f32>(-0.866025404, 0.5, 0.577350269);
-      var pp = abs(p - vec2<f32>({cx}, {cy}));
+      var pp = abs(p - vec2<f32>(cx, cy));
       pp -= 2.0 * min(dot(k.xy, pp), 0.0) * k.xy;
-      pp -= vec2<f32>(clamp(pp.x, -k.z * {r}, k.z * {r}), {r});
+      pp -= vec2<f32>(clamp(pp.x, -k.z * r, k.z * r), r);
       return length(pp) * sign(pp.y);
+  aabb:
+    code: |
+      float r = p[2] + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r;
+      *maxY = p[1] + r;
 
 - name: Star
   type: 12
@@ -227,17 +301,24 @@
     - { name: m,  type: f32 }
   shader:
     code: |
-      let an = 3.141593 / {n};
-      let en = 3.141593 / {m};
+      let an = 3.141593 / n;
+      let en = 3.141593 / m;
       let acs = vec2<f32>(cos(an), sin(an));
       let ecs = vec2<f32>(cos(en), sin(en));
-      var pp = p - vec2<f32>({cx}, {cy});
+      var pp = p - vec2<f32>(cx, cy);
       let angle = atan2(pp.x, pp.y);
       let bn = ((angle % (2.0 * an)) + 2.0 * an) % (2.0 * an) - an;
       pp = length(pp) * vec2<f32>(cos(bn), abs(sin(bn)));
-      pp -= {r} * acs;
-      pp += ecs * clamp(-dot(pp, ecs), 0.0, {r} * acs.y / ecs.y);
+      pp -= r * acs;
+      pp += ecs * clamp(-dot(pp, ecs), 0.0, r * acs.y / ecs.y);
       return length(pp) * sign(pp.x);
+  aabb:
+    code: |
+      float r = p[2] + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r;
+      *maxY = p[1] + r;
 
 - name: Pie
   type: 13
@@ -250,12 +331,19 @@
     - { name: r,    type: f32 }
   shader:
     code: |
-      let c = vec2<f32>({sc_x}, {sc_y});
-      var pp = p - vec2<f32>({cx}, {cy});
+      let c = vec2<f32>(sc_x, sc_y);
+      var pp = p - vec2<f32>(cx, cy);
       pp.x = abs(pp.x);
-      let l = length(pp) - {r};
-      let m = length(pp - c * clamp(dot(pp, c), 0.0, {r}));
+      let l = length(pp) - r;
+      let m = length(pp - c * clamp(dot(pp, c), 0.0, r));
       return max(l, m * sign(c.y * pp.x - c.x * pp.y));
+  aabb:
+    code: |
+      float r = p[4] + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r;
+      *maxY = p[1] + r;
 
 - name: Ring
   type: 14
@@ -269,12 +357,19 @@
     - { name: th, type: f32 }
   shader:
     code: |
-      let n = vec2<f32>({nx}, {ny});
-      var pp = p - vec2<f32>({cx}, {cy});
+      let n = vec2<f32>(nx, ny);
+      var pp = p - vec2<f32>(cx, cy);
       pp.x = abs(pp.x);
       pp = mat2x2<f32>(n.x, n.y, -n.y, n.x) * pp;
-      return max(abs(length(pp) - {r}) - {th} * 0.5,
-                 length(vec2<f32>(pp.x, max(0.0, abs({r} - pp.y) - {th} * 0.5))) * sign(pp.x));
+      return max(abs(length(pp) - r) - th * 0.5,
+                 length(vec2<f32>(pp.x, max(0.0, abs(r - pp.y) - th * 0.5))) * sign(pp.x));
+  aabb:
+    code: |
+      float r = p[4] + p[5] + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r;
+      *maxY = p[1] + r;
 
 - name: Heart
   type: 15
@@ -285,14 +380,21 @@
     - { name: scale, type: f32 }
   shader:
     code: |
-      var pp = (p - vec2<f32>({cx}, {cy})) / {scale};
+      var pp = (p - vec2<f32>(cx, cy)) / scale;
       pp.x = abs(pp.x);
       if (pp.y + pp.x > 1.0) {
-          return (length(pp - vec2<f32>(0.25, 0.75)) - sqrt(2.0) / 4.0) * {scale};
+          return (length(pp - vec2<f32>(0.25, 0.75)) - sqrt(2.0) / 4.0) * scale;
       }
       return (sqrt(min(dot(pp - vec2<f32>(0.0, 1.0), pp - vec2<f32>(0.0, 1.0)),
                        dot(pp - 0.5 * max(pp.x + pp.y, 0.0), pp - 0.5 * max(pp.x + pp.y, 0.0)))) *
-              sign(pp.x - pp.y)) * {scale};
+              sign(pp.x - pp.y)) * scale;
+  aabb:
+    code: |
+      float s = p[2] * 1.5f + expand;
+      *minX = p[0] - s;
+      *minY = p[1] - s;
+      *maxX = p[0] + s;
+      *maxY = p[1] + s;
 
 - name: Cross
   type: 16
@@ -305,13 +407,20 @@
     - { name: r,  type: f32 }
   shader:
     code: |
-      let b = vec2<f32>({bx}, {by});
-      var pp = abs(p - vec2<f32>({cx}, {cy}));
+      let b = vec2<f32>(bx, by);
+      var pp = abs(p - vec2<f32>(cx, cy));
       pp = select(pp, pp.yx, pp.y > pp.x);
       let q = pp - b;
       let k = max(q.y, q.x);
       let w = select(vec2<f32>(b.y - pp.x, -k), q, k > 0.0);
-      return sign(k) * length(max(w, vec2<f32>(0.0))) + {r};
+      return sign(k) * length(max(w, vec2<f32>(0.0))) + r;
+  aabb:
+    code: |
+      float hw = fmaxf(p[2], p[3]) + expand;
+      *minX = p[0] - hw;
+      *minY = p[1] - hw;
+      *maxX = p[0] + hw;
+      *maxY = p[1] + hw;
 
 - name: RoundedX
   type: 17
@@ -323,8 +432,15 @@
     - { name: r,  type: f32 }
   shader:
     code: |
-      let pp = abs(p - vec2<f32>({cx}, {cy}));
-      return length(pp - min(pp.x + pp.y, {w}) * 0.5) - {r};
+      let pp = abs(p - vec2<f32>(cx, cy));
+      return length(pp - min(pp.x + pp.y, w) * 0.5) - r;
+  aabb:
+    code: |
+      float s = p[2] + p[3] + expand;
+      *minX = p[0] - s;
+      *minY = p[1] - s;
+      *maxX = p[0] + s;
+      *maxY = p[1] + s;
 
 - name: Capsule
   type: 18
@@ -337,12 +453,19 @@
     - { name: r,  type: f32 }
   shader:
     code: |
-      let a = vec2<f32>({ax}, {ay});
-      let b = vec2<f32>({bx}, {by});
+      let a = vec2<f32>(ax, ay);
+      let b = vec2<f32>(bx, by);
       let pa = p - a;
       let ba = b - a;
       let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-      return length(pa - ba * h) - {r};
+      return length(pa - ba * h) - r;
+  aabb:
+    code: |
+      float r = p[4] + expand;
+      *minX = fminf(p[0], p[2]) - r;
+      *minY = fminf(p[1], p[3]) - r;
+      *maxX = fmaxf(p[0], p[2]) + r;
+      *maxY = fmaxf(p[1], p[3]) + r;
 
 - name: Moon
   type: 19
@@ -355,14 +478,21 @@
     - { name: rb, type: f32 }
   shader:
     code: |
-      var pp = p - vec2<f32>({cx}, {cy});
+      var pp = p - vec2<f32>(cx, cy);
       pp.y = abs(pp.y);
-      let a = ({ra} * {ra} - {rb} * {rb} + {d} * {d}) / (2.0 * {d});
-      let b = sqrt(max({ra} * {ra} - a * a, 0.0));
-      if ({d} * (pp.x * b - pp.y * a) > {d} * {d} * max(b - pp.y, 0.0)) {
+      let a = (ra * ra - rb * rb + d * d) / (2.0 * d);
+      let b = sqrt(max(ra * ra - a * a, 0.0));
+      if (d * (pp.x * b - pp.y * a) > d * d * max(b - pp.y, 0.0)) {
           return length(pp - vec2<f32>(a, b));
       }
-      return max(length(pp) - {ra}, -(length(pp - vec2<f32>({d}, 0.0)) - {rb}));
+      return max(length(pp) - ra, -(length(pp - vec2<f32>(d, 0.0)) - rb));
+  aabb:
+    code: |
+      float r = fmaxf(p[3], p[4]) + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r + p[2];
+      *maxY = p[1] + r;
 
 - name: Egg
   type: 20
@@ -374,13 +504,20 @@
     - { name: rb, type: f32 }
   shader:
     code: |
-      var pp = p - vec2<f32>({cx}, {cy});
+      var pp = p - vec2<f32>(cx, cy);
       pp.x = abs(pp.x);
-      let r = {ra} - {rb};
-      let k = select(({rb} * pp.y - {ra} * pp.x) / ({ra} * {rb}), length(pp) / r, pp.y < 0.0);
-      if (k < 0.0) { return length(pp) - {ra}; }
-      if (k > {ra}) { return length(pp - vec2<f32>(0.0, {ra})) - {rb}; }
-      return length(pp - vec2<f32>(-r, 0.0)) - ({ra} + {rb} - r);
+      let r = ra - rb;
+      let k = select((rb * pp.y - ra * pp.x) / (ra * rb), length(pp) / r, pp.y < 0.0);
+      if (k < 0.0) { return length(pp) - ra; }
+      if (k > ra) { return length(pp - vec2<f32>(0.0, ra)) - rb; }
+      return length(pp - vec2<f32>(-r, 0.0)) - (ra + rb - r);
+  aabb:
+    code: |
+      float r = fmaxf(p[2], p[3]) + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r;
+      *maxY = p[1] + r + p[2];
 
 - name: Octogon
   type: 28
@@ -392,11 +529,18 @@
   shader:
     code: |
       let k = vec3<f32>(-0.9238795325, 0.3826834323, 0.4142135623);
-      var pp = abs(p - vec2<f32>({cx}, {cy}));
+      var pp = abs(p - vec2<f32>(cx, cy));
       pp = pp - 2.0 * min(dot(vec2<f32>(k.x, k.y), pp), 0.0) * vec2<f32>(k.x, k.y);
       pp = pp - 2.0 * min(dot(vec2<f32>(-k.x, k.y), pp), 0.0) * vec2<f32>(-k.x, k.y);
-      pp = pp - vec2<f32>(clamp(pp.x, -k.z * {r}, k.z * {r}), {r});
+      pp = pp - vec2<f32>(clamp(pp.x, -k.z * r, k.z * r), r);
       return length(pp) * sign(pp.y);
+  aabb:
+    code: |
+      float r = p[2] + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r;
+      *maxY = p[1] + r;
 
 - name: Hexagram
   type: 29
@@ -408,11 +552,18 @@
   shader:
     code: |
       let k = vec4<f32>(-0.5, 0.8660254038, 0.5773502692, 1.7320508076);
-      var pp = abs(p - vec2<f32>({cx}, {cy}));
+      var pp = abs(p - vec2<f32>(cx, cy));
       pp = pp - 2.0 * min(dot(k.xy, pp), 0.0) * k.xy;
       pp = pp - 2.0 * min(dot(k.yx, pp), 0.0) * k.yx;
-      pp = pp - vec2<f32>(clamp(pp.x, {r} * k.z, {r} * k.w), {r});
+      pp = pp - vec2<f32>(clamp(pp.x, r * k.z, r * k.w), r);
       return length(pp) * sign(pp.y);
+  aabb:
+    code: |
+      float r = p[2] + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r;
+      *maxY = p[1] + r;
 
 - name: Pentagram
   type: 30
@@ -427,16 +578,23 @@
       let v2 = vec2<f32>(-0.809016994, -0.587785252);
       let v3 = vec2<f32>(0.309016994, -0.951056516);
       let k1z = 0.726542528;
-      var pp = p - vec2<f32>({cx}, {cy});
+      var pp = p - vec2<f32>(cx, cy);
       pp.x = abs(pp.x);
       pp = pp - 2.0 * max(dot(v1, pp), 0.0) * v1;
       pp = pp - 2.0 * max(dot(v2, pp), 0.0) * v2;
       pp.x = abs(pp.x);
-      pp.y = pp.y - {r};
-      return length(pp - v3 * clamp(dot(pp, v3), 0.0, k1z * {r})) * sign(pp.y * v3.x - pp.x * v3.y);
+      pp.y = pp.y - r;
+      return length(pp - v3 * clamp(dot(pp, v3), 0.0, k1z * r)) * sign(pp.y * v3.x - pp.x * v3.y);
+  aabb:
+    code: |
+      float r = p[2] + expand;
+      *minX = p[0] - r;
+      *minY = p[1] - r;
+      *maxX = p[0] + r;
+      *maxY = p[1] + r;
 
 # =============================================================================
-# 3D SDF Primitives
+# 3D SDF Primitives (AABB returns zero - not used for 2D grid)
 # =============================================================================
 
 - name: Sphere3D
@@ -449,7 +607,10 @@
     - { name: r,  type: f32 }
   shader:
     code: |
-      return length(p - vec3<f32>({px}, {py}, {pz})) - {r};
+      return length(p - vec3<f32>(px, py, pz)) - r;
+  aabb:
+    code: |
+      *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;
 
 - name: Box3D
   type: 101
@@ -463,8 +624,11 @@
     - { name: bz, type: f32 }
   shader:
     code: |
-      let q = abs(p - vec3<f32>({px}, {py}, {pz})) - vec3<f32>({bx}, {by}, {bz});
+      let q = abs(p - vec3<f32>(px, py, pz)) - vec3<f32>(bx, by, bz);
       return length(max(q, vec3<f32>(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
+  aabb:
+    code: |
+      *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;
 
 - name: Torus3D
   type: 103
@@ -477,9 +641,12 @@
     - { name: minorR, type: f32 }
   shader:
     code: |
-      let pos = p - vec3<f32>({px}, {py}, {pz});
-      let q = vec2<f32>(length(pos.xz) - {majorR}, pos.y);
-      return length(q) - {minorR};
+      let pos = p - vec3<f32>(px, py, pz);
+      let q = vec2<f32>(length(pos.xz) - majorR, pos.y);
+      return length(q) - minorR;
+  aabb:
+    code: |
+      *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;
 
 - name: Cylinder3D
   type: 105
@@ -492,7 +659,9 @@
     - { name: h,  type: f32 }
   shader:
     code: |
-      let pos = p - vec3<f32>({px}, {py}, {pz});
-      let d = abs(vec2<f32>(length(pos.xz), pos.y)) - vec2<f32>({r}, {h});
+      let pos = p - vec3<f32>(px, py, pz);
+      let d = abs(vec2<f32>(length(pos.xz), pos.y)) - vec2<f32>(r, h);
       return min(max(d.x, d.y), 0.0) + length(max(d, vec2<f32>(0.0)));
-
+  aabb:
+    code: |
+      *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;

@@ -18,16 +18,6 @@ else()
     set(YETTY_PLATFORM "linux")
 endif()
 
-# Auto-generate ypaint-c types/primitives/shaders from YAML
-execute_process(
-    COMMAND uv run ${YETTY_ROOT}/src/yetty/ypaint-c/gen-sdf-code.py
-    WORKING_DIRECTORY ${YETTY_ROOT}
-    RESULT_VARIABLE YPAINT_GEN_RESULT
-)
-if(NOT YPAINT_GEN_RESULT EQUAL 0)
-    message(FATAL_ERROR "Failed to generate ypaint-c code")
-endif()
-
 # Auto-generate MSDF CDB fonts if not present (must run before incbin)
 if(YETTY_ENABLE_FEATURE_MSDF_GEN)
     include(${YETTY_ROOT}/build-tools/cmake/prepare-assets.cmake)
