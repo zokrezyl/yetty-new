@@ -1,16 +1,11 @@
-# ypaint library (scrolling SDF renderer)
-add_library(yetty_ypaint STATIC
-    canvas.cpp
-    painter.cpp
-    ypaint-buffer.cpp
-    animation.cpp
-    yaml2ypaint.cpp
-    triangulate.cpp
-)
+add_subdirectory(core)
+add_subdirectory(sdf)
+add_subdirectory(yplot)
 
-target_include_directories(yetty_ypaint PUBLIC
-    ${YETTY_ROOT}/include
-    ${YETTY_ROOT}/src
-)
+add_library(yetty_ypaint INTERFACE)
 
-target_link_libraries(yetty_ypaint PUBLIC yaml-cpp glm::glm webgpu ytrace::ytrace)
+target_link_libraries(yetty_ypaint INTERFACE
+    ypaint_core
+    ypaint_sdf
+    ypaint_yplot
+)
