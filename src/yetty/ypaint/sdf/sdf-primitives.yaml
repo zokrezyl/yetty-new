@@ -1,0 +1,498 @@
+# sdf-primitives.yaml — Single source of truth for ypaint-c SDF primitives
+#
+# Each entry defines:
+#   - name: Primitive name (PascalCase)
+#   - type: Numeric type ID for GPU dispatch
+#   - category: sdf2d | sdf3d | glyph | composite
+#   - args: Fields for SDF calculation (buffer layout after type+layer)
+#   - shader.code: WGSL SDF implementation (p = sample point, {field} = substitution)
+#
+# Common rendering fields (prepended by generator, same for all primitives):
+#   fillColor (u32), strokeColor (u32), strokeWidth (f32)
+#
+# Buffer layout: [type:u32][layer:u32][fillColor][strokeColor][strokeWidth][args...]
+
+# =============================================================================
+# 2D SDF Primitives
+# =============================================================================
+
+- name: Circle
+  type: 0
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: r,  type: f32 }
+  shader:
+    code: |
+      return length(p - vec2<f32>({cx}, {cy})) - {r};
+
+- name: Box
+  type: 1
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: hw, type: f32 }
+    - { name: hh, type: f32 }
+    - { name: round, type: f32 }
+  shader:
+    code: |
+      let d = abs(p - vec2<f32>({cx}, {cy})) - vec2<f32>({hw}, {hh}) + {round};
+      return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - {round};
+
+- name: Segment
+  type: 2
+  category: sdf2d
+  args:
+    - { name: x0, type: f32 }
+    - { name: y0, type: f32 }
+    - { name: x1, type: f32 }
+    - { name: y1, type: f32 }
+  shader:
+    code: |
+      let a = vec2<f32>({x0}, {y0});
+      let b = vec2<f32>({x1}, {y1});
+      let pa = p - a;
+      let ba = b - a;
+      let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+      return length(pa - ba * h);
+
+- name: Triangle
+  type: 3
+  category: sdf2d
+  args:
+    - { name: ax, type: f32 }
+    - { name: ay, type: f32 }
+    - { name: bx, type: f32 }
+    - { name: by, type: f32 }
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+  shader:
+    code: |
+      let p0 = vec2<f32>({ax}, {ay});
+      let p1 = vec2<f32>({bx}, {by});
+      let p2 = vec2<f32>({cx}, {cy});
+      let e0 = p1 - p0; let e1 = p2 - p1; let e2 = p0 - p2;
+      let v0 = p - p0; let v1 = p - p1; let v2 = p - p2;
+      let pq0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0.0, 1.0);
+      let pq1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0.0, 1.0);
+      let pq2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0.0, 1.0);
+      let s = sign(e0.x * e2.y - e0.y * e2.x);
+      let d = min(min(
+          vec2<f32>(dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)),
+          vec2<f32>(dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x))),
+          vec2<f32>(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)));
+      return -sqrt(d.x) * sign(d.y);
+
+- name: Ellipse
+  type: 6
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: rx, type: f32 }
+    - { name: ry, type: f32 }
+  shader:
+    code: |
+      let center = vec2<f32>({cx}, {cy});
+      let ab = vec2<f32>({rx}, {ry});
+      if (abs(ab.x - ab.y) < 0.001) { return length(p - center) - ab.x; }
+      var pp = abs(p - center);
+      var aab = ab;
+      if (pp.x > pp.y) { pp = pp.yx; aab = aab.yx; }
+      let l = aab.y * aab.y - aab.x * aab.x;
+      let m = aab.x * pp.x / l; let m2 = m * m;
+      let n = aab.y * pp.y / l; let n2 = n * n;
+      let c = (m2 + n2 - 1.0) / 3.0; let c3 = c * c * c;
+      let q = c3 + m2 * n2 * 2.0;
+      let d = c3 + m2 * n2;
+      let g = m + m * n2;
+      var co: f32;
+      if (d < 0.0) {
+          let h = acos(q / c3) / 3.0;
+          let s = cos(h); let t = sin(h) * sqrt(3.0);
+          let rx = sqrt(-c * (s + t + 2.0) + m2);
+          let ry = sqrt(-c * (s - t + 2.0) + m2);
+          co = (ry + sign(l) * rx + abs(g) / (rx * ry) - m) / 2.0;
+      } else {
+          let h = 2.0 * m * n * sqrt(d);
+          let s = sign(q + h) * pow(abs(q + h), 1.0 / 3.0);
+          let u = sign(q - h) * pow(abs(q - h), 1.0 / 3.0);
+          let rx = -s - u - c * 4.0 + 2.0 * m2;
+          let ry = (s - u) * sqrt(3.0);
+          let rm = sqrt(rx * rx + ry * ry);
+          co = (ry / sqrt(rm - rx) + 2.0 * g / rm - m) / 2.0;
+      }
+      let r = aab * vec2<f32>(co, sqrt(1.0 - co * co));
+      return length(r - pp) * sign(pp.y - r.y);
+
+- name: Arc
+  type: 7
+  category: sdf2d
+  args:
+    - { name: cx,   type: f32 }
+    - { name: cy,   type: f32 }
+    - { name: sc_x, type: f32 }
+    - { name: sc_y, type: f32 }
+    - { name: ra,   type: f32 }
+    - { name: rb,   type: f32 }
+  shader:
+    code: |
+      let center = vec2<f32>({cx}, {cy});
+      let sc = vec2<f32>({sc_x}, {sc_y});
+      var pp = abs(p - center);
+      if (sc.y * pp.x > sc.x * pp.y) { return length(pp - sc * {ra}) - {rb}; }
+      return abs(length(pp) - {ra}) - {rb};
+
+- name: RoundedBox
+  type: 8
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: hw, type: f32 }
+    - { name: hh, type: f32 }
+    - { name: r0, type: f32 }
+    - { name: r1, type: f32 }
+    - { name: r2, type: f32 }
+    - { name: r3, type: f32 }
+  shader:
+    code: |
+      let center = vec2<f32>({cx}, {cy});
+      let b = vec2<f32>({hw}, {hh});
+      let r = vec4<f32>({r0}, {r1}, {r2}, {r3});
+      var pp = p - center;
+      var rr = select(r.zw, r.xy, pp.x > 0.0).xyxy;
+      rr.x = select(rr.y, rr.x, pp.y > 0.0);
+      let q = abs(pp) - b + rr.x;
+      return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0))) - rr.x;
+
+- name: Rhombus
+  type: 9
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: bx, type: f32 }
+    - { name: by, type: f32 }
+  shader:
+    code: |
+      var pp = abs(p - vec2<f32>({cx}, {cy}));
+      var bb = vec2<f32>({bx}, -{by});
+      let h = clamp((dot(bb, pp) + bb.y * bb.y) / dot(bb, bb), 0.0, 1.0);
+      pp -= bb * vec2<f32>(h, h - 1.0);
+      return length(pp) * sign(pp.x);
+
+- name: Pentagon
+  type: 10
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: r,  type: f32 }
+  shader:
+    code: |
+      let k = vec3<f32>(0.809016994, 0.587785252, 0.726542528);
+      var pp = p - vec2<f32>({cx}, {cy});
+      pp.x = abs(pp.x);
+      pp -= 2.0 * min(dot(vec2<f32>(-k.x, k.y), pp), 0.0) * vec2<f32>(-k.x, k.y);
+      pp -= 2.0 * min(dot(vec2<f32>(k.x, k.y), pp), 0.0) * vec2<f32>(k.x, k.y);
+      pp -= vec2<f32>(clamp(pp.x, -{r} * k.z, {r} * k.z), {r});
+      return length(pp) * sign(pp.y);
+
+- name: Hexagon
+  type: 11
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: r,  type: f32 }
+  shader:
+    code: |
+      let k = vec3<f32>(-0.866025404, 0.5, 0.577350269);
+      var pp = abs(p - vec2<f32>({cx}, {cy}));
+      pp -= 2.0 * min(dot(k.xy, pp), 0.0) * k.xy;
+      pp -= vec2<f32>(clamp(pp.x, -k.z * {r}, k.z * {r}), {r});
+      return length(pp) * sign(pp.y);
+
+- name: Star
+  type: 12
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: r,  type: f32 }
+    - { name: n,  type: f32 }
+    - { name: m,  type: f32 }
+  shader:
+    code: |
+      let an = 3.141593 / {n};
+      let en = 3.141593 / {m};
+      let acs = vec2<f32>(cos(an), sin(an));
+      let ecs = vec2<f32>(cos(en), sin(en));
+      var pp = p - vec2<f32>({cx}, {cy});
+      let angle = atan2(pp.x, pp.y);
+      let bn = ((angle % (2.0 * an)) + 2.0 * an) % (2.0 * an) - an;
+      pp = length(pp) * vec2<f32>(cos(bn), abs(sin(bn)));
+      pp -= {r} * acs;
+      pp += ecs * clamp(-dot(pp, ecs), 0.0, {r} * acs.y / ecs.y);
+      return length(pp) * sign(pp.x);
+
+- name: Pie
+  type: 13
+  category: sdf2d
+  args:
+    - { name: cx,   type: f32 }
+    - { name: cy,   type: f32 }
+    - { name: sc_x, type: f32 }
+    - { name: sc_y, type: f32 }
+    - { name: r,    type: f32 }
+  shader:
+    code: |
+      let c = vec2<f32>({sc_x}, {sc_y});
+      var pp = p - vec2<f32>({cx}, {cy});
+      pp.x = abs(pp.x);
+      let l = length(pp) - {r};
+      let m = length(pp - c * clamp(dot(pp, c), 0.0, {r}));
+      return max(l, m * sign(c.y * pp.x - c.x * pp.y));
+
+- name: Ring
+  type: 14
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: nx, type: f32 }
+    - { name: ny, type: f32 }
+    - { name: r,  type: f32 }
+    - { name: th, type: f32 }
+  shader:
+    code: |
+      let n = vec2<f32>({nx}, {ny});
+      var pp = p - vec2<f32>({cx}, {cy});
+      pp.x = abs(pp.x);
+      pp = mat2x2<f32>(n.x, n.y, -n.y, n.x) * pp;
+      return max(abs(length(pp) - {r}) - {th} * 0.5,
+                 length(vec2<f32>(pp.x, max(0.0, abs({r} - pp.y) - {th} * 0.5))) * sign(pp.x));
+
+- name: Heart
+  type: 15
+  category: sdf2d
+  args:
+    - { name: cx,    type: f32 }
+    - { name: cy,    type: f32 }
+    - { name: scale, type: f32 }
+  shader:
+    code: |
+      var pp = (p - vec2<f32>({cx}, {cy})) / {scale};
+      pp.x = abs(pp.x);
+      if (pp.y + pp.x > 1.0) {
+          return (length(pp - vec2<f32>(0.25, 0.75)) - sqrt(2.0) / 4.0) * {scale};
+      }
+      return (sqrt(min(dot(pp - vec2<f32>(0.0, 1.0), pp - vec2<f32>(0.0, 1.0)),
+                       dot(pp - 0.5 * max(pp.x + pp.y, 0.0), pp - 0.5 * max(pp.x + pp.y, 0.0)))) *
+              sign(pp.x - pp.y)) * {scale};
+
+- name: Cross
+  type: 16
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: bx, type: f32 }
+    - { name: by, type: f32 }
+    - { name: r,  type: f32 }
+  shader:
+    code: |
+      let b = vec2<f32>({bx}, {by});
+      var pp = abs(p - vec2<f32>({cx}, {cy}));
+      pp = select(pp, pp.yx, pp.y > pp.x);
+      let q = pp - b;
+      let k = max(q.y, q.x);
+      let w = select(vec2<f32>(b.y - pp.x, -k), q, k > 0.0);
+      return sign(k) * length(max(w, vec2<f32>(0.0))) + {r};
+
+- name: RoundedX
+  type: 17
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: w,  type: f32 }
+    - { name: r,  type: f32 }
+  shader:
+    code: |
+      let pp = abs(p - vec2<f32>({cx}, {cy}));
+      return length(pp - min(pp.x + pp.y, {w}) * 0.5) - {r};
+
+- name: Capsule
+  type: 18
+  category: sdf2d
+  args:
+    - { name: ax, type: f32 }
+    - { name: ay, type: f32 }
+    - { name: bx, type: f32 }
+    - { name: by, type: f32 }
+    - { name: r,  type: f32 }
+  shader:
+    code: |
+      let a = vec2<f32>({ax}, {ay});
+      let b = vec2<f32>({bx}, {by});
+      let pa = p - a;
+      let ba = b - a;
+      let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+      return length(pa - ba * h) - {r};
+
+- name: Moon
+  type: 19
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: d,  type: f32 }
+    - { name: ra, type: f32 }
+    - { name: rb, type: f32 }
+  shader:
+    code: |
+      var pp = p - vec2<f32>({cx}, {cy});
+      pp.y = abs(pp.y);
+      let a = ({ra} * {ra} - {rb} * {rb} + {d} * {d}) / (2.0 * {d});
+      let b = sqrt(max({ra} * {ra} - a * a, 0.0));
+      if ({d} * (pp.x * b - pp.y * a) > {d} * {d} * max(b - pp.y, 0.0)) {
+          return length(pp - vec2<f32>(a, b));
+      }
+      return max(length(pp) - {ra}, -(length(pp - vec2<f32>({d}, 0.0)) - {rb}));
+
+- name: Egg
+  type: 20
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: ra, type: f32 }
+    - { name: rb, type: f32 }
+  shader:
+    code: |
+      var pp = p - vec2<f32>({cx}, {cy});
+      pp.x = abs(pp.x);
+      let r = {ra} - {rb};
+      let k = select(({rb} * pp.y - {ra} * pp.x) / ({ra} * {rb}), length(pp) / r, pp.y < 0.0);
+      if (k < 0.0) { return length(pp) - {ra}; }
+      if (k > {ra}) { return length(pp - vec2<f32>(0.0, {ra})) - {rb}; }
+      return length(pp - vec2<f32>(-r, 0.0)) - ({ra} + {rb} - r);
+
+- name: Octogon
+  type: 28
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: r,  type: f32 }
+  shader:
+    code: |
+      let k = vec3<f32>(-0.9238795325, 0.3826834323, 0.4142135623);
+      var pp = abs(p - vec2<f32>({cx}, {cy}));
+      pp = pp - 2.0 * min(dot(vec2<f32>(k.x, k.y), pp), 0.0) * vec2<f32>(k.x, k.y);
+      pp = pp - 2.0 * min(dot(vec2<f32>(-k.x, k.y), pp), 0.0) * vec2<f32>(-k.x, k.y);
+      pp = pp - vec2<f32>(clamp(pp.x, -k.z * {r}, k.z * {r}), {r});
+      return length(pp) * sign(pp.y);
+
+- name: Hexagram
+  type: 29
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: r,  type: f32 }
+  shader:
+    code: |
+      let k = vec4<f32>(-0.5, 0.8660254038, 0.5773502692, 1.7320508076);
+      var pp = abs(p - vec2<f32>({cx}, {cy}));
+      pp = pp - 2.0 * min(dot(k.xy, pp), 0.0) * k.xy;
+      pp = pp - 2.0 * min(dot(k.yx, pp), 0.0) * k.yx;
+      pp = pp - vec2<f32>(clamp(pp.x, {r} * k.z, {r} * k.w), {r});
+      return length(pp) * sign(pp.y);
+
+- name: Pentagram
+  type: 30
+  category: sdf2d
+  args:
+    - { name: cx, type: f32 }
+    - { name: cy, type: f32 }
+    - { name: r,  type: f32 }
+  shader:
+    code: |
+      let v1 = vec2<f32>(0.809016994, -0.587785252);
+      let v2 = vec2<f32>(-0.809016994, -0.587785252);
+      let v3 = vec2<f32>(0.309016994, -0.951056516);
+      let k1z = 0.726542528;
+      var pp = p - vec2<f32>({cx}, {cy});
+      pp.x = abs(pp.x);
+      pp = pp - 2.0 * max(dot(v1, pp), 0.0) * v1;
+      pp = pp - 2.0 * max(dot(v2, pp), 0.0) * v2;
+      pp.x = abs(pp.x);
+      pp.y = pp.y - {r};
+      return length(pp - v3 * clamp(dot(pp, v3), 0.0, k1z * {r})) * sign(pp.y * v3.x - pp.x * v3.y);
+
+# =============================================================================
+# 3D SDF Primitives
+# =============================================================================
+
+- name: Sphere3D
+  type: 100
+  category: sdf3d
+  args:
+    - { name: px, type: f32 }
+    - { name: py, type: f32 }
+    - { name: pz, type: f32 }
+    - { name: r,  type: f32 }
+  shader:
+    code: |
+      return length(p - vec3<f32>({px}, {py}, {pz})) - {r};
+
+- name: Box3D
+  type: 101
+  category: sdf3d
+  args:
+    - { name: px, type: f32 }
+    - { name: py, type: f32 }
+    - { name: pz, type: f32 }
+    - { name: bx, type: f32 }
+    - { name: by, type: f32 }
+    - { name: bz, type: f32 }
+  shader:
+    code: |
+      let q = abs(p - vec3<f32>({px}, {py}, {pz})) - vec3<f32>({bx}, {by}, {bz});
+      return length(max(q, vec3<f32>(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
+
+- name: Torus3D
+  type: 103
+  category: sdf3d
+  args:
+    - { name: px,     type: f32 }
+    - { name: py,     type: f32 }
+    - { name: pz,     type: f32 }
+    - { name: majorR, type: f32 }
+    - { name: minorR, type: f32 }
+  shader:
+    code: |
+      let pos = p - vec3<f32>({px}, {py}, {pz});
+      let q = vec2<f32>(length(pos.xz) - {majorR}, pos.y);
+      return length(q) - {minorR};
+
+- name: Cylinder3D
+  type: 105
+  category: sdf3d
+  args:
+    - { name: px, type: f32 }
+    - { name: py, type: f32 }
+    - { name: pz, type: f32 }
+    - { name: r,  type: f32 }
+    - { name: h,  type: f32 }
+  shader:
+    code: |
+      let pos = p - vec3<f32>({px}, {py}, {pz});
+      let d = abs(vec2<f32>(length(pos.xz), pos.y)) - vec2<f32>({r}, {h});
+      return min(max(d.x, d.y), 0.0) + length(max(d, vec2<f32>(0.0)));
+

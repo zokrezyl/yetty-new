@@ -1,0 +1,229 @@
+# yfsvm - Yetty Fragment Shader Virtual Machine
+# Single source of truth for opcodes, generates C and WGSL code
+
+magic: 0x5946534D  # "YFSM"
+version: 1
+max_registers: 16
+max_functions: 16
+max_constants: 4096
+max_instructions: 256
+max_execution_steps: 1024  # safety limit for shader execution loop
+
+# Instruction format (32-bit):
+#   [31:24] opcode (8 bits)
+#   [23:20] dst    (4 bits) - destination register
+#   [19:16] src1   (4 bits) - first source register
+#   [15:12] src2   (4 bits) - second source register
+#   [11:0]  imm12  (12 bits) - immediate/constant index
+
+opcodes:
+  # Control
+  - name: NOP
+    value: 0x00
+    arity: 0
+    wgsl: "// nop"
+
+  - name: RET
+    value: 0x01
+    arity: 0
+    wgsl: "return regs[0];"
+
+  # Load/Move
+  - name: LOAD_C
+    value: 0x02
+    arity: 1
+    wgsl: "regs[dst] = bitcast<f32>(buf[constOffset + imm]);"
+
+  - name: LOAD_X
+    value: 0x03
+    arity: 1
+    wgsl: "regs[dst] = x;"
+
+  - name: LOAD_T
+    value: 0x04
+    arity: 1
+    wgsl: "regs[dst] = t;"
+
+  - name: LOAD_S
+    value: 0x05
+    arity: 1
+    wgsl: "regs[dst] = samplers[imm & 7u];"
+
+  - name: MOV
+    value: 0x06
+    arity: 1
+    wgsl: "regs[dst] = v1;"
+
+  # Arithmetic
+  - name: ADD
+    value: 0x10
+    arity: 2
+    wgsl: "regs[dst] = v1 + v2;"
+
+  - name: SUB
+    value: 0x11
+    arity: 2
+    wgsl: "regs[dst] = v1 - v2;"
+
+  - name: MUL
+    value: 0x12
+    arity: 2
+    wgsl: "regs[dst] = v1 * v2;"
+
+  - name: DIV
+    value: 0x13
+    arity: 2
+    wgsl: "regs[dst] = v1 / v2;"
+
+  - name: NEG
+    value: 0x14
+    arity: 1
+    wgsl: "regs[dst] = -v1;"
+
+  - name: MOD
+    value: 0x15
+    arity: 2
+    wgsl: "regs[dst] = v1 - v2 * floor(v1 / v2);"
+
+  # Transcendentals
+  - name: SIN
+    value: 0x20
+    arity: 1
+    wgsl: "regs[dst] = sin(v1);"
+
+  - name: COS
+    value: 0x21
+    arity: 1
+    wgsl: "regs[dst] = cos(v1);"
+
+  - name: TAN
+    value: 0x22
+    arity: 1
+    wgsl: "regs[dst] = tan(v1);"
+
+  - name: ASIN
+    value: 0x23
+    arity: 1
+    wgsl: "regs[dst] = asin(v1);"
+
+  - name: ACOS
+    value: 0x24
+    arity: 1
+    wgsl: "regs[dst] = acos(v1);"
+
+  - name: ATAN
+    value: 0x25
+    arity: 1
+    wgsl: "regs[dst] = atan(v1);"
+
+  - name: ATAN2
+    value: 0x26
+    arity: 2
+    wgsl: "regs[dst] = atan2(v1, v2);"
+
+  - name: SINH
+    value: 0x27
+    arity: 1
+    wgsl: "regs[dst] = sinh(v1);"
+
+  - name: COSH
+    value: 0x28
+    arity: 1
+    wgsl: "regs[dst] = cosh(v1);"
+
+  - name: TANH
+    value: 0x29
+    arity: 1
+    wgsl: "regs[dst] = tanh(v1);"
+
+  # Exponential/Logarithmic
+  - name: EXP
+    value: 0x30
+    arity: 1
+    wgsl: "regs[dst] = exp(v1);"
+
+  - name: EXP2
+    value: 0x31
+    arity: 1
+    wgsl: "regs[dst] = exp2(v1);"
+
+  - name: LOG
+    value: 0x32
+    arity: 1
+    wgsl: "regs[dst] = log(v1);"
+
+  - name: LOG2
+    value: 0x33
+    arity: 1
+    wgsl: "regs[dst] = log2(v1);"
+
+  - name: POW
+    value: 0x34
+    arity: 2
+    wgsl: "regs[dst] = pow(v1, v2);"
+
+  - name: SQRT
+    value: 0x35
+    arity: 1
+    wgsl: "regs[dst] = sqrt(v1);"
+
+  - name: RSQRT
+    value: 0x36
+    arity: 1
+    wgsl: "regs[dst] = inverseSqrt(v1);"
+
+  # Utility
+  - name: ABS
+    value: 0x40
+    arity: 1
+    wgsl: "regs[dst] = abs(v1);"
+
+  - name: MIN
+    value: 0x41
+    arity: 2
+    wgsl: "regs[dst] = min(v1, v2);"
+
+  - name: MAX
+    value: 0x42
+    arity: 2
+    wgsl: "regs[dst] = max(v1, v2);"
+
+  - name: FLOOR
+    value: 0x43
+    arity: 1
+    wgsl: "regs[dst] = floor(v1);"
+
+  - name: CEIL
+    value: 0x44
+    arity: 1
+    wgsl: "regs[dst] = ceil(v1);"
+
+  - name: ROUND
+    value: 0x45
+    arity: 1
+    wgsl: "regs[dst] = round(v1);"
+
+  - name: FRACT
+    value: 0x46
+    arity: 1
+    wgsl: "regs[dst] = fract(v1);"
+
+  - name: SIGN
+    value: 0x47
+    arity: 1
+    wgsl: "regs[dst] = sign(v1);"
+
+  - name: CLAMP01
+    value: 0x48
+    arity: 1
+    wgsl: "regs[dst] = clamp(v1, 0.0, 1.0);"
+
+  - name: STEP
+    value: 0x49
+    arity: 2
+    wgsl: "regs[dst] = step(v1, v2);"
+
+  - name: MIX
+    value: 0x4A
+    arity: 3
+    wgsl: "regs[dst] = mix(v1, v2, regs[imm & 0xFu]);"
