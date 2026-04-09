@@ -38,9 +38,17 @@ struct yetty_term_terminal_layer {
     int dirty;
 };
 
+/* Forward declaration */
+struct yetty_platform_input_pipe;
+
 /* Terminal creation/destruction */
-struct yetty_term_terminal_result yetty_term_terminal_create(uint32_t cols, uint32_t rows);
+struct yetty_term_terminal_result yetty_term_terminal_create(
+    uint32_t cols, uint32_t rows,
+    struct yetty_platform_input_pipe *platform_input_pipe);
 void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal);
+
+/* Terminal run */
+struct yetty_core_void_result yetty_term_terminal_run(struct yetty_term_terminal *terminal);
 
 /* Terminal input */
 void yetty_term_terminal_write(struct yetty_term_terminal *terminal, const char *data, size_t len);

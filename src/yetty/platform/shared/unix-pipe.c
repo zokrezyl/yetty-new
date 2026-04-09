@@ -1,16 +1,13 @@
 /* Unix platform input pipe implementation */
 
 #include <yetty/platform/platform-input-pipe.h>
+#include <yetty/core/types.h>
 
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-/* container_of macro */
-#define container_of(ptr, type, member) \
-    ((type *)((char *)(ptr) - offsetof(type, member)))
 
 /* Unix input pipe - embeds base as first member */
 struct unix_platform_input_pipe {
@@ -21,11 +18,11 @@ struct unix_platform_input_pipe {
 
 /* Forward declarations */
 static void unix_pipe_destroy(struct yetty_platform_input_pipe *self);
-static void unix_pipe_write(struct yetty_platform_input_pipe *self, const void *data, size_t size);
-static size_t unix_pipe_read(struct yetty_platform_input_pipe *self, void *data, size_t max_size);
-static int unix_pipe_read_fd(const struct yetty_platform_input_pipe *self);
-static void unix_pipe_set_event_loop(struct yetty_platform_input_pipe *self,
-                                      struct yetty_core_event_loop *loop);
+static struct yetty_core_size_result unix_pipe_write(struct yetty_platform_input_pipe *self, const void *data, size_t size);
+static struct yetty_core_size_result unix_pipe_read(struct yetty_platform_input_pipe *self, void *data, size_t max_size);
+static struct yetty_core_int_result unix_pipe_read_fd(const struct yetty_platform_input_pipe *self);
+static struct yetty_core_void_result unix_pipe_set_event_loop(struct yetty_platform_input_pipe *self,
+                                                               struct yetty_core_event_loop *loop);
 
 /* Ops table */
 static const struct yetty_platform_input_pipe_ops unix_pipe_ops = {
@@ -52,61 +49,66 @@ static void unix_pipe_destroy(struct yetty_platform_input_pipe *self)
     free(pipe_impl);
 }
 
-static struct yetty_core_void_result unix_pipe_write(struct yetty_platform_input_pipe *self, const void *data, size_t size)
+static struct yetty_core_size_result unix_pipe_write(struct yetty_platform_input_pipe *self, const void *data, size_t size)
 {
     struct unix_platform_input_pipe *pipe_impl = container_of(self, struct unix_platform_input_pipe, base);
     ssize_t written;
 
     if (pipe_impl->write_fd < 0)
-        return YETTY_ERR(yetty_core_void, "pipe write fd not open");
+        return YETTY_ERR(yetty_core_size, "pipe write fd not open");
 
     if (size == 0)
-        return YETTY_OK_VOID();
+        return YETTY_OK(yetty_core_size, 0);
 
     written = write(pipe_impl->write_fd, data, size);
     if (written < 0)
-        return YETTY_ERR(yetty_core_void, "write to pipe failed");
+        return YETTY_ERR(yetty_core_size, "write to pipe failed");
 
-    if ((size_t)written != size)
-        return YETTY_ERR(yetty_core_void, "partial write to pipe");
-
-    return YETTY_OK_VOID();
+    return YETTY_OK(yetty_core_size, (size_t)written);
 }
 
-static size_t unix_pipe_read(struct yetty_platform_input_pipe *self, void *data, size_t max_size)
+static struct yetty_core_size_result unix_pipe_read(struct yetty_platform_input_pipe *self, void *data, size_t max_size)
 {
     struct unix_platform_input_pipe *pipe_impl;
     ssize_t bytes_read;
 
     pipe_impl = container_of(self, struct unix_platform_input_pipe, base);
 
-    if (pipe_impl->read_fd < 0 || max_size == 0)
-        return 0;
+    if (pipe_impl->read_fd < 0)
+        return YETTY_ERR(yetty_core_size, "pipe read fd not open");
+
+    if (max_size == 0)
+        return YETTY_OK(yetty_core_size, 0);
 
     bytes_read = read(pipe_impl->read_fd, data, max_size);
     if (bytes_read < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK)
-            return 0;  /* No data available */
-        return 0;
+            return YETTY_OK(yetty_core_size, 0);
+        return YETTY_ERR(yetty_core_size, "read from pipe failed");
     }
 
-    return (size_t)bytes_read;
+    return YETTY_OK(yetty_core_size, (size_t)bytes_read);
 }
 
-static int unix_pipe_read_fd(const struct yetty_platform_input_pipe *self)
+static struct yetty_core_int_result unix_pipe_read_fd(const struct yetty_platform_input_pipe *self)
 {
     const struct unix_platform_input_pipe *pipe_impl;
 
     pipe_impl = container_of(self, struct unix_platform_input_pipe, base);
-    return pipe_impl->read_fd;
+
+    if (pipe_impl->read_fd < 0)
+        return YETTY_ERR(yetty_core_int, "pipe read fd not open");
+
+    return YETTY_OK(yetty_core_int, pipe_impl->read_fd);
 }
 
-static void unix_pipe_set_event_loop(struct yetty_platform_input_pipe *self,
-                                      struct yetty_core_event_loop *loop)
+static struct yetty_core_void_result unix_pipe_set_event_loop(struct yetty_platform_input_pipe *self,
+                                                               struct yetty_core_event_loop *loop)
 {
     /* No-op on Unix - EventLoop polls the fd directly */
     (void)self;
     (void)loop;
+    return YETTY_OK_VOID();
 }
 
 /* Create function */

@@ -17,11 +17,11 @@ YETTY_RESULT_DECLARE(yetty_platform_input_pipe, struct yetty_platform_input_pipe
 /* Platform input pipe ops */
 struct yetty_platform_input_pipe_ops {
     void (*destroy)(struct yetty_platform_input_pipe *self);
-    struct yetty_core_void_result (*write)(struct yetty_platform_input_pipe *self, const void *data, size_t size);
-    size_t (*read)(struct yetty_platform_input_pipe *self, void *data, size_t max_size);
-    int (*read_fd)(const struct yetty_platform_input_pipe *self);
-    void (*set_event_loop)(struct yetty_platform_input_pipe *self,
-                           struct yetty_core_event_loop *loop);
+    struct yetty_core_size_result (*write)(struct yetty_platform_input_pipe *self, const void *data, size_t size);
+    struct yetty_core_size_result (*read)(struct yetty_platform_input_pipe *self, void *data, size_t max_size);
+    struct yetty_core_int_result (*read_fd)(const struct yetty_platform_input_pipe *self);
+    struct yetty_core_void_result (*set_event_loop)(struct yetty_platform_input_pipe *self,
+                                                     struct yetty_core_event_loop *loop);
 };
 
 /* Platform input pipe base */

@@ -62,17 +62,7 @@ struct yetty_font_font_ops {
     int (*is_dirty)(const struct yetty_font_font *self);
     void (*clear_dirty)(struct yetty_font_font *self);
 
-    /* Atlas data */
-    uint32_t (*get_atlas_width)(const struct yetty_font_font *self);
-    uint32_t (*get_atlas_height)(const struct yetty_font_font *self);
-    const uint8_t *(*get_atlas_data)(const struct yetty_font_font *self);
-    size_t (*get_atlas_data_size)(const struct yetty_font_font *self);
-
-    /* Glyph UV data */
-    const void *(*get_glyph_uv_data)(const struct yetty_font_font *self);
-    size_t (*get_glyph_uv_data_size)(const struct yetty_font_font *self);
-
-    /* GPU resources */
+    /* GPU resources - provides everything the shader needs */
     struct yetty_render_gpu_resource_set (*get_gpu_resource_set)(const struct yetty_font_font *self);
 };
 

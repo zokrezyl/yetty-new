@@ -202,6 +202,9 @@ if(YETTY_ENABLE_LIB_ZLIB)
     list(APPEND YETTY_LIBS zlibstatic)
 endif()
 
+# Core libraries (always linked)
+list(APPEND YETTY_LIBS yetty_term)
+
 # Feature library link targets
 if(YETTY_ENABLE_FEATURE_BASE)
     list(APPEND YETTY_LIBS yetty_base)

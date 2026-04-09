@@ -107,6 +107,12 @@ struct yetty_core_event_loop {
     const struct yetty_core_event_loop_ops *ops;
 };
 
+/* Event loop creation - platform_input_pipe can be NULL */
+struct yetty_platform_input_pipe;
+YETTY_RESULT_DECLARE(yetty_core_event_loop, struct yetty_core_event_loop *);
+struct yetty_core_event_loop_result yetty_core_event_loop_create(
+    struct yetty_platform_input_pipe *pipe);
+
 #ifdef __cplusplus
 }
 #endif

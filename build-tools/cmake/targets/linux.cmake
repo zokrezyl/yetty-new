@@ -32,8 +32,7 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.c
     ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.c
     ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.c
-    ${YETTY_ROOT}/src/yetty/core/config.c
-    ${YETTY_ROOT}/src/yetty/incbin-assets.cpp
+    ${YETTY_ROOT}/src/yetty/incbin-assets.c
     ${YETTY_ROOT}/src/yetty/platform/linux/platform-paths.c
 )
 
@@ -76,6 +75,7 @@ find_library(UUID_STATIC_LIB libuuid.a PATHS /usr/lib/x86_64-linux-gnu /usr/lib 
 
 target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
+    ${BROTLIDEC_LIBRARIES}
     ${FONTCONFIG_STATIC_LIB}
     ${EXPAT_STATIC_LIB}
     ${UUID_STATIC_LIB}

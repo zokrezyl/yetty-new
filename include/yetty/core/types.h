@@ -2,10 +2,15 @@
 #define YETTY_CORE_TYPES_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Get pointer to containing struct from member pointer */
+#define container_of(ptr, type, member) \
+    ((type *)((char *)(ptr) - offsetof(type, member)))
 
 typedef uint64_t yetty_core_object_id;
 

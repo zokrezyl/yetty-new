@@ -1,15 +1,13 @@
 /* libuv-event-loop.c - Event loop using libuv */
 
 #include <yetty/core/event-loop.h>
+#include <yetty/core/types.h>
 #include <yetty/platform/platform-input-pipe.h>
 #include <yetty/platform/pty-poll-source.h>
 #include <uv.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define container_of(ptr, type, member) \
-    ((type *)((char *)(ptr) - offsetof(type, member)))
 
 #define MAX_LISTENERS_PER_POLL 16
 #define MAX_LISTENERS_PER_TIMER 16
@@ -157,8 +155,10 @@ static void on_pipe_poll(uv_poll_t *handle, int status, int events)
         return;
 
     if (events & UV_READABLE) {
-        while (impl->platform_input_pipe->ops->read(
-                   impl->platform_input_pipe, &event, sizeof(event)) == sizeof(event)) {
+        struct yetty_core_size_result read_res;
+        while ((read_res = impl->platform_input_pipe->ops->read(
+                   impl->platform_input_pipe, &event, sizeof(event))),
+               YETTY_IS_OK(read_res) && read_res.value == sizeof(event)) {
             libuv_dispatch(&impl->base, &event);
         }
     }
@@ -534,9 +534,6 @@ static void libuv_request_render(struct yetty_core_event_loop *self)
     uv_async_send(&impl->render_async);
 }
 
-/* Result type for event loop */
-YETTY_RESULT_DECLARE(yetty_core_event_loop, struct yetty_core_event_loop *);
-
 struct yetty_core_event_loop_result yetty_core_event_loop_create(
     struct yetty_platform_input_pipe *pipe)
 {
@@ -568,8 +565,9 @@ struct yetty_core_event_loop_result yetty_core_event_loop_create(
 
     /* Pipe polling */
     if (pipe) {
-        pipe_fd = pipe->ops->read_fd(pipe);
-        if (pipe_fd >= 0) {
+        struct yetty_core_int_result fd_res = pipe->ops->read_fd(pipe);
+        if (YETTY_IS_OK(fd_res) && fd_res.value >= 0) {
+            pipe_fd = fd_res.value;
             impl->pipe_poll.data = impl;
             uv_poll_init(impl->loop, &impl->pipe_poll, pipe_fd);
             uv_poll_start(&impl->pipe_poll, UV_READABLE, on_pipe_poll);

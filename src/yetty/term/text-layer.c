@@ -1,13 +1,16 @@
 #include <yetty/term/text-layer.h>
 #include <yetty/render/gpu-resource-set.h>
+#include <yetty/core/types.h>
+#include <yetty/ytrace.h>
 #include <vterm.h>
-#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* container_of macro */
-#define container_of(ptr, type, member) \
-    ((type *)((char *)(ptr) - offsetof(type, member)))
+#define INCBIN_STYLE 1
+#include <incbin.h>
+
+/* Embedded shader code */
+INCBIN(text_layer_shader, "src/yetty/term/text-layer.wgsl");
 
 /* Text layer - embeds base as first member */
 struct yetty_term_terminal_text_layer {
@@ -140,11 +143,18 @@ static struct yetty_render_gpu_resource_set text_layer_get_gpu_resource_set(
     resource_set.buffer_data = (const uint8_t *)cells;
     resource_set.buffer_data_size = self->cols * self->rows * sizeof(VTermScreenCell);
     resource_set.buffer_size = resource_set.buffer_data_size;
-    strncpy(resource_set.buffer_wgsl_type, "array<TextCell>",
+    strncpy(resource_set.buffer_wgsl_type, "array<Cell>",
             YETTY_RENDER_GPU_RESOURCE_WGSL_TYPE_MAX - 1);
-    strncpy(resource_set.buffer_name, "textCells",
+    strncpy(resource_set.buffer_name, "cellBuffer",
             YETTY_RENDER_GPU_RESOURCE_NAME_MAX - 1);
     resource_set.buffer_readonly = 1;
+
+    /* Main shader code for text layer rendering */
+    resource_set.shader_code = (const char *)gtext_layer_shader_data;
+    resource_set.shader_code_size = gtext_layer_shader_size;
+
+    ydebug("text_layer_get_gpu_resource_set: cols=%u rows=%u buffer_size=%zu shader_size=%zu",
+           self->cols, self->rows, resource_set.buffer_size, resource_set.shader_code_size);
 
     return resource_set;
 }

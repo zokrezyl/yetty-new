@@ -1,14 +1,11 @@
 /* GLFW clipboard manager implementation */
 
 #include <yetty/platform/clipboard-manager.h>
+#include <yetty/core/types.h>
 
 #include <GLFW/glfw3.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* container_of macro */
-#define container_of(ptr, type, member) \
-    ((type *)((char *)(ptr) - offsetof(type, member)))
 
 /* GLFW clipboard manager - embeds base as first member */
 struct glfw_clipboard_manager {

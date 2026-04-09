@@ -58,6 +58,10 @@ struct yetty_render_gpu_resource_set {
     size_t buffer_data_size;
     const uint8_t *uniform_data;
     size_t uniform_data_size;
+
+    /* Shader code - WGSL source provided by this resource set */
+    const char *shader_code;
+    size_t shader_code_size;
 };
 
 #ifdef __cplusplus

@@ -28,19 +28,11 @@ if(YETTY_ENABLE_FEATURE_RPC)
     add_subdirectory(rpc)
 endif()
 
-# Yetty sources (src/yetty/*.cpp)
+# Yetty sources (src/yetty/*.c)
 set(YETTY_SOURCES
-    ${YETTY_ROOT}/src/yetty/yetty.cpp
-    ${YETTY_ROOT}/src/yetty/config.cpp
-    ${YETTY_ROOT}/src/yetty/tree-like.cpp
-    ${YETTY_ROOT}/src/yetty/gpu-allocator.cpp
-    ${YETTY_ROOT}/src/yetty/gpu-resource-binder.cpp
-    ${YETTY_ROOT}/src/yetty/gpu-memory-manager.cpp
-    ${YETTY_ROOT}/src/yetty/gpu-buffer-manager.cpp
-    ${YETTY_ROOT}/src/yetty/gpu-texture-manager.cpp
-    ${YETTY_ROOT}/src/yetty/msdf-atlas.cpp
-    ${YETTY_ROOT}/src/yetty/shader-manager.cpp
-    ${YETTY_ROOT}/src/yetty/shared-bind-group.cpp
+    ${YETTY_ROOT}/src/yetty/yetty.c
+    ${YETTY_ROOT}/src/yetty/config.c
+    ${YETTY_ROOT}/src/yetty/ytrace.c
 )
 
 # Core sources (src/yetty/core/*.cpp)
@@ -79,7 +71,7 @@ if(YETTY_ENABLE_FEATURE_BASE)
 endif()
 
 if(YETTY_ENABLE_FEATURE_FONT)
-    add_subdirectory(font-cpp)
+    add_subdirectory(font)
 endif()
 
 if(YETTY_ENABLE_FEATURE_YECHO)
@@ -101,7 +93,7 @@ if(YETTY_ENABLE_FEATURE_YRICH)
 endif()
 
 if(YETTY_ENABLE_FEATURE_YPAINT)
-    add_subdirectory(ypaint/ypaint-cpp)
+    add_subdirectory(ypaint)
 endif()
 
 if(YETTY_ENABLE_FEATURE_DIAGRAM)

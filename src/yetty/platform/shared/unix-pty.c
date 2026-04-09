@@ -3,6 +3,7 @@
 #include <yetty/platform/pty.h>
 #include <yetty/platform/pty-factory.h>
 #include <yetty/config.h>
+#include <yetty/core/types.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -19,10 +20,6 @@
 #include <pty.h>
 #endif
 
-/* container_of macro */
-#define container_of(ptr, type, member) \
-    ((type *)((char *)(ptr) - offsetof(type, member)))
-
 /* Unix PTY implementation - embeds base as first member */
 struct unix_pty {
     struct yetty_platform_pty base;
@@ -36,10 +33,10 @@ struct unix_pty {
 
 /* Forward declarations */
 static void unix_pty_destroy(struct yetty_platform_pty *self);
-static size_t unix_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len);
-static void unix_pty_write(struct yetty_platform_pty *self, const char *data, size_t len);
-static void unix_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
-static void unix_pty_stop(struct yetty_platform_pty *self);
+static struct yetty_core_size_result unix_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len);
+static struct yetty_core_size_result unix_pty_write(struct yetty_platform_pty *self, const char *data, size_t len);
+static struct yetty_core_void_result unix_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
+static struct yetty_core_void_result unix_pty_stop(struct yetty_platform_pty *self);
 static struct yetty_platform_pty_poll_source *unix_pty_poll_source(struct yetty_platform_pty *self);
 
 /* Ops table */
@@ -79,43 +76,40 @@ static void unix_pty_destroy(struct yetty_platform_pty *self)
     free(pty);
 }
 
-static size_t unix_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len)
+static struct yetty_core_size_result unix_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len)
 {
     struct unix_pty *pty = container_of(self, struct unix_pty, base);
     ssize_t n;
 
     if (pty->pty_master < 0)
-        return 0;
+        return YETTY_ERR(yetty_core_size, "pty master not open");
 
     n = read(pty->pty_master, buf, max_len);
-    if (n > 0)
-        return (size_t)n;
+    if (n < 0)
+        return YETTY_ERR(yetty_core_size, "read from pty failed");
 
-    return 0;
+    return YETTY_OK(yetty_core_size, (size_t)n);
 }
 
-static struct yetty_core_void_result unix_pty_write(struct yetty_platform_pty *self, const char *data, size_t len)
+static struct yetty_core_size_result unix_pty_write(struct yetty_platform_pty *self, const char *data, size_t len)
 {
     struct unix_pty *pty = container_of(self, struct unix_pty, base);
     ssize_t written;
 
     if (pty->pty_master < 0)
-        return YETTY_ERR(yetty_core_void, "pty master not open");
+        return YETTY_ERR(yetty_core_size, "pty master not open");
 
     if (len == 0)
-        return YETTY_OK_VOID();
+        return YETTY_OK(yetty_core_size, 0);
 
     written = write(pty->pty_master, data, len);
     if (written < 0)
-        return YETTY_ERR(yetty_core_void, "write to pty failed");
+        return YETTY_ERR(yetty_core_size, "write to pty failed");
 
-    if ((size_t)written != len)
-        return YETTY_ERR(yetty_core_void, "partial write to pty");
-
-    return YETTY_OK_VOID();
+    return YETTY_OK(yetty_core_size, (size_t)written);
 }
 
-static void unix_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows)
+static struct yetty_core_void_result unix_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows)
 {
     struct unix_pty *pty = container_of(self, struct unix_pty, base);
     struct winsize ws;
@@ -123,22 +117,27 @@ static void unix_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint
     pty->cols = cols;
     pty->rows = rows;
 
-    if (pty->pty_master >= 0) {
-        ws.ws_row = (unsigned short)rows;
-        ws.ws_col = (unsigned short)cols;
-        ws.ws_xpixel = 0;
-        ws.ws_ypixel = 0;
-        ioctl(pty->pty_master, TIOCSWINSZ, &ws);
-    }
+    if (pty->pty_master < 0)
+        return YETTY_ERR(yetty_core_void, "pty master not open");
+
+    ws.ws_row = (unsigned short)rows;
+    ws.ws_col = (unsigned short)cols;
+    ws.ws_xpixel = 0;
+    ws.ws_ypixel = 0;
+
+    if (ioctl(pty->pty_master, TIOCSWINSZ, &ws) < 0)
+        return YETTY_ERR(yetty_core_void, "ioctl TIOCSWINSZ failed");
+
+    return YETTY_OK_VOID();
 }
 
-static void unix_pty_stop(struct yetty_platform_pty *self)
+static struct yetty_core_void_result unix_pty_stop(struct yetty_platform_pty *self)
 {
     struct unix_pty *pty = container_of(self, struct unix_pty, base);
     int status;
 
     if (!pty->running)
-        return;
+        return YETTY_OK_VOID();
 
     pty->running = 0;
 
@@ -152,6 +151,8 @@ static void unix_pty_stop(struct yetty_platform_pty *self)
         waitpid(pty->child_pid, &status, 0);
         pty->child_pid = -1;
     }
+
+    return YETTY_OK_VOID();
 }
 
 static struct yetty_platform_pty_poll_source *unix_pty_poll_source(struct yetty_platform_pty *self)

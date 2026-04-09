@@ -30,7 +30,7 @@ option(YETTY_ENABLE_LIB_ZLIB        "zlib — compression"                    ON
 option(YETTY_ENABLE_LIB_LIBPNG      "libpng — PNG support"                  ON)
 option(YETTY_ENABLE_LIB_FREETYPE    "freetype — font rendering"             ON)
 option(YETTY_ENABLE_LIB_MSDFGEN     "msdfgen — MSDF font generation"        OFF)
-option(YETTY_ENABLE_LIB_CDB         "cdb — constant database"               ON)
+option(YETTY_ENABLE_LIB_CDB         "cdb — constant database"               OFF)
 
 # Media / codecs
 option(YETTY_ENABLE_LIB_LIBJPEG_TURBO "libjpeg-turbo — JPEG support"       OFF)

@@ -1,4 +1,6 @@
 #include <yetty/term/terminal.h>
+#include <yetty/core/event-loop.h>
+#include <yetty/ytrace.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -9,13 +11,18 @@ struct yetty_term_terminal {
     uint32_t rows;
     struct yetty_term_terminal_layer *layers[YETTY_TERM_TERMINAL_MAX_LAYERS];
     size_t layer_count;
+    struct yetty_core_event_loop *event_loop;
 };
 
 /* Terminal creation/destruction */
 
-struct yetty_term_terminal_result yetty_term_terminal_create(uint32_t cols, uint32_t rows)
+struct yetty_term_terminal_result yetty_term_terminal_create(
+    uint32_t cols, uint32_t rows,
+    struct yetty_platform_input_pipe *platform_input_pipe)
 {
     struct yetty_term_terminal *terminal;
+
+    ydebug("terminal_create: cols=%u rows=%u pipe=%p", cols, rows, (void *)platform_input_pipe);
 
     terminal = calloc(1, sizeof(struct yetty_term_terminal));
     if (!terminal)
@@ -24,6 +31,16 @@ struct yetty_term_terminal_result yetty_term_terminal_create(uint32_t cols, uint
     terminal->cols = cols;
     terminal->rows = rows;
     terminal->layer_count = 0;
+
+    /* Create event loop */
+    struct yetty_core_event_loop_result event_loop_res = yetty_core_event_loop_create(platform_input_pipe);
+    if (!YETTY_IS_OK(event_loop_res)) {
+        ydebug("terminal_create: failed to create event loop");
+        free(terminal);
+        return YETTY_ERR(yetty_term_terminal, "failed to create event loop");
+    }
+    terminal->event_loop = event_loop_res.value;
+    ydebug("terminal_create: event_loop created at %p", (void *)terminal->event_loop);
 
     return YETTY_OK(yetty_term_terminal, terminal);
 }
@@ -41,7 +58,45 @@ void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal)
             layer->ops->destroy(layer);
     }
 
+    if (terminal->event_loop && terminal->event_loop->ops && terminal->event_loop->ops->destroy)
+        terminal->event_loop->ops->destroy(terminal->event_loop);
+
     free(terminal);
+}
+
+struct yetty_core_void_result yetty_term_terminal_run(struct yetty_term_terminal *terminal)
+{
+    ydebug("terminal_run: Starting...");
+
+    if (!terminal) {
+        ydebug("terminal_run: terminal is null!");
+        return YETTY_ERR(yetty_core_void, "terminal is null");
+    }
+
+    if (!terminal->event_loop) {
+        ydebug("terminal_run: terminal has no event_loop!");
+        return YETTY_ERR(yetty_core_void, "terminal has no event_loop");
+    }
+
+    if (!terminal->event_loop->ops) {
+        ydebug("terminal_run: event_loop has no ops!");
+        return YETTY_ERR(yetty_core_void, "event_loop has no ops");
+    }
+
+    if (!terminal->event_loop->ops->start) {
+        ydebug("terminal_run: event_loop has no start op!");
+        return YETTY_ERR(yetty_core_void, "event_loop has no start op");
+    }
+
+    ydebug("terminal_run: Calling event_loop start...");
+    struct yetty_core_void_result res = terminal->event_loop->ops->start(terminal->event_loop);
+    ydebug("terminal_run: event_loop start returned, ok=%d", YETTY_IS_OK(res));
+
+    if (!YETTY_IS_OK(res)) {
+        return res;
+    }
+
+    return YETTY_OK_VOID();
 }
 
 /* Terminal input */
