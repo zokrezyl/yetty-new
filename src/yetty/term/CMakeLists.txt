@@ -1,6 +1,12 @@
-set(YETTY_CORE_SOURCES ${YETTY_CORE_SOURCES}
-    ${CMAKE_CURRENT_SOURCE_DIR}/terminal.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terminal-screen.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/text-grid-layer.cpp
-    PARENT_SCOPE
+add_library(yetty_term
+    terminal.c
+    text-layer.c
+)
+
+target_include_directories(yetty_term PUBLIC
+    ${CMAKE_SOURCE_DIR}/include
+)
+
+target_link_libraries(yetty_term
+    vterm
 )
