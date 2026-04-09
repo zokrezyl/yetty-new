@@ -21,19 +21,20 @@ if(YETTY_ENABLE_FEATURE_YTOP)
     add_subdirectory(${YETTY_ROOT}/src/yetty/ytop ${CMAKE_BINARY_DIR}/src/yetty/ytop)
 endif()
 
-# Platform sources — linux-specific + shared GLFW/Unix
+# Platform sources — linux-specific + shared GLFW/Unix (C)
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-main.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-surface.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-event-loop.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-clipboard-manager.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-main.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-surface.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-event-loop.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-clipboard-manager.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.c
+    ${YETTY_ROOT}/src/yetty/core/config.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.cpp
-    ${YETTY_ROOT}/src/yetty/platform/linux/platform-paths.cpp
+    ${YETTY_ROOT}/src/yetty/platform/linux/platform-paths.c
 )
 
 # Create executable with core sources + platform

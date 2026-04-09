@@ -7,15 +7,8 @@
 extern "C" {
 #endif
 
-/* Error codes */
-#define YETTY_ERR_NOMEM     -1
-#define YETTY_ERR_INVALID   -2
-#define YETTY_ERR_NOT_FOUND -3
-#define YETTY_ERR_IO        -4
-
 /* Error info */
 struct yetty_core_error {
-    int code;
     const char *msg;
 };
 
@@ -43,10 +36,10 @@ YETTY_RESULT_DECLARE(yetty_core_size, size_t);
     ((struct name##_result){.ok = 1, .value = (val)})
 
 /* Create error result */
-#define YETTY_ERR(name, err_code, err_msg) \
+#define YETTY_ERR(name, err_msg) \
     ((struct name##_result){ \
         .ok = 0, \
-        .error = {.code = (err_code), .msg = (err_msg)}})
+        .error = {.msg = (err_msg)}})
 
 /* Check result */
 #define YETTY_IS_OK(res) ((res).ok)

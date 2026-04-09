@@ -79,7 +79,7 @@ if(YETTY_ENABLE_FEATURE_BASE)
 endif()
 
 if(YETTY_ENABLE_FEATURE_FONT)
-    add_subdirectory(font)
+    add_subdirectory(font-cpp)
 endif()
 
 if(YETTY_ENABLE_FEATURE_YECHO)
@@ -101,7 +101,7 @@ if(YETTY_ENABLE_FEATURE_YRICH)
 endif()
 
 if(YETTY_ENABLE_FEATURE_YPAINT)
-    add_subdirectory(ypaint)
+    add_subdirectory(ypaint-cpp)
 endif()
 
 if(YETTY_ENABLE_FEATURE_DIAGRAM)

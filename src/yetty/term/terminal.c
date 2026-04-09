@@ -19,7 +19,7 @@ struct yetty_term_terminal_result yetty_term_terminal_create(uint32_t cols, uint
 
     terminal = calloc(1, sizeof(struct yetty_term_terminal));
     if (!terminal)
-        return YETTY_ERR(yetty_term_terminal, YETTY_ERR_NOMEM, "failed to allocate terminal");
+        return YETTY_ERR(yetty_term_terminal, "failed to allocate terminal");
 
     terminal->cols = cols;
     terminal->rows = rows;

@@ -59,8 +59,7 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
 
     text_layer = calloc(1, sizeof(struct yetty_term_terminal_text_layer));
     if (!text_layer)
-        return YETTY_ERR(yetty_term_terminal_layer, YETTY_ERR_NOMEM,
-                         "failed to allocate text layer");
+        return YETTY_ERR(yetty_term_terminal_layer, "failed to allocate text layer");
 
     text_layer->base.ops = &text_layer_ops;
     text_layer->base.cols = cols;
@@ -72,8 +71,7 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     text_layer->vterm = vterm_new((int)rows, (int)cols);
     if (!text_layer->vterm) {
         free(text_layer);
-        return YETTY_ERR(yetty_term_terminal_layer, YETTY_ERR_NOMEM,
-                         "failed to create vterm");
+        return YETTY_ERR(yetty_term_terminal_layer, "failed to create vterm");
     }
 
     vterm_set_utf8(text_layer->vterm, 1);
