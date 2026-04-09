@@ -48,6 +48,10 @@ struct yetty_ypaint_canvas_ops {
     uint16_t (*cursor_col)(const struct yetty_ypaint_canvas *self);
     uint16_t (*cursor_row)(const struct yetty_ypaint_canvas *self);
 
+    /* Rolling offset (scrolling mode) */
+    uint32_t (*row_origin)(const struct yetty_ypaint_canvas *self);
+    uint32_t (*rolling_row)(const struct yetty_ypaint_canvas *self);
+
     /* Primitive management */
     void (*add_primitive)(struct yetty_ypaint_canvas *self,
                           const float *prim_data, size_t prim_data_count,
