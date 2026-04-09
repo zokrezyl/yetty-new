@@ -10,25 +10,6 @@
 #include <string.h>
 #include <stdint.h>
 
-#if defined(__EMSCRIPTEN__)
-#include <emscripten.h>
-#endif
-
-/* Yetty GPU context - owned by yetty */
-struct yetty_gpu_context {
-    struct yetty_app_gpu_context app_gpu_context;
-    WGPUAdapter adapter;
-    WGPUDevice device;
-    WGPUQueue queue;
-    WGPUTextureFormat surface_format;
-};
-
-/* Yetty context - combines app context and yetty GPU context */
-struct yetty_context {
-    struct yetty_app_context app_context;
-    struct yetty_gpu_context gpu_context;
-};
-
 /* Yetty instance */
 struct yetty_yetty {
     struct yetty_context context;
@@ -117,12 +98,6 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     ydebug("initWebGPU: Requesting adapter...");
     wgpuInstanceRequestAdapter(instance, &adapter_opts, adapter_cb);
 
-#if defined(__EMSCRIPTEN__)
-    while (!adapter_ready) {
-        emscripten_sleep(10);
-    }
-#endif
-
     if (!yetty->adapter) {
         return YETTY_ERR(yetty_core_void, "Failed to get WebGPU adapter");
     }
@@ -192,12 +167,6 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     ydebug("initWebGPU: Requesting device...");
     wgpuAdapterRequestDevice(yetty->adapter, &device_desc, device_cb);
 
-#if defined(__EMSCRIPTEN__)
-    while (!yetty->device && device_error[0] == '\0') {
-        emscripten_sleep(10);
-    }
-#endif
-
     if (!yetty->device) {
         return YETTY_ERR(yetty_core_void, "Failed to get WebGPU device");
     }
@@ -257,10 +226,9 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
     ydebug("yetty_create: WebGPU initialized");
 
     /* Create terminal */
-    ydebug("yetty_create: Creating terminal 80x24 with platform_input_pipe=%p...",
-           (void *)app_context->platform_input_pipe);
+    ydebug("yetty_create: Creating terminal 80x24...");
     struct yetty_term_terminal_result term_res = yetty_term_terminal_create(
-        80, 24, app_context->platform_input_pipe);
+        80, 24, &yetty->context);
     if (!YETTY_IS_OK(term_res)) {
         yetty_destroy(yetty);
         return YETTY_ERR(yetty_yetty, "Failed to create terminal");

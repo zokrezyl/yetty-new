@@ -77,6 +77,8 @@ static struct yetty_core_int_result libuv_dispatch(
 static struct yetty_core_void_result libuv_broadcast(
     struct yetty_core_event_loop *self, const struct yetty_core_event *event);
 static struct yetty_core_poll_id_result libuv_create_poll(struct yetty_core_event_loop *self);
+static struct yetty_core_poll_id_result libuv_create_pty_poll(
+    struct yetty_core_event_loop *self, struct yetty_platform_pty_poll_source *source);
 static struct yetty_core_void_result libuv_config_poll(
     struct yetty_core_event_loop *self, yetty_core_poll_id id, int fd);
 static struct yetty_core_void_result libuv_start_poll(
@@ -111,6 +113,7 @@ static const struct yetty_core_event_loop_ops libuv_ops = {
     .dispatch = libuv_dispatch,
     .broadcast = libuv_broadcast,
     .create_poll = libuv_create_poll,
+    .create_pty_poll = libuv_create_pty_poll,
     .config_poll = libuv_config_poll,
     .start_poll = libuv_start_poll,
     .stop_poll = libuv_stop_poll,
@@ -338,6 +341,32 @@ static struct yetty_core_poll_id_result libuv_create_poll(struct yetty_core_even
     memset(&impl->polls[id], 0, sizeof(impl->polls[id]));
     impl->polls[id].fd = -1;
 
+    return YETTY_OK(yetty_core_poll_id, id);
+}
+
+static struct yetty_core_poll_id_result libuv_create_pty_poll(
+    struct yetty_core_event_loop *self, struct yetty_platform_pty_poll_source *source)
+{
+    struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
+    struct poll_handle *ph;
+    int id, r;
+
+    if (!source || source->fd < 0)
+        return YETTY_ERR(yetty_core_poll_id, "invalid pty poll source");
+
+    id = impl->next_poll_id++;
+    if (id >= MAX_POLLS)
+        return YETTY_ERR(yetty_core_poll_id, "too many polls");
+
+    ph = &impl->polls[id];
+    memset(ph, 0, sizeof(*ph));
+    ph->fd = source->fd;
+
+    r = uv_poll_init(impl->loop, &ph->poll, ph->fd);
+    if (r != 0)
+        return YETTY_ERR(yetty_core_poll_id, "uv_poll_init failed");
+
+    ph->poll.data = ph;
     return YETTY_OK(yetty_core_poll_id, id);
 }
 

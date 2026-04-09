@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include <yetty/yetty.h>
 #include <yetty/config.h>
 #include <yetty/core/event.h>
 #include <yetty/core/event-loop.h>
@@ -26,33 +27,9 @@ WGPUSurface yetty_platform_create_surface(WGPUInstance instance, GLFWwindow *win
 void yetty_platform_setup_window_callbacks(GLFWwindow *window);
 void yetty_platform_run_os_event_loop(GLFWwindow *window, int *running);
 
-/* Forward declaration - yetty main */
-struct yetty;
-struct yetty_app_context;
-YETTY_RESULT_DECLARE(yetty, struct yetty *);
-
-struct yetty_result yetty_create(struct yetty_app_context *ctx);
-void yetty_destroy(struct yetty *yetty);
-struct yetty_core_void_result yetty_run(struct yetty *yetty);
-
-/* App context */
-struct yetty_app_gpu_context {
-    WGPUInstance instance;
-    WGPUSurface surface;
-    uint32_t surface_width;
-    uint32_t surface_height;
-};
-
-struct yetty_app_context {
-    struct yetty_app_gpu_context gpu;
-    struct yetty_config *config;
-    struct yetty_platform_input_pipe *platform_input_pipe;
-    struct yetty_platform_pty_factory *pty_factory;
-};
-
 /* Render thread args */
 struct render_thread_args {
-    struct yetty *yetty;
+    struct yetty_yetty *yetty;
     int *running;
     GLFWwindow *window;
     int result;
@@ -196,7 +173,7 @@ int main(int argc, char **argv)
     yetty_platform_get_framebuffer_size(window, &fb_width, &fb_height);
 
     struct yetty_app_context app_context = {
-        .gpu = {
+        .app_gpu_context = {
             .instance = instance,
             .surface = surface,
             .surface_width = (uint32_t)fb_width,
@@ -208,7 +185,7 @@ int main(int argc, char **argv)
     };
 
     /* Yetty */
-    struct yetty_result yetty_result = yetty_create(&app_context);
+    struct yetty_yetty_result yetty_result = yetty_create(&app_context);
     if (!YETTY_IS_OK(yetty_result)) {
         fprintf(stderr, "Failed to create Yetty\n");
         wgpuSurfaceRelease(surface);
@@ -220,7 +197,7 @@ int main(int argc, char **argv)
         glfwTerminate();
         return 1;
     }
-    struct yetty *yetty = yetty_result.value;
+    struct yetty_yetty *yetty = yetty_result.value;
 
     /* Render thread */
     int running = 1;

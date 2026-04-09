@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <yetty/core/result.h>
+#include <yetty/yetty.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,6 +16,8 @@ struct yetty_render_gpu_resource_set;
 struct yetty_term_terminal;
 struct yetty_term_terminal_layer;
 struct yetty_term_terminal_layer_ops;
+struct yetty_core_event_loop;
+struct yetty_platform_pty;
 
 /* Result types */
 YETTY_RESULT_DECLARE(yetty_term_terminal, struct yetty_term_terminal *);
@@ -38,13 +41,17 @@ struct yetty_term_terminal_layer {
     int dirty;
 };
 
-/* Forward declaration */
-struct yetty_platform_input_pipe;
+/* Terminal context - contains yetty context plus terminal-owned objects */
+struct yetty_term_terminal_context {
+    struct yetty_context yetty_context;
+    struct yetty_core_event_loop *event_loop;
+    struct yetty_platform_pty *pty;
+};
 
 /* Terminal creation/destruction */
 struct yetty_term_terminal_result yetty_term_terminal_create(
     uint32_t cols, uint32_t rows,
-    struct yetty_platform_input_pipe *platform_input_pipe);
+    const struct yetty_context *yetty_context);
 void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal);
 
 /* Terminal run */

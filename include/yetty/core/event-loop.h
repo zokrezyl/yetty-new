@@ -20,6 +20,7 @@ YETTY_RESULT_DECLARE(yetty_core_timer_id, yetty_core_timer_id);
 
 struct yetty_core_event_loop;
 struct yetty_core_event_listener;
+struct yetty_platform_pty_poll_source;
 
 /* Event listener callback - returns 1 if handled, 0 if not */
 typedef int (*yetty_core_event_handler)(
@@ -59,6 +60,9 @@ struct yetty_core_event_loop_ops {
     /* Poll management */
     struct yetty_core_poll_id_result (*create_poll)(
         struct yetty_core_event_loop *self);
+    struct yetty_core_poll_id_result (*create_pty_poll)(
+        struct yetty_core_event_loop *self,
+        struct yetty_platform_pty_poll_source *source);
     struct yetty_core_void_result (*config_poll)(
         struct yetty_core_event_loop *self,
         yetty_core_poll_id id,

@@ -10,7 +10,7 @@
 #include <incbin.h>
 
 /* Embedded shader code */
-INCBIN(text_layer_shader, "src/yetty/term/text-layer.wgsl");
+INCBIN(text_layer_shader, TEXT_LAYER_SHADER_PATH);
 
 /* Text layer - embeds base as first member */
 struct yetty_term_terminal_text_layer {
