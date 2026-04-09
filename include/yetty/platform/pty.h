@@ -16,7 +16,7 @@ struct yetty_platform_pty;
 struct yetty_platform_pty_ops {
     void (*destroy)(struct yetty_platform_pty *self);
     size_t (*read)(struct yetty_platform_pty *self, char *buf, size_t max_len);
-    void (*write)(struct yetty_platform_pty *self, const char *data, size_t len);
+    struct yetty_core_void_result (*write)(struct yetty_platform_pty *self, const char *data, size_t len);
     void (*resize)(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
     void (*stop)(struct yetty_platform_pty *self);
     struct yetty_platform_pty_poll_source *(*poll_source)(struct yetty_platform_pty *self);

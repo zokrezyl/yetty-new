@@ -94,12 +94,25 @@ static size_t unix_pty_read(struct yetty_platform_pty *self, char *buf, size_t m
     return 0;
 }
 
-static void unix_pty_write(struct yetty_platform_pty *self, const char *data, size_t len)
+static struct yetty_core_void_result unix_pty_write(struct yetty_platform_pty *self, const char *data, size_t len)
 {
     struct unix_pty *pty = container_of(self, struct unix_pty, base);
+    ssize_t written;
 
-    if (pty->pty_master >= 0 && len > 0)
-        write(pty->pty_master, data, len);
+    if (pty->pty_master < 0)
+        return YETTY_ERR(yetty_core_void, "pty master not open");
+
+    if (len == 0)
+        return YETTY_OK_VOID();
+
+    written = write(pty->pty_master, data, len);
+    if (written < 0)
+        return YETTY_ERR(yetty_core_void, "write to pty failed");
+
+    if ((size_t)written != len)
+        return YETTY_ERR(yetty_core_void, "partial write to pty");
+
+    return YETTY_OK_VOID();
 }
 
 static void unix_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows)

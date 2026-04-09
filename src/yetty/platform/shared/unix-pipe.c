@@ -52,16 +52,25 @@ static void unix_pipe_destroy(struct yetty_platform_input_pipe *self)
     free(pipe_impl);
 }
 
-static void unix_pipe_write(struct yetty_platform_input_pipe *self, const void *data, size_t size)
+static struct yetty_core_void_result unix_pipe_write(struct yetty_platform_input_pipe *self, const void *data, size_t size)
 {
-    struct unix_platform_input_pipe *pipe_impl;
+    struct unix_platform_input_pipe *pipe_impl = container_of(self, struct unix_platform_input_pipe, base);
+    ssize_t written;
 
-    pipe_impl = container_of(self, struct unix_platform_input_pipe, base);
+    if (pipe_impl->write_fd < 0)
+        return YETTY_ERR(yetty_core_void, "pipe write fd not open");
 
-    if (pipe_impl->write_fd < 0 || size == 0)
-        return;
+    if (size == 0)
+        return YETTY_OK_VOID();
 
-    write(pipe_impl->write_fd, data, size);
+    written = write(pipe_impl->write_fd, data, size);
+    if (written < 0)
+        return YETTY_ERR(yetty_core_void, "write to pipe failed");
+
+    if ((size_t)written != size)
+        return YETTY_ERR(yetty_core_void, "partial write to pipe");
+
+    return YETTY_OK_VOID();
 }
 
 static size_t unix_pipe_read(struct yetty_platform_input_pipe *self, void *data, size_t max_size)

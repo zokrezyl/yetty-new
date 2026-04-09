@@ -55,7 +55,7 @@ option(YETTY_ENABLE_LIB_LIBMAGIC    "libmagic — file type detection"         O
 
 # Core modules
 option(YETTY_ENABLE_FEATURE_BASE      "yetty_base — core utilities"          OFF)
-option(YETTY_ENABLE_FEATURE_FONT      "yetty_font — font subsystem"          OFF)
+option(YETTY_ENABLE_FEATURE_FONT      "yetty_font — font subsystem"          ON)
 option(YETTY_ENABLE_FEATURE_SHADERS   "shaders — WGSL shader sources"        ON)
 option(YETTY_ENABLE_FEATURE_MSDF_WGSL "msdf-wgsl — MSDF shader lib"         OFF)
 option(YETTY_ENABLE_FEATURE_MSDF_GEN  "msdf-gen — MSDF font generator"       OFF)
@@ -68,7 +68,7 @@ option(YETTY_ENABLE_FEATURE_YGUI_C    "ygui-c — C GUI bindings"              O
 option(YETTY_ENABLE_FEATURE_YDRAW     "ydraw — 2D vector drawing"            OFF)
 option(YETTY_ENABLE_FEATURE_YDRAW_ZOO "ydraw-zoo — ydraw demo shapes"        OFF)
 option(YETTY_ENABLE_FEATURE_YDRAW_MAZE "ydraw-maze — ydraw maze demo"        OFF)
-option(YETTY_ENABLE_FEATURE_YPAINT    "ypaint — painting"                    OFF)
+option(YETTY_ENABLE_FEATURE_YPAINT    "ypaint — painting"                    ON)
 option(YETTY_ENABLE_FEATURE_YRICH     "yrich — rich text"                    OFF)
 option(YETTY_ENABLE_FEATURE_DIAGRAM   "diagram — diagram rendering"          OFF)
 option(YETTY_ENABLE_FEATURE_YPLOT     "yplot — plotting"                     OFF)
