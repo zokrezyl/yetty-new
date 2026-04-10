@@ -4,13 +4,13 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <yetty/core/result.h>
+#include <yetty/render/gpu-resource-set.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 struct yetty_font_font;
-struct yetty_render_gpu_resource_set;
 
 /* Space glyph index - all fonts must return this for U+0020 */
 #define YETTY_FONT_SPACE_GLYPH_INDEX 0
@@ -63,7 +63,7 @@ struct yetty_font_font_ops {
     void (*clear_dirty)(struct yetty_font_font *self);
 
     /* GPU resources - provides everything the shader needs */
-    struct yetty_render_gpu_resource_set (*get_gpu_resource_set)(const struct yetty_font_font *self);
+    struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(const struct yetty_font_font *self);
 };
 
 /* Font base */

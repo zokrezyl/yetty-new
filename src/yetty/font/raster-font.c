@@ -5,16 +5,23 @@
 #include <yetty/font/raster-font.h>
 #include <yetty/font/font.h>
 #include <yetty/render/gpu-resource-set.h>
+#include <yetty/config.h>
+#include <yetty/core/types.h>
 #include <yetty/ytrace.h>
+#include <webgpu/webgpu.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-#include <yetty/core/types.h>
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+
+/* Shorthand accessors into rs */
+#define FONT_ATLAS(f)    ((f)->rs.textures[0])
+#define FONT_UV_BUF(f)   ((f)->rs.buffers[0])
+#define FONT_UVS(f)      ((struct raster_glyph_uv *)(f)->rs.buffers[0].data)
+#define FONT_UV_COUNT(f)  ((f)->rs.buffers[0].size / sizeof(struct raster_glyph_uv))
 
 #define RASTER_FONT_MAX_PATH 512
 #define RASTER_FONT_SLOT_PADDING 1
@@ -41,11 +48,6 @@ struct codepoint_slot {
     uint32_t slot;
 };
 
-struct loaded_glyph {
-    uint32_t codepoint;
-    enum yetty_font_style style;
-};
-
 struct raster_font {
     struct yetty_font_font base;
 
@@ -55,15 +57,14 @@ struct raster_font {
     float cell_height;
     uint32_t font_size;
     int baseline;
-    int shared;
 
     FT_Library ft_library;
     FT_Face ft_faces[4];
 
-    uint8_t *atlas_data;
-    size_t atlas_data_size;
-    uint32_t atlas_width;
-    uint32_t atlas_height;
+    /* GPU resource set — returned directly.
+     * rs.textures[0] = atlas, rs.buffers[0] = glyph UVs */
+    struct yetty_render_gpu_resource_set rs;
+    int next_slot_idx;
 
     /* Shelf packer state */
     uint32_t shelf_x;
@@ -71,18 +72,9 @@ struct raster_font {
     uint32_t shelf_height;
     uint32_t shelf_min_x;
 
-    struct raster_glyph_uv *glyph_uvs;
-    size_t glyph_uvs_count;
-    size_t glyph_uvs_capacity;
-    int next_slot_idx;
-
     struct codepoint_slot *codepoint_slots[4];
     size_t codepoint_slots_count[4];
     size_t codepoint_slots_capacity[4];
-
-    struct loaded_glyph *loaded_glyphs;
-    size_t loaded_glyphs_count;
-    size_t loaded_glyphs_capacity;
 
     int dirty;
 };
@@ -97,7 +89,7 @@ static struct yetty_core_void_result raster_font_load_glyphs(struct yetty_font_f
 static struct yetty_core_void_result raster_font_load_basic_latin(struct yetty_font_font *self);
 static int raster_font_is_dirty(const struct yetty_font_font *self);
 static void raster_font_clear_dirty(struct yetty_font_font *self);
-static struct yetty_render_gpu_resource_set raster_font_get_gpu_resource_set(const struct yetty_font_font *self);
+static struct yetty_render_gpu_resource_set_result raster_font_get_gpu_resource_set(const struct yetty_font_font *self);
 
 static void raster_font_update_font_size(struct raster_font *font);
 static void raster_font_rasterize_all(struct raster_font *font);
@@ -199,25 +191,23 @@ static void raster_font_update_font_size(struct raster_font *font)
 
 static void raster_font_grow_atlas(struct raster_font *font)
 {
-    uint32_t old_width = font->atlas_width;
-    uint32_t old_height = font->atlas_height;
-    uint32_t new_width = font->atlas_width;
-    uint32_t new_height = font->atlas_height;
+    uint32_t old_width = FONT_ATLAS(font).width;
+    uint32_t old_height = FONT_ATLAS(font).height;
+    uint32_t new_width = old_width;
+    uint32_t new_height = old_height;
 
     int can_grow_width = (new_width + RASTER_FONT_ATLAS_GROW_INCREMENT <= RASTER_FONT_ATLAS_MAX_DIMENSION);
     int can_grow_height = (new_height + RASTER_FONT_ATLAS_GROW_INCREMENT <= RASTER_FONT_ATLAS_MAX_DIMENSION);
 
     if (!can_grow_width && !can_grow_height) {
         yerror("Raster font atlas at maximum size %ux%u, cannot grow further",
-               font->atlas_width, font->atlas_height);
+               old_width, old_height);
         return;
     }
 
-    /* Grow both dimensions when possible */
     if (can_grow_height) new_height += RASTER_FONT_ATLAS_GROW_INCREMENT;
     if (can_grow_width)  new_width  += RASTER_FONT_ATLAS_GROW_INCREMENT;
 
-    /* Width-only growth (height maxed): pack into the new right column */
     if (can_grow_width && !can_grow_height) {
         font->shelf_x = old_width;
         font->shelf_y = 0;
@@ -227,36 +217,31 @@ static void raster_font_grow_atlas(struct raster_font *font)
 
     ydebug("Growing raster font atlas from %ux%u to %ux%u", old_width, old_height, new_width, new_height);
 
-    uint8_t *new_atlas_data = calloc(new_width * new_height, 1);
-    if (!new_atlas_data) {
+    uint8_t *new_data = calloc(new_width * new_height, 1);
+    if (!new_data) {
         yerror("Failed to allocate new atlas data");
         return;
     }
 
-    /* Copy old data row by row */
     for (uint32_t y = 0; y < old_height; y++) {
-        memcpy(new_atlas_data + y * new_width,
-               font->atlas_data + y * old_width,
+        memcpy(new_data + y * new_width,
+               FONT_ATLAS(font).data + y * old_width,
                old_width);
     }
 
-    free(font->atlas_data);
-    font->atlas_data = new_atlas_data;
-    font->atlas_width = new_width;
-    font->atlas_height = new_height;
-    font->atlas_data_size = new_width * new_height;
+    free(FONT_ATLAS(font).data);
+    FONT_ATLAS(font).data = new_data;
+    FONT_ATLAS(font).width = new_width;
+    FONT_ATLAS(font).height = new_height;
 
-    /* Recalculate UV coordinates for all existing glyphs */
     float scale_x = (float)old_width / (float)new_width;
     float scale_y = (float)old_height / (float)new_height;
-    for (size_t i = 0; i < font->glyph_uvs_count; i++) {
-        if (font->glyph_uvs[i].uv_x >= 0.0f) {  /* Skip invalid UVs */
-            if (old_width != new_width) {
-                font->glyph_uvs[i].uv_x *= scale_x;
-            }
-            if (old_height != new_height) {
-                font->glyph_uvs[i].uv_y *= scale_y;
-            }
+    size_t uv_count = FONT_UV_COUNT(font);
+    struct raster_glyph_uv *uvs = FONT_UVS(font);
+    for (size_t i = 0; i < uv_count; i++) {
+        if (uvs[i].uv_x >= 0.0f) {
+            if (old_width != new_width)  uvs[i].uv_x *= scale_x;
+            if (old_height != new_height) uvs[i].uv_y *= scale_y;
         }
     }
 
@@ -296,18 +281,22 @@ static int raster_font_rasterize_glyph(struct raster_font *font, uint32_t codepo
     uint32_t slot_idx = (uint32_t)font->next_slot_idx;
 
     /* Ensure UV array capacity */
-    if (slot_idx >= font->glyph_uvs_capacity) {
-        font->glyph_uvs_capacity *= 2;
-        font->glyph_uvs = realloc(font->glyph_uvs, font->glyph_uvs_capacity * sizeof(struct raster_glyph_uv));
+    size_t needed = (slot_idx + 1) * sizeof(struct raster_glyph_uv);
+    if (needed > FONT_UV_BUF(font).capacity) {
+        size_t new_cap = FONT_UV_BUF(font).capacity * 2;
+        if (new_cap < needed) new_cap = needed;
+        FONT_UV_BUF(font).data = realloc(FONT_UV_BUF(font).data, new_cap);
+        FONT_UV_BUF(font).capacity = new_cap;
     }
-    if (slot_idx >= font->glyph_uvs_count) {
-        font->glyph_uvs_count = slot_idx + 1;
+    if (needed > FONT_UV_BUF(font).size) {
+        FONT_UV_BUF(font).size = needed;
     }
 
+    struct raster_glyph_uv *uvs = FONT_UVS(font);
+
     if (bitmap->width == 0 || bitmap->rows == 0) {
-        /* Empty glyph - store with invalid UV */
-        font->glyph_uvs[slot_idx].uv_x = -1.0f;
-        font->glyph_uvs[slot_idx].uv_y = -1.0f;
+        uvs[slot_idx].uv_x = -1.0f;
+        uvs[slot_idx].uv_y = -1.0f;
         raster_font_add_slot(font, style_idx, codepoint, slot_idx);
         font->next_slot_idx++;
         return 1;
@@ -317,35 +306,38 @@ static int raster_font_rasterize_glyph(struct raster_font *font, uint32_t codepo
     int cell_h = (int)font->cell_height;
     uint32_t glyph_width = (uint32_t)cell_w + RASTER_FONT_ATLAS_PADDING * 2;
     uint32_t glyph_height = (uint32_t)cell_h + RASTER_FONT_ATLAS_PADDING * 2;
+    uint32_t aw = FONT_ATLAS(font).width;
+    uint32_t ah = FONT_ATLAS(font).height;
+    size_t atlas_size = (size_t)aw * ah;
 
-    /* Check if we need to wrap to next shelf */
-    if (font->shelf_x + glyph_width > font->atlas_width) {
+    if (font->shelf_x + glyph_width > aw) {
         font->shelf_x = font->shelf_min_x + RASTER_FONT_ATLAS_PADDING;
         font->shelf_y += font->shelf_height + RASTER_FONT_ATLAS_PADDING;
         font->shelf_height = 0;
     }
 
-    /* Check if we need to grow atlas */
-    if (font->shelf_y + glyph_height > font->atlas_height) {
+    if (font->shelf_y + glyph_height > ah) {
         raster_font_grow_atlas(font);
+        aw = FONT_ATLAS(font).width;
+        ah = FONT_ATLAS(font).height;
+        atlas_size = (size_t)aw * ah;
     }
 
-    /* Check again after potential growth */
-    if (font->shelf_y + glyph_height > font->atlas_height) {
+    if (font->shelf_y + glyph_height > ah) {
         yerror("Atlas full, cannot fit glyph for U+%04X", codepoint);
         return 0;
     }
 
     uint32_t atlas_x = font->shelf_x;
     uint32_t atlas_y = font->shelf_y;
+    uint8_t *pixels = FONT_ATLAS(font).data;
 
     /* Clear cell area */
     for (uint32_t y = 0; y < glyph_height; y++) {
         for (uint32_t x = 0; x < glyph_width; x++) {
-            uint32_t dst_idx = (atlas_y + y) * font->atlas_width + (atlas_x + x);
-            if (dst_idx < font->atlas_data_size) {
-                font->atlas_data[dst_idx] = 0;
-            }
+            uint32_t dst_idx = (atlas_y + y) * aw + (atlas_x + x);
+            if (dst_idx < atlas_size)
+                pixels[dst_idx] = 0;
         }
     }
 
@@ -357,40 +349,35 @@ static int raster_font_rasterize_glyph(struct raster_font *font, uint32_t codepo
 
     int offset_x = bearing_x + RASTER_FONT_ATLAS_PADDING;
     if (offset_x < RASTER_FONT_ATLAS_PADDING) offset_x = RASTER_FONT_ATLAS_PADDING;
-    if (offset_x > (int)(glyph_width - (uint32_t)glyph_w - RASTER_FONT_ATLAS_PADDING)) {
+    if (offset_x > (int)(glyph_width - (uint32_t)glyph_w - RASTER_FONT_ATLAS_PADDING))
         offset_x = (int)(glyph_width - (uint32_t)glyph_w - RASTER_FONT_ATLAS_PADDING);
-    }
     if (offset_x < RASTER_FONT_ATLAS_PADDING) offset_x = RASTER_FONT_ATLAS_PADDING;
 
     int offset_y = font->baseline - bearing_y + RASTER_FONT_ATLAS_PADDING;
     if (offset_y < RASTER_FONT_ATLAS_PADDING) offset_y = RASTER_FONT_ATLAS_PADDING;
-    if (offset_y > (int)(glyph_height - (uint32_t)glyph_h - RASTER_FONT_ATLAS_PADDING)) {
+    if (offset_y > (int)(glyph_height - (uint32_t)glyph_h - RASTER_FONT_ATLAS_PADDING))
         offset_y = (int)(glyph_height - (uint32_t)glyph_h - RASTER_FONT_ATLAS_PADDING);
-    }
     if (offset_y < RASTER_FONT_ATLAS_PADDING) offset_y = RASTER_FONT_ATLAS_PADDING;
 
     /* Copy bitmap to atlas */
     for (int y = 0; y < glyph_h; y++) {
         for (int x = 0; x < glyph_w; x++) {
             int src_idx = y * bitmap->pitch + x;
-            uint32_t dst_idx = (atlas_y + (uint32_t)offset_y + (uint32_t)y) * font->atlas_width +
+            uint32_t dst_idx = (atlas_y + (uint32_t)offset_y + (uint32_t)y) * aw +
                                (atlas_x + (uint32_t)offset_x + (uint32_t)x);
-            if (dst_idx < font->atlas_data_size) {
-                font->atlas_data[dst_idx] = bitmap->buffer[src_idx];
-            }
+            if (dst_idx < atlas_size)
+                pixels[dst_idx] = bitmap->buffer[src_idx];
         }
     }
 
-    /* Store UV (top-left of cell including padding) */
-    font->glyph_uvs[slot_idx].uv_x = (float)atlas_x / (float)font->atlas_width;
-    font->glyph_uvs[slot_idx].uv_y = (float)atlas_y / (float)font->atlas_height;
+    /* Store UV */
+    uvs[slot_idx].uv_x = (float)atlas_x / (float)aw;
+    uvs[slot_idx].uv_y = (float)atlas_y / (float)ah;
     raster_font_add_slot(font, style_idx, codepoint, slot_idx);
 
-    /* Update shelf packer */
     font->shelf_x = atlas_x + glyph_width + RASTER_FONT_ATLAS_PADDING;
-    if (glyph_height > font->shelf_height) {
+    if (glyph_height > font->shelf_height)
         font->shelf_height = glyph_height;
-    }
 
     font->next_slot_idx++;
     font->dirty = 1;
@@ -399,7 +386,8 @@ static int raster_font_rasterize_glyph(struct raster_font *font, uint32_t codepo
 
 static void raster_font_rasterize_all(struct raster_font *font)
 {
-    memset(font->atlas_data, 0, font->atlas_data_size);
+    size_t atlas_size = (size_t)FONT_ATLAS(font).width * FONT_ATLAS(font).height;
+    memset(FONT_ATLAS(font).data, 0, atlas_size);
 
     /* Reset shelf packer */
     font->shelf_x = RASTER_FONT_ATLAS_PADDING;
@@ -409,26 +397,26 @@ static void raster_font_rasterize_all(struct raster_font *font)
 
     /* Reserve slot 0 for empty/space */
     font->next_slot_idx = 1;
-    font->glyph_uvs[0].uv_x = -1.0f;
-    font->glyph_uvs[0].uv_y = -1.0f;
-    font->glyph_uvs_count = 1;
+    FONT_UVS(font)[0].uv_x = -1.0f;
+    FONT_UVS(font)[0].uv_y = -1.0f;
+    FONT_UV_BUF(font).size = sizeof(struct raster_glyph_uv);
 
     for (int i = 0; i < 4; i++) {
         font->codepoint_slots_count[i] = 0;
         raster_font_add_slot(font, i, 0x20, 0);  /* Map space to slot 0 */
     }
 
-    for (size_t i = 0; i < font->loaded_glyphs_count; i++) {
-        uint32_t codepoint = font->loaded_glyphs[i].codepoint;
-        enum yetty_font_style style = font->loaded_glyphs[i].style;
-        if (!raster_font_rasterize_glyph(font, codepoint, style)) {
-            ywarn("Failed to re-rasterize glyph for U+%04X style %d", codepoint, (int)style);
+    for (int s = 0; s < 4; s++) {
+        for (size_t i = 0; i < font->codepoint_slots_count[s]; i++) {
+            uint32_t cp = font->codepoint_slots[s][i].codepoint;
+            if (cp == 0x20) continue;  /* space already reserved */
+            if (!raster_font_rasterize_glyph(font, cp, (enum yetty_font_style)s)) {
+                ywarn("Failed to re-rasterize glyph U+%04X style %d", cp, s);
+            }
         }
     }
 
     font->dirty = 1;
-    ydebug("RasterFont: re-rasterized %zu glyphs at cell size %dx%d",
-           font->loaded_glyphs_count, (int)font->cell_width, (int)font->cell_height);
 }
 
 static void raster_font_cleanup(struct raster_font *font)
@@ -443,16 +431,14 @@ static void raster_font_cleanup(struct raster_font *font)
         FT_Done_FreeType(font->ft_library);
         font->ft_library = NULL;
     }
-    free(font->atlas_data);
-    font->atlas_data = NULL;
-    free(font->glyph_uvs);
-    font->glyph_uvs = NULL;
+    free(FONT_ATLAS(font).data);
+    FONT_ATLAS(font).data = NULL;
+    free(FONT_UV_BUF(font).data);
+    FONT_UV_BUF(font).data = NULL;
     for (int i = 0; i < 4; i++) {
         free(font->codepoint_slots[i]);
         font->codepoint_slots[i] = NULL;
     }
-    free(font->loaded_glyphs);
-    font->loaded_glyphs = NULL;
 }
 
 /*===========================================================================
@@ -460,85 +446,90 @@ static void raster_font_cleanup(struct raster_font *font)
  *===========================================================================*/
 
 struct yetty_font_font_result yetty_font_raster_font_create(
-    const char *fonts_dir,
-    const char *font_name,
+    struct yetty_config *config,
     float cell_width,
-    float cell_height,
-    int shared)
+    float cell_height)
 {
+    const char *fonts_dir = config->ops->get_string(config, "paths/fonts", "");
+    const char *font_family = config->ops->font_family(config);
+    if (!font_family || strcmp(font_family, "default") == 0)
+        font_family = "DejaVuSansMNerdFontMono";
+
     struct raster_font *font = calloc(1, sizeof(struct raster_font));
-    if (!font) {
-        return YETTY_ERR(yetty_font_font, "Failed to allocate raster font");
-    }
+    if (!font)
+        return YETTY_ERR(yetty_font_font, "failed to allocate raster font");
 
     font->base.ops = &raster_font_ops;
     strncpy(font->fonts_dir, fonts_dir, RASTER_FONT_MAX_PATH - 1);
-    strncpy(font->font_name, font_name, RASTER_FONT_MAX_PATH - 1);
+    strncpy(font->font_name, font_family, RASTER_FONT_MAX_PATH - 1);
     font->cell_width = cell_width;
     font->cell_height = cell_height;
-    font->shared = shared;
 
-    /* Initialize FreeType */
+    /* Resource set: namespace + atlas texture + UV buffer */
+    strncpy(font->rs.namespace, "raster_font", YETTY_RENDER_NAME_MAX - 1);
+    font->rs.texture_count = 1;
+    font->rs.buffer_count = 1;
+
+    FONT_ATLAS(font).width = RASTER_FONT_ATLAS_INITIAL_WIDTH;
+    FONT_ATLAS(font).height = RASTER_FONT_ATLAS_INITIAL_HEIGHT;
+    FONT_ATLAS(font).format = WGPUTextureFormat_R8Unorm;
+    FONT_ATLAS(font).sampler_filter = WGPUFilterMode_Linear;
+    strncpy(FONT_ATLAS(font).name, "texture", YETTY_RENDER_NAME_MAX - 1);
+    strncpy(FONT_ATLAS(font).wgsl_type, "texture_2d<f32>", YETTY_RENDER_WGSL_TYPE_MAX - 1);
+    strncpy(FONT_ATLAS(font).sampler_name, "sampler", YETTY_RENDER_NAME_MAX - 1);
+
+    size_t atlas_bytes = (size_t)FONT_ATLAS(font).width * FONT_ATLAS(font).height;
+    FONT_ATLAS(font).data = calloc(atlas_bytes, 1);
+    if (!FONT_ATLAS(font).data) {
+        free(font);
+        return YETTY_ERR(yetty_font_font, "Failed to allocate atlas");
+    }
+
+    strncpy(FONT_UV_BUF(font).name, "buffer", YETTY_RENDER_NAME_MAX - 1);
+    strncpy(FONT_UV_BUF(font).wgsl_type, "array<f32>", YETTY_RENDER_WGSL_TYPE_MAX - 1);
+    FONT_UV_BUF(font).readonly = 1;
+    FONT_UV_BUF(font).capacity = 256 * sizeof(struct raster_glyph_uv);
+    FONT_UV_BUF(font).data = malloc(FONT_UV_BUF(font).capacity);
+    if (!FONT_UV_BUF(font).data) {
+        raster_font_cleanup(font);
+        free(font);
+        return YETTY_ERR(yetty_font_font, "Failed to allocate glyph UVs");
+    }
+
+    FONT_UVS(font)[0].uv_x = -1.0f;
+    FONT_UVS(font)[0].uv_y = -1.0f;
+    FONT_UV_BUF(font).size = sizeof(struct raster_glyph_uv);
+    font->next_slot_idx = 1;
+
+    /* FreeType */
     if (FT_Init_FreeType(&font->ft_library)) {
+        raster_font_cleanup(font);
         free(font);
         return YETTY_ERR(yetty_font_font, "Failed to initialize FreeType");
     }
 
-    /* Load all font faces (Regular, Bold, Oblique, BoldOblique) */
     for (int i = 0; i < 4; i++) {
         char path[RASTER_FONT_MAX_PATH * 2];
-        snprintf(path, sizeof(path), "%s/%s%s", fonts_dir, font_name, FACE_SUFFIXES[i]);
-
+        snprintf(path, sizeof(path), "%s/%s%s", font->fonts_dir, font->font_name, FACE_SUFFIXES[i]);
         if (FT_New_Face(font->ft_library, path, 0, &font->ft_faces[i])) {
-            /* Non-Regular faces are optional */
             if (i == 0) {
                 raster_font_cleanup(font);
                 free(font);
                 return YETTY_ERR(yetty_font_font, "Failed to load font");
             }
             font->ft_faces[i] = NULL;
-            ydebug("RasterFont: face not found (optional): %s", path);
-        } else {
-            ydebug("RasterFont: loaded face: %s", path);
         }
     }
 
-    /* Calculate proper font size from metrics */
     raster_font_update_font_size(font);
 
-    /* Initialize atlas data (R8 grayscale) */
-    font->atlas_width = RASTER_FONT_ATLAS_INITIAL_WIDTH;
-    font->atlas_height = RASTER_FONT_ATLAS_INITIAL_HEIGHT;
-    font->atlas_data_size = font->atlas_width * font->atlas_height;
-    font->atlas_data = calloc(font->atlas_data_size, 1);
-    if (!font->atlas_data) {
-        raster_font_cleanup(font);
-        free(font);
-        return YETTY_ERR(yetty_font_font, "Failed to allocate atlas");
-    }
-
-    /* Initialize shelf packer */
+    /* Shelf packer */
     font->shelf_x = RASTER_FONT_ATLAS_PADDING;
     font->shelf_y = RASTER_FONT_ATLAS_PADDING;
     font->shelf_height = 0;
     font->shelf_min_x = 0;
 
-    /* Initialize glyph UVs */
-    font->glyph_uvs_capacity = 256;
-    font->glyph_uvs = malloc(font->glyph_uvs_capacity * sizeof(struct raster_glyph_uv));
-    if (!font->glyph_uvs) {
-        raster_font_cleanup(font);
-        free(font);
-        return YETTY_ERR(yetty_font_font, "Failed to allocate glyph UVs");
-    }
-
-    /* Reserve slot 0 for empty/space */
-    font->glyph_uvs[0].uv_x = -1.0f;
-    font->glyph_uvs[0].uv_y = -1.0f;
-    font->glyph_uvs_count = 1;
-    font->next_slot_idx = 1;
-
-    /* Initialize codepoint slot maps */
+    /* Codepoint slot maps */
     for (int i = 0; i < 4; i++) {
         font->codepoint_slots_capacity[i] = 256;
         font->codepoint_slots[i] = malloc(font->codepoint_slots_capacity[i] * sizeof(struct codepoint_slot));
@@ -548,25 +539,21 @@ struct yetty_font_font_result yetty_font_raster_font_create(
             return YETTY_ERR(yetty_font_font, "Failed to allocate codepoint slots");
         }
         font->codepoint_slots_count[i] = 0;
-
-        /* Map space to slot 0 for all styles */
         raster_font_add_slot(font, i, 0x20, 0);
     }
 
-    /* Initialize loaded glyphs list */
-    font->loaded_glyphs_capacity = 256;
-    font->loaded_glyphs = malloc(font->loaded_glyphs_capacity * sizeof(struct loaded_glyph));
-    if (!font->loaded_glyphs) {
+    /* Load basic latin glyphs */
+    struct yetty_core_void_result load_res = raster_font_load_basic_latin(&font->base);
+    if (!YETTY_IS_OK(load_res)) {
         raster_font_cleanup(font);
         free(font);
-        return YETTY_ERR(yetty_font_font, "Failed to allocate loaded glyphs");
+        return YETTY_ERR(yetty_font_font, load_res.error.msg);
     }
 
-    ydebug("RasterFont loaded: %s (cell=%dx%d, fontSize=%d, baseline=%d, atlas=%ux%u)",
-           font_name, (int)cell_width, (int)cell_height, font->font_size, font->baseline,
-           font->atlas_width, font->atlas_height);
+    ydebug("RasterFont: %s cell=%dx%d fontSize=%d atlas=%ux%u",
+           font->font_name, (int)cell_width, (int)cell_height, font->font_size,
+           FONT_ATLAS(font).width, FONT_ATLAS(font).height);
 
-    ydebug("RasterFont created successfully");
     return YETTY_OK(yetty_font_font, &font->base);
 }
 
@@ -655,15 +642,6 @@ static struct yetty_core_void_result raster_font_load_glyphs(struct yetty_font_f
                 continue;
             }
 
-            /* Track for re-rasterization */
-            if (font->loaded_glyphs_count >= font->loaded_glyphs_capacity) {
-                font->loaded_glyphs_capacity *= 2;
-                font->loaded_glyphs = realloc(font->loaded_glyphs,
-                    font->loaded_glyphs_capacity * sizeof(struct loaded_glyph));
-            }
-            font->loaded_glyphs[font->loaded_glyphs_count].codepoint = codepoint;
-            font->loaded_glyphs[font->loaded_glyphs_count].style = style;
-            font->loaded_glyphs_count++;
         }
     }
 
@@ -730,37 +708,12 @@ static void raster_font_clear_dirty(struct yetty_font_font *self)
     font->dirty = 0;
 }
 
-static struct yetty_render_gpu_resource_set raster_font_get_gpu_resource_set(const struct yetty_font_font *self)
+static struct yetty_render_gpu_resource_set_result raster_font_get_gpu_resource_set(const struct yetty_font_font *self)
 {
     const struct raster_font *font = container_of(self, struct raster_font, base);
-    struct yetty_render_gpu_resource_set res = {0};
 
-    res.shared = font->shared;
-    strncpy(res.name, "rasterFont", YETTY_RENDER_GPU_RESOURCE_NAME_MAX - 1);
+    ydebug("raster_font_get_gpu_resource_set: atlas=%ux%u buffer_size=%zu",
+           FONT_ATLAS(font).width, FONT_ATLAS(font).height, FONT_UV_BUF(font).size);
 
-    /* Texture: R8 atlas */
-    res.texture_width = font->atlas_width;
-    res.texture_height = font->atlas_height;
-    res.texture_format = YETTY_RENDER_GPU_TEXTURE_FORMAT_R8_UNORM;
-    strncpy(res.texture_wgsl_type, "texture_2d<f32>", YETTY_RENDER_GPU_RESOURCE_WGSL_TYPE_MAX - 1);
-    strncpy(res.texture_name, "rasterFontTexture", YETTY_RENDER_GPU_RESOURCE_NAME_MAX - 1);
-    strncpy(res.sampler_name, "rasterFontSampler", YETTY_RENDER_GPU_RESOURCE_NAME_MAX - 1);
-    res.texture_data = font->atlas_data;
-    res.texture_data_size = font->atlas_data_size;
-
-    /* Sampler: linear filtering */
-    res.sampler_filter = YETTY_RENDER_GPU_FILTER_LINEAR;
-
-    /* Buffer: glyph UV data */
-    res.buffer_size = font->glyph_uvs_count * sizeof(struct raster_glyph_uv);
-    strncpy(res.buffer_wgsl_type, "array<RasterGlyphUV>", YETTY_RENDER_GPU_RESOURCE_WGSL_TYPE_MAX - 1);
-    strncpy(res.buffer_name, "rasterFontBuffer", YETTY_RENDER_GPU_RESOURCE_NAME_MAX - 1);
-    res.buffer_readonly = 1;
-    res.buffer_data = (const uint8_t *)font->glyph_uvs;
-    res.buffer_data_size = font->glyph_uvs_count * sizeof(struct raster_glyph_uv);
-
-    ydebug("raster_font_get_gpu_resource_set: atlas=%ux%u glyph_count=%zu buffer_size=%zu",
-           res.texture_width, res.texture_height, font->glyph_uvs_count, res.buffer_size);
-
-    return res;
+    return YETTY_OK(yetty_render_gpu_resource_set, &font->rs);
 }

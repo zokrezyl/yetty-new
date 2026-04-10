@@ -7,13 +7,13 @@
 extern "C" {
 #endif
 
-/* Create raster font - returns base font type */
+struct yetty_config;
+
+/* Create raster font from config — reads paths/fonts, font/family, loads basic latin */
 struct yetty_font_font_result yetty_font_raster_font_create(
-    const char *fonts_dir,
-    const char *font_name,
+    struct yetty_config *config,
     float cell_width,
-    float cell_height,
-    int shared);
+    float cell_height);
 
 #ifdef __cplusplus
 }

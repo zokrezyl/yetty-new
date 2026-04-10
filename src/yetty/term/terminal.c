@@ -6,6 +6,8 @@
 #include <yetty/platform/pty-factory.h>
 #include <yetty/platform/pty-poll-source.h>
 #include <yetty/render/gpu-resource-set.h>
+#include <yetty/render/gpu-allocator.h>
+#include <yetty/render/gpu-resource-binder.h>
 #include <yetty/ytrace.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,10 +22,13 @@ struct yetty_term_terminal {
     struct yetty_term_terminal_layer *layers[YETTY_TERM_TERMINAL_MAX_LAYERS];
     size_t layer_count;
     yetty_core_poll_id pty_poll_id;
+    struct yetty_render_gpu_allocator *allocator;
+    struct yetty_render_gpu_resource_binder *binder;
 };
 
-/* Forward declaration */
+/* Forward declarations */
 static void terminal_read_pty(struct yetty_term_terminal *terminal);
+static struct yetty_core_void_result terminal_render_frame(struct yetty_term_terminal *terminal);
 
 /* Event handler */
 static int terminal_event_handler(
@@ -33,18 +38,12 @@ static int terminal_event_handler(
     struct yetty_term_terminal *terminal = (struct yetty_term_terminal *)listener;
 
     switch (event->type) {
-    case YETTY_EVENT_RENDER:
-        ydebug("terminal: RENDER event, layer_count=%zu", terminal->layer_count);
-        for (size_t i = 0; i < terminal->layer_count; i++) {
-            struct yetty_term_terminal_layer *layer = terminal->layers[i];
-            if (layer && layer->ops && layer->ops->get_gpu_resource_set) {
-                struct yetty_render_gpu_resource_set rs = layer->ops->get_gpu_resource_set(layer);
-                ydebug("terminal: layer %zu resource_set name=%s buffer_size=%zu shader_size=%zu",
-                       i, rs.name, rs.buffer_size, rs.shader_code_size);
-                /* TODO: actually render using the resource set */
-            }
-        }
+    case YETTY_EVENT_RENDER: {
+        struct yetty_core_void_result res = terminal_render_frame(terminal);
+        if (!YETTY_IS_OK(res))
+            yerror("terminal: render_frame failed: %s", res.error.msg);
         return 1;
+    }
 
     case YETTY_EVENT_POLL_READABLE:
         ydebug("terminal: POLL_READABLE event fd=%d", event->poll.fd);
@@ -54,6 +53,99 @@ static int terminal_event_handler(
     default:
         return 0;
     }
+}
+
+/* Render a frame */
+static struct yetty_core_void_result terminal_render_frame(struct yetty_term_terminal *terminal)
+{
+    struct yetty_gpu_context *gpu = &terminal->context.yetty_context.gpu_context;
+    struct yetty_app_gpu_context *app_gpu = &gpu->app_gpu_context;
+
+    ydebug("terminal_render_frame: starting");
+
+    if (!terminal->binder) {
+        yerror("terminal_render_frame: no binder");
+        return YETTY_ERR(yetty_core_void, "no binder");
+    }
+
+    /* Submit resource sets from all layers */
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+        struct yetty_term_terminal_layer *layer = terminal->layers[i];
+        if (layer && layer->ops && layer->ops->get_gpu_resource_set) {
+            struct yetty_render_gpu_resource_set_result rs_res = layer->ops->get_gpu_resource_set(layer);
+            if (!YETTY_IS_OK(rs_res)) {
+                yerror("terminal_render_frame: layer %zu get_gpu_resource_set failed: %s", i, rs_res.error.msg);
+                return YETTY_ERR(yetty_core_void, rs_res.error.msg);
+            }
+            terminal->binder->ops->submit(terminal->binder, rs_res.value);
+        }
+    }
+
+    /* Finalize (compile shaders, create pipeline if needed) */
+    struct yetty_core_void_result res = terminal->binder->ops->finalize(terminal->binder);
+    if (!YETTY_IS_OK(res)) {
+        yerror("terminal_render_frame: finalize failed: %s", res.error.msg);
+        return res;
+    }
+
+    /* Get surface texture */
+    WGPUSurfaceTexture surface_texture;
+    wgpuSurfaceGetCurrentTexture(app_gpu->surface, &surface_texture);
+    if (surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
+        surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
+        yerror("terminal_render_frame: surface texture not ready, status=%d", surface_texture.status);
+        return YETTY_ERR(yetty_core_void, "surface texture not ready");
+    }
+
+    WGPUTextureView target_view = wgpuTextureCreateView(surface_texture.texture, NULL);
+    if (!target_view) {
+        yerror("terminal_render_frame: failed to create texture view");
+        wgpuTextureRelease(surface_texture.texture);
+        return YETTY_ERR(yetty_core_void, "failed to create texture view");
+    }
+
+    /* Create command encoder */
+    WGPUCommandEncoderDescriptor enc_desc = {0};
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(gpu->device, &enc_desc);
+
+    /* Begin render pass */
+    WGPURenderPassColorAttachment color_attachment = {0};
+    color_attachment.view = target_view;
+    color_attachment.loadOp = WGPULoadOp_Clear;
+    color_attachment.storeOp = WGPUStoreOp_Store;
+    color_attachment.clearValue = (WGPUColor){0.0, 0.0, 0.0, 1.0};
+
+    WGPURenderPassDescriptor pass_desc = {0};
+    pass_desc.colorAttachmentCount = 1;
+    pass_desc.colorAttachments = &color_attachment;
+
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc);
+
+    /* Bind and draw */
+    WGPURenderPipeline pipeline = terminal->binder->ops->get_pipeline(terminal->binder);
+    WGPUBuffer quad_vb = terminal->binder->ops->get_quad_vertex_buffer(terminal->binder);
+    if (pipeline && quad_vb) {
+        wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+        terminal->binder->ops->bind(terminal->binder, pass, 0);
+        wgpuRenderPassEncoderSetVertexBuffer(pass, 0, quad_vb, 0, 6 * 4 * sizeof(float));
+        wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
+    }
+
+    wgpuRenderPassEncoderEnd(pass);
+    wgpuRenderPassEncoderRelease(pass);
+
+    /* Submit */
+    WGPUCommandBufferDescriptor cmd_desc = {0};
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, &cmd_desc);
+    wgpuQueueSubmit(gpu->queue, 1, &cmd);
+
+    wgpuCommandBufferRelease(cmd);
+    wgpuCommandEncoderRelease(encoder);
+    wgpuTextureViewRelease(target_view);
+    wgpuSurfacePresent(app_gpu->surface);
+
+    ydebug("terminal_render_frame: done");
+    return YETTY_OK_VOID();
 }
 
 /* Read from PTY and feed to text layer */
@@ -158,7 +250,7 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
     }
 
     /* Create text layer */
-    struct yetty_term_terminal_layer_result text_layer_res = yetty_term_terminal_text_layer_create(cols, rows);
+    struct yetty_term_terminal_layer_result text_layer_res = yetty_term_terminal_text_layer_create(cols, rows, yetty_context);
     if (!YETTY_IS_OK(text_layer_res)) {
         ydebug("terminal_create: failed to create text layer");
         if (terminal->context.pty)
@@ -170,6 +262,39 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
     yetty_term_terminal_layer_add(terminal, text_layer_res.value);
     ydebug("terminal_create: text_layer created and added");
 
+    /* Create GPU allocator */
+    struct yetty_render_gpu_allocator_result alloc_res =
+        yetty_render_gpu_allocator_create(yetty_context->gpu_context.device);
+    if (!YETTY_IS_OK(alloc_res)) {
+        ydebug("terminal_create: failed to create gpu allocator");
+        if (terminal->context.pty)
+            terminal->context.pty->ops->destroy(terminal->context.pty);
+        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+        free(terminal);
+        return YETTY_ERR(yetty_term_terminal, "failed to create gpu allocator");
+    }
+    terminal->allocator = alloc_res.value;
+    ydebug("terminal_create: gpu allocator created");
+
+    /* Create GPU resource binder */
+    struct yetty_render_gpu_resource_binder_result binder_res =
+        yetty_render_gpu_resource_binder_create(
+            yetty_context->gpu_context.device,
+            yetty_context->gpu_context.queue,
+            yetty_context->gpu_context.surface_format,
+            terminal->allocator);
+    if (!YETTY_IS_OK(binder_res)) {
+        ydebug("terminal_create: failed to create gpu resource binder");
+        terminal->allocator->ops->destroy(terminal->allocator);
+        if (terminal->context.pty)
+            terminal->context.pty->ops->destroy(terminal->context.pty);
+        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+        free(terminal);
+        return YETTY_ERR(yetty_term_terminal, "failed to create gpu resource binder");
+    }
+    terminal->binder = binder_res.value;
+    ydebug("terminal_create: gpu resource binder created");
+
     return YETTY_OK(yetty_term_terminal, terminal);
 }
 
@@ -179,6 +304,12 @@ void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal)
 
     if (!terminal)
         return;
+
+    if (terminal->binder && terminal->binder->ops && terminal->binder->ops->destroy)
+        terminal->binder->ops->destroy(terminal->binder);
+
+    if (terminal->allocator && terminal->allocator->ops && terminal->allocator->ops->destroy)
+        terminal->allocator->ops->destroy(terminal->allocator);
 
     for (i = 0; i < terminal->layer_count; i++) {
         struct yetty_term_terminal_layer *layer = terminal->layers[i];

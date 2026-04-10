@@ -16,6 +16,7 @@ typedef uint64_t yetty_core_object_id;
 
 #define YETTY_CORE_OBJECT_ID_NONE 0
 
+
 #ifdef __cplusplus
 }
 #endif

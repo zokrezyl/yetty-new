@@ -10,7 +10,8 @@ extern "C" {
 
 /* Text layer - renders terminal text via libvterm */
 struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
-    uint32_t cols, uint32_t rows);
+    uint32_t cols, uint32_t rows,
+    const struct yetty_context *context);
 
 #ifdef __cplusplus
 }

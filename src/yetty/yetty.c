@@ -188,6 +188,17 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     }
     ydebug("initWebGPU: Surface format = %d", (int)yetty->surface_format);
 
+    /* Configure surface */
+    WGPUSurfaceConfiguration surface_config = {0};
+    surface_config.device = yetty->device;
+    surface_config.format = yetty->surface_format;
+    surface_config.usage = WGPUTextureUsage_RenderAttachment;
+    surface_config.width = yetty->context.app_context.app_gpu_context.surface_width;
+    surface_config.height = yetty->context.app_context.app_gpu_context.surface_height;
+    surface_config.presentMode = WGPUPresentMode_Fifo;
+    wgpuSurfaceConfigure(surface, &surface_config);
+    ydebug("initWebGPU: Surface configured %ux%u", surface_config.width, surface_config.height);
+
     /* Complete context with owned GPU objects */
     yetty->context.gpu_context.app_gpu_context = yetty->context.app_context.app_gpu_context;
     yetty->context.gpu_context.adapter = yetty->adapter;
