@@ -254,6 +254,82 @@ static void text_layer_resize(struct yetty_term_terminal_layer *self,
     }
 }
 
+/* Convert GLFW modifier flags to VTerm modifier flags */
+static VTermModifier glfw_mods_to_vterm(int mods)
+{
+    VTermModifier vt_mod = VTERM_MOD_NONE;
+    if (mods & 0x0001) vt_mod |= VTERM_MOD_SHIFT;
+    if (mods & 0x0002) vt_mod |= VTERM_MOD_CTRL;
+    if (mods & 0x0004) vt_mod |= VTERM_MOD_ALT;
+    return vt_mod;
+}
+
+/* Convert GLFW key code to VTerm key (for special keys) */
+static VTermKey glfw_key_to_vterm(int key)
+{
+    switch (key) {
+    case 257: return VTERM_KEY_ENTER;      /* GLFW_KEY_ENTER */
+    case 258: return VTERM_KEY_TAB;        /* GLFW_KEY_TAB */
+    case 259: return VTERM_KEY_BACKSPACE;  /* GLFW_KEY_BACKSPACE */
+    case 260: return VTERM_KEY_INS;        /* GLFW_KEY_INSERT */
+    case 261: return VTERM_KEY_DEL;        /* GLFW_KEY_DELETE */
+    case 262: return VTERM_KEY_RIGHT;      /* GLFW_KEY_RIGHT */
+    case 263: return VTERM_KEY_LEFT;       /* GLFW_KEY_LEFT */
+    case 264: return VTERM_KEY_DOWN;       /* GLFW_KEY_DOWN */
+    case 265: return VTERM_KEY_UP;         /* GLFW_KEY_UP */
+    case 266: return VTERM_KEY_PAGEUP;     /* GLFW_KEY_PAGE_UP */
+    case 267: return VTERM_KEY_PAGEDOWN;   /* GLFW_KEY_PAGE_DOWN */
+    case 268: return VTERM_KEY_HOME;       /* GLFW_KEY_HOME */
+    case 269: return VTERM_KEY_END;        /* GLFW_KEY_END */
+    case 256: return VTERM_KEY_ESCAPE;     /* GLFW_KEY_ESCAPE */
+    case 290: return VTERM_KEY_FUNCTION(1);
+    case 291: return VTERM_KEY_FUNCTION(2);
+    case 292: return VTERM_KEY_FUNCTION(3);
+    case 293: return VTERM_KEY_FUNCTION(4);
+    case 294: return VTERM_KEY_FUNCTION(5);
+    case 295: return VTERM_KEY_FUNCTION(6);
+    case 296: return VTERM_KEY_FUNCTION(7);
+    case 297: return VTERM_KEY_FUNCTION(8);
+    case 298: return VTERM_KEY_FUNCTION(9);
+    case 299: return VTERM_KEY_FUNCTION(10);
+    case 300: return VTERM_KEY_FUNCTION(11);
+    case 301: return VTERM_KEY_FUNCTION(12);
+    default:  return VTERM_KEY_NONE;
+    }
+}
+
+static int text_layer_on_key(struct yetty_term_terminal_layer *self, int key, int mods)
+{
+    struct yetty_term_terminal_text_layer *text_layer =
+        container_of(self, struct yetty_term_terminal_text_layer, base);
+
+    if (!text_layer->vterm)
+        return 0;
+
+    VTermKey vt_key = glfw_key_to_vterm(key);
+    if (vt_key != VTERM_KEY_NONE) {
+        VTermModifier vt_mod = glfw_mods_to_vterm(mods);
+        vterm_keyboard_key(text_layer->vterm, vt_key, vt_mod);
+        ydebug("text_layer_on_key: key=%d vt_key=%d mods=%d", key, (int)vt_key, mods);
+        return 1;
+    }
+    return 0;  /* Not a special key */
+}
+
+static int text_layer_on_char(struct yetty_term_terminal_layer *self, uint32_t codepoint, int mods)
+{
+    struct yetty_term_terminal_text_layer *text_layer =
+        container_of(self, struct yetty_term_terminal_text_layer, base);
+
+    if (!text_layer->vterm)
+        return 0;
+
+    VTermModifier vt_mod = glfw_mods_to_vterm(mods);
+    vterm_keyboard_unichar(text_layer->vterm, codepoint, vt_mod);
+    ydebug("text_layer_on_char: codepoint=U+%04X mods=%d", codepoint, mods);
+    return 1;
+}
+
 static struct yetty_render_gpu_resource_set_result text_layer_get_gpu_resource_set(
     const struct yetty_term_terminal_layer *self)
 {

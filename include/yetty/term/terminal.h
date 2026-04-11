@@ -28,6 +28,9 @@ struct yetty_term_terminal_layer_ops {
     void (*write)(struct yetty_term_terminal_layer *self, const char *data, size_t len);
     void (*resize)(struct yetty_term_terminal_layer *self, uint32_t cols, uint32_t rows);
     struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(const struct yetty_term_terminal_layer *self);
+    /* Keyboard input - returns 1 if handled */
+    int (*on_key)(struct yetty_term_terminal_layer *self, int key, int mods);
+    int (*on_char)(struct yetty_term_terminal_layer *self, uint32_t codepoint, int mods);
 };
 
 /* Layer base - embed as first member in subclasses */
