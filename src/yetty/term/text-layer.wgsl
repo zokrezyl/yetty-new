@@ -25,14 +25,31 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     return output;
 }
 
+// VTermScreenCell layout (12 bytes):
+//   u32[0]: glyph_index
+//   u32[1]: fg.r | fg.g<<8 | fg.b<<16 | bg.r<<24
+//   u32[2]: bg.g | bg.b<<8 | attrs<<16
 fn read_cell_glyph(cell_index: u32) -> u32 {
     return storage_buffer[text_grid_buffer_offset + cell_index * 3u];
 }
-fn read_cell_fg(cell_index: u32) -> u32 {
-    return storage_buffer[text_grid_buffer_offset + cell_index * 3u + 1u];
+
+fn read_cell_fg(cell_index: u32) -> vec3<f32> {
+    let packed = storage_buffer[text_grid_buffer_offset + cell_index * 3u + 1u];
+    return vec3<f32>(
+        f32(packed & 0xFFu) / 255.0,
+        f32((packed >> 8u) & 0xFFu) / 255.0,
+        f32((packed >> 16u) & 0xFFu) / 255.0
+    );
 }
-fn read_cell_bg(cell_index: u32) -> u32 {
-    return storage_buffer[text_grid_buffer_offset + cell_index * 3u + 2u];
+
+fn read_cell_bg(cell_index: u32) -> vec3<f32> {
+    let packed1 = storage_buffer[text_grid_buffer_offset + cell_index * 3u + 1u];
+    let packed2 = storage_buffer[text_grid_buffer_offset + cell_index * 3u + 2u];
+    return vec3<f32>(
+        f32((packed1 >> 24u) & 0xFFu) / 255.0,
+        f32(packed2 & 0xFFu) / 255.0,
+        f32((packed2 >> 8u) & 0xFFu) / 255.0
+    );
 }
 
 fn read_glyph_uv(glyph_index: u32) -> vec2<f32> {
@@ -40,14 +57,6 @@ fn read_glyph_uv(glyph_index: u32) -> vec2<f32> {
     return vec2<f32>(
         bitcast<f32>(storage_buffer[base]),
         bitcast<f32>(storage_buffer[base + 1u])
-    );
-}
-
-fn unpack_color(c: u32) -> vec3<f32> {
-    return vec3<f32>(
-        f32(c & 0xFFu) / 255.0,
-        f32((c >> 8u) & 0xFFu) / 255.0,
-        f32((c >> 16u) & 0xFFu) / 255.0
     );
 }
 
@@ -75,8 +84,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     );
 
     let glyph = read_cell_glyph(cell_index);
-    let fg_color = unpack_color(read_cell_fg(cell_index));
-    let bg_color = unpack_color(read_cell_bg(cell_index));
+    let fg_color = read_cell_fg(cell_index);
+    let bg_color = read_cell_bg(cell_index);
 
     var final_color = bg_color;
 

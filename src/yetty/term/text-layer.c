@@ -82,10 +82,6 @@ struct yetty_term_terminal_text_layer {
     VTermScreen *screen;
     struct yetty_font_font *font;  /* not owned */
     struct yetty_render_gpu_resource_set rs;
-
-    /* Translated cell buffer: 3 u32 per cell (glyph, fg_packed, bg_packed) */
-    uint32_t *cell_buf;
-    size_t cell_buf_capacity;  /* in bytes */
 };
 
 /* Forward declarations */
@@ -98,7 +94,6 @@ static struct yetty_render_gpu_resource_set_result text_layer_get_gpu_resource_s
     const struct yetty_term_terminal_layer *self);
 static int text_layer_on_key(struct yetty_term_terminal_layer *self, int key, int mods);
 static int text_layer_on_char(struct yetty_term_terminal_layer *self, uint32_t codepoint, int mods);
-static void rebuild_cell_buffer(struct yetty_term_terminal_text_layer *text_layer);
 
 /* VTerm callbacks */
 static int on_damage(VTermRect rect, void *user);
@@ -228,8 +223,13 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     if (text_layer->font)
         text_layer->rs.children_count = 1;
 
-    /* Initial cell buffer build (empty screen) */
-    rebuild_cell_buffer(text_layer);
+    /* Initial buffer setup - point to vterm buffer directly */
+    {
+        const VTermScreenCell *cells = vterm_screen_get_buffer(text_layer->screen);
+        size_t buf_size = vterm_screen_get_buffer_size(text_layer->screen);
+        text_layer->rs.buffers[0].data = (const uint8_t *)cells;
+        text_layer->rs.buffers[0].size = buf_size;
+    }
 
     /* Clear dirty — vterm_screen_reset fires on_damage but there's no real content yet.
      * First real dirty will come from PTY data via on_damage. */
@@ -249,7 +249,6 @@ static void text_layer_destroy(struct yetty_term_terminal_layer *self)
     if (text_layer->vterm)
         vterm_free(text_layer->vterm);
 
-    free(text_layer->cell_buf);
     free(text_layer);
 }
 
@@ -274,7 +273,8 @@ static void text_layer_resize(struct yetty_term_terminal_layer *self,
         self->cols = cols;
         self->rows = rows;
         set_grid_size(&text_layer->rs, (float)cols, (float)rows);
-        rebuild_cell_buffer(text_layer);
+        /* Buffer pointer updated in get_gpu_resource_set when dirty */
+        self->dirty = 1;
     }
 }
 
@@ -361,9 +361,15 @@ static struct yetty_render_gpu_resource_set_result text_layer_get_gpu_resource_s
         (struct yetty_term_terminal_text_layer *)
         ((const char *)self - offsetof(struct yetty_term_terminal_text_layer, base));
 
-    /* Rebuild translated cell buffer if dirty */
-    if (text_layer->base.dirty)
-        rebuild_cell_buffer(text_layer);
+    /* Use vterm buffer directly - no conversion needed.
+     * VTermScreenCell is already 12 bytes matching shader expectations. */
+    if (text_layer->base.dirty) {
+        const VTermScreenCell *cells = vterm_screen_get_buffer(text_layer->screen);
+        size_t buf_size = vterm_screen_get_buffer_size(text_layer->screen);
+        text_layer->rs.buffers[0].data = (const uint8_t *)cells;
+        text_layer->rs.buffers[0].size = buf_size;
+        text_layer->rs.buffers[0].dirty = 1;
+    }
 
     /* Update font child pointer */
     if (text_layer->font && text_layer->font->ops &&
@@ -377,74 +383,14 @@ static struct yetty_render_gpu_resource_set_result text_layer_get_gpu_resource_s
     return YETTY_OK(yetty_render_gpu_resource_set, &text_layer->rs);
 }
 
-/* Rebuild translated cell buffer from vterm screen data.
- * VTermScreenCell is 12 bytes packed: {glyph_index(u32), fg(3B rgb), bg(3B rgb), attrs(2B)}.
- * Shader expects 3 u32 per cell: {glyph, fg_packed_u32, bg_packed_u32}. */
-static void rebuild_cell_buffer(struct yetty_term_terminal_text_layer *text_layer)
-{
-    uint32_t cols = text_layer->base.cols;
-    uint32_t rows = text_layer->base.rows;
-    size_t cell_count = (size_t)cols * rows;
-    size_t needed = cell_count * 3 * sizeof(uint32_t);
-
-    if (needed > text_layer->cell_buf_capacity) {
-        free(text_layer->cell_buf);
-        text_layer->cell_buf_capacity = needed;
-        text_layer->cell_buf = malloc(needed);
-        if (!text_layer->cell_buf) {
-            text_layer->cell_buf_capacity = 0;
-            return;
-        }
-    }
-
-    const VTermScreenCell *cells = vterm_screen_get_buffer(text_layer->screen);
-    if (!cells) {
-        ydebug("rebuild_cell_buffer: vterm_screen_get_buffer returned NULL");
-        return;
-    }
-
-    uint32_t *dst = text_layer->cell_buf;
-    int non_empty = 0;
-    for (size_t i = 0; i < cell_count; i++) {
-        const VTermScreenCell *c = &cells[i];
-        dst[i * 3 + 0] = c->glyph_index;
-        dst[i * 3 + 1] = (uint32_t)c->fg.red | ((uint32_t)c->fg.green << 8) | ((uint32_t)c->fg.blue << 16);
-        dst[i * 3 + 2] = (uint32_t)c->bg.red | ((uint32_t)c->bg.green << 8) | ((uint32_t)c->bg.blue << 16);
-        if (c->glyph_index != 0) non_empty++;
-    }
-
-    text_layer->rs.buffers[0].data = (uint8_t *)text_layer->cell_buf;
-    text_layer->rs.buffers[0].size = needed;
-    text_layer->rs.buffers[0].dirty = 1;
-
-    ydebug("rebuild_cell_buffer: %ux%u cells=%zu non_empty=%d buf_size=%zu sizeof(VTermScreenCell)=%zu",
-           cols, rows, cell_count, non_empty, needed, sizeof(VTermScreenCell));
-
-    /* Dump first few non-empty cells for debugging */
-    if (non_empty > 0) {
-        for (size_t i = 0; i < cell_count && non_empty > 0; i++) {
-            if (dst[i * 3] != 0) {
-                ydebug("  cell[%zu] glyph=%u fg=0x%06x bg=0x%06x (raw fg: r=%u g=%u b=%u)",
-                       i, dst[i * 3], dst[i * 3 + 1], dst[i * 3 + 2],
-                       cells[i].fg.red, cells[i].fg.green, cells[i].fg.blue);
-                non_empty--;
-                if (non_empty <= 0 || i > 20) break;
-            }
-        }
-    }
-}
-
 /* VTerm callbacks */
 
 static int on_damage(VTermRect rect, void *user)
 {
     struct yetty_term_terminal_text_layer *text_layer = user;
     (void)rect;
-    /* Just set dirty flag - terminal_read_pty calls request_render once after
-     * processing all PTY data. Calling request_render here would flood the
-     * event loop (one call per damage rect). */
+    /* Just set dirty flag - buffer is read directly from vterm in get_gpu_resource_set */
     text_layer->base.dirty = 1;
-    rebuild_cell_buffer(text_layer);
     return 1;
 }
 
