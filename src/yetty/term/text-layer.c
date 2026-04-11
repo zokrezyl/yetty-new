@@ -98,6 +98,7 @@ static int text_layer_on_char(struct yetty_term_terminal_layer *self, uint32_t c
 /* VTerm callbacks */
 static int on_damage(VTermRect rect, void *user);
 static int on_move_cursor(VTermPos pos, VTermPos oldpos, int visible, void *user);
+static int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user);
 
 /* Glyph resolver — called by vterm for every codepoint */
 static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
@@ -137,6 +138,7 @@ static const struct yetty_term_terminal_layer_ops text_layer_ops = {
     .is_empty = text_layer_is_empty,
     .on_key = text_layer_on_key,
     .on_char = text_layer_on_char,
+    .scroll = NULL,  /* text layer is scroll source, doesn't receive scroll */
 };
 
 /* VTerm screen callbacks */
@@ -147,7 +149,7 @@ static VTermScreenCallbacks screen_callbacks = {
     .settermprop = NULL,
     .bell = NULL,
     .resize = NULL,
-    .sb_pushline = NULL,
+    .sb_pushline = on_sb_pushline,
     .sb_popline = NULL,
     .sb_clear = NULL,
 };
@@ -169,7 +171,9 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     yetty_term_pty_write_fn pty_write_fn,
     void *pty_write_userdata,
     yetty_term_request_render_fn request_render_fn,
-    void *request_render_userdata)
+    void *request_render_userdata,
+    yetty_term_scroll_fn scroll_fn,
+    void *scroll_userdata)
 {
     struct yetty_term_terminal_text_layer *text_layer;
 
@@ -187,6 +191,8 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     text_layer->base.pty_write_userdata = pty_write_userdata;
     text_layer->base.request_render_fn = request_render_fn;
     text_layer->base.request_render_userdata = request_render_userdata;
+    text_layer->base.scroll_fn = scroll_fn;
+    text_layer->base.scroll_userdata = scroll_userdata;
 
     /* Create font from config */
     struct yetty_font_font_result font_res = yetty_font_raster_font_create(
@@ -406,5 +412,18 @@ static int on_move_cursor(VTermPos pos, VTermPos oldpos, int visible, void *user
     set_cursor_pos(&text_layer->rs, (float)pos.col, (float)pos.row);
     set_cursor_visible(&text_layer->rs, visible ? 1.0f : 0.0f);
     text_layer->base.dirty = 1;
+    return 1;
+}
+
+static int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
+{
+    struct yetty_term_terminal_text_layer *text_layer = user;
+    (void)cols;
+    (void)cells;
+
+    /* Notify scroll callback - 1 line scrolled down */
+    if (text_layer->base.scroll_fn) {
+        text_layer->base.scroll_fn(&text_layer->base, 1, text_layer->base.scroll_userdata);
+    }
     return 1;
 }

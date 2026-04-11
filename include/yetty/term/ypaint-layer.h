@@ -35,7 +35,9 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
     float cell_width, float cell_height,
     int scrolling_mode,
     yetty_term_request_render_fn request_render_fn,
-    void *request_render_userdata);
+    void *request_render_userdata,
+    yetty_term_scroll_fn scroll_fn,
+    void *scroll_userdata);
 
 #ifdef __cplusplus
 }

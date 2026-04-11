@@ -15,7 +15,9 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     yetty_term_pty_write_fn pty_write_fn,
     void *pty_write_userdata,
     yetty_term_request_render_fn request_render_fn,
-    void *request_render_userdata);
+    void *request_render_userdata,
+    yetty_term_scroll_fn scroll_fn,
+    void *scroll_userdata);
 
 #ifdef __cplusplus
 }

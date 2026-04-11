@@ -76,6 +76,7 @@ static struct yetty_render_gpu_resource_set_result ypaint_layer_get_gpu_resource
 static int ypaint_layer_on_key(struct yetty_term_terminal_layer *self, int key, int mods);
 static int ypaint_layer_on_char(struct yetty_term_terminal_layer *self, uint32_t codepoint, int mods);
 static int ypaint_layer_is_empty(const struct yetty_term_terminal_layer *self);
+static void ypaint_layer_scroll(struct yetty_term_terminal_layer *self, int lines);
 
 /* Ops */
 static const struct yetty_term_terminal_layer_ops ypaint_layer_ops = {
@@ -86,6 +87,7 @@ static const struct yetty_term_terminal_layer_ops ypaint_layer_ops = {
     .is_empty = ypaint_layer_is_empty,
     .on_key = ypaint_layer_on_key,
     .on_char = ypaint_layer_on_char,
+    .scroll = ypaint_layer_scroll,
 };
 
 /* Create */
@@ -94,7 +96,9 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
     float cell_width, float cell_height,
     int scrolling_mode,
     yetty_term_request_render_fn request_render_fn,
-    void *request_render_userdata)
+    void *request_render_userdata,
+    yetty_term_scroll_fn scroll_fn,
+    void *scroll_userdata)
 {
     struct yetty_term_ypaint_layer *layer;
 
@@ -112,6 +116,8 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
     layer->base.pty_write_userdata = NULL;
     layer->base.request_render_fn = request_render_fn;
     layer->base.request_render_userdata = request_render_userdata;
+    layer->base.scroll_fn = scroll_fn;
+    layer->base.scroll_userdata = scroll_userdata;
 
     layer->scrolling_mode = scrolling_mode;
 
@@ -346,4 +352,22 @@ static int ypaint_layer_is_empty(const struct yetty_term_terminal_layer *self)
         return 1;
 
     return ypaint_canvas_primitive_count(layer->canvas) == 0;
+}
+
+/* Scroll - called when another layer scrolls */
+static void ypaint_layer_scroll(struct yetty_term_terminal_layer *self, int lines)
+{
+    struct yetty_term_ypaint_layer *layer =
+        (struct yetty_term_ypaint_layer *)self;
+
+    if (!layer->canvas || !layer->scrolling_mode || lines <= 0)
+        return;
+
+    ypaint_canvas_scroll_lines(layer->canvas, (uint16_t)lines);
+    layer->base.dirty = 1;
+
+    ydebug("ypaint_layer_scroll: %d lines", lines);
+
+    if (layer->base.request_render_fn)
+        layer->base.request_render_fn(layer->base.request_render_userdata);
 }
