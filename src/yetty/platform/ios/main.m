@@ -12,6 +12,8 @@
 #include <yetty/core/event.h>
 #include <yetty/platform/platform-input-pipe.h>
 #include <yetty/platform/pty-factory.h>
+#include <yetty/platform/extract-assets.h>
+#include <yetty/ytrace.h>
 
 /* Forward declarations */
 const char *yetty_platform_get_cache_dir(void);
@@ -61,8 +63,8 @@ static void *render_thread_func(void *arg)
     return NULL;
 }
 
-/* YettyViewController */
-@interface YettyViewController : UIViewController {
+/* YettyViewController - implements UIKeyInput for keyboard */
+@interface YettyViewController : UIViewController <UIKeyInput> {
     YettyMetalView *_metalView;
     struct yetty_yetty *_yetty;
     struct yetty_platform_input_pipe *_pipe;
@@ -91,53 +93,76 @@ static void *render_thread_func(void *arg)
 }
 
 - (void)initializeYetty {
+    ydebug("initializeYetty starting");
+
     const char *cache_dir = yetty_platform_get_cache_dir();
     const char *runtime_dir = yetty_platform_get_runtime_dir();
+    ydebug("cache_dir=%s runtime_dir=%s", cache_dir, runtime_dir);
+
+    static char shaders_dir[512];
+    static char fonts_dir[512];
+    snprintf(shaders_dir, sizeof(shaders_dir), "%s/shaders", cache_dir);
+    snprintf(fonts_dir, sizeof(fonts_dir), "%s/fonts", cache_dir);
 
     struct yetty_platform_paths paths = {
-        .shaders_dir = cache_dir,
-        .fonts_dir = cache_dir,
+        .shaders_dir = shaders_dir,
+        .fonts_dir = fonts_dir,
         .runtime_dir = runtime_dir,
         .bin_dir = NULL
     };
 
     /* Config */
+    ydebug("creating config");
     struct yetty_config_result config_result = yetty_config_create(0, NULL, &paths);
     if (!YETTY_IS_OK(config_result)) {
-        NSLog(@"Failed to create config");
+        yerror("failed to create config: %s", config_result.error);
         return;
     }
     _config = config_result.value;
+    ydebug("config created");
+
+    /* Extract embedded assets (fonts, shaders) to cache */
+    ydebug("extracting assets");
+    yetty_platform_extract_assets(_config);
+    ydebug("assets extracted");
 
     /* Platform input pipe */
+    ydebug("creating input pipe");
     struct yetty_platform_input_pipe_result pipe_result = yetty_platform_input_pipe_create();
     if (!YETTY_IS_OK(pipe_result)) {
-        NSLog(@"Failed to create input pipe");
+        yerror("failed to create input pipe: %s", pipe_result.error);
         return;
     }
     _pipe = pipe_result.value;
+    ydebug("input pipe created");
 
     /* PTY factory */
+    ydebug("creating PTY factory");
     struct yetty_platform_pty_factory_result pty_result = yetty_platform_pty_factory_create(_config, NULL);
     if (!YETTY_IS_OK(pty_result)) {
-        NSLog(@"Failed to create PTY factory");
+        yerror("failed to create PTY factory: %s", pty_result.error);
         return;
     }
     _ptyFactory = pty_result.value;
+    ydebug("PTY factory created");
 
     /* WebGPU instance */
+    ydebug("creating WebGPU instance");
     _instance = wgpuCreateInstance(NULL);
     if (!_instance) {
-        NSLog(@"Failed to create WebGPU instance");
+        yerror("failed to create WebGPU instance");
         return;
     }
+    ydebug("WebGPU instance created");
 
     /* Surface */
+    ydebug("creating surface");
     _surface = yetty_platform_create_surface_from_layer(_instance, _metalView.metalLayer);
     if (!_surface) {
-        NSLog(@"Failed to create surface");
+        yerror("failed to create surface");
         return;
     }
+    ydebug("surface created");
 
     /* Get framebuffer size */
     CGSize size = _metalView.bounds.size;
@@ -145,8 +170,10 @@ static void *render_thread_func(void *arg)
     uint32_t fb_width = (uint32_t)(size.width * scale);
     uint32_t fb_height = (uint32_t)(size.height * scale);
     _metalView.metalLayer.drawableSize = CGSizeMake(fb_width, fb_height);
+    ydebug("framebuffer size: %ux%u", fb_width, fb_height);
 
     /* Create Yetty */
+    ydebug("creating yetty");
     struct yetty_app_context ctx = {
         .app_gpu_context = {
             .instance = _instance,
@@ -162,10 +189,11 @@ static void *render_thread_func(void *arg)
 
     struct yetty_yetty_result yetty_result = yetty_create(&ctx);
     if (!YETTY_IS_OK(yetty_result)) {
-        NSLog(@"Failed to create Yetty");
+        yerror("failed to create yetty: %s", yetty_result.error);
         return;
     }
     _yetty = yetty_result.value;
+    ydebug("yetty created");
 
     /* Start render thread */
     _running = 1;
@@ -173,6 +201,62 @@ static void *render_thread_func(void *arg)
     args->yetty = _yetty;
     args->running = &_running;
     pthread_create(&_renderThread, NULL, render_thread_func, args);
+
+    /* Send initial resize event */
+    {
+        CGSize size = _metalView.bounds.size;
+        CGFloat scale = _metalView.metalLayer.contentsScale;
+        struct yetty_core_event ev = {0};
+        ev.type = YETTY_EVENT_RESIZE;
+        ev.resize.width = (float)(size.width * scale);
+        ev.resize.height = (float)(size.height * scale);
+        ydebug("initial resize: %.0fx%.0f", ev.resize.width, ev.resize.height);
+        _pipe->ops->write(_pipe, &ev, sizeof(ev));
+    }
+
+    /* Become first responder to receive keyboard input */
+    [self becomeFirstResponder];
+}
+
+#pragma mark - UIKeyInput
+
+- (BOOL)canBecomeFirstResponder {
+    return YES;
+}
+
+- (BOOL)hasText {
+    return YES;
+}
+
+- (void)insertText:(NSString *)text {
+    if (!_pipe) return;
+
+    ydebug("insertText: %s", [text UTF8String]);
+
+    /* Send each character as YETTY_EVENT_CHAR */
+    NSUInteger len = [text length];
+    for (NSUInteger i = 0; i < len; i++) {
+        unichar ch = [text characterAtIndex:i];
+        struct yetty_core_event ev = {0};
+        ev.type = YETTY_EVENT_CHAR;
+        ev.chr.codepoint = (uint32_t)ch;
+        ev.chr.mods = 0;
+        _pipe->ops->write(_pipe, &ev, sizeof(ev));
+    }
+}
+
+- (void)deleteBackward {
+    if (!_pipe) return;
+
+    ydebug("deleteBackward");
+
+    /* Send backspace key event (GLFW_KEY_BACKSPACE = 259) */
+    struct yetty_core_event ev = {0};
+    ev.type = YETTY_EVENT_KEY_DOWN;
+    ev.key.key = 259;
+    ev.key.mods = 0;
+    ev.key.scancode = 0;
+    _pipe->ops->write(_pipe, &ev, sizeof(ev));
 }
 
 - (void)viewDidLayoutSubviews {
