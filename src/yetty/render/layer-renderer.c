@@ -103,6 +103,62 @@ static struct yetty_render_rendered_layer_result layer_renderer_render(
 {
     struct layer_renderer_impl *impl = (struct layer_renderer_impl *)self;
 
+    /* Ensure intermediate texture exists */
+    if (!impl->intermediate_texture) {
+        create_intermediate_texture(impl);
+        if (!impl->intermediate_texture) {
+            return YETTY_ERR(yetty_render_rendered_layer, "no intermediate texture");
+        }
+    }
+
+    /* Check if layer is empty - return transparent texture, skip binder */
+    if (layer->ops->is_empty && layer->ops->is_empty(layer)) {
+        ydebug("layer_renderer_render: layer is empty, returning transparent texture");
+
+        /* Clear to transparent if we don't have a cached empty layer */
+        if (!impl->cached_layer) {
+            /* Clear intermediate texture to transparent */
+            WGPUCommandEncoderDescriptor enc_desc = {0};
+            WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(impl->device, &enc_desc);
+            if (encoder) {
+                WGPURenderPassColorAttachment color_attachment = {0};
+                color_attachment.view = impl->intermediate_view;
+                color_attachment.loadOp = WGPULoadOp_Clear;
+                color_attachment.storeOp = WGPUStoreOp_Store;
+                color_attachment.clearValue = (WGPUColor){0.0, 0.0, 0.0, 0.0};
+                color_attachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+
+                WGPURenderPassDescriptor pass_desc = {0};
+                pass_desc.colorAttachmentCount = 1;
+                pass_desc.colorAttachments = &color_attachment;
+
+                WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc);
+                if (pass) {
+                    wgpuRenderPassEncoderEnd(pass);
+                    wgpuRenderPassEncoderRelease(pass);
+                }
+
+                WGPUCommandBufferDescriptor cmd_desc = {0};
+                WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, &cmd_desc);
+                wgpuQueueSubmit(impl->queue, 1, &cmd);
+                wgpuCommandBufferRelease(cmd);
+                wgpuCommandEncoderRelease(encoder);
+            }
+
+            /* Create cached layer handle */
+            struct yetty_render_rendered_layer_result rl_res = yetty_render_rendered_layer_wrap(
+                impl->intermediate_texture,
+                impl->intermediate_view,
+                impl->width,
+                impl->height);
+            if (YETTY_IS_OK(rl_res)) {
+                impl->cached_layer = rl_res.value;
+            }
+            return rl_res;
+        }
+        return YETTY_OK(yetty_render_rendered_layer, impl->cached_layer);
+    }
+
     /* Check if layer is dirty */
     if (!layer->dirty && impl->cached_layer) {
         ydebug("layer_renderer_render: layer not dirty, returning cached");
@@ -131,14 +187,6 @@ static struct yetty_render_rendered_layer_result layer_renderer_render(
     res = impl->binder->ops->update(impl->binder);
     if (!YETTY_IS_OK(res)) {
         return YETTY_ERR(yetty_render_rendered_layer, res.error.msg);
-    }
-
-    /* Ensure intermediate texture exists */
-    if (!impl->intermediate_texture) {
-        create_intermediate_texture(impl);
-        if (!impl->intermediate_texture) {
-            return YETTY_ERR(yetty_render_rendered_layer, "no intermediate texture");
-        }
     }
 
     /* Create command encoder */

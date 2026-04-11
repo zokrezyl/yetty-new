@@ -72,6 +72,7 @@ static struct yetty_render_gpu_resource_set_result ypaint_layer_get_gpu_resource
     const struct yetty_term_terminal_layer *self);
 static int ypaint_layer_on_key(struct yetty_term_terminal_layer *self, int key, int mods);
 static int ypaint_layer_on_char(struct yetty_term_terminal_layer *self, uint32_t codepoint, int mods);
+static int ypaint_layer_is_empty(const struct yetty_term_terminal_layer *self);
 
 /* Ops */
 static const struct yetty_term_terminal_layer_ops ypaint_layer_ops = {
@@ -79,6 +80,7 @@ static const struct yetty_term_terminal_layer_ops ypaint_layer_ops = {
     .write = ypaint_layer_write,
     .resize = ypaint_layer_resize,
     .get_gpu_resource_set = ypaint_layer_get_gpu_resource_set,
+    .is_empty = ypaint_layer_is_empty,
     .on_key = ypaint_layer_on_key,
     .on_char = ypaint_layer_on_char,
 };
@@ -282,4 +284,16 @@ static int ypaint_layer_on_char(struct yetty_term_terminal_layer *self, uint32_t
     (void)codepoint;
     (void)mods;
     return 0;  /* Not handled */
+}
+
+/* YPaint layer is empty if there are no primitives */
+static int ypaint_layer_is_empty(const struct yetty_term_terminal_layer *self)
+{
+    const struct yetty_term_ypaint_layer *layer =
+        (const struct yetty_term_ypaint_layer *)self;
+
+    if (!layer->canvas)
+        return 1;
+
+    return ypaint_canvas_primitive_count(layer->canvas) == 0;
 }

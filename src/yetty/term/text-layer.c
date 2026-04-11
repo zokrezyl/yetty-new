@@ -121,12 +121,20 @@ static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
     return result;
 }
 
+/* Text layer always has content */
+static int text_layer_is_empty(const struct yetty_term_terminal_layer *self)
+{
+    (void)self;
+    return 0;
+}
+
 /* Ops */
 static const struct yetty_term_terminal_layer_ops text_layer_ops = {
     .destroy = text_layer_destroy,
     .write = text_layer_write,
     .resize = text_layer_resize,
     .get_gpu_resource_set = text_layer_get_gpu_resource_set,
+    .is_empty = text_layer_is_empty,
     .on_key = text_layer_on_key,
     .on_char = text_layer_on_char,
 };
