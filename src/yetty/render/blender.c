@@ -170,6 +170,7 @@ static struct yetty_core_void_result create_pipeline(struct blender_impl *impl)
     sampler_desc.magFilter = WGPUFilterMode_Linear;
     sampler_desc.addressModeU = WGPUAddressMode_ClampToEdge;
     sampler_desc.addressModeV = WGPUAddressMode_ClampToEdge;
+    sampler_desc.maxAnisotropy = 1;
 
     impl->sampler = wgpuDeviceCreateSampler(impl->device, &sampler_desc);
     if (!impl->sampler) {

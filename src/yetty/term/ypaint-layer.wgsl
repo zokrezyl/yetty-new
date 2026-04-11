@@ -9,8 +9,8 @@
 //   uniforms.ypaint_scroll_ypaint_cell_size
 //   uniforms.ypaint_scroll_ypaint_row_origin
 //   uniforms.ypaint_scroll_ypaint_prim_count
-//   ypaint_scroll_grid_buffer_offset
-//   ypaint_scroll_prims_buffer_offset
+//   ypaint_scroll_grid_offset
+//   ypaint_scroll_prims_offset
 
 // RENDER_LAYER_BINDINGS_PLACEHOLDER
 
@@ -183,8 +183,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);  // Fully transparent
     }
 
-    let grid_offset = ypaint_scroll_grid_buffer_offset;
-    let prims_offset = ypaint_scroll_prims_buffer_offset;
+    let grid_offset = ypaint_scroll_grid_offset;
+    let prims_offset = ypaint_scroll_prims_offset;
 
     // Grid pixel bounds
     let grid_pixel_w = grid_size.x * cell_size.x;
