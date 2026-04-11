@@ -2,23 +2,20 @@
 
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
-# Set iOS assets directory BEFORE adding yetty subdirectory
+# Set iOS assets directory
 set(IOS_ASSETS_DIR "${CMAKE_BINARY_DIR}/ios-assets")
 file(MAKE_DIRECTORY ${IOS_ASSETS_DIR})
 
-# Add src/yetty (builds libraries, VNC included since YETTY_ANDROID=0)
-add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
-
-# Platform sources — iOS-specific + shared Unix components
+# Platform sources — iOS-specific (Objective-C) + shared Unix (C)
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/ios/main.mm
-    ${YETTY_ROOT}/src/yetty/platform/ios/platform-paths.mm
-    ${YETTY_ROOT}/src/yetty/platform/ios/surface.mm
-    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.cpp
-    ${YETTY_ROOT}/src/yetty/incbin-assets.cpp
+    ${YETTY_ROOT}/src/yetty/platform/ios/main.m
+    ${YETTY_ROOT}/src/yetty/platform/ios/platform-paths.m
+    ${YETTY_ROOT}/src/yetty/platform/ios/surface.m
+    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.c
+    ${YETTY_ROOT}/src/yetty/incbin-assets.c
 )
 
 # Create iOS app bundle
