@@ -19,7 +19,8 @@ option(YETTY_ENABLE_LIB_LZ4         "lz4 — compression"                     OF
 option(YETTY_ENABLE_LIB_LIBUV       "libuv — event loop"                    ON)
 option(YETTY_ENABLE_LIB_GLM         "glm — math"                            OFF)
 option(YETTY_ENABLE_LIB_STB         "stb — image loading"                   OFF)
-option(YETTY_ENABLE_LIB_YAML_CPP    "yaml-cpp — config parsing"             ON)
+option(YETTY_ENABLE_LIB_YAML_CPP    "yaml-cpp — config parsing (C++)"       OFF)
+option(YETTY_ENABLE_LIB_LIBYAML     "libyaml — config parsing (C)"          ON)
 option(YETTY_ENABLE_LIB_SPDLOG      "spdlog — logging backend"              ON)
 option(YETTY_ENABLE_LIB_YTRACE      "ytrace — tracing framework"            ON)
 option(YETTY_ENABLE_LIB_MSGPACK     "msgpack — serialization"               OFF)
@@ -29,7 +30,7 @@ option(YETTY_ENABLE_LIB_ZLIB        "zlib — compression"                    ON
 option(YETTY_ENABLE_LIB_LIBPNG      "libpng — PNG support"                  ON)
 option(YETTY_ENABLE_LIB_FREETYPE    "freetype — font rendering"             ON)
 option(YETTY_ENABLE_LIB_MSDFGEN     "msdfgen — MSDF font generation"        OFF)
-option(YETTY_ENABLE_LIB_CDB         "cdb — constant database"               ON)
+option(YETTY_ENABLE_LIB_CDB         "cdb — constant database"               OFF)
 
 # Media / codecs
 option(YETTY_ENABLE_LIB_LIBJPEG_TURBO "libjpeg-turbo — JPEG support"       OFF)

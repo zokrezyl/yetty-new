@@ -1,25 +1,17 @@
-# yetty base utilities
-# Event loop runs on render thread:
-# - Desktop + Android: libuv (uv_run)
-# - WebASM: browser requestAnimationFrame (single-threaded)
-if(EMSCRIPTEN)
-    set(EVENT_LOOP_SRC ${YETTY_ROOT}/src/yetty/platform/webasm/event-loop.cpp)
-else()
-    set(EVENT_LOOP_SRC ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp)
-endif()
-
-add_library(yetty_base STATIC
-    ${EVENT_LOOP_SRC}
+# yetty core (C)
+add_library(yetty_core STATIC
+    config.c
+    yetty.c
 )
 
-target_include_directories(yetty_base PUBLIC
+target_include_directories(yetty_core PUBLIC
     ${YETTY_ROOT}/include
     ${YETTY_ROOT}/src
+    ${DAWN_INCLUDE_DIR}
 )
 
-target_link_libraries(yetty_base PUBLIC ytrace::ytrace yaml-cpp)
-
-# libuv for desktop and Android (not WebASM)
-if(NOT EMSCRIPTEN)
-    target_link_libraries(yetty_base PUBLIC uv_a)
-endif()
+target_link_libraries(yetty_core PUBLIC
+    ytrace::ytrace
+    webgpu
+    yetty_term
+)
