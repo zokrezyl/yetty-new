@@ -19,6 +19,7 @@ struct yetty_render_buffer {
     char name[YETTY_RENDER_NAME_MAX];
     char wgsl_type[YETTY_RENDER_WGSL_TYPE_MAX];
     int readonly;
+    int dirty;
 };
 
 /* Texture */
@@ -31,6 +32,7 @@ struct yetty_render_texture {
     char wgsl_type[YETTY_RENDER_WGSL_TYPE_MAX];
     char sampler_name[YETTY_RENDER_NAME_MAX];
     uint32_t sampler_filter;  /* WGPUFilterMode */
+    int dirty;
 };
 
 /* Uniform value types */
@@ -59,11 +61,28 @@ struct yetty_render_uniform {
     };
 };
 
+/* Shader code with precomputed hash */
+struct yetty_render_shader_code {
+    const char *data;
+    size_t size;
+    uint64_t hash;
+};
+
+/* Set shader code and compute hash */
+void yetty_render_shader_code_set(struct yetty_render_shader_code *sc,
+                                   const char *data, size_t size);
+
+/* Compute FNV-1a hash */
+uint64_t yetty_render_hash(const void *data, size_t size);
+
 /* Returns WGSL type string for a uniform type */
 const char *yetty_render_uniform_type_wgsl(enum yetty_render_uniform_type type);
 
 /* Returns byte size of a uniform type */
 size_t yetty_render_uniform_type_size(enum yetty_render_uniform_type type);
+
+/* Returns WGSL alignment requirement for a uniform type */
+size_t yetty_render_uniform_type_align(enum yetty_render_uniform_type type);
 
 /* Returns total byte size of texture pixel data */
 size_t yetty_render_texture_get_size(const struct yetty_render_texture *texture);

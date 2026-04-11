@@ -26,8 +26,7 @@ struct yetty_render_gpu_resource_set {
     struct yetty_render_uniform uniforms[YETTY_RENDER_RS_MAX_UNIFORMS];
     size_t uniform_count;
 
-    const char *shader_code;
-    size_t shader_code_size;
+    struct yetty_render_shader_code shader;
 
     struct yetty_render_gpu_resource_set *children[YETTY_RENDER_RS_MAX_CHILDREN];
     size_t children_count;

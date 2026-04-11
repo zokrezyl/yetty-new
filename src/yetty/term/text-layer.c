@@ -82,6 +82,10 @@ struct yetty_term_terminal_text_layer {
     VTermScreen *screen;
     struct yetty_font_font *font;  /* not owned */
     struct yetty_render_gpu_resource_set rs;
+
+    /* Translated cell buffer: 3 u32 per cell (glyph, fg_packed, bg_packed) */
+    uint32_t *cell_buf;
+    size_t cell_buf_capacity;  /* in bytes */
 };
 
 /* Forward declarations */
@@ -92,10 +96,33 @@ static void text_layer_resize(struct yetty_term_terminal_layer *self,
                               uint32_t cols, uint32_t rows);
 static struct yetty_render_gpu_resource_set_result text_layer_get_gpu_resource_set(
     const struct yetty_term_terminal_layer *self);
+static void rebuild_cell_buffer(struct yetty_term_terminal_text_layer *text_layer);
 
 /* VTerm callbacks */
 static int on_damage(VTermRect rect, void *user);
 static int on_move_cursor(VTermPos pos, VTermPos oldpos, int visible, void *user);
+
+/* Glyph resolver — called by vterm for every codepoint */
+static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
+                                         int bold, int italic, void *user)
+{
+    struct yetty_term_terminal_text_layer *text_layer = user;
+    VTermResolvedGlyph result = {0, 0};
+
+    if (!text_layer->font || !text_layer->font->ops || count == 0)
+        return result;
+
+    enum yetty_font_style style = YETTY_FONT_STYLE_REGULAR;
+    if (bold && italic)      style = YETTY_FONT_STYLE_BOLD_ITALIC;
+    else if (bold)           style = YETTY_FONT_STYLE_BOLD;
+    else if (italic)         style = YETTY_FONT_STYLE_ITALIC;
+
+    result.glyph_index = text_layer->font->ops->get_glyph_index_styled(
+        text_layer->font, chars[0], style);
+    result.font_type = YETTY_FONT_RENDER_METHOD_RASTER;
+
+    return result;
+}
 
 /* Ops */
 static const struct yetty_term_terminal_layer_ops text_layer_ops = {
@@ -153,7 +180,7 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     }
 
     vterm_set_utf8(text_layer->vterm, 1);
-    text_layer->screen = vterm_obtain_screen(text_layer->vterm, NULL, NULL);
+    text_layer->screen = vterm_obtain_screen(text_layer->vterm, resolve_glyph, text_layer);
     vterm_screen_set_callbacks(text_layer->screen, &screen_callbacks, text_layer);
     vterm_screen_enable_altscreen(text_layer->screen, 1);
     vterm_screen_enable_reflow(text_layer->screen, 1);
@@ -171,11 +198,19 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     set_grid_size(&text_layer->rs, (float)cols, (float)rows);
     set_cell_size(&text_layer->rs, text_layer->base.cell_width, text_layer->base.cell_height);
 
-    text_layer->rs.shader_code = (const char *)gtext_layer_shader_data;
-    text_layer->rs.shader_code_size = gtext_layer_shader_size;
+    yetty_render_shader_code_set(&text_layer->rs.shader,
+        (const char *)gtext_layer_shader_data, gtext_layer_shader_size);
 
     if (text_layer->font)
         text_layer->rs.children_count = 1;
+
+    /* Initial cell buffer build (empty screen) */
+    rebuild_cell_buffer(text_layer);
+
+    /* Clear dirty — vterm_screen_reset fires on_damage but there's no real content yet.
+     * First real dirty will come from PTY data via on_damage. */
+    text_layer->base.dirty = 0;
+    text_layer->rs.buffers[0].dirty = 0;
 
     return YETTY_OK(yetty_term_terminal_layer, &text_layer->base);
 }
@@ -190,6 +225,7 @@ static void text_layer_destroy(struct yetty_term_terminal_layer *self)
     if (text_layer->vterm)
         vterm_free(text_layer->vterm);
 
+    free(text_layer->cell_buf);
     free(text_layer);
 }
 
@@ -214,6 +250,7 @@ static void text_layer_resize(struct yetty_term_terminal_layer *self,
         self->cols = cols;
         self->rows = rows;
         set_grid_size(&text_layer->rs, (float)cols, (float)rows);
+        rebuild_cell_buffer(text_layer);
     }
 }
 
@@ -224,10 +261,9 @@ static struct yetty_render_gpu_resource_set_result text_layer_get_gpu_resource_s
         (struct yetty_term_terminal_text_layer *)
         ((const char *)self - offsetof(struct yetty_term_terminal_text_layer, base));
 
-    /* Update cell buffer pointer to current vterm screen data */
-    const VTermScreenCell *cells = vterm_screen_get_buffer(text_layer->screen);
-    text_layer->rs.buffers[0].data = (uint8_t *)cells;
-    text_layer->rs.buffers[0].size = self->cols * self->rows * sizeof(VTermScreenCell);
+    /* Rebuild translated cell buffer if dirty */
+    if (text_layer->base.dirty)
+        rebuild_cell_buffer(text_layer);
 
     /* Update font child pointer */
     if (text_layer->font && text_layer->font->ops &&
@@ -241,6 +277,63 @@ static struct yetty_render_gpu_resource_set_result text_layer_get_gpu_resource_s
     return YETTY_OK(yetty_render_gpu_resource_set, &text_layer->rs);
 }
 
+/* Rebuild translated cell buffer from vterm screen data.
+ * VTermScreenCell is 12 bytes packed: {glyph_index(u32), fg(3B rgb), bg(3B rgb), attrs(2B)}.
+ * Shader expects 3 u32 per cell: {glyph, fg_packed_u32, bg_packed_u32}. */
+static void rebuild_cell_buffer(struct yetty_term_terminal_text_layer *text_layer)
+{
+    uint32_t cols = text_layer->base.cols;
+    uint32_t rows = text_layer->base.rows;
+    size_t cell_count = (size_t)cols * rows;
+    size_t needed = cell_count * 3 * sizeof(uint32_t);
+
+    if (needed > text_layer->cell_buf_capacity) {
+        free(text_layer->cell_buf);
+        text_layer->cell_buf_capacity = needed;
+        text_layer->cell_buf = malloc(needed);
+        if (!text_layer->cell_buf) {
+            text_layer->cell_buf_capacity = 0;
+            return;
+        }
+    }
+
+    const VTermScreenCell *cells = vterm_screen_get_buffer(text_layer->screen);
+    if (!cells) {
+        ydebug("rebuild_cell_buffer: vterm_screen_get_buffer returned NULL");
+        return;
+    }
+
+    uint32_t *dst = text_layer->cell_buf;
+    int non_empty = 0;
+    for (size_t i = 0; i < cell_count; i++) {
+        const VTermScreenCell *c = &cells[i];
+        dst[i * 3 + 0] = c->glyph_index;
+        dst[i * 3 + 1] = (uint32_t)c->fg.red | ((uint32_t)c->fg.green << 8) | ((uint32_t)c->fg.blue << 16);
+        dst[i * 3 + 2] = (uint32_t)c->bg.red | ((uint32_t)c->bg.green << 8) | ((uint32_t)c->bg.blue << 16);
+        if (c->glyph_index != 0) non_empty++;
+    }
+
+    text_layer->rs.buffers[0].data = (uint8_t *)text_layer->cell_buf;
+    text_layer->rs.buffers[0].size = needed;
+    text_layer->rs.buffers[0].dirty = 1;
+
+    ydebug("rebuild_cell_buffer: %ux%u cells=%zu non_empty=%d buf_size=%zu sizeof(VTermScreenCell)=%zu",
+           cols, rows, cell_count, non_empty, needed, sizeof(VTermScreenCell));
+
+    /* Dump first few non-empty cells for debugging */
+    if (non_empty > 0) {
+        for (size_t i = 0; i < cell_count && non_empty > 0; i++) {
+            if (dst[i * 3] != 0) {
+                ydebug("  cell[%zu] glyph=%u fg=0x%06x bg=0x%06x (raw fg: r=%u g=%u b=%u)",
+                       i, dst[i * 3], dst[i * 3 + 1], dst[i * 3 + 2],
+                       cells[i].fg.red, cells[i].fg.green, cells[i].fg.blue);
+                non_empty--;
+                if (non_empty <= 0 || i > 20) break;
+            }
+        }
+    }
+}
+
 /* VTerm callbacks */
 
 static int on_damage(VTermRect rect, void *user)
@@ -248,6 +341,7 @@ static int on_damage(VTermRect rect, void *user)
     struct yetty_term_terminal_text_layer *text_layer = user;
     (void)rect;
     text_layer->base.dirty = 1;
+    rebuild_cell_buffer(text_layer);
     return 1;
 }
 

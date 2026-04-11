@@ -61,14 +61,27 @@ static struct yetty_core_void_result terminal_render_frame(struct yetty_term_ter
     struct yetty_gpu_context *gpu = &terminal->context.yetty_context.gpu_context;
     struct yetty_app_gpu_context *app_gpu = &gpu->app_gpu_context;
 
-    ydebug("terminal_render_frame: starting");
-
     if (!terminal->binder) {
         yerror("terminal_render_frame: no binder");
         return YETTY_ERR(yetty_core_void, "no binder");
     }
 
-    /* Submit resource sets from all layers */
+    /* Check if any layer is dirty — skip render if nothing changed */
+    int any_dirty = 0;
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+        if (terminal->layers[i] && terminal->layers[i]->dirty) {
+            any_dirty = 1;
+            break;
+        }
+    }
+    if (!any_dirty) {
+        ydebug("terminal_render_frame: no dirty layers, skipping");
+        return YETTY_OK_VOID();
+    }
+
+    ydebug("terminal_render_frame: starting");
+
+    /* Submit resource sets from all layers (idempotent — only adds new ones) */
     for (size_t i = 0; i < terminal->layer_count; i++) {
         struct yetty_term_terminal_layer *layer = terminal->layers[i];
         if (layer && layer->ops && layer->ops->get_gpu_resource_set) {
@@ -81,11 +94,24 @@ static struct yetty_core_void_result terminal_render_frame(struct yetty_term_ter
         }
     }
 
-    /* Finalize (compile shaders, create pipeline if needed) */
+    /* Finalize (compile shaders, create pipeline — first time only) */
     struct yetty_core_void_result res = terminal->binder->ops->finalize(terminal->binder);
     if (!YETTY_IS_OK(res)) {
         yerror("terminal_render_frame: finalize failed: %s", res.error.msg);
         return res;
+    }
+
+    /* Per-frame update: upload dirty buffers/textures/uniforms */
+    res = terminal->binder->ops->update(terminal->binder);
+    if (!YETTY_IS_OK(res)) {
+        yerror("terminal_render_frame: update failed: %s", res.error.msg);
+        return res;
+    }
+
+    /* Clear dirty flags after upload */
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+        if (terminal->layers[i])
+            terminal->layers[i]->dirty = 0;
     }
 
     /* Get surface texture */
@@ -127,7 +153,7 @@ static struct yetty_core_void_result terminal_render_frame(struct yetty_term_ter
     if (pipeline && quad_vb) {
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         terminal->binder->ops->bind(terminal->binder, pass, 0);
-        wgpuRenderPassEncoderSetVertexBuffer(pass, 0, quad_vb, 0, 6 * 4 * sizeof(float));
+        wgpuRenderPassEncoderSetVertexBuffer(pass, 0, quad_vb, 0, WGPU_WHOLE_SIZE);
         wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
     }
 
