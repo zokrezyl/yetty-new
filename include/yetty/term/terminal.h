@@ -22,6 +22,9 @@ struct yetty_platform_pty;
 YETTY_RESULT_DECLARE(yetty_term_terminal, struct yetty_term_terminal *);
 YETTY_RESULT_DECLARE(yetty_term_terminal_layer, struct yetty_term_terminal_layer *);
 
+/* PTY write callback - called when layer needs to send data to PTY */
+typedef void (*yetty_term_pty_write_fn)(const char *data, size_t len, void *userdata);
+
 /* Layer ops */
 struct yetty_term_terminal_layer_ops {
     void (*destroy)(struct yetty_term_terminal_layer *self);
@@ -41,6 +44,9 @@ struct yetty_term_terminal_layer {
     float cell_width;
     float cell_height;
     int dirty;
+    /* PTY write callback - set by terminal when layer is added */
+    yetty_term_pty_write_fn pty_write_fn;
+    void *pty_write_userdata;
 };
 
 /* Terminal context - contains yetty context plus terminal-owned objects */

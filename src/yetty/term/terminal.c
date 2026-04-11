@@ -30,6 +30,16 @@ struct yetty_term_terminal {
 static void terminal_read_pty(struct yetty_term_terminal *terminal);
 static struct yetty_core_void_result terminal_render_frame(struct yetty_term_terminal *terminal);
 
+/* PTY write callback for layers */
+static void terminal_pty_write_callback(const char *data, size_t len, void *userdata)
+{
+    struct yetty_term_terminal *terminal = userdata;
+    if (terminal->context.pty && terminal->context.pty->ops && terminal->context.pty->ops->write) {
+        terminal->context.pty->ops->write(terminal->context.pty, data, len);
+        ydebug("terminal_pty_write: wrote %zu bytes to PTY", len);
+    }
+}
+
 /* Event handler */
 static int terminal_event_handler(
     struct yetty_core_event_listener *listener,
@@ -48,6 +58,30 @@ static int terminal_event_handler(
     case YETTY_EVENT_POLL_READABLE:
         ydebug("terminal: POLL_READABLE event fd=%d", event->poll.fd);
         terminal_read_pty(terminal);
+        return 1;
+
+    case YETTY_EVENT_KEY_DOWN:
+        ydebug("terminal: KEY_DOWN key=%d mods=%d", event->key.key, event->key.mods);
+        /* Dispatch to layers */
+        for (size_t i = 0; i < terminal->layer_count; i++) {
+            struct yetty_term_terminal_layer *layer = terminal->layers[i];
+            if (layer && layer->ops && layer->ops->on_key) {
+                if (layer->ops->on_key(layer, event->key.key, event->key.mods))
+                    break;  /* Event consumed */
+            }
+        }
+        return 1;
+
+    case YETTY_EVENT_CHAR:
+        ydebug("terminal: CHAR codepoint=U+%04X mods=%d", event->chr.codepoint, event->chr.mods);
+        /* Dispatch to layers */
+        for (size_t i = 0; i < terminal->layer_count; i++) {
+            struct yetty_term_terminal_layer *layer = terminal->layers[i];
+            if (layer && layer->ops && layer->ops->on_char) {
+                if (layer->ops->on_char(layer, event->chr.codepoint, event->chr.mods))
+                    break;  /* Event consumed */
+            }
+        }
         return 1;
 
     default:
@@ -275,6 +309,25 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
     }
     ydebug("terminal_create: registered for RENDER events");
 
+    /* Register for keyboard events */
+    res = terminal->context.event_loop->ops->register_listener(
+        terminal->context.event_loop, YETTY_EVENT_KEY_DOWN, &terminal->listener, 0);
+    if (!YETTY_IS_OK(res)) {
+        ydebug("terminal_create: failed to register KEY_DOWN listener");
+        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+        free(terminal);
+        return YETTY_ERR(yetty_term_terminal, "failed to register KEY_DOWN listener");
+    }
+    res = terminal->context.event_loop->ops->register_listener(
+        terminal->context.event_loop, YETTY_EVENT_CHAR, &terminal->listener, 0);
+    if (!YETTY_IS_OK(res)) {
+        ydebug("terminal_create: failed to register CHAR listener");
+        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+        free(terminal);
+        return YETTY_ERR(yetty_term_terminal, "failed to register CHAR listener");
+    }
+    ydebug("terminal_create: registered for keyboard events");
+
     /* Create PTY */
     struct yetty_platform_pty_factory *pty_factory = yetty_context->app_context.pty_factory;
     if (pty_factory && pty_factory->ops && pty_factory->ops->create_pty) {
@@ -303,7 +356,8 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
     }
 
     /* Create text layer */
-    struct yetty_term_terminal_layer_result text_layer_res = yetty_term_terminal_text_layer_create(cols, rows, yetty_context);
+    struct yetty_term_terminal_layer_result text_layer_res = yetty_term_terminal_text_layer_create(
+        cols, rows, yetty_context, terminal_pty_write_callback, terminal);
     if (!YETTY_IS_OK(text_layer_res)) {
         ydebug("terminal_create: failed to create text layer");
         if (terminal->context.pty)

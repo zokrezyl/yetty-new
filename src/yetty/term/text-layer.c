@@ -96,6 +96,8 @@ static void text_layer_resize(struct yetty_term_terminal_layer *self,
                               uint32_t cols, uint32_t rows);
 static struct yetty_render_gpu_resource_set_result text_layer_get_gpu_resource_set(
     const struct yetty_term_terminal_layer *self);
+static int text_layer_on_key(struct yetty_term_terminal_layer *self, int key, int mods);
+static int text_layer_on_char(struct yetty_term_terminal_layer *self, uint32_t codepoint, int mods);
 static void rebuild_cell_buffer(struct yetty_term_terminal_text_layer *text_layer);
 
 /* VTerm callbacks */
@@ -130,6 +132,8 @@ static const struct yetty_term_terminal_layer_ops text_layer_ops = {
     .write = text_layer_write,
     .resize = text_layer_resize,
     .get_gpu_resource_set = text_layer_get_gpu_resource_set,
+    .on_key = text_layer_on_key,
+    .on_char = text_layer_on_char,
 };
 
 /* VTerm screen callbacks */
@@ -147,9 +151,20 @@ static VTermScreenCallbacks screen_callbacks = {
 
 /* Create */
 
+/* VTerm output callback - forwards to layer's PTY write callback */
+static void vterm_output_callback(const char *data, size_t len, void *user)
+{
+    struct yetty_term_terminal_text_layer *text_layer = user;
+    if (text_layer->base.pty_write_fn) {
+        text_layer->base.pty_write_fn(data, len, text_layer->base.pty_write_userdata);
+    }
+}
+
 struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     uint32_t cols, uint32_t rows,
-    const struct yetty_context *context)
+    const struct yetty_context *context,
+    yetty_term_pty_write_fn pty_write_fn,
+    void *pty_write_userdata)
 {
     struct yetty_term_terminal_text_layer *text_layer;
 
@@ -163,6 +178,8 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     text_layer->base.cell_width = 10.0f;
     text_layer->base.cell_height = 20.0f;
     text_layer->base.dirty = 1;
+    text_layer->base.pty_write_fn = pty_write_fn;
+    text_layer->base.pty_write_userdata = pty_write_userdata;
 
     /* Create font from config */
     struct yetty_font_font_result font_res = yetty_font_raster_font_create(
@@ -185,6 +202,9 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     vterm_screen_enable_altscreen(text_layer->screen, 1);
     vterm_screen_enable_reflow(text_layer->screen, 1);
     vterm_screen_reset(text_layer->screen, 1);
+
+    /* Set up vterm output callback to write to PTY */
+    vterm_output_set_callback(text_layer->vterm, vterm_output_callback, text_layer);
 
     /* Resource set */
     strncpy(text_layer->rs.namespace, "text_grid", YETTY_RENDER_NAME_MAX - 1);

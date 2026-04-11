@@ -11,7 +11,9 @@ extern "C" {
 /* Text layer - renders terminal text via libvterm */
 struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     uint32_t cols, uint32_t rows,
-    const struct yetty_context *context);
+    const struct yetty_context *context,
+    yetty_term_pty_write_fn pty_write_fn,
+    void *pty_write_userdata);
 
 #ifdef __cplusplus
 }
