@@ -4,6 +4,7 @@
 #include <yetty/core/types.h>
 #include <yetty/platform/platform-input-pipe.h>
 #include <yetty/platform/pty-poll-source.h>
+#include <yetty/ytrace.h>
 #include <uv.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -142,6 +143,7 @@ static void on_render_async(uv_async_t *handle)
     struct libuv_event_loop *impl = handle->data;
     struct yetty_core_event event = {0};
 
+    ydebug("on_render_async: render_pending=%d", impl->render_pending);
     if (impl->render_pending) {
         impl->render_pending = 0;
         event.type = YETTY_EVENT_RENDER;
@@ -559,6 +561,7 @@ static struct yetty_core_void_result libuv_register_timer_listener(
 static void libuv_request_render(struct yetty_core_event_loop *self)
 {
     struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
+    ydebug("libuv_request_render: setting render_pending=1");
     impl->render_pending = 1;
     uv_async_send(&impl->render_async);
 }

@@ -40,6 +40,18 @@ static void terminal_pty_write_callback(const char *data, size_t len, void *user
     }
 }
 
+/* Request render callback for layers */
+static void terminal_request_render_callback(void *userdata)
+{
+    struct yetty_term_terminal *terminal = userdata;
+    ydebug("terminal_request_render_callback: event_loop=%p", (void*)terminal->context.event_loop);
+    if (terminal->context.event_loop && terminal->context.event_loop->ops &&
+        terminal->context.event_loop->ops->request_render) {
+        ydebug("terminal_request_render_callback: calling request_render");
+        terminal->context.event_loop->ops->request_render(terminal->context.event_loop);
+    }
+}
+
 /* Event handler */
 static int terminal_event_handler(
     struct yetty_core_event_listener *listener,
@@ -92,6 +104,23 @@ static int terminal_event_handler(
         if (width <= 0 || height <= 0)
             return 1;
 
+        /* Reconfigure WebGPU surface */
+        struct yetty_gpu_context *gpu = &terminal->context.yetty_context.gpu_context;
+        struct yetty_app_gpu_context *app_gpu = &gpu->app_gpu_context;
+        if (app_gpu->surface && gpu->device) {
+            WGPUSurfaceConfiguration surface_config = {0};
+            surface_config.device = gpu->device;
+            surface_config.format = gpu->surface_format;
+            surface_config.usage = WGPUTextureUsage_RenderAttachment;
+            surface_config.width = (uint32_t)width;
+            surface_config.height = (uint32_t)height;
+            surface_config.presentMode = WGPUPresentMode_Fifo;
+            wgpuSurfaceConfigure(app_gpu->surface, &surface_config);
+            app_gpu->surface_width = (uint32_t)width;
+            app_gpu->surface_height = (uint32_t)height;
+            ydebug("terminal: surface reconfigured to %ux%u", (uint32_t)width, (uint32_t)height);
+        }
+
         /* Calculate grid dimensions from first layer's cell size */
         if (terminal->layer_count > 0) {
             struct yetty_term_terminal_layer *layer = terminal->layers[0];
@@ -130,19 +159,6 @@ static struct yetty_core_void_result terminal_render_frame(struct yetty_term_ter
     if (!terminal->binder) {
         yerror("terminal_render_frame: no binder");
         return YETTY_ERR(yetty_core_void, "no binder");
-    }
-
-    /* Check if any layer is dirty — skip render if nothing changed */
-    int any_dirty = 0;
-    for (size_t i = 0; i < terminal->layer_count; i++) {
-        if (terminal->layers[i] && terminal->layers[i]->dirty) {
-            any_dirty = 1;
-            break;
-        }
-    }
-    if (!any_dirty) {
-        ydebug("terminal_render_frame: no dirty layers, skipping");
-        return YETTY_OK_VOID();
     }
 
     ydebug("terminal_render_frame: starting");
@@ -267,11 +283,17 @@ static struct yetty_core_void_result terminal_render_frame(struct yetty_term_ter
     return YETTY_OK_VOID();
 }
 
+/* Max bytes to read per PTY poll event before yielding for render.
+ * This prevents depleting all PTY data before any rendering can happen.
+ * TODO: Make this configurable via yetty config. */
+#define YETTY_TERM_PTY_READ_CHUNK_SIZE 65536  /* 64KB */
+
 /* Read from PTY and feed to text layer */
 static void terminal_read_pty(struct yetty_term_terminal *terminal)
 {
     struct yetty_platform_pty *pty = terminal->context.pty;
     char buf[4096];
+    size_t total_read = 0;
     int dirty = 0;
 
     if (!pty || !pty->ops || !pty->ops->read)
@@ -286,6 +308,13 @@ static void terminal_read_pty(struct yetty_term_terminal *terminal)
                 layer->ops->write(layer, buf, res.value);
                 dirty = 1;
             }
+        }
+        total_read += res.value;
+
+        /* Break after reading chunk size to allow render events */
+        if (total_read >= YETTY_TERM_PTY_READ_CHUNK_SIZE) {
+            ydebug("terminal_read_pty: read %zu bytes, yielding for render", total_read);
+            break;
         }
     }
 
@@ -400,7 +429,9 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
 
     /* Create text layer */
     struct yetty_term_terminal_layer_result text_layer_res = yetty_term_terminal_text_layer_create(
-        cols, rows, yetty_context, terminal_pty_write_callback, terminal);
+        cols, rows, yetty_context,
+        terminal_pty_write_callback, terminal,
+        terminal_request_render_callback, terminal);
     if (!YETTY_IS_OK(text_layer_res)) {
         ydebug("terminal_create: failed to create text layer");
         if (terminal->context.pty)

@@ -13,7 +13,9 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     uint32_t cols, uint32_t rows,
     const struct yetty_context *context,
     yetty_term_pty_write_fn pty_write_fn,
-    void *pty_write_userdata);
+    void *pty_write_userdata,
+    yetty_term_request_render_fn request_render_fn,
+    void *request_render_userdata);
 
 #ifdef __cplusplus
 }

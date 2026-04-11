@@ -164,7 +164,9 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     uint32_t cols, uint32_t rows,
     const struct yetty_context *context,
     yetty_term_pty_write_fn pty_write_fn,
-    void *pty_write_userdata)
+    void *pty_write_userdata,
+    yetty_term_request_render_fn request_render_fn,
+    void *request_render_userdata)
 {
     struct yetty_term_terminal_text_layer *text_layer;
 
@@ -180,6 +182,8 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     text_layer->base.dirty = 1;
     text_layer->base.pty_write_fn = pty_write_fn;
     text_layer->base.pty_write_userdata = pty_write_userdata;
+    text_layer->base.request_render_fn = request_render_fn;
+    text_layer->base.request_render_userdata = request_render_userdata;
 
     /* Create font from config */
     struct yetty_font_font_result font_res = yetty_font_raster_font_create(
@@ -436,6 +440,9 @@ static int on_damage(VTermRect rect, void *user)
 {
     struct yetty_term_terminal_text_layer *text_layer = user;
     (void)rect;
+    /* Just set dirty flag - terminal_read_pty calls request_render once after
+     * processing all PTY data. Calling request_render here would flood the
+     * event loop (one call per damage rect). */
     text_layer->base.dirty = 1;
     rebuild_cell_buffer(text_layer);
     return 1;
