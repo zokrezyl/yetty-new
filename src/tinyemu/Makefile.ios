@@ -1,0 +1,158 @@
+#
+# TinyEMU for iOS
+#
+# Cross-compilation for iOS arm64 (device) and arm64 simulator
+#
+# Usage:
+#   make -f Makefile.ios                    # build for device (arm64)
+#   make -f Makefile.ios ARCH=arm64-sim     # build for simulator
+#   make -f Makefile.ios clean
+#
+
+# Architecture: arm64 (device), arm64-sim, or x86_64-sim (Intel simulator)
+ARCH ?= x86_64-sim
+
+# iOS deployment target
+IOS_MIN_VERSION ?= 15.0
+
+# Output directories
+BUILD_DIR = build-ios-$(ARCH)
+INSTALL_DIR = $(BUILD_DIR)/install
+
+# SDK and toolchain
+ifeq ($(ARCH),arm64)
+  SDK := iphoneos
+  ARCH_FLAGS := -arch arm64
+else ifeq ($(ARCH),arm64-sim)
+  SDK := iphonesimulator
+  ARCH_FLAGS := -arch arm64
+else ifeq ($(ARCH),x86_64-sim)
+  SDK := iphonesimulator
+  ARCH_FLAGS := -arch x86_64
+else
+  $(error Unknown ARCH: $(ARCH). Use arm64, arm64-sim, or x86_64-sim)
+endif
+
+SDK_PATH := $(shell xcrun --sdk $(SDK) --show-sdk-path)
+CC := $(shell xcrun --sdk $(SDK) --find clang)
+AR := $(shell xcrun --sdk $(SDK) --find ar)
+RANLIB := $(shell xcrun --sdk $(SDK) --find ranlib)
+
+# Configuration
+# Disable features that don't work on iOS
+CONFIG_INT128 = y
+# CONFIG_X86EMU = y  # Optional: enable for x86 emulation
+# CONFIG_FS_NET = n  # Disabled: requires libcurl
+# CONFIG_SDL = n     # Disabled: no SDL on iOS
+CONFIG_SLIRP = y     # User-space networking
+
+# Compiler flags
+CFLAGS = -O2 -Wall -g
+CFLAGS += $(ARCH_FLAGS)
+CFLAGS += -isysroot $(SDK_PATH)
+ifeq ($(SDK),iphoneos)
+  CFLAGS += -miphoneos-version-min=$(IOS_MIN_VERSION)
+  CFLAGS += -fembed-bitcode
+else
+  CFLAGS += -mios-simulator-version-min=$(IOS_MIN_VERSION)
+endif
+CFLAGS += -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
+CFLAGS += -DCONFIG_VERSION=\"$(shell cat VERSION)\"
+CFLAGS += -DCONFIG_IOS
+CFLAGS += -MMD
+
+# iOS-specific: need BSD functions for networking
+CFLAGS += -D_DARWIN_C_SOURCE
+
+# Suppress some warnings in legacy code
+CFLAGS += -Wno-deprecated-declarations -Wno-unused-function
+
+# Core emulator objects
+EMU_OBJS = virtio.o pci.o fs.o cutils.o iomem.o simplefb.o json.o machine.o
+
+# RISC-V support (always included)
+EMU_OBJS += riscv_machine.o softfp.o riscv_cpu32.o riscv_cpu64.o
+ifdef CONFIG_INT128
+  CFLAGS += -DCONFIG_RISCV_MAX_XLEN=128
+  EMU_OBJS += riscv_cpu128.o
+else
+  CFLAGS += -DCONFIG_RISCV_MAX_XLEN=64
+endif
+
+# x86 support (optional)
+ifdef CONFIG_X86EMU
+  CFLAGS += -DCONFIG_X86EMU
+  EMU_OBJS += x86_cpu.o x86_machine.o ide.o ps2.o vmmouse.o pckbd.o vga.o
+endif
+
+# SLIRP user-space networking
+ifdef CONFIG_SLIRP
+  CFLAGS += -DCONFIG_SLIRP
+  SLIRP_OBJS = slirp/bootp.o slirp/ip_icmp.o slirp/mbuf.o slirp/slirp.o \
+               slirp/tcp_output.o slirp/cksum.o slirp/ip_input.o slirp/misc.o \
+               slirp/socket.o slirp/tcp_subr.o slirp/udp.o slirp/if.o \
+               slirp/ip_output.o slirp/sbuf.o slirp/tcp_input.o slirp/tcp_timer.o
+  EMU_OBJS += $(SLIRP_OBJS)
+endif
+
+# All object files with build directory prefix
+OBJS = $(addprefix $(BUILD_DIR)/, $(EMU_OBJS))
+
+# Output library
+LIB_NAME = libtinyemu.a
+LIB = $(BUILD_DIR)/$(LIB_NAME)
+
+# Targets
+.PHONY: all clean install info
+
+all: $(LIB)
+	@echo "Built $(LIB) for iOS $(ARCH)"
+
+$(LIB): $(OBJS)
+	@mkdir -p $(dir $@)
+	$(AR) rcs $@ $^
+	$(RANLIB) $@
+
+# Build directory creation
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)/slirp
+
+# Generic rule for .c -> .o
+$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# RISC-V CPU variants
+$(BUILD_DIR)/riscv_cpu32.o: riscv_cpu.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -DMAX_XLEN=32 -c -o $@ $<
+
+$(BUILD_DIR)/riscv_cpu64.o: riscv_cpu.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -DMAX_XLEN=64 -c -o $@ $<
+
+$(BUILD_DIR)/riscv_cpu128.o: riscv_cpu.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -DMAX_XLEN=128 -c -o $@ $<
+
+# Install to output directory
+install: $(LIB)
+	mkdir -p $(INSTALL_DIR)/lib
+	mkdir -p $(INSTALL_DIR)/include
+	cp $(LIB) $(INSTALL_DIR)/lib/
+	cp cutils.h iomem.h virtio.h machine.h json.h fs.h $(INSTALL_DIR)/include/
+ifdef CONFIG_SLIRP
+	mkdir -p $(INSTALL_DIR)/include/slirp
+	cp slirp/libslirp.h $(INSTALL_DIR)/include/slirp/
+endif
+
+clean:
+	rm -rf build-ios-*
+
+info:
+	@echo "SDK: $(SDK)"
+	@echo "SDK_PATH: $(SDK_PATH)"
+	@echo "CC: $(CC)"
+	@echo "ARCH: $(ARCH)"
+	@echo "CFLAGS: $(CFLAGS)"
+
+# Dependencies
+-include $(OBJS:.o=.d)

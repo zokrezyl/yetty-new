@@ -5,6 +5,10 @@ set(YETTY_ENABLE_LIB_GLFW OFF CACHE BOOL "" FORCE)
 
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
+# TinyEMU - RISC-V emulator for iOS (provides PTY via Linux VM)
+include(${YETTY_ROOT}/build-tools/cmake/tinyemu.cmake)
+include(${YETTY_ROOT}/build-tools/cmake/tinyemu-runtime.cmake)
+
 # Set iOS assets directory
 set(IOS_ASSETS_DIR "${CMAKE_BINARY_DIR}/ios-assets")
 file(MAKE_DIRECTORY ${IOS_ASSETS_DIR})
@@ -74,6 +78,7 @@ find_library(QUARTZCORE_LIBRARY QuartzCore REQUIRED)
 
 target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
+    tinyemu
     ${CORETEXT_LIBRARY}
     ${COREFOUNDATION_LIBRARY}
     ${COREGRAPHICS_LIBRARY}
@@ -81,6 +86,9 @@ target_link_libraries(yetty PRIVATE
     ${METAL_LIBRARY}
     ${QUARTZCORE_LIBRARY}
 )
+
+# Copy TinyEMU runtime files (RISC-V disk images) to app bundle
+tinyemu_copy_runtime_to_bundle(yetty)
 
 # CDB font generation (builds host tools for cross-compilation)
 if(YETTY_ENABLE_FEATURE_CDB_GEN)
