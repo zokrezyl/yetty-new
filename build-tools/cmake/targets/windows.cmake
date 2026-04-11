@@ -7,9 +7,6 @@ if(YETTY_ENABLE_LIB_GLFW)
     include(${YETTY_ROOT}/build-tools/cmake/libs/glfw.cmake)
 endif()
 
-# Add src/yetty (builds libraries)
-add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
-
 # Desktop-specific subdirectories
 if(YETTY_ENABLE_FEATURE_GPU)
     add_subdirectory(${YETTY_ROOT}/src/yetty/gpu ${CMAKE_BINARY_DIR}/src/yetty/gpu)
@@ -18,20 +15,20 @@ if(YETTY_ENABLE_FEATURE_CLIENT)
     add_subdirectory(${YETTY_ROOT}/src/yetty/client ${CMAKE_BINARY_DIR}/src/yetty/client)
 endif()
 
-# Platform sources — Windows-specific + shared GLFW
+# Platform sources — Windows-specific + shared GLFW (C)
 # Windows uses GLFW for window/surface but ConPTY for terminal and Windows pipes
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-main.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-surface.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-event-loop.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-clipboard-manager.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
-    ${YETTY_ROOT}/src/yetty/platform/windows/conpty.cpp
-    ${YETTY_ROOT}/src/yetty/platform/windows/pipe.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.cpp
-    ${YETTY_ROOT}/src/yetty/incbin-assets.cpp
-    ${YETTY_ROOT}/src/yetty/platform/windows/platform-paths.cpp
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-main.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-surface.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-event-loop.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-clipboard-manager.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/platform/windows/conpty.c
+    ${YETTY_ROOT}/src/yetty/platform/windows/pipe.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.c
+    ${YETTY_ROOT}/src/yetty/incbin-assets.c
+    ${YETTY_ROOT}/src/yetty/platform/windows/platform-paths.c
 )
 
 # Create executable with core sources + platform

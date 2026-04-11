@@ -29,16 +29,16 @@ if(YETTY_ENABLE_FEATURE_VNC)
     add_subdirectory(${YETTY_ROOT}/src/yetty/vnc ${CMAKE_BINARY_DIR}/src/yetty/vnc)
 endif()
 
-# Platform sources — Android-specific + shared Unix components
+# Platform sources — Android-specific + shared Unix components (all C)
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/android/main.cpp
-    ${YETTY_ROOT}/src/yetty/platform/android/platform-paths.cpp
-    ${YETTY_ROOT}/src/yetty/platform/android/surface.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.cpp
-    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.cpp
-    ${YETTY_ROOT}/src/yetty/incbin-assets.cpp
+    ${YETTY_ROOT}/src/yetty/platform/android/main.c
+    ${YETTY_ROOT}/src/yetty/platform/android/platform-paths.c
+    ${YETTY_ROOT}/src/yetty/platform/android/surface.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.c
+    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.c
+    ${YETTY_ROOT}/src/yetty/incbin-assets.c
 )
 
 # Create shared library with core sources + android platform
