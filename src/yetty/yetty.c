@@ -4,6 +4,7 @@
 
 #include <yetty/yetty.h>
 #include <yetty/term/terminal.h>
+#include <yetty/webgpu/error.h>
 #include <yetty/ytrace.h>
 
 #include <stdlib.h>
@@ -156,6 +157,7 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     device_desc.label = device_label;
     device_desc.requiredLimits = &limits;
     device_desc.defaultQueue.label = queue_label;
+    device_desc.uncapturedErrorCallbackInfo = yetty_webgpu_get_error_callback_info();
 
     char device_error[256] = {0};
     WGPURequestDeviceCallbackInfo device_cb = {0};

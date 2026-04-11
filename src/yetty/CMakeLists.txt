@@ -33,10 +33,13 @@ set(YETTY_SOURCES
     ${YETTY_ROOT}/src/yetty/yetty.c
     ${YETTY_ROOT}/src/yetty/config.c
     ${YETTY_ROOT}/src/yetty/ytrace.c
-    ${YETTY_ROOT}/src/yetty/render/types.c
-    ${YETTY_ROOT}/src/yetty/render/gpu-allocator.c
-    ${YETTY_ROOT}/src/yetty/render/gpu-resource-binder.c
 )
+
+# Render subsystem
+add_subdirectory(render)
+
+# WebGPU utilities
+add_subdirectory(webgpu)
 
 # Core sources (src/yetty/core/*.cpp)
 set(YETTY_CORE_SOURCES "")

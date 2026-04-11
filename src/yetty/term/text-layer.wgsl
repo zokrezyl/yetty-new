@@ -53,9 +53,6 @@ fn unpack_color(c: u32) -> vec3<f32> {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    // DEBUG: Return bright magenta to verify shader runs
-    return vec4<f32>(1.0, 0.0, 1.0, 1.0);
-
     let pixel_pos = input.position.xy;
     let grid_size = uniforms.text_grid_grid_size;
     let cell_size = uniforms.text_grid_cell_size;
@@ -104,10 +101,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // DEBUG: visualize glyph presence with green tint
-    if (glyph != 0u) {
-        final_color = vec3<f32>(final_color.r, final_color.g + 0.2, final_color.b);
-    }
 
     // Cursor
     let cursor_pos = uniforms.text_grid_cursor_pos;

@@ -133,6 +133,11 @@ static struct yetty_core_void_result terminal_render_frame(struct yetty_term_ter
     /* Create command encoder */
     WGPUCommandEncoderDescriptor enc_desc = {0};
     WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(gpu->device, &enc_desc);
+    if (!encoder) {
+        yerror("terminal_render_frame: wgpuDeviceCreateCommandEncoder failed");
+        wgpuTextureViewRelease(target_view);
+        return YETTY_ERR(yetty_core_void, "failed to create command encoder");
+    }
 
     /* Begin render pass */
     WGPURenderPassColorAttachment color_attachment = {0};
@@ -140,21 +145,37 @@ static struct yetty_core_void_result terminal_render_frame(struct yetty_term_ter
     color_attachment.loadOp = WGPULoadOp_Clear;
     color_attachment.storeOp = WGPUStoreOp_Store;
     color_attachment.clearValue = (WGPUColor){0.0, 0.0, 0.0, 1.0};
+    color_attachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;  /* Required for 2D textures */
 
     WGPURenderPassDescriptor pass_desc = {0};
     pass_desc.colorAttachmentCount = 1;
     pass_desc.colorAttachments = &color_attachment;
 
     WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc);
+    if (!pass) {
+        yerror("terminal_render_frame: wgpuCommandEncoderBeginRenderPass failed");
+        wgpuCommandEncoderRelease(encoder);
+        wgpuTextureViewRelease(target_view);
+        return YETTY_ERR(yetty_core_void, "failed to begin render pass");
+    }
 
     /* Bind and draw */
     WGPURenderPipeline pipeline = terminal->binder->ops->get_pipeline(terminal->binder);
     WGPUBuffer quad_vb = terminal->binder->ops->get_quad_vertex_buffer(terminal->binder);
+    if (!pipeline) {
+        yerror("terminal_render_frame: pipeline is NULL!");
+    }
+    if (!quad_vb) {
+        yerror("terminal_render_frame: quad_vb is NULL!");
+    }
     if (pipeline && quad_vb) {
+        ydebug("terminal_render_frame: drawing with pipeline=%p quad_vb=%p", (void*)pipeline, (void*)quad_vb);
         wgpuRenderPassEncoderSetPipeline(pass, pipeline);
         terminal->binder->ops->bind(terminal->binder, pass, 0);
         wgpuRenderPassEncoderSetVertexBuffer(pass, 0, quad_vb, 0, WGPU_WHOLE_SIZE);
         wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
+    } else {
+        yerror("terminal_render_frame: skipping draw - missing pipeline or vertex buffer");
     }
 
     wgpuRenderPassEncoderEnd(pass);
@@ -163,6 +184,12 @@ static struct yetty_core_void_result terminal_render_frame(struct yetty_term_ter
     /* Submit */
     WGPUCommandBufferDescriptor cmd_desc = {0};
     WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, &cmd_desc);
+    if (!cmd) {
+        yerror("terminal_render_frame: wgpuCommandEncoderFinish failed");
+        wgpuCommandEncoderRelease(encoder);
+        wgpuTextureViewRelease(target_view);
+        return YETTY_ERR(yetty_core_void, "failed to finish command encoder");
+    }
     wgpuQueueSubmit(gpu->queue, 1, &cmd);
 
     wgpuCommandBufferRelease(cmd);
