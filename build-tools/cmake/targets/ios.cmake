@@ -14,13 +14,14 @@ set(IOS_ASSETS_DIR "${CMAKE_BINARY_DIR}/ios-assets")
 file(MAKE_DIRECTORY ${IOS_ASSETS_DIR})
 
 # Platform sources — iOS-specific (Objective-C) + shared Unix (C)
+# iOS uses TinyEMU for PTY (RISC-V Linux VM) instead of unix-pty
 set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/platform/ios/main.m
     ${YETTY_ROOT}/src/yetty/platform/ios/platform-paths.m
     ${YETTY_ROOT}/src/yetty/platform/ios/surface.m
+    ${YETTY_ROOT}/src/yetty/platform/ios/tinyemu-pty.c
     ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.c
     ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.c
     ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
 )
@@ -127,10 +128,4 @@ if(YETTY_ENABLE_FEATURE_CDB_GEN)
     )
 endif()
 
-# Verify all required assets are present
-if(YETTY_ENABLE_FEATURE_ASSETS)
-    add_custom_command(TARGET yetty POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${IOS_ASSETS_DIR}/.. -DTARGET_TYPE=ios -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
-        COMMENT "Verifying build assets..."
-    )
-endif()
+# iOS embeds all assets via incbin - no runtime asset verification needed

@@ -5,6 +5,17 @@
 
 static char cache_dir_buf[512];
 static char config_dir_buf[512];
+static char bundle_dir_buf[512];
+
+const char *yetty_platform_get_bundle_dir(void)
+{
+    NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
+    if (bundlePath) {
+        snprintf(bundle_dir_buf, sizeof(bundle_dir_buf), "%s", [bundlePath UTF8String]);
+        return bundle_dir_buf;
+    }
+    return ".";
+}
 
 const char *yetty_platform_get_cache_dir(void)
 {
