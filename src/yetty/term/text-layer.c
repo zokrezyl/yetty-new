@@ -223,13 +223,11 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     if (text_layer->font)
         text_layer->rs.children_count = 1;
 
-    /* Initial buffer setup - point to vterm buffer directly */
-    {
-        const VTermScreenCell *cells = vterm_screen_get_buffer(text_layer->screen);
-        size_t buf_size = vterm_screen_get_buffer_size(text_layer->screen);
-        text_layer->rs.buffers[0].data = (const uint8_t *)cells;
-        text_layer->rs.buffers[0].size = buf_size;
-    }
+    /* Initial buffer setup - point to vterm buffer directly.
+     * Cast away const is safe: buffer is readonly, GPU only reads from it. */
+    text_layer->rs.buffers[0].data = (uint8_t *)vterm_screen_get_buffer(text_layer->screen);
+    text_layer->rs.buffers[0].size = vterm_screen_get_buffer_size(text_layer->screen);
+    text_layer->rs.buffers[0].readonly = 1;
 
     /* Clear dirty — vterm_screen_reset fires on_damage but there's no real content yet.
      * First real dirty will come from PTY data via on_damage. */
@@ -362,12 +360,11 @@ static struct yetty_render_gpu_resource_set_result text_layer_get_gpu_resource_s
         ((const char *)self - offsetof(struct yetty_term_terminal_text_layer, base));
 
     /* Use vterm buffer directly - no conversion needed.
-     * VTermScreenCell is already 12 bytes matching shader expectations. */
+     * VTermScreenCell is already 12 bytes matching shader expectations.
+     * Cast away const is safe: buffer is readonly, GPU only reads from it. */
     if (text_layer->base.dirty) {
-        const VTermScreenCell *cells = vterm_screen_get_buffer(text_layer->screen);
-        size_t buf_size = vterm_screen_get_buffer_size(text_layer->screen);
-        text_layer->rs.buffers[0].data = (const uint8_t *)cells;
-        text_layer->rs.buffers[0].size = buf_size;
+        text_layer->rs.buffers[0].data = (uint8_t *)vterm_screen_get_buffer(text_layer->screen);
+        text_layer->rs.buffers[0].size = vterm_screen_get_buffer_size(text_layer->screen);
         text_layer->rs.buffers[0].dirty = 1;
     }
 

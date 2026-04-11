@@ -263,6 +263,15 @@ void yetty_destroy(struct yetty_yetty *yetty)
         yetty_term_terminal_destroy(yetty->terminal);
     }
 
+    /* Unconfigure surface before releasing device - prevents crash in Dawn's
+     * SwapChain::DetachFromSurfaceImpl when surface is released later */
+    WGPUSurface surface = yetty->context.app_context.app_gpu_context.surface;
+    if (surface && yetty->device) {
+        wgpuSurfaceUnconfigure(surface);
+        /* Tick to process unconfigure before releasing device */
+        wgpuDeviceTick(yetty->device);
+    }
+
     if (yetty->queue) {
         wgpuQueueRelease(yetty->queue);
     }

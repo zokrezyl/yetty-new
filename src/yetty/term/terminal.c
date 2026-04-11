@@ -1,5 +1,6 @@
 #include <yetty/term/terminal.h>
 #include <yetty/term/text-layer.h>
+#include <yetty/term/ypaint-layer.h>
 #include <yetty/core/event-loop.h>
 #include <yetty/core/event.h>
 #include <yetty/platform/pty.h>
@@ -442,6 +443,23 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
     }
     yetty_term_terminal_layer_add(terminal, text_layer_res.value);
     ydebug("terminal_create: text_layer created and added");
+
+    /* Create ypaint scrolling layer (overlay on top of text) */
+    {
+        struct yetty_term_terminal_layer *text_layer = text_layer_res.value;
+        struct yetty_term_terminal_layer_result ypaint_res = yetty_term_ypaint_layer_create(
+            cols, rows,
+            text_layer->cell_width, text_layer->cell_height,
+            1,  /* scrolling_mode = true */
+            terminal_request_render_callback, terminal);
+        if (YETTY_IS_OK(ypaint_res)) {
+            yetty_term_terminal_layer_add(terminal, ypaint_res.value);
+            ydebug("terminal_create: ypaint scrolling layer created and added");
+        } else {
+            ydebug("terminal_create: failed to create ypaint layer (non-fatal): %s",
+                   ypaint_res.error.msg);
+        }
+    }
 
     /* Create GPU allocator */
     struct yetty_render_gpu_allocator_result alloc_res =
