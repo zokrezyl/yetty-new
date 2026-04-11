@@ -84,6 +84,38 @@ static int terminal_event_handler(
         }
         return 1;
 
+    case YETTY_EVENT_RESIZE: {
+        float width = event->resize.width;
+        float height = event->resize.height;
+        ydebug("terminal: RESIZE %.0fx%.0f", width, height);
+
+        if (width <= 0 || height <= 0)
+            return 1;
+
+        /* Calculate grid dimensions from first layer's cell size */
+        if (terminal->layer_count > 0) {
+            struct yetty_term_terminal_layer *layer = terminal->layers[0];
+            float cell_w = layer->cell_width > 0 ? layer->cell_width : 10.0f;
+            float cell_h = layer->cell_height > 0 ? layer->cell_height : 20.0f;
+            uint32_t new_cols = (uint32_t)(width / cell_w);
+            uint32_t new_rows = (uint32_t)(height / cell_h);
+
+            if (new_cols > 0 && new_rows > 0 &&
+                (new_cols != terminal->cols || new_rows != terminal->rows)) {
+                ydebug("terminal: resizing grid from %ux%u to %ux%u",
+                       terminal->cols, terminal->rows, new_cols, new_rows);
+                yetty_term_terminal_resize(terminal, new_cols, new_rows);
+
+                /* Also resize PTY */
+                if (terminal->context.pty && terminal->context.pty->ops &&
+                    terminal->context.pty->ops->resize) {
+                    terminal->context.pty->ops->resize(terminal->context.pty, new_cols, new_rows);
+                }
+            }
+        }
+        return 1;
+    }
+
     default:
         return 0;
     }
@@ -327,6 +359,17 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
         return YETTY_ERR(yetty_term_terminal, "failed to register CHAR listener");
     }
     ydebug("terminal_create: registered for keyboard events");
+
+    /* Register for resize events */
+    res = terminal->context.event_loop->ops->register_listener(
+        terminal->context.event_loop, YETTY_EVENT_RESIZE, &terminal->listener, 0);
+    if (!YETTY_IS_OK(res)) {
+        ydebug("terminal_create: failed to register RESIZE listener");
+        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+        free(terminal);
+        return YETTY_ERR(yetty_term_terminal, "failed to register RESIZE listener");
+    }
+    ydebug("terminal_create: registered for RESIZE events");
 
     /* Create PTY */
     struct yetty_platform_pty_factory *pty_factory = yetty_context->app_context.pty_factory;
