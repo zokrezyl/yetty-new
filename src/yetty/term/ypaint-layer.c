@@ -77,6 +77,7 @@ static int ypaint_layer_on_key(struct yetty_term_terminal_layer *self, int key, 
 static int ypaint_layer_on_char(struct yetty_term_terminal_layer *self, uint32_t codepoint, int mods);
 static int ypaint_layer_is_empty(const struct yetty_term_terminal_layer *self);
 static void ypaint_layer_scroll(struct yetty_term_terminal_layer *self, int lines);
+static void ypaint_layer_set_cursor(struct yetty_term_terminal_layer *self, int col, int row);
 
 /* Ops */
 static const struct yetty_term_terminal_layer_ops ypaint_layer_ops = {
@@ -88,6 +89,7 @@ static const struct yetty_term_terminal_layer_ops ypaint_layer_ops = {
     .on_key = ypaint_layer_on_key,
     .on_char = ypaint_layer_on_char,
     .scroll = ypaint_layer_scroll,
+    .set_cursor = ypaint_layer_set_cursor,
 };
 
 /* Create */
@@ -98,7 +100,9 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
     yetty_term_request_render_fn request_render_fn,
     void *request_render_userdata,
     yetty_term_scroll_fn scroll_fn,
-    void *scroll_userdata)
+    void *scroll_userdata,
+    yetty_term_cursor_fn cursor_fn,
+    void *cursor_userdata)
 {
     struct yetty_term_ypaint_layer *layer;
 
@@ -118,6 +122,8 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
     layer->base.request_render_userdata = request_render_userdata;
     layer->base.scroll_fn = scroll_fn;
     layer->base.scroll_userdata = scroll_userdata;
+    layer->base.cursor_fn = cursor_fn;
+    layer->base.cursor_userdata = cursor_userdata;
 
     layer->scrolling_mode = scrolling_mode;
 
@@ -370,4 +376,17 @@ static void ypaint_layer_scroll(struct yetty_term_terminal_layer *self, int line
 
     if (layer->base.request_render_fn)
         layer->base.request_render_fn(layer->base.request_render_userdata);
+}
+
+/* Set cursor - called when another layer moves cursor */
+static void ypaint_layer_set_cursor(struct yetty_term_terminal_layer *self, int col, int row)
+{
+    struct yetty_term_ypaint_layer *layer =
+        (struct yetty_term_ypaint_layer *)self;
+
+    if (!layer->canvas)
+        return;
+
+    ypaint_canvas_set_cursor(layer->canvas, (uint16_t)col, (uint16_t)row);
+    ydebug("ypaint_layer_set_cursor: col=%d row=%d", col, row);
 }

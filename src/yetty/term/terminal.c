@@ -72,6 +72,20 @@ static void terminal_scroll_callback(struct yetty_term_terminal_layer *source, i
     }
 }
 
+/* Cursor callback - propagate cursor position from source layer to all other layers */
+static void terminal_cursor_callback(struct yetty_term_terminal_layer *source, int col, int row, void *userdata)
+{
+    struct yetty_term_terminal *terminal = userdata;
+    ydebug("terminal_cursor_callback: source=%p col=%d row=%d", (void*)source, col, row);
+
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+        struct yetty_term_terminal_layer *layer = terminal->layers[i];
+        if (layer != source && layer->ops && layer->ops->set_cursor) {
+            layer->ops->set_cursor(layer, col, row);
+        }
+    }
+}
+
 /* Event handler */
 static int terminal_event_handler(
     struct yetty_core_event_listener *listener,
@@ -383,7 +397,8 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
         cols, rows, yetty_context,
         terminal_pty_write_callback, terminal,
         terminal_request_render_callback, terminal,
-        terminal_scroll_callback, terminal);
+        terminal_scroll_callback, terminal,
+        terminal_cursor_callback, terminal);
     if (!YETTY_IS_OK(text_layer_res)) {
         ydebug("terminal_create: failed to create text layer");
         yetty_term_pty_reader_destroy(terminal->pty_reader);
@@ -410,7 +425,8 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
             text_layer->cell_width, text_layer->cell_height,
             1,  /* scrolling_mode = true */
             terminal_request_render_callback, terminal,
-            terminal_scroll_callback, terminal);
+            terminal_scroll_callback, terminal,
+            terminal_cursor_callback, terminal);
         if (YETTY_IS_OK(ypaint_res)) {
             yetty_term_terminal_layer_add(terminal, ypaint_res.value);
             ydebug("terminal_create: ypaint scrolling layer created and added");

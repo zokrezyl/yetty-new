@@ -450,26 +450,39 @@ void ypaint_canvas_add_primitive(YPaintCanvasHandle canvas,
                                   const float* primData, uint32_t wordCount,
                                   float aabbMinX, float aabbMinY,
                                   float aabbMaxX, float aabbMaxY) {
-    if (!canvas || !primData || wordCount == 0) return;
+    if (!canvas || !primData || wordCount == 0 || wordCount > 32) return;
+
+    // Offset AABB Y by cursor position for grid placement
+    float yOffset = canvas->cursorRow * canvas->cellSizeY;
+    aabbMinY += yOffset;
+    aabbMaxY += yOffset;
+
+    // Primitive data Y coords stay relative to the line (handled in shader via rolling_row)
 
     float baseY = (canvas->sceneMinY > 1e9f) ? 0.0f : canvas->sceneMinY;
 
-    // Local row range within primitive's AABB
+    // Row range within primitive's AABB
     int32_t localMinRow = (int32_t)floorf((aabbMinY - baseY) / canvas->cellSizeY);
     int32_t localMaxRow = (int32_t)floorf((aabbMaxY - baseY) / canvas->cellSizeY);
     if (localMinRow < 0) localMinRow = 0;
     if (localMaxRow < 0) localMaxRow = 0;
 
-    // In scrolling mode, grid rows are offset by cursor position
-    uint32_t primMinRow = canvas->scrollingMode ? (canvas->cursorRow + localMinRow) : (uint32_t)localMinRow;
-    uint32_t primMaxRow = canvas->scrollingMode ? (canvas->cursorRow + localMaxRow) : (uint32_t)localMaxRow;
+    uint32_t primMinRow = (uint32_t)localMinRow;
+    uint32_t primMaxRow = (uint32_t)localMaxRow;
 
     // Ensure lines exist
     linebuffer_ensure_count(&canvas->lines, primMaxRow + 1, canvas->gridWidth);
 
+    // Prepend anchorRow (cursor's absolute row) to primitive data
+    // Shader uses this for y_offset calculation
+    uint32_t anchorRow = canvas->row0Absolute + canvas->cursorRow;
+    float dataWithAnchor[33];
+    memcpy(&dataWithAnchor[0], &anchorRow, sizeof(uint32_t));
+    memcpy(&dataWithAnchor[1], primData, wordCount * sizeof(float));
+
     // Store primitive at primMaxRow (bottom of AABB - for scroll deletion)
     GridLine* baseLine = linebuffer_get(&canvas->lines, primMaxRow);
-    uint32_t primIndex = primdata_array_push(&baseLine->prims, primData, wordCount);
+    uint32_t primIndex = primdata_array_push(&baseLine->prims, dataWithAnchor, wordCount + 1);
 
     // Add grid cell references
     uint32_t cellMinX = cell_x_from_world(canvas, aabbMinX);
@@ -723,7 +736,7 @@ const uint32_t* ypaint_canvas_build_prim_staging(YPaintCanvasHandle canvas, uint
         return NULL;
     }
 
-    // Count primitives and total words
+    // Count primitives and total words (anchorRow already included in wordCount)
     uint32_t primCount = 0;
     uint32_t totalWords = 0;
     for (uint32_t i = 0; i < canvas->lines.count; i++) {
@@ -741,6 +754,7 @@ const uint32_t* ypaint_canvas_build_prim_staging(YPaintCanvasHandle canvas, uint
     }
 
     // Layout: [prim0_offset, prim1_offset, ...][prim0_data...][prim1_data...]
+    // Each prim data starts with anchorRow (already in data)
     uint32_t totalSize = primCount + totalWords;
     ensure_prim_staging(canvas, totalSize);
 
@@ -748,10 +762,12 @@ const uint32_t* ypaint_canvas_build_prim_staging(YPaintCanvasHandle canvas, uint
     uint32_t primIdx = 0;
     for (uint32_t i = 0; i < canvas->lines.count; i++) {
         GridLine* line = linebuffer_get(&canvas->lines, i);
+
         for (uint32_t p = 0; p < line->prims.count; p++) {
             PrimData* prim = &line->prims.data[p];
             canvas->primStaging[primIdx] = dataOffset;
 
+            // Copy primitive data (anchorRow is first word)
             for (uint32_t w = 0; w < prim->wordCount; w++) {
                 uint32_t val;
                 memcpy(&val, &prim->data[w], sizeof(uint32_t));
@@ -775,7 +791,7 @@ uint32_t ypaint_canvas_prim_gpu_size(YPaintCanvasHandle canvas) {
     for (uint32_t i = 0; i < canvas->lines.count; i++) {
         GridLine* line = linebuffer_get(&canvas->lines, i);
         for (uint32_t p = 0; p < line->prims.count; p++) {
-            totalWords += 1 + line->prims.data[p].wordCount;
+            totalWords += line->prims.data[p].wordCount;
         }
     }
     return totalWords * sizeof(float);

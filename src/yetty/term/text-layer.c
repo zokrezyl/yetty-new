@@ -173,7 +173,9 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     yetty_term_request_render_fn request_render_fn,
     void *request_render_userdata,
     yetty_term_scroll_fn scroll_fn,
-    void *scroll_userdata)
+    void *scroll_userdata,
+    yetty_term_cursor_fn cursor_fn,
+    void *cursor_userdata)
 {
     struct yetty_term_terminal_text_layer *text_layer;
 
@@ -193,6 +195,8 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     text_layer->base.request_render_userdata = request_render_userdata;
     text_layer->base.scroll_fn = scroll_fn;
     text_layer->base.scroll_userdata = scroll_userdata;
+    text_layer->base.cursor_fn = cursor_fn;
+    text_layer->base.cursor_userdata = cursor_userdata;
 
     /* Create font from config */
     struct yetty_font_font_result font_res = yetty_font_raster_font_create(
@@ -412,6 +416,12 @@ static int on_move_cursor(VTermPos pos, VTermPos oldpos, int visible, void *user
     set_cursor_pos(&text_layer->rs, (float)pos.col, (float)pos.row);
     set_cursor_visible(&text_layer->rs, visible ? 1.0f : 0.0f);
     text_layer->base.dirty = 1;
+
+    /* Notify cursor callback */
+    if (text_layer->base.cursor_fn) {
+        text_layer->base.cursor_fn(&text_layer->base, pos.col, pos.row,
+                                   text_layer->base.cursor_userdata);
+    }
     return 1;
 }
 

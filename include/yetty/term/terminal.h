@@ -31,6 +31,9 @@ typedef void (*yetty_term_request_render_fn)(void *userdata);
 /* Scroll callback - called when layer scrolls, passes source layer and line count */
 typedef void (*yetty_term_scroll_fn)(struct yetty_term_terminal_layer *source, int lines, void *userdata);
 
+/* Cursor callback - called when layer moves cursor, passes source layer and position */
+typedef void (*yetty_term_cursor_fn)(struct yetty_term_terminal_layer *source, int col, int row, void *userdata);
+
 /* Layer ops */
 struct yetty_term_terminal_layer_ops {
     void (*destroy)(struct yetty_term_terminal_layer *self);
@@ -44,6 +47,8 @@ struct yetty_term_terminal_layer_ops {
     int (*on_char)(struct yetty_term_terminal_layer *self, uint32_t codepoint, int mods);
     /* Scroll - called when another layer scrolls, lines > 0 = scroll down */
     void (*scroll)(struct yetty_term_terminal_layer *self, int lines);
+    /* Cursor - called when another layer moves cursor */
+    void (*set_cursor)(struct yetty_term_terminal_layer *self, int col, int row);
 };
 
 /* Layer base - embed as first member in subclasses */
@@ -63,6 +68,9 @@ struct yetty_term_terminal_layer {
     /* Scroll callback - set by creator */
     yetty_term_scroll_fn scroll_fn;
     void *scroll_userdata;
+    /* Cursor callback - set by creator */
+    yetty_term_cursor_fn cursor_fn;
+    void *cursor_userdata;
 };
 
 /* Terminal context - contains yetty context plus terminal-owned objects */

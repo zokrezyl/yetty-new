@@ -77,33 +77,38 @@ fn sd_capsule(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
 }
 
 // =============================================================================
-// Primitive Buffer Layout (from ypaint-sdf-prim.gen.c):
-//   [0] type          - primitive type for dispatch
-//   [1] z_order       - rendering order
-//   [2] fill_color    - packed RGBA
-//   [3] stroke_color  - packed RGBA
-//   [4] stroke_width  - f32
-//   [5+] geometry     - primitive-specific args
+// Primitive Buffer Layout (serialized with rolling_row prepended):
+//   [0] rolling_row   - absolute row number of primitive's line
+//   [1] type          - primitive type for dispatch
+//   [2] z_order       - rendering order
+//   [3] fill_color    - packed RGBA
+//   [4] stroke_color  - packed RGBA
+//   [5] stroke_width  - f32
+//   [6+] geometry     - primitive-specific args (Y coords relative to line)
 // =============================================================================
 
-fn ypaint_read_prim_type(prim_offset: u32) -> u32 {
+fn ypaint_read_rolling_row(prim_offset: u32) -> u32 {
     return storage_buffer[prim_offset + 0u];
 }
 
-fn ypaint_read_fill_color(prim_offset: u32) -> u32 {
-    return storage_buffer[prim_offset + 2u];
+fn ypaint_read_prim_type(prim_offset: u32) -> u32 {
+    return storage_buffer[prim_offset + 1u];
 }
 
-fn ypaint_read_stroke_color(prim_offset: u32) -> u32 {
+fn ypaint_read_fill_color(prim_offset: u32) -> u32 {
     return storage_buffer[prim_offset + 3u];
 }
 
+fn ypaint_read_stroke_color(prim_offset: u32) -> u32 {
+    return storage_buffer[prim_offset + 4u];
+}
+
 fn ypaint_read_stroke_width(prim_offset: u32) -> f32 {
-    return bitcast<f32>(storage_buffer[prim_offset + 4u]);
+    return bitcast<f32>(storage_buffer[prim_offset + 5u]);
 }
 
 fn ypaint_read_geom_f32(prim_offset: u32, idx: u32) -> f32 {
-    return bitcast<f32>(storage_buffer[prim_offset + 5u + idx]);
+    return bitcast<f32>(storage_buffer[prim_offset + 6u + idx]);
 }
 
 // Evaluate SDF for a primitive at given scene position
@@ -225,8 +230,16 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let data_offset = storage_buffer[prims_offset + raw_idx];
         let prim_offset = prims_offset + prim_count + data_offset;
 
+        // Compute primitive's screen Y offset from its rolling_row
+        let rolling_row = ypaint_read_rolling_row(prim_offset);
+        let row_origin = uniforms.ypaint_scroll_ypaint_row_origin;
+        let y_offset = f32(rolling_row - row_origin) * cell_size.y;
+
+        // Adjust scene position - primitive coords are relative to its line
+        let prim_scene_pos = vec2<f32>(pixel_pos.x, pixel_pos.y - y_offset);
+
         // Evaluate SDF
-        let d = ypaint_evaluate_sdf(prim_offset, scene_pos);
+        let d = ypaint_evaluate_sdf(prim_offset, prim_scene_pos);
 
         // Render fill
         let fill_color = ypaint_read_fill_color(prim_offset);
