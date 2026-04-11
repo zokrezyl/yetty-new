@@ -54,7 +54,7 @@ static void init_uniforms(struct yetty_render_gpu_resource_set *rs)
 /* YPaint layer - embeds base as first member */
 struct yetty_term_ypaint_layer {
     struct yetty_term_terminal_layer base;
-    YPaintCanvasHandle canvas;
+    struct ypaint_canvas *canvas;
     int scrolling_mode;
     struct yetty_render_gpu_resource_set rs;
 

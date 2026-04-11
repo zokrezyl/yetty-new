@@ -41,8 +41,8 @@ static uint32_t parse_color(const char *str) {
  * Parser context
  *===========================================================================*/
 
-typedef struct {
-    YPaintCanvasHandle canvas;
+struct ypaint_yaml_parse_ctx {
+    struct ypaint_canvas *canvas;
     uint32_t z_order;
     /* Current primitive state */
     char prim_type[32];
@@ -86,9 +86,9 @@ typedef struct {
     int in_array;
     int array_idx;
     float array_vals[8];
-} ParseCtx;
+};
 
-static void reset_prim(ParseCtx *ctx) {
+static void reset_prim(struct ypaint_yaml_parse_ctx *ctx) {
     ctx->prim_type[0] = 0;
     ctx->prop_key[0] = 0;
     ctx->fill_color = 0;
@@ -130,7 +130,7 @@ static void reset_prim(ParseCtx *ctx) {
     ctx->array_idx = 0;
 }
 
-static void store_array(ParseCtx *ctx) {
+static void store_array(struct ypaint_yaml_parse_ctx *ctx) {
     const char *k = ctx->prop_key;
     ydebug("store_array: key='%s' idx=%d vals=[%f,%f]", k, ctx->array_idx, ctx->array_vals[0], ctx->array_vals[1]);
     if (strcmp(k, "position") == 0 && ctx->array_idx >= 2) {
@@ -163,7 +163,7 @@ static void store_array(ParseCtx *ctx) {
     }
 }
 
-static void add_prim(ParseCtx *ctx) {
+static void add_prim(struct ypaint_yaml_parse_ctx *ctx) {
     float data[16];
     uint32_t wc = 0, tmp;
     float minX, minY, maxX, maxY;
@@ -458,10 +458,10 @@ static void add_prim(ParseCtx *ctx) {
  * YAML event parser
  *===========================================================================*/
 
-int ypaint_sdf_yaml_parse(YPaintCanvasHandle canvas, const char *yaml, size_t len) {
+int ypaint_sdf_yaml_parse(struct ypaint_canvas *canvas, const char *yaml, size_t len) {
     yaml_parser_t parser;
     yaml_event_t ev;
-    ParseCtx ctx = {0};
+    struct ypaint_yaml_parse_ctx ctx = {0};
     int done = 0, err = 0;
     int depth = 0;       /* mapping depth */
     int in_body = 0;     /* inside body sequence */
