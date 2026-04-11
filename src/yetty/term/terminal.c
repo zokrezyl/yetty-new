@@ -7,8 +7,10 @@
 #include <yetty/platform/pty-factory.h>
 #include <yetty/platform/pty-poll-source.h>
 #include <yetty/render/gpu-resource-set.h>
-#include <yetty/render/gpu-allocator.h>
-#include <yetty/render/gpu-resource-binder.h>
+#include <yetty/render/layer-renderer.h>
+#include <yetty/render/blender.h>
+#include <yetty/render/render-target.h>
+#include <yetty/render/rendered-layer.h>
 #include <yetty/ytrace.h>
 #include <stdlib.h>
 #include <string.h>

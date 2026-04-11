@@ -8,7 +8,8 @@ Terminal rendering is split into multiple layers (text, ypaint, etc.), each rend
 - **Simple orchestration** - terminal.c iterates layers and calls blender
 - **Complex logic in render/** - Rendering and blending logic in `src/yetty/render/`
 - **Blender owns target** - Target is encapsulated, can be changed at runtime
-- **Layer independence** - Each layer has its own pipeline and intermediate texture
+- **1:1 renderer-layer coupling** - Each layer has its dedicated renderer
+- **Renderer owns binder** - Binder caches compiled shader/pipeline
 
 ---
 
@@ -17,8 +18,13 @@ Terminal rendering is split into multiple layers (text, ypaint, etc.), each rend
 ```
 terminal.c (simple orchestrator)
     │
-    ├── for each layer:
-    │       renderer->ops->render(layer) → rendered_layer
+    ├── layers[]      ─────────────────────────────────────┐
+    │   ├── text_layer                                     │
+    │   └── ypaint_layer                                   │
+    │                                                      │ 1:1
+    ├── renderers[]   ←────────────────────────────────────┘
+    │   ├── text_renderer (owns: binder, texture, layer ref)
+    │   └── ypaint_renderer (owns: binder, texture, layer ref)
     │
     └── blender->ops->blend(rendered_layers[], count)
                 │
@@ -67,7 +73,7 @@ struct yetty_render_rendered_layer_ops {
 
 ### 3. layer_renderer
 
-Renders a terminal_layer to texture.
+Renders a terminal_layer to texture. **Created with a layer reference (1:1 coupling).**
 
 ```c
 struct yetty_render_layer_renderer_ops {
@@ -76,14 +82,29 @@ struct yetty_render_layer_renderer_ops {
     struct yetty_render_rendered_layer_result (*render)(
         struct yetty_render_layer_renderer *self,
         struct yetty_term_terminal_layer *layer);
+
+    void (*resize)(struct yetty_render_layer_renderer *self,
+                   uint32_t width, uint32_t height);
 };
+
+/* Create renderer with layer reference */
+struct yetty_render_layer_renderer_result yetty_render_layer_renderer_create(
+    WGPUDevice device,
+    WGPUQueue queue,
+    WGPUTextureFormat format,
+    uint32_t width,
+    uint32_t height);
 ```
 
-Responsibilities:
-- Creates/manages per-layer binder
-- Creates/manages intermediate texture
-- Handles resize
-- Returns rendered_layer handle
+**Renderer owns:**
+- **Binder** - Caches compiled shader and pipeline. Reuses if shader code unchanged.
+- **Intermediate texture** - Layer renders to this, blender reads from it.
+- **Layer reference** - The renderer is bound to one layer for its lifetime.
+
+**Dirty flag optimization:**
+- `render()` calls `layer->ops->is_dirty()` first
+- If not dirty, returns cached rendered_layer immediately (no GPU work)
+- If dirty, calls `layer->ops->get_gpu_resource_set()` which clears the dirty flag
 
 ### 4. blender
 
@@ -115,12 +136,12 @@ Target ownership:
 
 ```c
 struct yetty_term_terminal {
-    /* layers */
+    /* layers and their renderers (1:1) */
     struct yetty_term_terminal_layer *layers[MAX_LAYERS];
+    struct yetty_render_layer_renderer *renderers[MAX_LAYERS];
     size_t layer_count;
 
-    /* rendering */
-    struct yetty_render_layer_renderer *renderer;
+    /* compositor */
     struct yetty_render_blender *blender;
 };
 
@@ -130,11 +151,11 @@ static struct yetty_core_void_result terminal_render_frame(
     struct yetty_render_rendered_layer *rendered[MAX_LAYERS];
     size_t rendered_count = 0;
 
-    /* Render each layer to texture */
+    /* Render each layer to texture (skips if not dirty) */
     for (size_t i = 0; i < terminal->layer_count; i++) {
         struct yetty_render_rendered_layer_result res =
-            terminal->renderer->ops->render(
-                terminal->renderer,
+            terminal->renderers[i]->ops->render(
+                terminal->renderers[i],
                 terminal->layers[i]);
         if (YETTY_IS_OK(res)) {
             rendered[rendered_count++] = res.value;
@@ -156,22 +177,55 @@ static struct yetty_core_void_result terminal_render_frame(
 ```
 terminal_layer (text, ypaint, etc.)
        │
-       │ layer->ops->get_gpu_resource_set()
-       ▼
-gpu_resource_set (buffers, textures, uniforms, shader)
+       │ renderer checks: layer->ops->is_dirty()
        │
-       │ layer_renderer creates binder, pipeline
-       ▼
-intermediate texture
+       ├── NOT DIRTY ──► return cached rendered_layer (no GPU work)
        │
-       │ returned as rendered_layer
-       ▼
+       └── DIRTY ──────► layer->ops->get_gpu_resource_set()
+                               │         (clears dirty flag)
+                               ▼
+                gpu_resource_set (buffers, textures, uniforms, shader)
+                               │
+                               │ binder compiles pipeline (if shader changed)
+                               ▼
+                        intermediate texture
+                               │
+                               │ returned as rendered_layer
+                               ▼
 blender collects all rendered_layers
        │
        │ alpha-over compositing
        ▼
 render_target (screen, VNC, etc.)
 ```
+
+**Dirty flag lifecycle:**
+1. Layer data changes → layer sets `dirty = true`
+2. `render()` checks `is_dirty()` → returns cached if false
+3. `get_gpu_resource_set()` called → clears `dirty = false`
+4. Binder checks if shader code changed → recompiles only if needed
+
+---
+
+## Binder Caching
+
+The binder (owned by renderer) caches compiled shader and pipeline:
+
+```c
+struct binder {
+    WGPUDevice device;
+    WGPUShaderModule shader;      /* cached */
+    WGPURenderPipeline pipeline;  /* cached */
+    uint32_t shader_hash;         /* hash of last compiled shader code */
+};
+```
+
+**On `bind()` call:**
+1. Compute hash of shader code from gpu_resource_set
+2. If hash matches `shader_hash` → reuse cached pipeline
+3. If hash differs → recompile shader, create new pipeline, update hash
+
+This avoids recompilation when only buffers/uniforms change (common case).
 
 ---
 
@@ -223,15 +277,18 @@ terminal_render_frame(terminal);
 ## File Structure
 
 ```
-src/yetty/render/
+include/yetty/render/
 ├── render-target.h         # target interface
-├── render-target-surface.c # WGPUSurface implementation
 ├── rendered-layer.h        # rendered layer handle
-├── rendered-layer.c
 ├── layer-renderer.h        # layer → texture renderer
-├── layer-renderer.c
-├── blender.h               # compositor, owns target
-├── blender.c
+└── blender.h               # compositor, owns target
+
+src/yetty/render/
+├── render-target-surface.c # WGPUSurface target implementation
+├── rendered-layer.c        # rendered layer handle implementation
+├── layer-renderer.c        # renderer (owns binder, texture, layer ref)
+├── binder.c                # shader/pipeline caching
+├── blender.c               # compositor
 └── blend.wgsl              # compositing shader
 ```
 
