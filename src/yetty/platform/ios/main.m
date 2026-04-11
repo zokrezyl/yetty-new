@@ -202,6 +202,18 @@ static void *render_thread_func(void *arg)
     args->running = &_running;
     pthread_create(&_renderThread, NULL, render_thread_func, args);
 
+    /* Send initial resize event */
+    {
+        CGSize size = _metalView.bounds.size;
+        CGFloat scale = _metalView.metalLayer.contentsScale;
+        struct yetty_core_event ev = {0};
+        ev.type = YETTY_EVENT_RESIZE;
+        ev.resize.width = (float)(size.width * scale);
+        ev.resize.height = (float)(size.height * scale);
+        ydebug("initial resize: %.0fx%.0f", ev.resize.width, ev.resize.height);
+        _pipe->ops->write(_pipe, &ev, sizeof(ev));
+    }
+
     /* Become first responder to receive keyboard input */
     [self becomeFirstResponder];
 }
