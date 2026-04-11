@@ -53,6 +53,9 @@ fn unpack_color(c: u32) -> vec3<f32> {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    // DEBUG: Return bright magenta to verify shader runs
+    return vec4<f32>(1.0, 0.0, 1.0, 1.0);
+
     let pixel_pos = input.position.xy;
     let grid_size = uniforms.text_grid_grid_size;
     let cell_size = uniforms.text_grid_cell_size;
@@ -95,7 +98,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             let sample_uv = region.xy + glyph_uv * region_size + local_uv * glyph_size_uv;
             let alpha = textureSampleLevel(atlas_r8_texture, atlas_r8_sampler, sample_uv, 0.0).r;
             final_color = mix(bg_color, fg_color, alpha);
+
+            // DEBUG: Show red tint where glyph should appear
+            // final_color = vec3<f32>(final_color.r + 0.3, final_color.g, final_color.b);
         }
+    }
+
+    // DEBUG: visualize glyph presence with green tint
+    if (glyph != 0u) {
+        final_color = vec3<f32>(final_color.r, final_color.g + 0.2, final_color.b);
     }
 
     // Cursor

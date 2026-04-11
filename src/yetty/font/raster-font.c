@@ -373,10 +373,22 @@ static int raster_font_rasterize_glyph(struct raster_font *font, uint32_t codepo
         }
     }
 
-    /* Store UV */
-    uvs[slot_idx].uv_x = (float)atlas_x / (float)aw;
-    uvs[slot_idx].uv_y = (float)atlas_y / (float)ah;
+    /* Store UV — point to cell content start (skip padding) */
+    uvs[slot_idx].uv_x = (float)(atlas_x + RASTER_FONT_ATLAS_PADDING) / (float)aw;
+    uvs[slot_idx].uv_y = (float)(atlas_y + RASTER_FONT_ATLAS_PADDING) / (float)ah;
     raster_font_add_slot(font, style_idx, codepoint, slot_idx);
+
+    /* Sample a few pixel values from the bitmap */
+    uint8_t sample_vals[4] = {0};
+    for (int i = 0; i < 4 && i < glyph_w * glyph_h; i++) {
+        int y = i / glyph_w;
+        int x = i % glyph_w;
+        sample_vals[i] = bitmap->buffer[y * bitmap->pitch + x];
+    }
+    ydebug("rasterize U+%04X slot=%u bm=%dx%d mode=%d bear=(%d,%d) off=(%d,%d) atlas=(%u,%u) uv=(%.4f,%.4f) px=[%u,%u,%u,%u]",
+           codepoint, slot_idx, glyph_w, glyph_h, bitmap->pixel_mode, bearing_x, bearing_y,
+           offset_x, offset_y, atlas_x, atlas_y, uvs[slot_idx].uv_x, uvs[slot_idx].uv_y,
+           sample_vals[0], sample_vals[1], sample_vals[2], sample_vals[3]);
 
     font->shelf_x = atlas_x + glyph_width + RASTER_FONT_ATLAS_PADDING;
     if (glyph_height > font->shelf_height)
@@ -717,6 +729,19 @@ static struct yetty_render_gpu_resource_set_result raster_font_get_gpu_resource_
 
     ydebug("raster_font_get_gpu_resource_set: atlas=%ux%u buffer_size=%zu dirty=%d",
            FONT_ATLAS(font).width, FONT_ATLAS(font).height, FONT_UV_BUF(font).size, font->dirty);
+
+    /* Dump non-zero pixels in first glyph slot area for debugging */
+    if (font->dirty && FONT_ATLAS(font).data) {
+        uint8_t *px = FONT_ATLAS(font).data;
+        uint32_t aw = FONT_ATLAS(font).width;
+        int non_zero = 0;
+        for (uint32_t y = 0; y < 24 && y < FONT_ATLAS(font).height; y++) {
+            for (uint32_t x = 0; x < 16 && x < aw; x++) {
+                if (px[y * aw + x] > 0) non_zero++;
+            }
+        }
+        ydebug("  atlas first slot (0-16, 0-24): %d non-zero pixels", non_zero);
+    }
 
     if (font->dirty) {
         FONT_ATLAS(font).dirty = 1;
