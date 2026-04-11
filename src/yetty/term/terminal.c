@@ -1,6 +1,7 @@
 #include <yetty/term/terminal.h>
 #include <yetty/term/text-layer.h>
 #include <yetty/term/ypaint-layer.h>
+#include <yetty/term/pty-reader.h>
 #include <yetty/core/event-loop.h>
 #include <yetty/core/event.h>
 #include <yetty/platform/pty.h>
@@ -28,6 +29,7 @@ struct yetty_term_terminal {
     yetty_core_poll_id pty_poll_id;
     struct yetty_render_blender *blender;
     int shutting_down;
+    struct yetty_term_pty_reader *pty_reader;
 };
 
 /* Forward declarations */
@@ -212,43 +214,14 @@ static struct yetty_core_void_result terminal_render_frame(struct yetty_term_ter
     return YETTY_OK_VOID();
 }
 
-/* Max bytes to read per PTY poll event before yielding for render.
- * This prevents depleting all PTY data before any rendering can happen.
- * TODO: Make this configurable via yetty config. */
-#define YETTY_TERM_PTY_READ_CHUNK_SIZE 65536  /* 64KB */
-
-/* Read from PTY and feed to text layer */
+/* Read from PTY via pty_reader */
 static void terminal_read_pty(struct yetty_term_terminal *terminal)
 {
-    struct yetty_platform_pty *pty = terminal->context.pty;
-    char buf[4096];
-    size_t total_read = 0;
-    int dirty = 0;
-
-    if (!pty || !pty->ops || !pty->ops->read)
+    if (!terminal->pty_reader)
         return;
 
-    struct yetty_core_size_result res;
-    while ((res = pty->ops->read(pty, buf, sizeof(buf))), YETTY_IS_OK(res) && res.value > 0) {
-        /* Feed to text layer */
-        if (terminal->layer_count > 0) {
-            struct yetty_term_terminal_layer *layer = terminal->layers[0];
-            if (layer && layer->ops && layer->ops->write) {
-                layer->ops->write(layer, buf, res.value);
-                dirty = 1;
-            }
-        }
-        total_read += res.value;
-
-        /* Break after reading chunk size to allow render events */
-        if (total_read >= YETTY_TERM_PTY_READ_CHUNK_SIZE) {
-            ydebug("terminal_read_pty: read %zu bytes, yielding for render", total_read);
-            break;
-        }
-    }
-
-    /* Request render if text layer is dirty */
-    if (dirty && terminal->layer_count > 0) {
+    int bytes_read = yetty_term_pty_reader_read(terminal->pty_reader);
+    if (bytes_read > 0 && terminal->layer_count > 0) {
         struct yetty_term_terminal_layer *layer = terminal->layers[0];
         if (layer && layer->dirty) {
             terminal->context.event_loop->ops->request_render(terminal->context.event_loop);
@@ -348,6 +321,14 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
             terminal->context.pty = pty_res.value;
             ydebug("terminal_create: PTY created at %p", (void *)terminal->context.pty);
 
+            /* Create PTY reader */
+            struct yetty_term_pty_reader_result reader_res =
+                yetty_term_pty_reader_create(terminal->context.pty);
+            if (YETTY_IS_OK(reader_res)) {
+                terminal->pty_reader = reader_res.value;
+                ydebug("terminal_create: pty_reader created");
+            }
+
             /* Set up PTY poll */
             struct yetty_platform_pty_poll_source *poll_source = terminal->context.pty->ops->poll_source(terminal->context.pty);
             if (poll_source) {
@@ -374,6 +355,7 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
         terminal_request_render_callback, terminal);
     if (!YETTY_IS_OK(text_layer_res)) {
         ydebug("terminal_create: failed to create text layer");
+        yetty_term_pty_reader_destroy(terminal->pty_reader);
         if (terminal->context.pty)
             terminal->context.pty->ops->destroy(terminal->context.pty);
         terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
@@ -382,6 +364,12 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
     }
     yetty_term_terminal_layer_add(terminal, text_layer_res.value);
     ydebug("terminal_create: text_layer created and added");
+
+    /* Register text layer as default sink for pty_reader */
+    if (terminal->pty_reader) {
+        yetty_term_pty_reader_register_default_sink(terminal->pty_reader, text_layer_res.value);
+        ydebug("terminal_create: text_layer registered as default sink");
+    }
 
     /* Create ypaint scrolling layer (overlay on top of text) */
     {
@@ -394,6 +382,13 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
         if (YETTY_IS_OK(ypaint_res)) {
             yetty_term_terminal_layer_add(terminal, ypaint_res.value);
             ydebug("terminal_create: ypaint scrolling layer created and added");
+
+            /* Register ypaint layer for OSC 666674 */
+            if (terminal->pty_reader) {
+                yetty_term_pty_reader_register_osc_sink(
+                    terminal->pty_reader, YETTY_OSC_YPAINT_SCROLL, ypaint_res.value);
+                ydebug("terminal_create: ypaint layer registered for OSC 666674");
+            }
         } else {
             ydebug("terminal_create: failed to create ypaint layer (non-fatal): %s",
                    ypaint_res.error.msg);
@@ -509,6 +504,12 @@ void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal)
     if (terminal->context.event_loop && terminal->context.event_loop->ops && terminal->context.event_loop->ops->destroy) {
         ydebug("terminal_destroy: destroying event_loop");
         terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+    }
+
+    /* Destroy PTY reader */
+    if (terminal->pty_reader) {
+        ydebug("terminal_destroy: destroying pty_reader");
+        yetty_term_pty_reader_destroy(terminal->pty_reader);
     }
 
     ydebug("terminal_destroy: freeing terminal struct");

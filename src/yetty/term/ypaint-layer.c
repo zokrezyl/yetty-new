@@ -1,6 +1,8 @@
 #include <yetty/term/ypaint-layer.h>
+#include <yetty/term/osc-args.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/render/gpu-resource-set.h>
+#include <yetty/util.h>
 #include <yetty/ytrace.h>
 #include <stdlib.h>
 #include <string.h>
@@ -165,46 +167,66 @@ static void ypaint_layer_destroy(struct yetty_term_terminal_layer *self)
     free(layer);
 }
 
-/* Write - receives ypaint data in format "args;payload"
- * args: options like "--clear", "--yaml"
- * payload: primitive data (already uncompressed/decoded)
- */
+/* Write - receives ypaint data in format "args;payload" (base64 encoded) */
 static void ypaint_layer_write(struct yetty_term_terminal_layer *self,
                                const char *data, size_t len)
 {
     struct yetty_term_ypaint_layer *layer =
         (struct yetty_term_ypaint_layer *)self;
+    struct yetty_term_osc_args args;
 
     if (!data || len == 0)
         return;
 
-    /* Find separator between args and payload */
-    const char *sep = memchr(data, ';', len);
-    size_t args_len = sep ? (size_t)(sep - data) : len;
+    /* Parse OSC args */
+    if (yetty_term_osc_args_parse(&args, data, len) < 0) {
+        yerror("ypaint_layer_write: failed to parse args");
+        return;
+    }
 
-    /* Check for --clear command */
-    if (args_len >= 7 && strncmp(data, "--clear", 7) == 0) {
+    /* Handle --clear */
+    if (yetty_term_osc_args_has(&args, "clear")) {
         ydebug("ypaint_layer_write: clearing canvas");
         ypaint_canvas_clear(layer->canvas);
+        yetty_term_osc_args_free(&args);
         layer->base.dirty = 1;
         if (layer->base.request_render_fn)
             layer->base.request_render_fn(layer->base.request_render_userdata);
         return;
     }
 
-    /* TODO: Parse args for --yaml flag and process payload
-     * For now, we'll handle this when OSC dispatch is integrated.
-     * The payload parsing will use ypaint_canvas_add_primitive().
-     */
-
-    if (sep) {
-        const char *payload = sep + 1;
-        size_t payload_len = len - args_len - 1;
-        (void)payload;
-        (void)payload_len;
-        ydebug("ypaint_layer_write: args_len=%zu payload_len=%zu (parsing TBD)",
-               args_len, payload_len);
+    /* Check for payload */
+    if (!args.payload || args.payload_len == 0) {
+        ydebug("ypaint_layer_write: no payload");
+        yetty_term_osc_args_free(&args);
+        return;
     }
+
+    /* Base64 decode payload */
+    size_t decoded_cap = args.payload_len;
+    char *decoded = malloc(decoded_cap + 1);
+    if (!decoded) {
+        yerror("ypaint_layer_write: malloc failed");
+        yetty_term_osc_args_free(&args);
+        return;
+    }
+
+    size_t decoded_len = yetty_base64_decode(args.payload, args.payload_len, decoded, decoded_cap);
+    decoded[decoded_len] = '\0';
+
+    ydebug("ypaint_layer_write: yaml=%d payload_len=%zu decoded_len=%zu",
+           yetty_term_osc_args_has(&args, "yaml"), args.payload_len, decoded_len);
+
+    /* Handle --yaml format */
+    if (yetty_term_osc_args_has(&args, "yaml")) {
+        ydebug("ypaint_layer_write: YAML (first 200 chars): %.200s", decoded);
+        /* TODO: Parse YAML with libyaml and call ypaint_canvas_add_primitive() */
+    } else {
+        ydebug("ypaint_layer_write: binary format (not implemented)");
+    }
+
+    free(decoded);
+    yetty_term_osc_args_free(&args);
 
     layer->base.dirty = 1;
     if (layer->base.request_render_fn)

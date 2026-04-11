@@ -33,6 +33,7 @@ set(YETTY_SOURCES
     ${YETTY_ROOT}/src/yetty/yetty.c
     ${YETTY_ROOT}/src/yetty/config.c
     ${YETTY_ROOT}/src/yetty/ytrace.c
+    ${YETTY_ROOT}/src/yetty/util.c
 )
 
 # Render subsystem

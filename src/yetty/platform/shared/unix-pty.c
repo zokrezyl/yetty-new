@@ -202,7 +202,13 @@ static struct yetty_platform_pty_result unix_pty_create(struct yetty_config *con
         for (fd = 3; fd < 1024; fd++)
             close(fd);
 
-        execl(shell, shell, NULL);
+        /* Check for command to execute (-e flag) */
+        const char *command = config->ops->get_string(config, "shell/command", NULL);
+        if (command && command[0]) {
+            execl(shell, shell, "-c", command, NULL);
+        } else {
+            execl(shell, shell, NULL);
+        }
         _exit(1);
     }
 
