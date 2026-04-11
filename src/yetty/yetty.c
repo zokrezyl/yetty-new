@@ -259,30 +259,42 @@ void yetty_destroy(struct yetty_yetty *yetty)
         return;
     }
 
+    ydebug("yetty_destroy: starting");
+
     if (yetty->terminal) {
+        ydebug("yetty_destroy: destroying terminal");
         yetty_term_terminal_destroy(yetty->terminal);
+        ydebug("yetty_destroy: terminal destroyed");
     }
 
-    /* Unconfigure surface before releasing device - prevents crash in Dawn's
-     * SwapChain::DetachFromSurfaceImpl when surface is released later */
+    /* Surface is created by platform (glfw-main.c) but owned by yetty since we
+     * configured it with our device. Must release before device. */
     WGPUSurface surface = yetty->context.app_context.app_gpu_context.surface;
     if (surface && yetty->device) {
+        ydebug("yetty_destroy: unconfiguring surface");
         wgpuSurfaceUnconfigure(surface);
-        /* Tick to process unconfigure before releasing device */
         wgpuDeviceTick(yetty->device);
+        ydebug("yetty_destroy: releasing surface");
+        wgpuSurfaceRelease(surface);
+        yetty->context.app_context.app_gpu_context.surface = NULL;
     }
 
     if (yetty->queue) {
+        ydebug("yetty_destroy: releasing queue");
         wgpuQueueRelease(yetty->queue);
     }
     if (yetty->device) {
+        ydebug("yetty_destroy: releasing device");
         wgpuDeviceRelease(yetty->device);
     }
     if (yetty->adapter) {
+        ydebug("yetty_destroy: releasing adapter");
         wgpuAdapterRelease(yetty->adapter);
     }
 
+    ydebug("yetty_destroy: freeing yetty struct");
     free(yetty);
+    ydebug("yetty_destroy: done");
 }
 
 struct yetty_core_void_result yetty_run(struct yetty_yetty *yetty)

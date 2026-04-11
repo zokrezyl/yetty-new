@@ -148,7 +148,14 @@ static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 
 static void window_close_callback(GLFWwindow *window)
 {
-    (void)window;
+    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_core_event event = {0};
+
+    if (!pipe)
+        return;
+
+    event.type = YETTY_EVENT_SHUTDOWN;
+    pipe->ops->write(pipe, &event, sizeof(event));
 }
 
 static void window_refresh_callback(GLFWwindow *window)

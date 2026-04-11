@@ -27,6 +27,7 @@ struct yetty_term_terminal {
     size_t layer_count;
     yetty_core_poll_id pty_poll_id;
     struct yetty_render_blender *blender;
+    int shutting_down;
 };
 
 /* Forward declarations */
@@ -99,6 +100,15 @@ static int terminal_event_handler(
         }
         return 1;
 
+    case YETTY_EVENT_SHUTDOWN:
+        ydebug("terminal: SHUTDOWN received");
+        terminal->shutting_down = 1;
+        if (terminal->context.event_loop && terminal->context.event_loop->ops &&
+            terminal->context.event_loop->ops->stop) {
+            terminal->context.event_loop->ops->stop(terminal->context.event_loop);
+        }
+        return 1;
+
     case YETTY_EVENT_RESIZE: {
         float width = event->resize.width;
         float height = event->resize.height;
@@ -156,6 +166,11 @@ static int terminal_event_handler(
 /* Render a frame using layered rendering */
 static struct yetty_core_void_result terminal_render_frame(struct yetty_term_terminal *terminal)
 {
+    if (terminal->shutting_down) {
+        ydebug("terminal_render_frame: shutting down, skipping render");
+        return YETTY_OK_VOID();
+    }
+
     if (!terminal->blender) {
         yerror("terminal_render_frame: no blender");
         return YETTY_ERR(yetty_core_void, "no blender");
@@ -314,6 +329,17 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
     }
     ydebug("terminal_create: registered for RESIZE events");
 
+    /* Register for shutdown events */
+    res = terminal->context.event_loop->ops->register_listener(
+        terminal->context.event_loop, YETTY_EVENT_SHUTDOWN, &terminal->listener, 0);
+    if (!YETTY_IS_OK(res)) {
+        ydebug("terminal_create: failed to register SHUTDOWN listener");
+        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+        free(terminal);
+        return YETTY_ERR(yetty_term_terminal, "failed to register SHUTDOWN listener");
+    }
+    ydebug("terminal_create: registered for SHUTDOWN events");
+
     /* Create PTY */
     struct yetty_platform_pty_factory *pty_factory = yetty_context->app_context.pty_factory;
     if (pty_factory && pty_factory->ops && pty_factory->ops->create_pty) {
@@ -446,31 +472,48 @@ void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal)
     if (!terminal)
         return;
 
+    ydebug("terminal_destroy: starting");
+
     /* Destroy renderers first */
     for (i = 0; i < terminal->layer_count; i++) {
         struct yetty_render_layer_renderer *renderer = terminal->renderers[i];
-        if (renderer && renderer->ops && renderer->ops->destroy)
+        if (renderer && renderer->ops && renderer->ops->destroy) {
+            ydebug("terminal_destroy: destroying renderer %zu", i);
             renderer->ops->destroy(renderer);
+        }
     }
+    ydebug("terminal_destroy: renderers destroyed");
 
     /* Destroy blender (also destroys owned render target) */
-    if (terminal->blender && terminal->blender->ops && terminal->blender->ops->destroy)
+    if (terminal->blender && terminal->blender->ops && terminal->blender->ops->destroy) {
+        ydebug("terminal_destroy: destroying blender");
         terminal->blender->ops->destroy(terminal->blender);
+        ydebug("terminal_destroy: blender destroyed");
+    }
 
     /* Destroy layers */
     for (i = 0; i < terminal->layer_count; i++) {
         struct yetty_term_terminal_layer *layer = terminal->layers[i];
-        if (layer && layer->ops && layer->ops->destroy)
+        if (layer && layer->ops && layer->ops->destroy) {
+            ydebug("terminal_destroy: destroying layer %zu", i);
             layer->ops->destroy(layer);
+        }
+    }
+    ydebug("terminal_destroy: layers destroyed");
+
+    if (terminal->context.pty && terminal->context.pty->ops && terminal->context.pty->ops->destroy) {
+        ydebug("terminal_destroy: destroying pty");
+        terminal->context.pty->ops->destroy(terminal->context.pty);
     }
 
-    if (terminal->context.pty && terminal->context.pty->ops && terminal->context.pty->ops->destroy)
-        terminal->context.pty->ops->destroy(terminal->context.pty);
-
-    if (terminal->context.event_loop && terminal->context.event_loop->ops && terminal->context.event_loop->ops->destroy)
+    if (terminal->context.event_loop && terminal->context.event_loop->ops && terminal->context.event_loop->ops->destroy) {
+        ydebug("terminal_destroy: destroying event_loop");
         terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+    }
 
+    ydebug("terminal_destroy: freeing terminal struct");
     free(terminal);
+    ydebug("terminal_destroy: done");
 }
 
 struct yetty_core_void_result yetty_term_terminal_run(struct yetty_term_terminal *terminal)
