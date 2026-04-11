@@ -1,6 +1,7 @@
 #include <yetty/term/ypaint-layer.h>
 #include <yetty/term/osc-args.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
+#include <yetty/ypaint/sdf/ypaint-sdf-yaml.gen.h>
 #include <yetty/render/gpu-resource-set.h>
 #include <yetty/util.h>
 #include <yetty/ytrace.h>
@@ -219,8 +220,8 @@ static void ypaint_layer_write(struct yetty_term_terminal_layer *self,
 
     /* Handle --yaml format */
     if (yetty_term_osc_args_has(&args, "yaml")) {
-        ydebug("ypaint_layer_write: YAML (first 200 chars): %.200s", decoded);
-        /* TODO: Parse YAML with libyaml and call ypaint_canvas_add_primitive() */
+        if (ypaint_sdf_yaml_parse(layer->canvas, decoded, decoded_len) < 0)
+            yerror("ypaint_layer_write: yaml parse failed");
     } else {
         ydebug("ypaint_layer_write: binary format (not implemented)");
     }
@@ -282,10 +283,37 @@ static struct yetty_render_gpu_resource_set_result ypaint_layer_get_gpu_resource
 
         /* Update uniforms */
         set_row_origin(&layer->rs, ypaint_canvas_row0_absolute(layer->canvas));
-        set_prim_count(&layer->rs, ypaint_canvas_primitive_count(layer->canvas));
+        uint32_t prim_count = ypaint_canvas_primitive_count(layer->canvas);
+        set_prim_count(&layer->rs, prim_count);
 
-        ydebug("ypaint_layer_get_gpu_resource_set: grid=%u words, prims=%u words",
-               grid_word_count, prim_word_count);
+        ydebug("ypaint_layer: grid=%u words, prims=%u words, prim_count=%u",
+               grid_word_count, prim_word_count, prim_count);
+
+        /* Debug: dump first primitive data */
+        if (prim_data && prim_count > 0) {
+            uint32_t offset0 = prim_data[0];
+            ydebug("ypaint_layer: prim[0] offset=%u, type=%u, fill=0x%08x",
+                   offset0, prim_data[prim_count + offset0],
+                   prim_data[prim_count + offset0 + 2]);
+            /* Dump geometry */
+            ydebug("ypaint_layer: prim[0] geom: [5]=%f [6]=%f [7]=%f",
+                   *(float*)&prim_data[prim_count + offset0 + 5],
+                   *(float*)&prim_data[prim_count + offset0 + 6],
+                   *(float*)&prim_data[prim_count + offset0 + 7]);
+        }
+
+        /* Debug: dump grid cell 0 */
+        if (grid_data && grid_word_count > 0) {
+            uint32_t cell0_start = grid_data[0];
+            uint32_t cell0_count = grid_data[cell0_start];
+            ydebug("ypaint_layer: grid[0] start=%u count=%u", cell0_start, cell0_count);
+            if (cell0_count > 0) {
+                ydebug("ypaint_layer: grid[0] prim_indices: %u %u %u",
+                       grid_data[cell0_start + 1],
+                       cell0_count > 1 ? grid_data[cell0_start + 2] : 0,
+                       cell0_count > 2 ? grid_data[cell0_start + 3] : 0);
+            }
+        }
     }
 
     return YETTY_OK(yetty_render_gpu_resource_set, &layer->rs);

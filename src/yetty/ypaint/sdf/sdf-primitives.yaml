@@ -8,6 +8,12 @@
 #   - shader.code: WGSL SDF implementation (p = sample point, args as params)
 #   - aabb.code: C code for AABB computation (p = geometry args pointer, expand = strokeWidth/2)
 #
+# YAML parsing is auto-generated from arg names:
+#   cx,cy → position: [x,y]    |  hw,hh → size: [w,h] (divided by 2)
+#   x0,y0,x1,y1 → from/to      |  ax,ay,bx,by,cx,cy → p0/p1/p2
+#   r → radius                 |  rx,ry → radii: [x,y]
+#   round → round              |  scale → scale
+#
 # Buffer layout: [type:u32][zOrder:u32][fillColor:u32][strokeColor:u32][strokeWidth:f32][args...]
 # Geometry offset = 5 (after type + zOrder + fillColor + strokeColor + strokeWidth)
 

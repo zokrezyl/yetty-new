@@ -77,34 +77,33 @@ fn sd_capsule(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
 }
 
 // =============================================================================
-// Primitive Buffer Layout (per docs/ypaint.md):
-//   [0] packed_offset - col | (rolling_row << 16)
-//   [1] type          - primitive type for dispatch
-//   [2] z_order       - rendering order
-//   [3] fill_color    - packed RGBA
-//   [4] stroke_color  - packed RGBA
-//   [5] stroke_width  - f32
-//   [6+] geometry     - primitive-specific args
+// Primitive Buffer Layout (from ypaint-sdf-prim.gen.c):
+//   [0] type          - primitive type for dispatch
+//   [1] z_order       - rendering order
+//   [2] fill_color    - packed RGBA
+//   [3] stroke_color  - packed RGBA
+//   [4] stroke_width  - f32
+//   [5+] geometry     - primitive-specific args
 // =============================================================================
 
 fn ypaint_read_prim_type(prim_offset: u32) -> u32 {
-    return storage_buffer[prim_offset + 1u];
+    return storage_buffer[prim_offset + 0u];
 }
 
 fn ypaint_read_fill_color(prim_offset: u32) -> u32 {
-    return storage_buffer[prim_offset + 3u];
+    return storage_buffer[prim_offset + 2u];
 }
 
 fn ypaint_read_stroke_color(prim_offset: u32) -> u32 {
-    return storage_buffer[prim_offset + 4u];
+    return storage_buffer[prim_offset + 3u];
 }
 
 fn ypaint_read_stroke_width(prim_offset: u32) -> f32 {
-    return bitcast<f32>(storage_buffer[prim_offset + 5u]);
+    return bitcast<f32>(storage_buffer[prim_offset + 4u]);
 }
 
 fn ypaint_read_geom_f32(prim_offset: u32, idx: u32) -> f32 {
-    return bitcast<f32>(storage_buffer[prim_offset + 6u + idx]);
+    return bitcast<f32>(storage_buffer[prim_offset + 5u + idx]);
 }
 
 // Evaluate SDF for a primitive at given scene position
@@ -220,8 +219,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             continue;
         }
 
-        // Compute primitive offset in buffer
-        let prim_offset = prims_offset + prim_count + raw_idx;
+        // raw_idx is a primitive index (0, 1, 2...), not a data offset
+        // Prim staging layout: [offset_table...][prim_data...]
+        // Read data offset from offset table, then compute actual position
+        let data_offset = storage_buffer[prims_offset + raw_idx];
+        let prim_offset = prims_offset + prim_count + data_offset;
 
         // Evaluate SDF
         let d = ypaint_evaluate_sdf(prim_offset, scene_pos);

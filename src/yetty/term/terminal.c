@@ -134,6 +134,22 @@ static int terminal_event_handler(
             app_gpu->surface_width = (uint32_t)width;
             app_gpu->surface_height = (uint32_t)height;
             ydebug("terminal: surface reconfigured to %ux%u", (uint32_t)width, (uint32_t)height);
+
+            /* Resize blender's render target */
+            if (terminal->blender && terminal->blender->ops->get_target) {
+                struct yetty_render_target *target = terminal->blender->ops->get_target(terminal->blender);
+                if (target && target->ops->resize) {
+                    target->ops->resize(target, (uint32_t)width, (uint32_t)height);
+                }
+            }
+
+            /* Resize layer renderers */
+            for (size_t i = 0; i < terminal->layer_count; i++) {
+                struct yetty_render_layer_renderer *renderer = terminal->renderers[i];
+                if (renderer && renderer->ops->resize) {
+                    renderer->ops->resize(renderer, (uint32_t)width, (uint32_t)height);
+                }
+            }
         }
 
         /* Calculate grid dimensions from first layer's cell size */
