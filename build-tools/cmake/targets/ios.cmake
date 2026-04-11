@@ -1,5 +1,8 @@
 # iOS build target
 
+# Disable desktop-only libraries
+set(YETTY_ENABLE_LIB_GLFW OFF CACHE BOOL "" FORCE)
+
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
 # Set iOS assets directory
@@ -20,10 +23,9 @@ set(YETTY_PLATFORM_SOURCES
 
 # Create iOS app bundle
 add_executable(yetty MACOSX_BUNDLE
+    ${YETTY_SOURCES}
     ${YETTY_CORE_SOURCES}
-    ${YETTY_IOS_SOURCES}
     ${YETTY_PLATFORM_SOURCES}
-    ${YETTY_ROOT}/src/yetty/msdf-gen/generator.cpp
 )
 
 target_include_directories(yetty PRIVATE ${YETTY_INCLUDES} ${YETTY_RENDERER_INCLUDES} ${JPEG_INCLUDE_DIRS} ${BROTLI_INCLUDE_DIR})

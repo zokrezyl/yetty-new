@@ -6,6 +6,7 @@
 #import <Metal/Metal.h>
 
 #include <webgpu/webgpu.h>
+#include <pthread.h>
 #include <yetty/yetty.h>
 #include <yetty/config.h>
 #include <yetty/core/event.h>
@@ -46,16 +47,31 @@ WGPUSurface yetty_platform_create_surface_from_layer(WGPUInstance instance, CAMe
 
 @end
 
+/* Render thread args */
+struct render_thread_args {
+    struct yetty_yetty *yetty;
+    int *running;
+};
+
+static void *render_thread_func(void *arg)
+{
+    struct render_thread_args *args = arg;
+    yetty_run(args->yetty);
+    *(args->running) = 0;
+    return NULL;
+}
+
 /* YettyViewController */
 @interface YettyViewController : UIViewController {
     YettyMetalView *_metalView;
-    CADisplayLink *_displayLink;
     struct yetty_yetty *_yetty;
     struct yetty_platform_input_pipe *_pipe;
     struct yetty_config *_config;
     struct yetty_platform_pty_factory *_ptyFactory;
     WGPUInstance _instance;
     WGPUSurface _surface;
+    pthread_t _renderThread;
+    int _running;
 }
 @end
 
@@ -72,7 +88,6 @@ WGPUSurface yetty_platform_create_surface_from_layer(WGPUInstance instance, CAMe
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     [self initializeYetty];
-    [self startRenderLoop];
 }
 
 - (void)initializeYetty {
@@ -124,38 +139,40 @@ WGPUSurface yetty_platform_create_surface_from_layer(WGPUInstance instance, CAMe
         return;
     }
 
+    /* Get framebuffer size */
+    CGSize size = _metalView.bounds.size;
+    CGFloat scale = _metalView.metalLayer.contentsScale;
+    uint32_t fb_width = (uint32_t)(size.width * scale);
+    uint32_t fb_height = (uint32_t)(size.height * scale);
+    _metalView.metalLayer.drawableSize = CGSizeMake(fb_width, fb_height);
+
     /* Create Yetty */
     struct yetty_app_context ctx = {
+        .app_gpu_context = {
+            .instance = _instance,
+            .surface = _surface,
+            .surface_width = fb_width,
+            .surface_height = fb_height
+        },
         .config = _config,
         .platform_input_pipe = _pipe,
-        .pty_factory = _ptyFactory,
-        .instance = _instance,
-        .surface = _surface
+        .clipboard_manager = NULL,
+        .pty_factory = _ptyFactory
     };
 
-    struct yetty_result yetty_result = yetty_create(&ctx);
+    struct yetty_yetty_result yetty_result = yetty_create(&ctx);
     if (!YETTY_IS_OK(yetty_result)) {
         NSLog(@"Failed to create Yetty");
         return;
     }
     _yetty = yetty_result.value;
-}
 
-- (void)startRenderLoop {
-    if (_displayLink) return;
-    _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(renderFrame)];
-    [_displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSDefaultRunLoopMode];
-}
-
-- (void)stopRenderLoop {
-    [_displayLink invalidate];
-    _displayLink = nil;
-}
-
-- (void)renderFrame {
-    if (_yetty) {
-        yetty_iterate(_yetty);
-    }
+    /* Start render thread */
+    _running = 1;
+    struct render_thread_args *args = malloc(sizeof(struct render_thread_args));
+    args->yetty = _yetty;
+    args->running = &_running;
+    pthread_create(&_renderThread, NULL, render_thread_func, args);
 }
 
 - (void)viewDidLayoutSubviews {
@@ -168,7 +185,10 @@ WGPUSurface yetty_platform_create_surface_from_layer(WGPUInstance instance, CAMe
     _metalView.metalLayer.drawableSize = size;
 
     if (_pipe) {
-        struct yetty_core_event ev = yetty_core_event_resize((float)size.width, (float)size.height);
+        struct yetty_core_event ev = {0};
+        ev.type = YETTY_EVENT_RESIZE;
+        ev.resize.width = (float)size.width;
+        ev.resize.height = (float)size.height;
         _pipe->ops->write(_pipe, &ev, sizeof(ev));
     }
 }
@@ -181,8 +201,12 @@ WGPUSurface yetty_platform_create_surface_from_layer(WGPUInstance instance, CAMe
     CGPoint loc = [touch locationInView:_metalView];
     CGFloat scale = _metalView.metalLayer.contentsScale;
 
-    struct yetty_core_event ev = yetty_core_event_mouse_down(
-        (float)(loc.x * scale), (float)(loc.y * scale), 0);
+    struct yetty_core_event ev = {0};
+    ev.type = YETTY_EVENT_MOUSE_DOWN;
+    ev.mouse.x = (float)(loc.x * scale);
+    ev.mouse.y = (float)(loc.y * scale);
+    ev.mouse.button = 0;
+    ev.mouse.mods = 0;
     _pipe->ops->write(_pipe, &ev, sizeof(ev));
 }
 
@@ -194,8 +218,10 @@ WGPUSurface yetty_platform_create_surface_from_layer(WGPUInstance instance, CAMe
     CGPoint loc = [touch locationInView:_metalView];
     CGFloat scale = _metalView.metalLayer.contentsScale;
 
-    struct yetty_core_event ev = yetty_core_event_mouse_move(
-        (float)(loc.x * scale), (float)(loc.y * scale));
+    struct yetty_core_event ev = {0};
+    ev.type = YETTY_EVENT_MOUSE_MOVE;
+    ev.mouse.x = (float)(loc.x * scale);
+    ev.mouse.y = (float)(loc.y * scale);
     _pipe->ops->write(_pipe, &ev, sizeof(ev));
 }
 
@@ -207,8 +233,12 @@ WGPUSurface yetty_platform_create_surface_from_layer(WGPUInstance instance, CAMe
     CGPoint loc = [touch locationInView:_metalView];
     CGFloat scale = _metalView.metalLayer.contentsScale;
 
-    struct yetty_core_event ev = yetty_core_event_mouse_up(
-        (float)(loc.x * scale), (float)(loc.y * scale), 0);
+    struct yetty_core_event ev = {0};
+    ev.type = YETTY_EVENT_MOUSE_UP;
+    ev.mouse.x = (float)(loc.x * scale);
+    ev.mouse.y = (float)(loc.y * scale);
+    ev.mouse.button = 0;
+    ev.mouse.mods = 0;
     _pipe->ops->write(_pipe, &ev, sizeof(ev));
 }
 
@@ -216,13 +246,16 @@ WGPUSurface yetty_platform_create_surface_from_layer(WGPUInstance instance, CAMe
 - (BOOL)prefersHomeIndicatorAutoHidden { return YES; }
 
 - (void)dealloc {
-    [self stopRenderLoop];
+    _running = 0;
+    if (_renderThread) {
+        pthread_join(_renderThread, NULL);
+    }
     if (_yetty) yetty_destroy(_yetty);
     if (_surface) wgpuSurfaceRelease(_surface);
     if (_instance) wgpuInstanceRelease(_instance);
     if (_ptyFactory) _ptyFactory->ops->destroy(_ptyFactory);
     if (_pipe) _pipe->ops->destroy(_pipe);
-    if (_config) yetty_config_destroy(_config);
+    if (_config) _config->ops->destroy(_config);
 }
 
 @end

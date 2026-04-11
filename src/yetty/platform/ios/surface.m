@@ -5,15 +5,16 @@
 
 WGPUSurface yetty_platform_create_surface_from_layer(WGPUInstance instance, CAMetalLayer *layer)
 {
+    WGPUSurfaceSourceMetalLayer metal_source = {0};
+    WGPUSurfaceDescriptor surface_desc = {0};
+
     if (!instance || !layer)
         return NULL;
 
-    WGPUSurfaceDescriptorFromMetalLayer metal_desc = {0};
-    metal_desc.chain.sType = WGPUSType_SurfaceDescriptorFromMetalLayer;
-    metal_desc.layer = (__bridge void *)layer;
+    metal_source.chain.sType = WGPUSType_SurfaceSourceMetalLayer;
+    metal_source.layer = (__bridge void *)layer;
 
-    WGPUSurfaceDescriptor surface_desc = {0};
-    surface_desc.nextInChain = (WGPUChainedStruct *)&metal_desc;
+    surface_desc.nextInChain = &metal_source.chain;
 
     return wgpuInstanceCreateSurface(instance, &surface_desc);
 }

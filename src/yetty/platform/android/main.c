@@ -9,6 +9,7 @@
 
 #include <webgpu/webgpu.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -44,6 +45,12 @@ struct app_state {
     int initialized;
 };
 
+/* Render thread args */
+struct render_thread_args {
+    struct yetty_yetty *yetty;
+    int *running;
+};
+
 static void mkdir_p(const char *path)
 {
     char tmp[512];
@@ -67,12 +74,10 @@ static void mkdir_p(const char *path)
 
 static void *render_thread_func(void *arg)
 {
-    struct app_state *state = arg;
-
-    while (state->running && state->yetty) {
-        yetty_iterate(state->yetty);
-    }
-
+    struct render_thread_args *args = arg;
+    yetty_run(args->yetty);
+    *(args->running) = 0;
+    free(args);
     return NULL;
 }
 
@@ -85,7 +90,9 @@ static void init_yetty(struct app_state *state)
     struct yetty_platform_input_pipe_result pipe_result;
     struct yetty_platform_pty_factory_result pty_result;
     struct yetty_app_context ctx;
-    struct yetty_result yetty_result;
+    struct yetty_yetty_result yetty_result;
+    struct render_thread_args *args;
+    int32_t width, height;
 
     if (state->initialized || !state->window)
         return;
@@ -141,12 +148,20 @@ static void init_yetty(struct app_state *state)
         return;
     }
 
+    /* Get window size */
+    width = ANativeWindow_getWidth(state->window);
+    height = ANativeWindow_getHeight(state->window);
+
     /* Create Yetty */
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.app_gpu_context.instance = state->instance;
+    ctx.app_gpu_context.surface = state->surface;
+    ctx.app_gpu_context.surface_width = (uint32_t)width;
+    ctx.app_gpu_context.surface_height = (uint32_t)height;
     ctx.config = state->config;
     ctx.platform_input_pipe = state->pipe;
+    ctx.clipboard_manager = NULL;
     ctx.pty_factory = state->pty_factory;
-    ctx.instance = state->instance;
-    ctx.surface = state->surface;
 
     yetty_result = yetty_create(&ctx);
     if (!YETTY_IS_OK(yetty_result)) {
@@ -158,7 +173,10 @@ static void init_yetty(struct app_state *state)
     state->running = 1;
 
     /* Start render thread */
-    pthread_create(&state->render_thread, NULL, render_thread_func, state);
+    args = malloc(sizeof(struct render_thread_args));
+    args->yetty = state->yetty;
+    args->running = &state->running;
+    pthread_create(&state->render_thread, NULL, render_thread_func, args);
 
     LOGI("Yetty initialized successfully");
 }
@@ -197,7 +215,7 @@ static void term_yetty(struct app_state *state)
         state->pipe = NULL;
     }
     if (state->config) {
-        yetty_config_destroy(state->config);
+        state->config->ops->destroy(state->config);
         state->config = NULL;
     }
 
@@ -210,7 +228,7 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event)
     int32_t type;
     int32_t action;
     float x, y;
-    struct yetty_core_event ev;
+    struct yetty_core_event ev = {0};
 
     if (!state->pipe)
         return 0;
@@ -224,15 +242,25 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event)
 
         switch (action) {
         case AMOTION_EVENT_ACTION_DOWN:
-            ev = yetty_core_event_mouse_down(x, y, 0);
+            ev.type = YETTY_EVENT_MOUSE_DOWN;
+            ev.mouse.x = x;
+            ev.mouse.y = y;
+            ev.mouse.button = 0;
+            ev.mouse.mods = 0;
             state->pipe->ops->write(state->pipe, &ev, sizeof(ev));
             return 1;
         case AMOTION_EVENT_ACTION_MOVE:
-            ev = yetty_core_event_mouse_move(x, y);
+            ev.type = YETTY_EVENT_MOUSE_MOVE;
+            ev.mouse.x = x;
+            ev.mouse.y = y;
             state->pipe->ops->write(state->pipe, &ev, sizeof(ev));
             return 1;
         case AMOTION_EVENT_ACTION_UP:
-            ev = yetty_core_event_mouse_up(x, y, 0);
+            ev.type = YETTY_EVENT_MOUSE_UP;
+            ev.mouse.x = x;
+            ev.mouse.y = y;
+            ev.mouse.button = 0;
+            ev.mouse.mods = 0;
             state->pipe->ops->write(state->pipe, &ev, sizeof(ev));
             return 1;
         }
@@ -262,7 +290,10 @@ static void handle_cmd(struct android_app *app, int32_t cmd)
         if (state->pipe && state->window) {
             int32_t w = ANativeWindow_getWidth(state->window);
             int32_t h = ANativeWindow_getHeight(state->window);
-            struct yetty_core_event ev = yetty_core_event_resize((float)w, (float)h);
+            struct yetty_core_event ev = {0};
+            ev.type = YETTY_EVENT_RESIZE;
+            ev.resize.width = (float)w;
+            ev.resize.height = (float)h;
             state->pipe->ops->write(state->pipe, &ev, sizeof(ev));
         }
         break;
