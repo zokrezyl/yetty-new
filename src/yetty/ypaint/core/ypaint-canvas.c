@@ -30,6 +30,7 @@ struct ypaint_canvas_grid_cell {
 
 // A single primitive's data
 struct ypaint_canvas_prim_data {
+	uint32_t rolling_row;  // rolling_row at insertion (cursor row or explicit)
 	float *data;
 	uint32_t word_count;
 };
@@ -47,6 +48,7 @@ struct ypaint_canvas_grid_line {
 	struct ypaint_canvas_grid_cell *cells;       // grid cells for this line
 	uint32_t cell_count;
 	uint32_t cell_capacity;
+	uint32_t rolling_row;  // absolute row number, never changes after creation
 };
 
 // Circular buffer for lines (deque-like)
@@ -82,6 +84,9 @@ struct ypaint_canvas {
 
 	// Rolling offset: absolute row index of line 0
 	uint32_t row0_absolute;
+
+	// Next rolling row to assign to new lines
+	uint32_t next_rolling_row;
 
 	// Lines
 	struct ypaint_canvas_line_buffer lines;
@@ -153,6 +158,7 @@ static void prim_data_array_free(struct ypaint_canvas_prim_data_array *arr)
 }
 
 static uint32_t prim_data_array_push(struct ypaint_canvas_prim_data_array *arr,
+				     uint32_t rolling_row,
 				     const float *data, uint32_t word_count)
 {
 	if (arr->count >= arr->capacity) {
@@ -161,6 +167,7 @@ static uint32_t prim_data_array_push(struct ypaint_canvas_prim_data_array *arr,
 		arr->capacity = new_cap;
 	}
 	uint32_t idx = arr->count++;
+	arr->data[idx].rolling_row = rolling_row;
 	arr->data[idx].data = malloc(word_count * sizeof(float));
 	arr->data[idx].word_count = word_count;
 	memcpy(arr->data[idx].data, data, word_count * sizeof(float));
@@ -171,12 +178,14 @@ static uint32_t prim_data_array_push(struct ypaint_canvas_prim_data_array *arr,
 // Helper: grid_line
 //=============================================================================
 
-static void grid_line_init(struct ypaint_canvas_grid_line *line, uint32_t initial_cells)
+static void grid_line_init(struct ypaint_canvas_grid_line *line, uint32_t initial_cells,
+			   uint32_t rolling_row)
 {
 	prim_data_array_init(&line->prims);
 	line->cells = NULL;
 	line->cell_count = 0;
 	line->cell_capacity = 0;
+	line->rolling_row = rolling_row;
 	if (initial_cells > 0) {
 		line->cells = calloc(initial_cells, sizeof(struct ypaint_canvas_grid_cell));
 		line->cell_capacity = initial_cells;
@@ -250,9 +259,10 @@ static struct ypaint_canvas_grid_line *line_buffer_get(struct ypaint_canvas_line
 	return &buf->lines[idx];
 }
 
-static void line_buffer_ensure_count(struct ypaint_canvas_line_buffer *buf,
-				     uint32_t min_count, uint32_t grid_width)
+static void canvas_ensure_lines(struct ypaint_canvas *canvas, uint32_t min_count)
 {
+	struct ypaint_canvas_line_buffer *buf = &canvas->lines;
+
 	// Grow capacity if needed
 	if (min_count > buf->capacity) {
 		uint32_t new_cap = buf->capacity == 0 ? INITIAL_LINE_CAPACITY : buf->capacity;
@@ -274,10 +284,11 @@ static void line_buffer_ensure_count(struct ypaint_canvas_line_buffer *buf,
 		buf->head = 0;
 	}
 
-	// Initialize new lines
+	// Initialize new lines with incrementing rolling_row
 	while (buf->count < min_count) {
 		uint32_t idx = (buf->head + buf->count) % buf->capacity;
-		grid_line_init(&buf->lines[idx], grid_width);
+		grid_line_init(&buf->lines[idx], canvas->grid_width, canvas->next_rolling_row);
+		canvas->next_rolling_row++;
 		buf->count++;
 	}
 }
@@ -286,7 +297,7 @@ static void line_buffer_pop_front(struct ypaint_canvas_line_buffer *buf, uint32_
 {
 	for (uint32_t i = 0; i < count && buf->count > 0; i++) {
 		grid_line_free(&buf->lines[buf->head]);
-		grid_line_init(&buf->lines[buf->head], 0);
+		grid_line_init(&buf->lines[buf->head], 0, 0);  // rolling_row irrelevant, line removed
 		buf->head = (buf->head + 1) % buf->capacity;
 		buf->count--;
 	}
@@ -508,11 +519,9 @@ void ypaint_canvas_add_primitive(struct ypaint_canvas *canvas,
 		return;
 
 	// Offset AABB Y by cursor position for grid placement
-	float y_offset = canvas->cursor_row * canvas->cell_size_y;
-	aabb_min_y += y_offset;
-	aabb_max_y += y_offset;
-
-	// Primitive data Y coords stay relative to the line (handled in shader via rolling_row)
+	float cursor_y_offset = canvas->cursor_row * canvas->cell_size_y;
+	aabb_min_y += cursor_y_offset;
+	aabb_max_y += cursor_y_offset;
 
 	float base_y = (canvas->scene_min_y > 1e9f) ? 0.0f : canvas->scene_min_y;
 
@@ -528,18 +537,16 @@ void ypaint_canvas_add_primitive(struct ypaint_canvas *canvas,
 	uint32_t prim_max_row = (uint32_t)local_max_row;
 
 	// Ensure lines exist
-	line_buffer_ensure_count(&canvas->lines, prim_max_row + 1, canvas->grid_width);
+	canvas_ensure_lines(canvas, prim_max_row + 1);
 
-	// Prepend anchor_row (cursor's absolute row) to primitive data
-	// Shader uses this for y_offset calculation
-	uint32_t anchor_row = canvas->row0_absolute + canvas->cursor_row;
-	float data_with_anchor[33];
-	memcpy(&data_with_anchor[0], &anchor_row, sizeof(uint32_t));
-	memcpy(&data_with_anchor[1], prim_data, word_count * sizeof(float));
+	// Cursor's line rolling_row (for shader y_offset calculation)
+	uint32_t rolling_row = canvas->row0_absolute + canvas->cursor_row;
 
 	// Store primitive at prim_max_row (bottom of AABB - for scroll deletion)
+	// Geometry coordinates stored as-is (no transformation)
+	// Shader adjusts test position using y_offset from rolling_row
 	struct ypaint_canvas_grid_line *base_line = line_buffer_get(&canvas->lines, prim_max_row);
-	uint32_t prim_index = prim_data_array_push(&base_line->prims, data_with_anchor, word_count + 1);
+	uint32_t prim_index = prim_data_array_push(&base_line->prims, rolling_row, prim_data, word_count);
 
 	// Add grid cell references
 	uint32_t cell_min_x = cell_x_from_world(canvas, aabb_min_x);
@@ -571,8 +578,13 @@ void ypaint_canvas_scroll_lines(struct ypaint_canvas *canvas, uint16_t num_lines
 	// Pop lines from front - primitives in those lines are deleted
 	line_buffer_pop_front(&canvas->lines, num_lines);
 
-	// Update rolling offset - this is the key: O(1) update!
-	canvas->row0_absolute += num_lines;
+	// Update row0_absolute to rolling_row of first remaining line
+	if (canvas->lines.count > 0) {
+		struct ypaint_canvas_grid_line *first = line_buffer_get(&canvas->lines, 0);
+		canvas->row0_absolute = first->rolling_row;
+	} else {
+		canvas->row0_absolute = canvas->next_rolling_row;
+	}
 
 	// Update cursor
 	if (canvas->cursor_row >= num_lines)
@@ -827,14 +839,14 @@ const uint32_t *ypaint_canvas_build_prim_staging(struct ypaint_canvas *canvas,
 		return NULL;
 	}
 
-	// Count primitives and total words (anchor_row already included in word_count)
+	// Count primitives and total words (+1 per prim for rolling_row)
 	uint32_t prim_count = 0;
 	uint32_t total_words = 0;
 	for (uint32_t i = 0; i < canvas->lines.count; i++) {
 		struct ypaint_canvas_grid_line *line = line_buffer_get(&canvas->lines, i);
 		for (uint32_t p = 0; p < line->prims.count; p++) {
 			prim_count++;
-			total_words += line->prims.data[p].word_count;
+			total_words += line->prims.data[p].word_count + 1;  // +1 for rolling_row
 		}
 	}
 
@@ -845,8 +857,7 @@ const uint32_t *ypaint_canvas_build_prim_staging(struct ypaint_canvas *canvas,
 		return NULL;
 	}
 
-	// Layout: [prim0_offset, prim1_offset, ...][prim0_data...][prim1_data...]
-	// Each prim data starts with anchor_row (already in data)
+	// Layout: [prim0_offset, prim1_offset, ...][rolling_row0, prim0_data...][rolling_row1, prim1_data...]
 	uint32_t total_size = prim_count + total_words;
 	ensure_prim_staging(canvas, total_size);
 
@@ -859,14 +870,17 @@ const uint32_t *ypaint_canvas_build_prim_staging(struct ypaint_canvas *canvas,
 			struct ypaint_canvas_prim_data *prim = &line->prims.data[p];
 			canvas->prim_staging[prim_idx] = data_offset;
 
-			// Copy primitive data (anchor_row is first word)
+			// Prepend rolling_row at insertion (for shader y_offset calculation)
+			canvas->prim_staging[prim_count + data_offset] = prim->rolling_row;
+
+			// Copy primitive data
 			for (uint32_t w = 0; w < prim->word_count; w++) {
 				uint32_t val;
 				memcpy(&val, &prim->data[w], sizeof(uint32_t));
-				canvas->prim_staging[prim_count + data_offset + w] = val;
+				canvas->prim_staging[prim_count + data_offset + 1 + w] = val;
 			}
 
-			data_offset += prim->word_count;
+			data_offset += prim->word_count + 1;  // +1 for rolling_row
 			prim_idx++;
 		}
 	}
@@ -886,7 +900,7 @@ uint32_t ypaint_canvas_prim_gpu_size(struct ypaint_canvas *canvas)
 	for (uint32_t i = 0; i < canvas->lines.count; i++) {
 		struct ypaint_canvas_grid_line *line = line_buffer_get(&canvas->lines, i);
 		for (uint32_t p = 0; p < line->prims.count; p++)
-			total_words += line->prims.data[p].word_count;
+			total_words += line->prims.data[p].word_count + 1;  // +1 for rolling_row
 	}
 	return total_words * sizeof(float);
 }
@@ -908,6 +922,7 @@ void ypaint_canvas_clear(struct ypaint_canvas *canvas)
 	canvas->cursor_col = 0;
 	canvas->cursor_row = 0;
 	canvas->row0_absolute = 0;
+	canvas->next_rolling_row = 0;
 	canvas->dirty = true;
 }
 
