@@ -62,28 +62,40 @@ static void terminal_request_render_callback(void *userdata)
 static void terminal_scroll_callback(struct yetty_term_terminal_layer *source, int lines, void *userdata)
 {
     struct yetty_term_terminal *terminal = userdata;
-    ydebug("terminal_scroll_callback: source=%p lines=%d", (void*)source, lines);
+    ydebug("terminal_scroll_callback ENTER: source=%p lines=%d layer_count=%zu",
+           (void*)source, lines, terminal->layer_count);
 
     for (size_t i = 0; i < terminal->layer_count; i++) {
         struct yetty_term_terminal_layer *layer = terminal->layers[i];
         if (layer != source && layer->ops && layer->ops->scroll) {
+            ydebug("terminal_scroll_callback: calling layer[%zu]=%p scroll(%d)", i, (void*)layer, lines);
             layer->ops->scroll(layer, lines);
+        } else {
+            ydebug("terminal_scroll_callback: skipping layer[%zu]=%p (source=%d has_scroll=%d)",
+                   i, (void*)layer, layer == source, layer->ops && layer->ops->scroll);
         }
     }
+    ydebug("terminal_scroll_callback EXIT: lines=%d", lines);
 }
 
 /* Cursor callback - propagate cursor position from source layer to all other layers */
 static void terminal_cursor_callback(struct yetty_term_terminal_layer *source, int col, int row, void *userdata)
 {
     struct yetty_term_terminal *terminal = userdata;
-    ydebug("terminal_cursor_callback: source=%p col=%d row=%d", (void*)source, col, row);
+    ydebug("terminal_cursor_callback ENTER: source=%p col=%d row=%d layer_count=%zu",
+           (void*)source, col, row, terminal->layer_count);
 
     for (size_t i = 0; i < terminal->layer_count; i++) {
         struct yetty_term_terminal_layer *layer = terminal->layers[i];
         if (layer != source && layer->ops && layer->ops->set_cursor) {
+            ydebug("terminal_cursor_callback: calling layer[%zu]=%p set_cursor(%d,%d)", i, (void*)layer, col, row);
             layer->ops->set_cursor(layer, col, row);
+        } else {
+            ydebug("terminal_cursor_callback: skipping layer[%zu]=%p (source=%d has_set_cursor=%d)",
+                   i, (void*)layer, layer == source, layer->ops && layer->ops->set_cursor);
         }
     }
+    ydebug("terminal_cursor_callback EXIT: col=%d row=%d", col, row);
 }
 
 /* Event handler */

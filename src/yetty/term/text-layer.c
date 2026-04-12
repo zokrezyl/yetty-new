@@ -135,13 +135,15 @@ static void text_layer_scroll(struct yetty_term_terminal_layer *self, int lines)
     struct yetty_term_terminal_text_layer *text_layer =
         container_of(self, struct yetty_term_terminal_text_layer, base);
 
-    ydebug("text_layer_scroll: lines=%d", lines);
+    ydebug("text_layer_scroll ENTER: lines=%d screen=%p", lines, (void*)text_layer->screen);
 
     if (!text_layer->screen || lines <= 0)
         return;
 
     vterm_screen_scroll_lines(text_layer->screen, lines);
     text_layer->base.dirty = 1;
+
+    ydebug("text_layer_scroll EXIT: lines=%d scrolled", lines);
 }
 
 /* Receive cursor position from other layers (e.g., ypaint) */
@@ -150,7 +152,7 @@ static void text_layer_set_cursor(struct yetty_term_terminal_layer *self, int co
     struct yetty_term_terminal_text_layer *text_layer =
         container_of(self, struct yetty_term_terminal_text_layer, base);
 
-    ydebug("text_layer_set_cursor: col=%d row=%d", col, row);
+    ydebug("text_layer_set_cursor ENTER: col=%d row=%d screen=%p", col, row, (void*)text_layer->screen);
 
     if (!text_layer->screen)
         return;
@@ -158,6 +160,8 @@ static void text_layer_set_cursor(struct yetty_term_terminal_layer *self, int co
     VTermPos pos = { .row = row, .col = col };
     vterm_screen_set_cursorpos(text_layer->screen, pos);
     text_layer->base.dirty = 1;
+
+    ydebug("text_layer_set_cursor EXIT: col=%d row=%d set", col, row);
 }
 
 /* Ops */

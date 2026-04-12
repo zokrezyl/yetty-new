@@ -18,7 +18,7 @@ INCBIN(ypaint_layer_shader, YPAINT_LAYER_SHADER_PATH);
 /* Uniform positions */
 #define U_GRID_SIZE       0
 #define U_CELL_SIZE       1
-#define U_ROW_ORIGIN      2
+#define U_ROLLING_ROW_0      2
 #define U_PRIM_COUNT      3
 #define U_COUNT           4
 
@@ -31,8 +31,8 @@ static inline void set_cell_size(struct yetty_render_gpu_resource_set *rs, float
     rs->uniforms[U_CELL_SIZE].vec2[0] = w;
     rs->uniforms[U_CELL_SIZE].vec2[1] = h;
 }
-static inline void set_row_origin(struct yetty_render_gpu_resource_set *rs, uint32_t row_origin) {
-    rs->uniforms[U_ROW_ORIGIN].u32 = row_origin;
+static inline void set_rolling_row_0(struct yetty_render_gpu_resource_set *rs, uint32_t row_origin) {
+    rs->uniforms[U_ROLLING_ROW_0].u32 = row_origin;
 }
 static inline void set_prim_count(struct yetty_render_gpu_resource_set *rs, uint32_t count) {
     rs->uniforms[U_PRIM_COUNT].u32 = count;
@@ -45,10 +45,10 @@ static void init_uniforms(struct yetty_render_gpu_resource_set *rs)
 
     rs->uniforms[U_GRID_SIZE]  = (struct yetty_render_uniform){"ypaint_grid_size",  YETTY_RENDER_UNIFORM_VEC2};
     rs->uniforms[U_CELL_SIZE]  = (struct yetty_render_uniform){"ypaint_cell_size",  YETTY_RENDER_UNIFORM_VEC2};
-    rs->uniforms[U_ROW_ORIGIN] = (struct yetty_render_uniform){"ypaint_row_origin", YETTY_RENDER_UNIFORM_U32};
+    rs->uniforms[U_ROLLING_ROW_0] = (struct yetty_render_uniform){"ypaint_rolling_row_0", YETTY_RENDER_UNIFORM_U32};
     rs->uniforms[U_PRIM_COUNT] = (struct yetty_render_uniform){"ypaint_prim_count", YETTY_RENDER_UNIFORM_U32};
 
-    set_row_origin(rs, 0);
+    set_rolling_row_0(rs, 0);
     set_prim_count(rs, 0);
 }
 
@@ -83,22 +83,26 @@ static void ypaint_layer_set_cursor(struct yetty_term_terminal_layer *self, int 
 /* Canvas scroll callback - propagate to other layers */
 static struct yetty_core_void_result on_canvas_scroll(void *user_data, uint16_t num_lines) {
     struct yetty_term_ypaint_layer *layer = user_data;
+    ydebug("on_canvas_scroll ENTER: num_lines=%u", num_lines);
     if (!layer->base.scroll_fn) {
         yerror("on_canvas_scroll: scroll_fn is NULL");
         return YETTY_ERR(yetty_core_void, "scroll_fn is NULL");
     }
     layer->base.scroll_fn(&layer->base, (int)num_lines, layer->base.scroll_userdata);
+    ydebug("on_canvas_scroll EXIT: num_lines=%u", num_lines);
     return YETTY_OK_VOID();
 }
 
 /* Canvas cursor callback - propagate to other layers */
 static struct yetty_core_void_result on_canvas_cursor_set(void *user_data, uint16_t new_row) {
     struct yetty_term_ypaint_layer *layer = user_data;
+    ydebug("on_canvas_cursor_set ENTER: new_row=%u", new_row);
     if (!layer->base.cursor_fn) {
         yerror("on_canvas_cursor_set: cursor_fn is NULL");
         return YETTY_ERR(yetty_core_void, "cursor_fn is NULL");
     }
     layer->base.cursor_fn(&layer->base, 0, (int)new_row, layer->base.cursor_userdata);
+    ydebug("on_canvas_cursor_set EXIT: new_row=%u", new_row);
     return YETTY_OK_VOID();
 }
 
@@ -321,7 +325,7 @@ static struct yetty_render_gpu_resource_set_result ypaint_layer_get_gpu_resource
         layer->rs.buffers[1].dirty = 1;
 
         /* Update uniforms */
-        set_row_origin(&layer->rs, ypaint_canvas_row0_absolute(layer->canvas));
+        set_rolling_row_0(&layer->rs, ypaint_canvas_rolling_row_0(layer->canvas));
         uint32_t prim_count = ypaint_canvas_primitive_count(layer->canvas);
         set_prim_count(&layer->rs, prim_count);
 
@@ -393,13 +397,16 @@ static void ypaint_layer_scroll(struct yetty_term_terminal_layer *self, int line
     struct yetty_term_ypaint_layer *layer =
         (struct yetty_term_ypaint_layer *)self;
 
+    ydebug("ypaint_layer_scroll ENTER: lines=%d scrolling_mode=%d canvas=%p",
+           lines, layer->scrolling_mode, (void*)layer->canvas);
+
     if (!layer->canvas || !layer->scrolling_mode || lines <= 0)
         return;
 
     ypaint_canvas_scroll_lines(layer->canvas, (uint16_t)lines);
     layer->base.dirty = 1;
 
-    ydebug("ypaint_layer_scroll: %d lines", lines);
+    ydebug("ypaint_layer_scroll EXIT: %d lines scrolled", lines);
 
     if (layer->base.request_render_fn)
         layer->base.request_render_fn(layer->base.request_render_userdata);

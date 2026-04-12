@@ -73,8 +73,8 @@ uint16_t ypaint_canvas_cursor_row(struct ypaint_canvas *canvas);
 // Rolling offset (for shader uniform)
 //=============================================================================
 
-// Get the absolute row index of line 0 (pass to shader as uniform)
-uint32_t ypaint_canvas_row0_absolute(struct ypaint_canvas *canvas);
+// Get rolling_row_0: absolute row of visible line 0 (pass to shader as row_origin)
+uint32_t ypaint_canvas_rolling_row_0(struct ypaint_canvas *canvas);
 
 //=============================================================================
 // Buffer management

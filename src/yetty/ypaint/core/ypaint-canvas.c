@@ -53,15 +53,13 @@ struct ypaint_canvas_grid_line {
   struct ypaint_canvas_grid_cell *cells; // grid cells for this line
   uint32_t cell_count;
   uint32_t cell_capacity;
-  uint32_t rolling_row; // absolute row number, never changes after creation
 };
 
-// Circular buffer for lines (deque-like)
+// Simple line array
 struct ypaint_canvas_line_buffer {
   struct ypaint_canvas_grid_line *lines;
   uint32_t capacity;
-  uint32_t head;  // index of first valid line
-  uint32_t count; // number of valid lines
+  uint32_t count;
 };
 
 // Canvas structure
@@ -87,11 +85,8 @@ struct ypaint_canvas {
   uint16_t cursor_col;
   uint16_t cursor_row;
 
-  // Rolling offset: absolute row index of line 0
-  uint32_t row0_absolute;
-
-  // Next rolling row to assign to new lines
-  uint32_t next_rolling_row;
+  // Rolling row of visible line 0 (increments on scroll)
+  uint32_t rolling_row_0;
 
   // Lines
   struct ypaint_canvas_line_buffer lines;
@@ -190,12 +185,11 @@ static uint32_t prim_data_array_push(struct ypaint_canvas_prim_data_array *arr,
 //=============================================================================
 
 static void grid_line_init(struct ypaint_canvas_grid_line *line,
-                           uint32_t initial_cells, uint32_t rolling_row) {
+                           uint32_t initial_cells) {
   prim_data_array_init(&line->prims);
   line->cells = NULL;
   line->cell_count = 0;
   line->cell_capacity = 0;
-  line->rolling_row = rolling_row;
   if (initial_cells > 0) {
     line->cells = calloc(initial_cells, sizeof(struct ypaint_canvas_grid_cell));
     line->cell_capacity = initial_cells;
@@ -243,19 +237,16 @@ static void grid_line_ensure_cells(struct ypaint_canvas_grid_line *line,
 static void line_buffer_init(struct ypaint_canvas_line_buffer *buf) {
   buf->lines = NULL;
   buf->capacity = 0;
-  buf->head = 0;
   buf->count = 0;
 }
 
 static void line_buffer_free(struct ypaint_canvas_line_buffer *buf) {
   for (uint32_t i = 0; i < buf->count; i++) {
-    uint32_t idx = (buf->head + i) % buf->capacity;
-    grid_line_free(&buf->lines[idx]);
+    grid_line_free(&buf->lines[i]);
   }
   free(buf->lines);
   buf->lines = NULL;
   buf->capacity = 0;
-  buf->head = 0;
   buf->count = 0;
 }
 
@@ -263,8 +254,7 @@ static struct ypaint_canvas_grid_line *
 line_buffer_get(struct ypaint_canvas_line_buffer *buf, uint32_t index) {
   if (index >= buf->count)
     return NULL;
-  uint32_t idx = (buf->head + index) % buf->capacity;
-  return &buf->lines[idx];
+  return &buf->lines[index];
 }
 
 static void canvas_ensure_lines(struct ypaint_canvas *canvas,
@@ -278,40 +268,40 @@ static void canvas_ensure_lines(struct ypaint_canvas *canvas,
     while (new_cap < min_count)
       new_cap *= 2;
 
-    struct ypaint_canvas_grid_line *new_lines;
-    new_lines = calloc(new_cap, sizeof(struct ypaint_canvas_grid_line));
-
-    // Copy existing lines to new buffer (linearize)
-    for (uint32_t i = 0; i < buf->count; i++) {
-      uint32_t old_idx = (buf->head + i) % buf->capacity;
-      new_lines[i] = buf->lines[old_idx];
-    }
-
-    free(buf->lines);
-    buf->lines = new_lines;
+    buf->lines = realloc(buf->lines, new_cap * sizeof(struct ypaint_canvas_grid_line));
     buf->capacity = new_cap;
-    buf->head = 0;
   }
 
-  // Initialize new lines with incrementing rolling_row
+  // Initialize new lines at the end
   while (buf->count < min_count) {
-    uint32_t idx = (buf->head + buf->count) % buf->capacity;
-    grid_line_init(&buf->lines[idx], canvas->grid_width,
-                   canvas->next_rolling_row);
-    canvas->next_rolling_row++;
+    grid_line_init(&buf->lines[buf->count], canvas->grid_width);
     buf->count++;
   }
 }
 
 static void line_buffer_pop_front(struct ypaint_canvas_line_buffer *buf,
                                   uint32_t count) {
-  for (uint32_t i = 0; i < count && buf->count > 0; i++) {
-    grid_line_free(&buf->lines[buf->head]);
-    grid_line_init(&buf->lines[buf->head], 0,
-                   0); // rolling_row irrelevant, line removed
-    buf->head = (buf->head + 1) % buf->capacity;
-    buf->count--;
+  if (count == 0 || buf->count == 0)
+    return;
+  if (count > buf->count)
+    count = buf->count;
+
+  // Free the top lines being removed
+  for (uint32_t i = 0; i < count; i++) {
+    grid_line_free(&buf->lines[i]);
   }
+
+  // Memmove remaining lines to front
+  uint32_t remaining = buf->count - count;
+  if (remaining > 0) {
+    memmove(buf->lines, buf->lines + count,
+            remaining * sizeof(struct ypaint_canvas_grid_line));
+  }
+
+  // Zero the freed slots at the end (optional, for safety)
+  memset(buf->lines + remaining, 0, count * sizeof(struct ypaint_canvas_grid_line));
+
+  buf->count = remaining;
 }
 
 //=============================================================================
@@ -328,7 +318,7 @@ struct ypaint_canvas *ypaint_canvas_create(bool scrolling_mode) {
   canvas->scrolling_mode = scrolling_mode;
   canvas->max_prims_per_cell = DEFAULT_MAX_PRIMS_PER_CELL;
   canvas->dirty = true;
-  canvas->row0_absolute = 0;
+  canvas->rolling_row_0 = 0;
 
   line_buffer_init(&canvas->lines);
 
@@ -480,8 +470,8 @@ uint16_t ypaint_canvas_cursor_row(struct ypaint_canvas *canvas) {
 // Rolling offset
 //=============================================================================
 
-uint32_t ypaint_canvas_row0_absolute(struct ypaint_canvas *canvas) {
-  return canvas ? canvas->row0_absolute : 0;
+uint32_t ypaint_canvas_rolling_row_0(struct ypaint_canvas *canvas) {
+  return canvas ? canvas->rolling_row_0 : 0;
 }
 
 //=============================================================================
@@ -508,6 +498,21 @@ uint32_t ypaint_canvas_add_primitive_internal(struct ypaint_canvas *canvas,
   if (!canvas || !prim_data || word_count == 0 || word_count > 32)
     return 0;
 
+  // Validate cell_size_y to avoid division issues
+  if (canvas->cell_size_y <= 0.0f) {
+    yerror("BUG: cell_size_y=%.1f <= 0, cannot compute rows!", canvas->cell_size_y);
+    return 0;
+  }
+
+  // Check for inverted AABB (bug in compute_aabb)
+  if (aabb_min_y > aabb_max_y) {
+    yerror("BUG: inverted AABB! aabb_min_y=%.1f > aabb_max_y=%.1f", aabb_min_y, aabb_max_y);
+    // Swap to fix
+    float tmp = aabb_min_y;
+    aabb_min_y = aabb_max_y;
+    aabb_max_y = tmp;
+  }
+
   // Offset AABB Y by cursor position for grid placement
   float cursor_y_offset = canvas->cursor_row * canvas->cell_size_y;
   aabb_min_y += cursor_y_offset;
@@ -528,11 +533,21 @@ uint32_t ypaint_canvas_add_primitive_internal(struct ypaint_canvas *canvas,
   uint32_t prim_min_row = (uint32_t)local_min_row;
   uint32_t prim_max_row = (uint32_t)local_max_row;
 
+  // BUG CHECK: if min > max, AABB is inverted (bug in compute_aabb or cell_size issue)
+  if (prim_min_row > prim_max_row) {
+    yerror("BUG: prim_min_row=%u > prim_max_row=%u! aabb_y=[%.1f,%.1f] cell_size_y=%.1f",
+           prim_min_row, prim_max_row, aabb_min_y, aabb_max_y, canvas->cell_size_y);
+    // Swap to avoid crash, but this is a BUG that needs fixing
+    uint32_t tmp = prim_min_row;
+    prim_min_row = prim_max_row;
+    prim_max_row = tmp;
+  }
+
   // Ensure lines exist
   canvas_ensure_lines(canvas, prim_max_row + 1);
 
-  // Rolling_row at insertion (for shader y_offset calculation)
-  uint32_t rolling_row = canvas->row0_absolute + canvas->cursor_row;
+  // Absolute row where primitive is stored (for shader y_offset)
+  uint32_t rolling_row = canvas->rolling_row_0 + prim_max_row;
 
   // Store primitive at prim_max_row (bottom of AABB - for scroll deletion)
   // Geometry coordinates stored as-is (no transformation)
@@ -556,6 +571,11 @@ uint32_t ypaint_canvas_add_primitive_internal(struct ypaint_canvas *canvas,
       prim_ref_array_push(&line->cells[col].refs, ref);
     }
   }
+
+  ydebug("add_primitive_internal: aabb_y=[%.1f,%.1f] cell_size_y=%.1f cursor_row=%u",
+         aabb_min_y, aabb_max_y, canvas->cell_size_y, canvas->cursor_row);
+  ydebug("add_primitive_internal: prim_min_row=%u prim_max_row=%u lines.count=%u",
+         prim_min_row, prim_max_row, canvas->lines.count);
 
   canvas->dirty = true;
   return prim_max_row;
@@ -699,27 +719,58 @@ struct yetty_core_void_result ypaint_canvas_add_buffer(
 // Scrolling
 //=============================================================================
 
+static void dump_grid(struct ypaint_canvas *canvas, const char *label) {
+  ydebug("=== GRID DUMP [%s] lines.count=%u rolling_row_0=%u grid=%ux%u staging=%u ===",
+         label, canvas->lines.count, canvas->rolling_row_0,
+         canvas->grid_width, canvas->grid_height, canvas->grid_staging_count);
+  for (uint32_t i = 0; i < canvas->lines.count; i++) {
+    struct ypaint_canvas_grid_line *line = line_buffer_get(&canvas->lines, i);
+    uint32_t total_refs = 0;
+    uint32_t first_ref_col = 0xFFFFFFFF;
+    for (uint32_t c = 0; c < line->cell_count; c++) {
+      total_refs += line->cells[c].refs.count;
+      if (line->cells[c].refs.count > 0 && first_ref_col == 0xFFFFFFFF)
+        first_ref_col = c;
+    }
+    if (total_refs > 0 && first_ref_col != 0xFFFFFFFF) {
+      struct ypaint_canvas_prim_ref *ref = &line->cells[first_ref_col].refs.data[0];
+      ydebug("  line[%u] prims=%u refs=%u cells=%u first_ref@col%u: ahead=%u idx=%u",
+             i, line->prims.count, total_refs, line->cell_count,
+             first_ref_col, ref->lines_ahead, ref->prim_index);
+    } else {
+      ydebug("  line[%u] prims=%u refs=%u cells=%u",
+             i, line->prims.count, total_refs, line->cell_count);
+    }
+  }
+  ydebug("=== END GRID DUMP ===");
+}
+
 void ypaint_canvas_scroll_lines(struct ypaint_canvas *canvas,
                                 uint16_t num_lines) {
-  if (!canvas || num_lines == 0 || canvas->lines.count == 0)
+  if (!canvas || num_lines == 0)
     return;
 
-  // Pop lines from front - primitives in those lines are deleted
+  ydebug("ypaint_canvas_scroll_lines: num_lines=%u lines.count=%u rolling_row_0=%u",
+         num_lines, canvas->lines.count, canvas->rolling_row_0);
+
+  dump_grid(canvas, "BEFORE SCROLL");
+
+  // Pop lines from front (memmove)
   line_buffer_pop_front(&canvas->lines, num_lines);
 
-  // Update row0_absolute to rolling_row of first remaining line
-  if (canvas->lines.count > 0) {
-    struct ypaint_canvas_grid_line *first = line_buffer_get(&canvas->lines, 0);
-    canvas->row0_absolute = first->rolling_row;
-  } else {
-    canvas->row0_absolute = canvas->next_rolling_row;
-  }
+  // Always increment rolling_row_0
+  canvas->rolling_row_0 += num_lines;
 
   // Update cursor
   if (canvas->cursor_row >= num_lines)
     canvas->cursor_row -= num_lines;
   else
     canvas->cursor_row = 0;
+
+  ydebug("ypaint_canvas_scroll_lines: after scroll lines.count=%u rolling_row_0=%u cursor_row=%u",
+         canvas->lines.count, canvas->rolling_row_0, canvas->cursor_row);
+
+  dump_grid(canvas, "AFTER SCROLL");
 
   canvas->dirty = true;
 }
@@ -918,6 +969,10 @@ void ypaint_canvas_rebuild_grid_with_glyphs(
             canvas->grid_staging[canvas->grid_staging_count++] =
                 line_base_prim_idx[bl] + ref->prim_index;
             count++;
+          } else if (ref->lines_ahead > 0) {
+            // DEBUG: ref pointing outside valid lines!
+            ydebug("BUILD_GRID BUG: y=%u lines_ahead=%u bl=%u >= lines.count=%u",
+                   y, ref->lines_ahead, bl, canvas->lines.count);
           }
         }
       }
@@ -1072,8 +1127,7 @@ void ypaint_canvas_clear(struct ypaint_canvas *canvas) {
   canvas->prim_staging_count = 0;
   canvas->cursor_col = 0;
   canvas->cursor_row = 0;
-  canvas->row0_absolute = 0;
-  canvas->next_rolling_row = 0;
+  canvas->rolling_row_0 = 0;
   canvas->dirty = true;
 }
 

@@ -7,7 +7,7 @@
 // Generated constants (prepended by binder):
 //   uniforms.ypaint_scroll_ypaint_grid_size
 //   uniforms.ypaint_scroll_ypaint_cell_size
-//   uniforms.ypaint_scroll_ypaint_row_origin
+//   uniforms.ypaint_scroll_ypaint_rolling_row_0
 //   uniforms.ypaint_scroll_ypaint_prim_count
 //   ypaint_scroll_grid_offset
 //   ypaint_scroll_prims_offset
@@ -232,8 +232,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
         // Compute primitive's screen Y offset from its rolling_row
         let rolling_row = ypaint_read_rolling_row(prim_offset);
-        let row_origin = uniforms.ypaint_scroll_ypaint_row_origin;
-        let y_offset = f32(rolling_row - row_origin) * cell_size.y;
+        let rolling_row_0 = uniforms.ypaint_scroll_ypaint_rolling_row_0;
+        let y_offset = f32(rolling_row - rolling_row_0) * cell_size.y;
 
         // Adjust scene position - primitive coords are relative to its line
         let prim_scene_pos = vec2<f32>(pixel_pos.x, pixel_pos.y - y_offset);
