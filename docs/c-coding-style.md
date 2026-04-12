@@ -123,6 +123,54 @@ layer = calloc(1, sizeof(*layer));
 layer = malloc(sizeof(struct yetty_term_terminal_text_layer));
 ```
 
+## Object Lifecycle: create/destroy
+
+Objects follow the `create`/`destroy` pattern:
+
+```c
+/* Creation - returns result type */
+struct yetty_thing_result yetty_thing_create(...);
+
+/* Destruction - void, handles NULL, propagates to children */
+void yetty_thing_destroy(struct yetty_thing *thing);
+```
+
+### destroy Rules
+
+1. **Handle NULL**: `destroy(NULL)` must be safe (no-op)
+2. **Propagate**: destroy children before freeing self
+3. **Idempotent**: safe to call multiple times
+4. **No return value**: void, errors logged but not returned
+
+```c
+void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal)
+{
+    if (!terminal)
+        return;
+
+    /* Destroy children first */
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+        if (terminal->layers[i])
+            terminal->layers[i]->ops->destroy(terminal->layers[i]);
+    }
+
+    /* Destroy owned resources */
+    if (terminal->blender)
+        terminal->blender->ops->destroy(terminal->blender);
+
+    /* Free self */
+    free(terminal);
+}
+```
+
+### SHUTDOWN Event
+
+`YETTY_EVENT_SHUTDOWN` triggers graceful destroy chain:
+
+```
+Window close → SHUTDOWN event → event_loop stops → caller destroys terminal
+```
+
 ## Result Types
 
 Each module declares its own result types using `YETTY_RESULT_DECLARE`:

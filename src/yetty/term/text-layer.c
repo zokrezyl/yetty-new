@@ -88,8 +88,9 @@ struct yetty_term_terminal_text_layer {
 static void text_layer_destroy(struct yetty_term_terminal_layer *self);
 static void text_layer_write(struct yetty_term_terminal_layer *self,
                              const char *data, size_t len);
-static void text_layer_resize(struct yetty_term_terminal_layer *self,
-                              uint32_t cols, uint32_t rows);
+static struct yetty_core_void_result
+text_layer_resize_grid(struct yetty_term_terminal_layer *self,
+                       struct grid_size grid_size);
 static struct yetty_render_gpu_resource_set_result text_layer_get_gpu_resource_set(
     const struct yetty_term_terminal_layer *self);
 static int text_layer_on_key(struct yetty_term_terminal_layer *self, int key, int mods);
@@ -98,6 +99,7 @@ static int text_layer_on_char(struct yetty_term_terminal_layer *self, uint32_t c
 /* VTerm callbacks */
 static int on_damage(VTermRect rect, void *user);
 static int on_move_cursor(VTermPos pos, VTermPos oldpos, int visible, void *user);
+static int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user);
 
 /* Glyph resolver — called by vterm for every codepoint */
 static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
@@ -121,14 +123,59 @@ static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
     return result;
 }
 
+/* Text layer always has content */
+static int text_layer_is_empty(const struct yetty_term_terminal_layer *self)
+{
+    (void)self;
+    return 0;
+}
+
+/* Receive scroll from other layers (e.g., ypaint) */
+static void text_layer_scroll(struct yetty_term_terminal_layer *self, int lines)
+{
+    struct yetty_term_terminal_text_layer *text_layer =
+        container_of(self, struct yetty_term_terminal_text_layer, base);
+
+    ydebug("text_layer_scroll ENTER: lines=%d screen=%p", lines, (void*)text_layer->screen);
+
+    if (!text_layer->screen || lines <= 0)
+        return;
+
+    vterm_screen_scroll_lines(text_layer->screen, lines);
+    text_layer->base.dirty = 1;
+
+    ydebug("text_layer_scroll EXIT: lines=%d scrolled", lines);
+}
+
+/* Receive cursor position from other layers (e.g., ypaint) */
+static void text_layer_set_cursor(struct yetty_term_terminal_layer *self, int col, int row)
+{
+    struct yetty_term_terminal_text_layer *text_layer =
+        container_of(self, struct yetty_term_terminal_text_layer, base);
+
+    ydebug("text_layer_set_cursor ENTER: col=%d row=%d screen=%p", col, row, (void*)text_layer->screen);
+
+    if (!text_layer->screen)
+        return;
+
+    VTermPos pos = { .row = row, .col = col };
+    vterm_screen_set_cursorpos(text_layer->screen, pos);
+    text_layer->base.dirty = 1;
+
+    ydebug("text_layer_set_cursor EXIT: col=%d row=%d set", col, row);
+}
+
 /* Ops */
 static const struct yetty_term_terminal_layer_ops text_layer_ops = {
     .destroy = text_layer_destroy,
     .write = text_layer_write,
-    .resize = text_layer_resize,
+    .resize_grid = text_layer_resize_grid,
     .get_gpu_resource_set = text_layer_get_gpu_resource_set,
+    .is_empty = text_layer_is_empty,
     .on_key = text_layer_on_key,
     .on_char = text_layer_on_char,
+    .scroll = text_layer_scroll,
+    .set_cursor = text_layer_set_cursor,
 };
 
 /* VTerm screen callbacks */
@@ -139,7 +186,7 @@ static VTermScreenCallbacks screen_callbacks = {
     .settermprop = NULL,
     .bell = NULL,
     .resize = NULL,
-    .sb_pushline = NULL,
+    .sb_pushline = on_sb_pushline,
     .sb_popline = NULL,
     .sb_clear = NULL,
 };
@@ -161,7 +208,11 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     yetty_term_pty_write_fn pty_write_fn,
     void *pty_write_userdata,
     yetty_term_request_render_fn request_render_fn,
-    void *request_render_userdata)
+    void *request_render_userdata,
+    yetty_term_scroll_fn scroll_fn,
+    void *scroll_userdata,
+    yetty_term_cursor_fn cursor_fn,
+    void *cursor_userdata)
 {
     struct yetty_term_terminal_text_layer *text_layer;
 
@@ -170,19 +221,23 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
         return YETTY_ERR(yetty_term_terminal_layer, "failed to allocate text layer");
 
     text_layer->base.ops = &text_layer_ops;
-    text_layer->base.cols = cols;
-    text_layer->base.rows = rows;
-    text_layer->base.cell_width = 10.0f;
-    text_layer->base.cell_height = 20.0f;
+    text_layer->base.grid_size.cols = cols;
+    text_layer->base.grid_size.rows = rows;
+    text_layer->base.cell_size.width = 10.0f;
+    text_layer->base.cell_size.height = 20.0f;
     text_layer->base.dirty = 1;
     text_layer->base.pty_write_fn = pty_write_fn;
     text_layer->base.pty_write_userdata = pty_write_userdata;
     text_layer->base.request_render_fn = request_render_fn;
     text_layer->base.request_render_userdata = request_render_userdata;
+    text_layer->base.scroll_fn = scroll_fn;
+    text_layer->base.scroll_userdata = scroll_userdata;
+    text_layer->base.cursor_fn = cursor_fn;
+    text_layer->base.cursor_userdata = cursor_userdata;
 
     /* Create font from config */
     struct yetty_font_font_result font_res = yetty_font_raster_font_create(
-        context->app_context.config, text_layer->base.cell_width, text_layer->base.cell_height);
+        context->app_context.config, text_layer->base.cell_size.width, text_layer->base.cell_size.height);
     if (!YETTY_IS_OK(font_res)) {
         free(text_layer);
         return YETTY_ERR(yetty_term_terminal_layer, font_res.error.msg);
@@ -215,7 +270,7 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
 
     init_uniforms(&text_layer->rs);
     set_grid_size(&text_layer->rs, (float)cols, (float)rows);
-    set_cell_size(&text_layer->rs, text_layer->base.cell_width, text_layer->base.cell_height);
+    set_cell_size(&text_layer->rs, text_layer->base.cell_size.width, text_layer->base.cell_size.height);
 
     yetty_render_shader_code_set(&text_layer->rs.shader,
         (const char *)gtext_layer_shader_data, gtext_layer_shader_size);
@@ -223,13 +278,11 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     if (text_layer->font)
         text_layer->rs.children_count = 1;
 
-    /* Initial buffer setup - point to vterm buffer directly */
-    {
-        const VTermScreenCell *cells = vterm_screen_get_buffer(text_layer->screen);
-        size_t buf_size = vterm_screen_get_buffer_size(text_layer->screen);
-        text_layer->rs.buffers[0].data = (const uint8_t *)cells;
-        text_layer->rs.buffers[0].size = buf_size;
-    }
+    /* Initial buffer setup - point to vterm buffer directly.
+     * Cast away const is safe: buffer is readonly, GPU only reads from it. */
+    text_layer->rs.buffers[0].data = (uint8_t *)vterm_screen_get_buffer(text_layer->screen);
+    text_layer->rs.buffers[0].size = vterm_screen_get_buffer_size(text_layer->screen);
+    text_layer->rs.buffers[0].readonly = 1;
 
     /* Clear dirty — vterm_screen_reset fires on_damage but there's no real content yet.
      * First real dirty will come from PTY data via on_damage. */
@@ -262,20 +315,20 @@ static void text_layer_write(struct yetty_term_terminal_layer *self,
         vterm_input_write(text_layer->vterm, data, len);
 }
 
-static void text_layer_resize(struct yetty_term_terminal_layer *self,
-                              uint32_t cols, uint32_t rows)
-{
-    struct yetty_term_terminal_text_layer *text_layer =
-        container_of(self, struct yetty_term_terminal_text_layer, base);
+static struct yetty_core_void_result
+text_layer_resize_grid(struct yetty_term_terminal_layer *self,
+                       struct grid_size grid_size) {
+  struct yetty_term_terminal_text_layer *text_layer =
+      container_of(self, struct yetty_term_terminal_text_layer, base);
 
-    if (text_layer->vterm) {
-        vterm_set_size(text_layer->vterm, (int)rows, (int)cols);
-        self->cols = cols;
-        self->rows = rows;
-        set_grid_size(&text_layer->rs, (float)cols, (float)rows);
-        /* Buffer pointer updated in get_gpu_resource_set when dirty */
-        self->dirty = 1;
-    }
+  if (!text_layer->vterm)
+    return YETTY_ERR(yetty_core_void, "vterm is NULL");
+
+  vterm_set_size(text_layer->vterm, (int)grid_size.rows, (int)grid_size.cols);
+  self->grid_size = grid_size;
+  set_grid_size(&text_layer->rs, (float)grid_size.cols, (float)grid_size.rows);
+  self->dirty = 1;
+  return YETTY_OK_VOID();
 }
 
 /* Convert GLFW modifier flags to VTerm modifier flags */
@@ -362,12 +415,11 @@ static struct yetty_render_gpu_resource_set_result text_layer_get_gpu_resource_s
         ((const char *)self - offsetof(struct yetty_term_terminal_text_layer, base));
 
     /* Use vterm buffer directly - no conversion needed.
-     * VTermScreenCell is already 12 bytes matching shader expectations. */
+     * VTermScreenCell is already 12 bytes matching shader expectations.
+     * Cast away const is safe: buffer is readonly, GPU only reads from it. */
     if (text_layer->base.dirty) {
-        const VTermScreenCell *cells = vterm_screen_get_buffer(text_layer->screen);
-        size_t buf_size = vterm_screen_get_buffer_size(text_layer->screen);
-        text_layer->rs.buffers[0].data = (const uint8_t *)cells;
-        text_layer->rs.buffers[0].size = buf_size;
+        text_layer->rs.buffers[0].data = (uint8_t *)vterm_screen_get_buffer(text_layer->screen);
+        text_layer->rs.buffers[0].size = vterm_screen_get_buffer_size(text_layer->screen);
         text_layer->rs.buffers[0].dirty = 1;
     }
 
@@ -401,5 +453,27 @@ static int on_move_cursor(VTermPos pos, VTermPos oldpos, int visible, void *user
     set_cursor_pos(&text_layer->rs, (float)pos.col, (float)pos.row);
     set_cursor_visible(&text_layer->rs, visible ? 1.0f : 0.0f);
     text_layer->base.dirty = 1;
+
+    /* Notify cursor callback */
+    if (text_layer->base.cursor_fn) {
+        text_layer->base.cursor_fn(
+            &text_layer->base,
+            (struct grid_cursor_pos){.cols = (uint32_t)pos.col,
+                                     .rows = (uint32_t)pos.row},
+            text_layer->base.cursor_userdata);
+    }
+    return 1;
+}
+
+static int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
+{
+    struct yetty_term_terminal_text_layer *text_layer = user;
+    (void)cols;
+    (void)cells;
+
+    /* Notify scroll callback - 1 line scrolled down */
+    if (text_layer->base.scroll_fn) {
+        text_layer->base.scroll_fn(&text_layer->base, 1, text_layer->base.scroll_userdata);
+    }
     return 1;
 }

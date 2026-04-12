@@ -1,23 +1,13 @@
-// YPaint Buffer - Core primitive buffer for ypaint
-// Pure data container with no dependencies
+// YPaint Buffer - primitive buffer for ypaint
+// Pure data container, struct is public for direct field access
 
 #pragma once
 
-#include <stdint.h>
-#include <stddef.h>
+#include <yetty/core/types.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Opaque handle to a YPaintBuffer
-typedef struct YPaintBuffer* YPaintBufferHandle;
-
-// Result from adding a primitive
-typedef struct YPaintIdResult {
-    int error;       // 0 on success, error code otherwise
-    uint32_t id;     // primitive ID (offset in buffer)
-} YPaintIdResult;
 
 // Error codes
 #define YPAINT_OK           0
@@ -25,27 +15,36 @@ typedef struct YPaintIdResult {
 #define YPAINT_ERR_OVERFLOW 2
 #define YPAINT_ERR_ALLOC    3
 
-// Create a new buffer with initial capacity (in words)
-YPaintBufferHandle ypaint_buffer_create(uint32_t initialCapacity);
+// Result from adding a primitive
+struct yetty_ypaint_id_result {
+    int error;
+    uint32_t id;  // byte offset in prims buffer
+};
 
-// Destroy a buffer
-void ypaint_buffer_destroy(YPaintBufferHandle buf);
+// YPaint buffer - contains multiple named buffers for different data types
+struct yetty_ypaint_buffer {
+    struct yetty_named_buffer prims;   // raw primitive data (float words)
+    // TODO: add when needed
+    // struct yetty_text_span *text_spans;
+    // uint32_t text_span_count;
+    // struct yetty_font_blob *fonts;
+    // uint32_t font_count;
+    // struct yetty_image_data *images;
+    // uint32_t image_count;
+};
 
-// Clear all primitives from buffer (keeps allocation)
-void ypaint_buffer_clear(YPaintBufferHandle buf);
+// Create/destroy
+struct yetty_ypaint_buffer *yetty_ypaint_buffer_create(void);
+void yetty_ypaint_buffer_destroy(struct yetty_ypaint_buffer *buf);
 
-// Add raw primitive data to buffer
-// Returns ID (word offset) of the primitive
-YPaintIdResult ypaint_buffer_add_prim(YPaintBufferHandle buf, const float* data, uint32_t wordCount);
+// Clear all data (keeps allocation)
+void yetty_ypaint_buffer_clear(struct yetty_ypaint_buffer *buf);
 
-// Get current word count in buffer
-uint32_t ypaint_buffer_word_count(YPaintBufferHandle buf);
-
-// Get pointer to raw data (for GPU upload)
-const float* ypaint_buffer_data(YPaintBufferHandle buf);
-
-// Get capacity in words
-uint32_t ypaint_buffer_capacity(YPaintBufferHandle buf);
+// Add raw primitive data, returns byte offset
+struct yetty_ypaint_id_result yetty_ypaint_buffer_add_prim(
+    struct yetty_ypaint_buffer *buf,
+    const float *data,
+    uint32_t word_count);
 
 #ifdef __cplusplus
 }

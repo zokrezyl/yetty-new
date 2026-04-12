@@ -15,6 +15,7 @@
 #include <yetty/platform/platform-input-pipe.h>
 #include <yetty/platform/pty-factory.h>
 #include <yetty/platform/extract-assets.h>
+#include <yetty/ytrace.h>
 
 /* Forward declarations - implemented in other platform files */
 const char *yetty_platform_get_cache_dir(void);
@@ -226,16 +227,23 @@ int main(int argc, char **argv)
     yetty_platform_run_os_event_loop(window, &running);
     pthread_join(render_thread, NULL);
 
-    /* Cleanup */
+    /* Cleanup - surface is released by yetty_destroy (yetty owns it after configure) */
+    ydebug("main: cleanup starting");
     yetty_destroy(yetty);
-    wgpuSurfaceRelease(surface);
+    ydebug("main: yetty destroyed, releasing instance");
     wgpuInstanceRelease(instance);
+    ydebug("main: instance released, destroying pty_factory");
     pty_factory->ops->destroy(pty_factory);
+    ydebug("main: pty_factory destroyed");
     glfwSetWindowUserPointer(window, NULL);
     platform_input_pipe->ops->destroy(platform_input_pipe);
+    ydebug("main: platform_input_pipe destroyed");
     config->ops->destroy(config);
+    ydebug("main: config destroyed, destroying window");
     yetty_platform_destroy_window(window);
+    ydebug("main: window destroyed, calling glfwTerminate");
     glfwTerminate();
+    ydebug("main: cleanup complete");
 
     return thread_args.result;
 }

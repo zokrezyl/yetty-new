@@ -43,8 +43,8 @@ struct libuv_event_loop {
     struct yetty_core_event_loop base;
     uv_loop_t *loop;
 
-    struct prioritized_listener listeners[YETTY_EVENT_RENDER + 1][MAX_LISTENERS_PER_TYPE];
-    int listener_counts[YETTY_EVENT_RENDER + 1];
+    struct prioritized_listener listeners[YETTY_EVENT_COUNT][MAX_LISTENERS_PER_TYPE];
+    int listener_counts[YETTY_EVENT_COUNT];
 
     struct poll_handle polls[MAX_POLLS];
     int next_poll_id;
@@ -246,7 +246,7 @@ static struct yetty_core_void_result libuv_register_listener(
     struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
     int count, i, insert_pos;
 
-    if (!listener || type > YETTY_EVENT_RENDER)
+    if (!listener || type >= YETTY_EVENT_COUNT)
         return YETTY_ERR(yetty_core_void, "invalid listener or type");
 
     count = impl->listener_counts[type];
@@ -280,7 +280,7 @@ static struct yetty_core_void_result libuv_deregister_listener(
     struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
     int count, i, j;
 
-    if (type > YETTY_EVENT_RENDER)
+    if (type >= YETTY_EVENT_COUNT)
         return YETTY_OK_VOID();
 
     count = impl->listener_counts[type];
@@ -302,7 +302,7 @@ static struct yetty_core_int_result libuv_dispatch(
     struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
     int count, i;
 
-    if (event->type > YETTY_EVENT_RENDER)
+    if (event->type >= YETTY_EVENT_COUNT)
         return YETTY_OK(yetty_core_int, 0);
 
     count = impl->listener_counts[event->type];
@@ -321,7 +321,7 @@ static struct yetty_core_void_result libuv_broadcast(
     struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
     int t, count, i;
 
-    for (t = 0; t <= YETTY_EVENT_RENDER; t++) {
+    for (t = 0; t < YETTY_EVENT_COUNT; t++) {
         count = impl->listener_counts[t];
         for (i = 0; i < count; i++) {
             struct yetty_core_event_listener *listener = impl->listeners[t][i].listener;

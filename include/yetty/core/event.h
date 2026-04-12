@@ -53,7 +53,11 @@ enum yetty_core_event_type {
     /* Frame rate */
     YETTY_EVENT_SET_FRAME_RATE,
     /* Render */
-    YETTY_EVENT_RENDER
+    YETTY_EVENT_RENDER,
+    /* Shutdown - window close, propagates destroy */
+    YETTY_EVENT_SHUTDOWN,
+    /* Must be last - used for array sizing */
+    YETTY_EVENT_COUNT
 };
 
 struct yetty_core_event_key {

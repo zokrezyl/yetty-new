@@ -1,13 +1,17 @@
 #include <yetty/term/terminal.h>
 #include <yetty/term/text-layer.h>
+#include <yetty/term/ypaint-layer.h>
+#include <yetty/term/pty-reader.h>
 #include <yetty/core/event-loop.h>
 #include <yetty/core/event.h>
 #include <yetty/platform/pty.h>
 #include <yetty/platform/pty-factory.h>
 #include <yetty/platform/pty-poll-source.h>
 #include <yetty/render/gpu-resource-set.h>
-#include <yetty/render/gpu-allocator.h>
-#include <yetty/render/gpu-resource-binder.h>
+#include <yetty/render/layer-renderer.h>
+#include <yetty/render/blender.h>
+#include <yetty/render/render-target.h>
+#include <yetty/render/rendered-layer.h>
 #include <yetty/ytrace.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,10 +24,12 @@ struct yetty_term_terminal {
     uint32_t cols;
     uint32_t rows;
     struct yetty_term_terminal_layer *layers[YETTY_TERM_TERMINAL_MAX_LAYERS];
+    struct yetty_render_layer_renderer *renderers[YETTY_TERM_TERMINAL_MAX_LAYERS];
     size_t layer_count;
     yetty_core_poll_id pty_poll_id;
-    struct yetty_render_gpu_allocator *allocator;
-    struct yetty_render_gpu_resource_binder *binder;
+    struct yetty_render_blender *blender;
+    int shutting_down;
+    struct yetty_term_pty_reader *pty_reader;
 };
 
 /* Forward declarations */
@@ -50,6 +56,51 @@ static void terminal_request_render_callback(void *userdata)
         ydebug("terminal_request_render_callback: calling request_render");
         terminal->context.event_loop->ops->request_render(terminal->context.event_loop);
     }
+}
+
+/* Scroll callback - propagate scroll from source layer to all other layers */
+static void terminal_scroll_callback(struct yetty_term_terminal_layer *source, int lines, void *userdata)
+{
+    struct yetty_term_terminal *terminal = userdata;
+    ydebug("terminal_scroll_callback ENTER: source=%p lines=%d layer_count=%zu",
+           (void*)source, lines, terminal->layer_count);
+
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+        struct yetty_term_terminal_layer *layer = terminal->layers[i];
+        if (layer != source && layer->ops && layer->ops->scroll) {
+            ydebug("terminal_scroll_callback: calling layer[%zu]=%p scroll(%d)", i, (void*)layer, lines);
+            layer->ops->scroll(layer, lines);
+        } else {
+            ydebug("terminal_scroll_callback: skipping layer[%zu]=%p (source=%d has_scroll=%d)",
+                   i, (void*)layer, layer == source, layer->ops && layer->ops->scroll);
+        }
+    }
+    ydebug("terminal_scroll_callback EXIT: lines=%d", lines);
+}
+
+/* Cursor callback - propagate cursor position from source layer to all other layers */
+static void terminal_cursor_callback(struct yetty_term_terminal_layer *source,
+                                     struct grid_cursor_pos cursor_pos,
+                                     void *userdata) {
+  struct yetty_term_terminal *terminal = userdata;
+  ydebug("terminal_cursor_callback ENTER: source=%p col=%u row=%u layer_count=%zu",
+         (void *)source, cursor_pos.cols, cursor_pos.rows, terminal->layer_count);
+
+  for (size_t i = 0; i < terminal->layer_count; i++) {
+    struct yetty_term_terminal_layer *layer = terminal->layers[i];
+    if (layer != source && layer->ops && layer->ops->set_cursor) {
+      ydebug("terminal_cursor_callback: calling layer[%zu]=%p set_cursor(%u,%u)",
+             i, (void *)layer, cursor_pos.cols, cursor_pos.rows);
+      layer->ops->set_cursor(layer, cursor_pos.cols, cursor_pos.rows);
+    } else {
+      ydebug("terminal_cursor_callback: skipping layer[%zu]=%p (source=%d "
+             "has_set_cursor=%d)",
+             i, (void *)layer, layer == source,
+             layer->ops && layer->ops->set_cursor);
+    }
+  }
+  ydebug("terminal_cursor_callback EXIT: col=%u row=%u", cursor_pos.cols,
+         cursor_pos.rows);
 }
 
 /* Event handler */
@@ -96,6 +147,15 @@ static int terminal_event_handler(
         }
         return 1;
 
+    case YETTY_EVENT_SHUTDOWN:
+        ydebug("terminal: SHUTDOWN received");
+        terminal->shutting_down = 1;
+        if (terminal->context.event_loop && terminal->context.event_loop->ops &&
+            terminal->context.event_loop->ops->stop) {
+            terminal->context.event_loop->ops->stop(terminal->context.event_loop);
+        }
+        return 1;
+
     case YETTY_EVENT_RESIZE: {
         float width = event->resize.width;
         float height = event->resize.height;
@@ -119,13 +179,29 @@ static int terminal_event_handler(
             app_gpu->surface_width = (uint32_t)width;
             app_gpu->surface_height = (uint32_t)height;
             ydebug("terminal: surface reconfigured to %ux%u", (uint32_t)width, (uint32_t)height);
+
+            /* Resize blender's render target */
+            if (terminal->blender && terminal->blender->ops->get_target) {
+                struct yetty_render_target *target = terminal->blender->ops->get_target(terminal->blender);
+                if (target && target->ops->resize) {
+                    target->ops->resize(target, (uint32_t)width, (uint32_t)height);
+                }
+            }
+
+            /* Resize layer renderers */
+            for (size_t i = 0; i < terminal->layer_count; i++) {
+                struct yetty_render_layer_renderer *renderer = terminal->renderers[i];
+                if (renderer && renderer->ops->resize) {
+                    renderer->ops->resize(renderer, (uint32_t)width, (uint32_t)height);
+                }
+            }
         }
 
         /* Calculate grid dimensions from first layer's cell size */
         if (terminal->layer_count > 0) {
             struct yetty_term_terminal_layer *layer = terminal->layers[0];
-            float cell_w = layer->cell_width > 0 ? layer->cell_width : 10.0f;
-            float cell_h = layer->cell_height > 0 ? layer->cell_height : 20.0f;
+            float cell_w = layer->cell_size.width > 0 ? layer->cell_size.width : 10.0f;
+            float cell_h = layer->cell_size.height > 0 ? layer->cell_size.height : 20.0f;
             uint32_t new_cols = (uint32_t)(width / cell_w);
             uint32_t new_rows = (uint32_t)(height / cell_h);
 
@@ -133,7 +209,8 @@ static int terminal_event_handler(
                 (new_cols != terminal->cols || new_rows != terminal->rows)) {
                 ydebug("terminal: resizing grid from %ux%u to %ux%u",
                        terminal->cols, terminal->rows, new_cols, new_rows);
-                yetty_term_terminal_resize(terminal, new_cols, new_rows);
+                yetty_term_terminal_resize_grid(terminal,
+                    (struct grid_size){.cols = new_cols, .rows = new_rows});
 
                 /* Also resize PTY */
                 if (terminal->context.pty && terminal->context.pty->ops &&
@@ -150,176 +227,63 @@ static int terminal_event_handler(
     }
 }
 
-/* Render a frame */
+/* Render a frame using layered rendering */
 static struct yetty_core_void_result terminal_render_frame(struct yetty_term_terminal *terminal)
 {
-    struct yetty_gpu_context *gpu = &terminal->context.yetty_context.gpu_context;
-    struct yetty_app_gpu_context *app_gpu = &gpu->app_gpu_context;
+    if (terminal->shutting_down) {
+        ydebug("terminal_render_frame: shutting down, skipping render");
+        return YETTY_OK_VOID();
+    }
 
-    if (!terminal->binder) {
-        yerror("terminal_render_frame: no binder");
-        return YETTY_ERR(yetty_core_void, "no binder");
+    if (!terminal->blender) {
+        yerror("terminal_render_frame: no blender");
+        return YETTY_ERR(yetty_core_void, "no blender");
     }
 
     ydebug("terminal_render_frame: starting");
 
-    /* Submit resource sets from all layers (idempotent — only adds new ones) */
+    /* Render each layer to texture */
+    struct yetty_render_rendered_layer *rendered[YETTY_TERM_TERMINAL_MAX_LAYERS];
+    size_t rendered_count = 0;
+
     for (size_t i = 0; i < terminal->layer_count; i++) {
         struct yetty_term_terminal_layer *layer = terminal->layers[i];
-        if (layer && layer->ops && layer->ops->get_gpu_resource_set) {
-            struct yetty_render_gpu_resource_set_result rs_res = layer->ops->get_gpu_resource_set(layer);
-            if (!YETTY_IS_OK(rs_res)) {
-                yerror("terminal_render_frame: layer %zu get_gpu_resource_set failed: %s", i, rs_res.error.msg);
-                return YETTY_ERR(yetty_core_void, rs_res.error.msg);
-            }
-            terminal->binder->ops->submit(terminal->binder, rs_res.value);
+        struct yetty_render_layer_renderer *renderer = terminal->renderers[i];
+
+        if (!layer || !renderer)
+            continue;
+
+        struct yetty_render_rendered_layer_result res =
+            renderer->ops->render(renderer, layer);
+
+        if (YETTY_IS_OK(res)) {
+            rendered[rendered_count++] = res.value;
+        } else {
+            yerror("terminal_render_frame: layer %zu render failed: %s", i, res.error.msg);
         }
     }
 
-    /* Finalize (compile shaders, create pipeline — first time only) */
-    struct yetty_core_void_result res = terminal->binder->ops->finalize(terminal->binder);
-    if (!YETTY_IS_OK(res)) {
-        yerror("terminal_render_frame: finalize failed: %s", res.error.msg);
-        return res;
+    /* Blend all layers to target */
+    struct yetty_core_void_result blend_res =
+        terminal->blender->ops->blend(terminal->blender, rendered, rendered_count);
+
+    if (!YETTY_IS_OK(blend_res)) {
+        yerror("terminal_render_frame: blend failed: %s", blend_res.error.msg);
+        return blend_res;
     }
 
-    /* Per-frame update: upload dirty buffers/textures/uniforms */
-    res = terminal->binder->ops->update(terminal->binder);
-    if (!YETTY_IS_OK(res)) {
-        yerror("terminal_render_frame: update failed: %s", res.error.msg);
-        return res;
-    }
-
-    /* Clear dirty flags after upload */
-    for (size_t i = 0; i < terminal->layer_count; i++) {
-        if (terminal->layers[i])
-            terminal->layers[i]->dirty = 0;
-    }
-
-    /* Get surface texture */
-    WGPUSurfaceTexture surface_texture;
-    wgpuSurfaceGetCurrentTexture(app_gpu->surface, &surface_texture);
-    if (surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
-        surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
-        yerror("terminal_render_frame: surface texture not ready, status=%d", surface_texture.status);
-        return YETTY_ERR(yetty_core_void, "surface texture not ready");
-    }
-
-    WGPUTextureView target_view = wgpuTextureCreateView(surface_texture.texture, NULL);
-    if (!target_view) {
-        yerror("terminal_render_frame: failed to create texture view");
-        wgpuTextureRelease(surface_texture.texture);
-        return YETTY_ERR(yetty_core_void, "failed to create texture view");
-    }
-
-    /* Create command encoder */
-    WGPUCommandEncoderDescriptor enc_desc = {0};
-    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(gpu->device, &enc_desc);
-    if (!encoder) {
-        yerror("terminal_render_frame: wgpuDeviceCreateCommandEncoder failed");
-        wgpuTextureViewRelease(target_view);
-        return YETTY_ERR(yetty_core_void, "failed to create command encoder");
-    }
-
-    /* Begin render pass */
-    WGPURenderPassColorAttachment color_attachment = {0};
-    color_attachment.view = target_view;
-    color_attachment.loadOp = WGPULoadOp_Clear;
-    color_attachment.storeOp = WGPUStoreOp_Store;
-    color_attachment.clearValue = (WGPUColor){0.0, 0.0, 0.0, 1.0};
-    color_attachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;  /* Required for 2D textures */
-
-    WGPURenderPassDescriptor pass_desc = {0};
-    pass_desc.colorAttachmentCount = 1;
-    pass_desc.colorAttachments = &color_attachment;
-
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc);
-    if (!pass) {
-        yerror("terminal_render_frame: wgpuCommandEncoderBeginRenderPass failed");
-        wgpuCommandEncoderRelease(encoder);
-        wgpuTextureViewRelease(target_view);
-        return YETTY_ERR(yetty_core_void, "failed to begin render pass");
-    }
-
-    /* Bind and draw */
-    WGPURenderPipeline pipeline = terminal->binder->ops->get_pipeline(terminal->binder);
-    WGPUBuffer quad_vb = terminal->binder->ops->get_quad_vertex_buffer(terminal->binder);
-    if (!pipeline) {
-        yerror("terminal_render_frame: pipeline is NULL!");
-    }
-    if (!quad_vb) {
-        yerror("terminal_render_frame: quad_vb is NULL!");
-    }
-    if (pipeline && quad_vb) {
-        ydebug("terminal_render_frame: drawing with pipeline=%p quad_vb=%p", (void*)pipeline, (void*)quad_vb);
-        wgpuRenderPassEncoderSetPipeline(pass, pipeline);
-        terminal->binder->ops->bind(terminal->binder, pass, 0);
-        wgpuRenderPassEncoderSetVertexBuffer(pass, 0, quad_vb, 0, WGPU_WHOLE_SIZE);
-        wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
-    } else {
-        yerror("terminal_render_frame: skipping draw - missing pipeline or vertex buffer");
-    }
-
-    wgpuRenderPassEncoderEnd(pass);
-    wgpuRenderPassEncoderRelease(pass);
-
-    /* Submit */
-    WGPUCommandBufferDescriptor cmd_desc = {0};
-    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, &cmd_desc);
-    if (!cmd) {
-        yerror("terminal_render_frame: wgpuCommandEncoderFinish failed");
-        wgpuCommandEncoderRelease(encoder);
-        wgpuTextureViewRelease(target_view);
-        return YETTY_ERR(yetty_core_void, "failed to finish command encoder");
-    }
-    wgpuQueueSubmit(gpu->queue, 1, &cmd);
-
-    wgpuCommandBufferRelease(cmd);
-    wgpuCommandEncoderRelease(encoder);
-    wgpuTextureViewRelease(target_view);
-    wgpuSurfacePresent(app_gpu->surface);
-
-    ydebug("terminal_render_frame: done");
+    ydebug("terminal_render_frame: done, blended %zu layers", rendered_count);
     return YETTY_OK_VOID();
 }
 
-/* Max bytes to read per PTY poll event before yielding for render.
- * This prevents depleting all PTY data before any rendering can happen.
- * TODO: Make this configurable via yetty config. */
-#define YETTY_TERM_PTY_READ_CHUNK_SIZE 65536  /* 64KB */
-
-/* Read from PTY and feed to text layer */
+/* Read from PTY via pty_reader */
 static void terminal_read_pty(struct yetty_term_terminal *terminal)
 {
-    struct yetty_platform_pty *pty = terminal->context.pty;
-    char buf[4096];
-    size_t total_read = 0;
-    int dirty = 0;
-
-    if (!pty || !pty->ops || !pty->ops->read)
+    if (!terminal->pty_reader)
         return;
 
-    struct yetty_core_size_result res;
-    while ((res = pty->ops->read(pty, buf, sizeof(buf))), YETTY_IS_OK(res) && res.value > 0) {
-        /* Feed to text layer */
-        if (terminal->layer_count > 0) {
-            struct yetty_term_terminal_layer *layer = terminal->layers[0];
-            if (layer && layer->ops && layer->ops->write) {
-                layer->ops->write(layer, buf, res.value);
-                dirty = 1;
-            }
-        }
-        total_read += res.value;
-
-        /* Break after reading chunk size to allow render events */
-        if (total_read >= YETTY_TERM_PTY_READ_CHUNK_SIZE) {
-            ydebug("terminal_read_pty: read %zu bytes, yielding for render", total_read);
-            break;
-        }
-    }
-
-    /* Request render if text layer is dirty */
-    if (dirty && terminal->layer_count > 0) {
+    int bytes_read = yetty_term_pty_reader_read(terminal->pty_reader);
+    if (bytes_read > 0 && terminal->layer_count > 0) {
         struct yetty_term_terminal_layer *layer = terminal->layers[0];
         if (layer && layer->dirty) {
             terminal->context.event_loop->ops->request_render(terminal->context.event_loop);
@@ -329,22 +293,23 @@ static void terminal_read_pty(struct yetty_term_terminal *terminal)
 
 /* Terminal creation/destruction */
 
-struct yetty_term_terminal_result yetty_term_terminal_create(
-    uint32_t cols, uint32_t rows,
-    const struct yetty_context *yetty_context)
-{
-    struct yetty_term_terminal *terminal;
-    struct yetty_core_void_result res;
+struct yetty_term_terminal_result
+yetty_term_terminal_create(struct grid_size grid_size,
+                           const struct yetty_context *yetty_context) {
+  struct yetty_term_terminal *terminal;
+  struct yetty_core_void_result res;
+  uint32_t cols = grid_size.cols;
+  uint32_t rows = grid_size.rows;
 
-    ydebug("terminal_create: cols=%u rows=%u", cols, rows);
+  ydebug("terminal_create: cols=%u rows=%u", cols, rows);
 
-    terminal = calloc(1, sizeof(struct yetty_term_terminal));
-    if (!terminal)
-        return YETTY_ERR(yetty_term_terminal, "failed to allocate terminal");
+  terminal = calloc(1, sizeof(struct yetty_term_terminal));
+  if (!terminal)
+    return YETTY_ERR(yetty_term_terminal, "failed to allocate terminal");
 
-    terminal->listener.handler = terminal_event_handler;
-    terminal->cols = cols;
-    terminal->rows = rows;
+  terminal->listener.handler = terminal_event_handler;
+  terminal->cols = cols;
+  terminal->rows = rows;
     terminal->layer_count = 0;
     terminal->context.yetty_context = *yetty_context;
 
@@ -400,6 +365,17 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
     }
     ydebug("terminal_create: registered for RESIZE events");
 
+    /* Register for shutdown events */
+    res = terminal->context.event_loop->ops->register_listener(
+        terminal->context.event_loop, YETTY_EVENT_SHUTDOWN, &terminal->listener, 0);
+    if (!YETTY_IS_OK(res)) {
+        ydebug("terminal_create: failed to register SHUTDOWN listener");
+        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+        free(terminal);
+        return YETTY_ERR(yetty_term_terminal, "failed to register SHUTDOWN listener");
+    }
+    ydebug("terminal_create: registered for SHUTDOWN events");
+
     /* Create PTY */
     struct yetty_platform_pty_factory *pty_factory = yetty_context->app_context.pty_factory;
     if (pty_factory && pty_factory->ops && pty_factory->ops->create_pty) {
@@ -407,6 +383,14 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
         if (YETTY_IS_OK(pty_res)) {
             terminal->context.pty = pty_res.value;
             ydebug("terminal_create: PTY created at %p", (void *)terminal->context.pty);
+
+            /* Create PTY reader */
+            struct yetty_term_pty_reader_result reader_res =
+                yetty_term_pty_reader_create(terminal->context.pty);
+            if (YETTY_IS_OK(reader_res)) {
+                terminal->pty_reader = reader_res.value;
+                ydebug("terminal_create: pty_reader created");
+            }
 
             /* Set up PTY poll */
             struct yetty_platform_pty_poll_source *poll_source = terminal->context.pty->ops->poll_source(terminal->context.pty);
@@ -431,9 +415,12 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
     struct yetty_term_terminal_layer_result text_layer_res = yetty_term_terminal_text_layer_create(
         cols, rows, yetty_context,
         terminal_pty_write_callback, terminal,
-        terminal_request_render_callback, terminal);
+        terminal_request_render_callback, terminal,
+        terminal_scroll_callback, terminal,
+        terminal_cursor_callback, terminal);
     if (!YETTY_IS_OK(text_layer_res)) {
         ydebug("terminal_create: failed to create text layer");
+        yetty_term_pty_reader_destroy(terminal->pty_reader);
         if (terminal->context.pty)
             terminal->context.pty->ops->destroy(terminal->context.pty);
         terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
@@ -443,38 +430,99 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
     yetty_term_terminal_layer_add(terminal, text_layer_res.value);
     ydebug("terminal_create: text_layer created and added");
 
-    /* Create GPU allocator */
-    struct yetty_render_gpu_allocator_result alloc_res =
-        yetty_render_gpu_allocator_create(yetty_context->gpu_context.device);
-    if (!YETTY_IS_OK(alloc_res)) {
-        ydebug("terminal_create: failed to create gpu allocator");
-        if (terminal->context.pty)
-            terminal->context.pty->ops->destroy(terminal->context.pty);
-        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
-        free(terminal);
-        return YETTY_ERR(yetty_term_terminal, "failed to create gpu allocator");
+    /* Register text layer as default sink for pty_reader */
+    if (terminal->pty_reader) {
+        yetty_term_pty_reader_register_default_sink(terminal->pty_reader, text_layer_res.value);
+        ydebug("terminal_create: text_layer registered as default sink");
     }
-    terminal->allocator = alloc_res.value;
-    ydebug("terminal_create: gpu allocator created");
 
-    /* Create GPU resource binder */
-    struct yetty_render_gpu_resource_binder_result binder_res =
-        yetty_render_gpu_resource_binder_create(
-            yetty_context->gpu_context.device,
-            yetty_context->gpu_context.queue,
-            yetty_context->gpu_context.surface_format,
-            terminal->allocator);
-    if (!YETTY_IS_OK(binder_res)) {
-        ydebug("terminal_create: failed to create gpu resource binder");
-        terminal->allocator->ops->destroy(terminal->allocator);
+    /* Create ypaint scrolling layer (overlay on top of text) */
+    {
+        struct yetty_term_terminal_layer *text_layer = text_layer_res.value;
+        struct yetty_term_terminal_layer_result ypaint_res = yetty_term_ypaint_layer_create(
+            cols, rows,
+            text_layer->cell_size.width, text_layer->cell_size.height,
+            1,  /* scrolling_mode = true */
+            terminal_request_render_callback, terminal,
+            terminal_scroll_callback, terminal,
+            terminal_cursor_callback, terminal);
+        if (YETTY_IS_OK(ypaint_res)) {
+            yetty_term_terminal_layer_add(terminal, ypaint_res.value);
+            ydebug("terminal_create: ypaint scrolling layer created and added");
+
+            /* Register ypaint layer for OSC 666674 */
+            if (terminal->pty_reader) {
+                yetty_term_pty_reader_register_osc_sink(
+                    terminal->pty_reader, YETTY_OSC_YPAINT_SCROLL, ypaint_res.value);
+                ydebug("terminal_create: ypaint layer registered for OSC 666674");
+            }
+        } else {
+            ydebug("terminal_create: failed to create ypaint layer (non-fatal): %s",
+                   ypaint_res.error.msg);
+        }
+    }
+
+    /* Create render target (surface target) */
+    const struct yetty_app_gpu_context *app_gpu = &yetty_context->gpu_context.app_gpu_context;
+    struct yetty_render_target_result target_res = yetty_render_target_surface_create(
+        yetty_context->gpu_context.device,
+        app_gpu->surface,
+        yetty_context->gpu_context.surface_format,
+        app_gpu->surface_width,
+        app_gpu->surface_height);
+    if (!YETTY_IS_OK(target_res)) {
+        ydebug("terminal_create: failed to create render target");
         if (terminal->context.pty)
             terminal->context.pty->ops->destroy(terminal->context.pty);
         terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
         free(terminal);
-        return YETTY_ERR(yetty_term_terminal, "failed to create gpu resource binder");
+        return YETTY_ERR(yetty_term_terminal, "failed to create render target");
     }
-    terminal->binder = binder_res.value;
-    ydebug("terminal_create: gpu resource binder created");
+    ydebug("terminal_create: render target created");
+
+    /* Create blender (takes ownership of target) */
+    struct yetty_render_blender_result blender_res = yetty_render_blender_create(
+        yetty_context->gpu_context.device,
+        yetty_context->gpu_context.queue,
+        target_res.value);
+    if (!YETTY_IS_OK(blender_res)) {
+        ydebug("terminal_create: failed to create blender");
+        target_res.value->ops->destroy(target_res.value);
+        if (terminal->context.pty)
+            terminal->context.pty->ops->destroy(terminal->context.pty);
+        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+        free(terminal);
+        return YETTY_ERR(yetty_term_terminal, "failed to create blender");
+    }
+    terminal->blender = blender_res.value;
+    ydebug("terminal_create: blender created");
+
+    /* Create layer renderers for each layer */
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+        struct yetty_render_layer_renderer_result renderer_res =
+            yetty_render_layer_renderer_create(
+                yetty_context->gpu_context.device,
+                yetty_context->gpu_context.queue,
+                yetty_context->gpu_context.surface_format,
+                app_gpu->surface_width,
+                app_gpu->surface_height);
+        if (!YETTY_IS_OK(renderer_res)) {
+            ydebug("terminal_create: failed to create renderer for layer %zu", i);
+            /* Clean up already-created renderers */
+            for (size_t j = 0; j < i; j++) {
+                if (terminal->renderers[j])
+                    terminal->renderers[j]->ops->destroy(terminal->renderers[j]);
+            }
+            terminal->blender->ops->destroy(terminal->blender);
+            if (terminal->context.pty)
+                terminal->context.pty->ops->destroy(terminal->context.pty);
+            terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+            free(terminal);
+            return YETTY_ERR(yetty_term_terminal, "failed to create layer renderer");
+        }
+        terminal->renderers[i] = renderer_res.value;
+        ydebug("terminal_create: renderer %zu created", i);
+    }
 
     return YETTY_OK(yetty_term_terminal, terminal);
 }
@@ -486,25 +534,54 @@ void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal)
     if (!terminal)
         return;
 
-    if (terminal->binder && terminal->binder->ops && terminal->binder->ops->destroy)
-        terminal->binder->ops->destroy(terminal->binder);
+    ydebug("terminal_destroy: starting");
 
-    if (terminal->allocator && terminal->allocator->ops && terminal->allocator->ops->destroy)
-        terminal->allocator->ops->destroy(terminal->allocator);
-
+    /* Destroy renderers first */
     for (i = 0; i < terminal->layer_count; i++) {
-        struct yetty_term_terminal_layer *layer = terminal->layers[i];
-        if (layer && layer->ops && layer->ops->destroy)
-            layer->ops->destroy(layer);
+        struct yetty_render_layer_renderer *renderer = terminal->renderers[i];
+        if (renderer && renderer->ops && renderer->ops->destroy) {
+            ydebug("terminal_destroy: destroying renderer %zu", i);
+            renderer->ops->destroy(renderer);
+        }
+    }
+    ydebug("terminal_destroy: renderers destroyed");
+
+    /* Destroy blender (also destroys owned render target) */
+    if (terminal->blender && terminal->blender->ops && terminal->blender->ops->destroy) {
+        ydebug("terminal_destroy: destroying blender");
+        terminal->blender->ops->destroy(terminal->blender);
+        ydebug("terminal_destroy: blender destroyed");
     }
 
-    if (terminal->context.pty && terminal->context.pty->ops && terminal->context.pty->ops->destroy)
+    /* Destroy layers */
+    for (i = 0; i < terminal->layer_count; i++) {
+        struct yetty_term_terminal_layer *layer = terminal->layers[i];
+        if (layer && layer->ops && layer->ops->destroy) {
+            ydebug("terminal_destroy: destroying layer %zu", i);
+            layer->ops->destroy(layer);
+        }
+    }
+    ydebug("terminal_destroy: layers destroyed");
+
+    if (terminal->context.pty && terminal->context.pty->ops && terminal->context.pty->ops->destroy) {
+        ydebug("terminal_destroy: destroying pty");
         terminal->context.pty->ops->destroy(terminal->context.pty);
+    }
 
-    if (terminal->context.event_loop && terminal->context.event_loop->ops && terminal->context.event_loop->ops->destroy)
+    if (terminal->context.event_loop && terminal->context.event_loop->ops && terminal->context.event_loop->ops->destroy) {
+        ydebug("terminal_destroy: destroying event_loop");
         terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
+    }
 
+    /* Destroy PTY reader */
+    if (terminal->pty_reader) {
+        ydebug("terminal_destroy: destroying pty_reader");
+        yetty_term_pty_reader_destroy(terminal->pty_reader);
+    }
+
+    ydebug("terminal_destroy: freeing terminal struct");
     free(terminal);
+    ydebug("terminal_destroy: done");
 }
 
 struct yetty_core_void_result yetty_term_terminal_run(struct yetty_term_terminal *terminal)
@@ -560,22 +637,19 @@ void yetty_term_terminal_write(struct yetty_term_terminal *terminal,
     }
 }
 
-void yetty_term_terminal_resize(struct yetty_term_terminal *terminal,
-                                uint32_t cols, uint32_t rows)
-{
-    size_t i;
+void yetty_term_terminal_resize_grid(struct yetty_term_terminal *terminal,
+                                     struct grid_size grid_size) {
+  if (!terminal)
+    return;
 
-    if (!terminal)
-        return;
+  terminal->cols = grid_size.cols;
+  terminal->rows = grid_size.rows;
 
-    terminal->cols = cols;
-    terminal->rows = rows;
-
-    for (i = 0; i < terminal->layer_count; i++) {
-        struct yetty_term_terminal_layer *layer = terminal->layers[i];
-        if (layer && layer->ops && layer->ops->resize)
-            layer->ops->resize(layer, cols, rows);
-    }
+  for (size_t i = 0; i < terminal->layer_count; i++) {
+    struct yetty_term_terminal_layer *layer = terminal->layers[i];
+    if (layer && layer->ops && layer->ops->resize_grid)
+      layer->ops->resize_grid(layer, grid_size);
+  }
 }
 
 /* Terminal state */

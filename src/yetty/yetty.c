@@ -241,7 +241,7 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
     /* Create terminal */
     ydebug("yetty_create: Creating terminal 80x24...");
     struct yetty_term_terminal_result term_res = yetty_term_terminal_create(
-        80, 24, &yetty->context);
+        (struct grid_size){.cols = 80, .rows = 24}, &yetty->context);
     if (!YETTY_IS_OK(term_res)) {
         yetty_destroy(yetty);
         return YETTY_ERR(yetty_yetty, "Failed to create terminal");
@@ -259,21 +259,42 @@ void yetty_destroy(struct yetty_yetty *yetty)
         return;
     }
 
+    ydebug("yetty_destroy: starting");
+
     if (yetty->terminal) {
+        ydebug("yetty_destroy: destroying terminal");
         yetty_term_terminal_destroy(yetty->terminal);
+        ydebug("yetty_destroy: terminal destroyed");
+    }
+
+    /* Surface is created by platform (glfw-main.c) but owned by yetty since we
+     * configured it with our device. Must release before device. */
+    WGPUSurface surface = yetty->context.app_context.app_gpu_context.surface;
+    if (surface && yetty->device) {
+        ydebug("yetty_destroy: unconfiguring surface");
+        wgpuSurfaceUnconfigure(surface);
+        wgpuDeviceTick(yetty->device);
+        ydebug("yetty_destroy: releasing surface");
+        wgpuSurfaceRelease(surface);
+        yetty->context.app_context.app_gpu_context.surface = NULL;
     }
 
     if (yetty->queue) {
+        ydebug("yetty_destroy: releasing queue");
         wgpuQueueRelease(yetty->queue);
     }
     if (yetty->device) {
+        ydebug("yetty_destroy: releasing device");
         wgpuDeviceRelease(yetty->device);
     }
     if (yetty->adapter) {
+        ydebug("yetty_destroy: releasing adapter");
         wgpuAdapterRelease(yetty->adapter);
     }
 
+    ydebug("yetty_destroy: freeing yetty struct");
     free(yetty);
+    ydebug("yetty_destroy: done");
 }
 
 struct yetty_core_void_result yetty_run(struct yetty_yetty *yetty)
