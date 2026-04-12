@@ -32,7 +32,7 @@ aabb_max_row = cursor_row + aabb_max_row_rel = 5 + 2 = 7
 storage_row = aabb_max_row = 7  (lowest row, for deletion tracking)
 ```
 
-**STEP 3: Get rolling_row for cursor's line**
+**STEP 3: Get rolling_row at insertion**
 ```
 rolling_row = row0_absolute + cursor_row = 0 + 5 = 5
 ```
@@ -94,7 +94,7 @@ sd_circle(prim_scene_pos, vec2(cx, cy), radius)  // cy used as-is
 
 This means:
 - CPU does NOT transform cy
-- Shader computes y_offset from rolling_row (cursor's line at creation)
+- Shader computes y_offset from rolling_row (at insertion)
 - Shader adjusts test position to match primitive's coordinate system
 - SDF evaluates distance from adjusted test position to stored coordinates
 
@@ -112,7 +112,7 @@ In scrolling mode (terminal), lines scroll off the top. Naive approach updates e
    ```
    packed_offset = col | (rolling_row << 16)
    ```
-   Where `rolling_row` = row0_absolute + cursor_row (rolling row of cursor's line at creation).
+   Where `rolling_row` = row0_absolute + cursor_row (rolling row at insertion).
 
 3. **Geometry stored as-is** - No coordinate transformation. cy, etc. stored exactly as user specified.
 
@@ -149,7 +149,7 @@ Each primitive is serialized to a GPU buffer as consecutive 32-bit words:
 ```
 
 Where:
-- `packed_offset` = `col | (rolling_row << 16)` - column and rolling row of cursor's line
+- `packed_offset` = `col | (rolling_row << 16)` - column and rolling row at insertion
 - `type` = primitive type for shader dispatch
 - `attrs` = rendering attributes
 - `style` = fill/stroke colors and width

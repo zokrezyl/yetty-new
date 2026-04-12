@@ -11,8 +11,8 @@
 #include <math.h>
 
 /* External AABB function */
-extern void ypaint_sdf_compute_aabb(const float *data, uint32_t wordCount,
-                                     float *minX, float *minY, float *maxX, float *maxY);
+extern void ypaint_sdf_compute_aabb(const float *data, uint32_t word_count,
+                                     float *min_x, float *min_y, float *max_x, float *max_y);
 
 /*=============================================================================
  * Helpers
@@ -50,418 +50,425 @@ struct ypaint_yaml_parse_ctx {
     uint32_t fill_color;
     uint32_t stroke_color;
     float stroke_width;
-    float ax;
-    float ay;
-    float bx;
-    float by;
-    float cx;
-    float cy;
-    float d;
-    float hh;
-    float hw;
-    float m;
-    float n;
-    float nx;
-    float ny;
-    float r;
-    float r0;
-    float r1;
-    float r2;
-    float r3;
-    float ra;
-    float rb;
-    float round;
-    float rx;
-    float ry;
-    float sc_x;
-    float sc_y;
+    float aperture_x;
+    float aperture_y;
+    float center_x;
+    float center_y;
+    float corner_radius;
+    float end_x;
+    float end_y;
+    float half_height;
+    float half_width;
+    float inner_ratio;
+    float normal_x;
+    float normal_y;
+    float num_points;
+    float offset;
+    float radius;
+    float radius_bottom_left;
+    float radius_bottom_right;
+    float radius_inner;
+    float radius_outer;
+    float radius_top_left;
+    float radius_top_right;
+    float radius_x;
+    float radius_y;
     float scale;
-    float th;
-    float w;
-    float x0;
-    float x1;
-    float y0;
-    float y1;
+    float start_x;
+    float start_y;
+    float thickness;
+    float vertex_a_x;
+    float vertex_a_y;
+    float vertex_b_x;
+    float vertex_b_y;
+    float vertex_c_x;
+    float vertex_c_y;
+    float width;
     /* Array parsing state */
     int in_array;
     int array_idx;
     float array_vals[8];
 };
 
-static void reset_prim(struct ypaint_yaml_parse_ctx *ctx) {
-    ctx->prim_type[0] = 0;
-    ctx->prop_key[0] = 0;
-    ctx->fill_color = 0;
-    ctx->stroke_color = 0;
-    ctx->stroke_width = 0;
-    ctx->ax = 0;
-    ctx->ay = 0;
-    ctx->bx = 0;
-    ctx->by = 0;
-    ctx->cx = 0;
-    ctx->cy = 0;
-    ctx->d = 0;
-    ctx->hh = 0;
-    ctx->hw = 0;
-    ctx->m = 0;
-    ctx->n = 0;
-    ctx->nx = 0;
-    ctx->ny = 0;
-    ctx->r = 0;
-    ctx->r0 = 0;
-    ctx->r1 = 0;
-    ctx->r2 = 0;
-    ctx->r3 = 0;
-    ctx->ra = 0;
-    ctx->rb = 0;
-    ctx->round = 0;
-    ctx->rx = 0;
-    ctx->ry = 0;
-    ctx->sc_x = 0;
-    ctx->sc_y = 0;
-    ctx->scale = 0;
-    ctx->th = 0;
-    ctx->w = 0;
-    ctx->x0 = 0;
-    ctx->x1 = 0;
-    ctx->y0 = 0;
-    ctx->y1 = 0;
-    ctx->in_array = 0;
-    ctx->array_idx = 0;
+static void reset_prim(struct ypaint_yaml_parse_ctx *yaml_parse_ctx) {
+    yaml_parse_ctx->prim_type[0] = 0;
+    yaml_parse_ctx->prop_key[0] = 0;
+    yaml_parse_ctx->fill_color = 0;
+    yaml_parse_ctx->stroke_color = 0;
+    yaml_parse_ctx->stroke_width = 0;
+    yaml_parse_ctx->aperture_x = 0;
+    yaml_parse_ctx->aperture_y = 0;
+    yaml_parse_ctx->center_x = 0;
+    yaml_parse_ctx->center_y = 0;
+    yaml_parse_ctx->corner_radius = 0;
+    yaml_parse_ctx->end_x = 0;
+    yaml_parse_ctx->end_y = 0;
+    yaml_parse_ctx->half_height = 0;
+    yaml_parse_ctx->half_width = 0;
+    yaml_parse_ctx->inner_ratio = 0;
+    yaml_parse_ctx->normal_x = 0;
+    yaml_parse_ctx->normal_y = 0;
+    yaml_parse_ctx->num_points = 0;
+    yaml_parse_ctx->offset = 0;
+    yaml_parse_ctx->radius = 0;
+    yaml_parse_ctx->radius_bottom_left = 0;
+    yaml_parse_ctx->radius_bottom_right = 0;
+    yaml_parse_ctx->radius_inner = 0;
+    yaml_parse_ctx->radius_outer = 0;
+    yaml_parse_ctx->radius_top_left = 0;
+    yaml_parse_ctx->radius_top_right = 0;
+    yaml_parse_ctx->radius_x = 0;
+    yaml_parse_ctx->radius_y = 0;
+    yaml_parse_ctx->scale = 0;
+    yaml_parse_ctx->start_x = 0;
+    yaml_parse_ctx->start_y = 0;
+    yaml_parse_ctx->thickness = 0;
+    yaml_parse_ctx->vertex_a_x = 0;
+    yaml_parse_ctx->vertex_a_y = 0;
+    yaml_parse_ctx->vertex_b_x = 0;
+    yaml_parse_ctx->vertex_b_y = 0;
+    yaml_parse_ctx->vertex_c_x = 0;
+    yaml_parse_ctx->vertex_c_y = 0;
+    yaml_parse_ctx->width = 0;
+    yaml_parse_ctx->in_array = 0;
+    yaml_parse_ctx->array_idx = 0;
 }
 
-static void store_array(struct ypaint_yaml_parse_ctx *ctx) {
-    const char *k = ctx->prop_key;
-    ydebug("store_array: key='%s' idx=%d vals=[%f,%f]", k, ctx->array_idx, ctx->array_vals[0], ctx->array_vals[1]);
-    if (strcmp(k, "position") == 0 && ctx->array_idx >= 2) {
-        ctx->cx = ctx->array_vals[0]; ctx->cy = ctx->array_vals[1];
-        ydebug("store_array: set cx=%f cy=%f", ctx->cx, ctx->cy);
+static void store_array(struct ypaint_yaml_parse_ctx *yaml_parse_ctx) {
+    const char *key = yaml_parse_ctx->prop_key;
+    ydebug("store_array: key='%s' idx=%d vals=[%f,%f]", key, yaml_parse_ctx->array_idx, yaml_parse_ctx->array_vals[0], yaml_parse_ctx->array_vals[1]);
+    if (strcmp(key, "position") == 0 && yaml_parse_ctx->array_idx >= 2) {
+        yaml_parse_ctx->center_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->center_y = yaml_parse_ctx->array_vals[1];
+        ydebug("store_array: set center_x=%f center_y=%f", yaml_parse_ctx->center_x, yaml_parse_ctx->center_y);
     }
-    else if (strcmp(k, "size") == 0 && ctx->array_idx >= 2) {
-        ctx->hw = ctx->array_vals[0] / 2.0f; ctx->hh = ctx->array_vals[1] / 2.0f;
-        ctx->bx = ctx->array_vals[0]; ctx->by = ctx->array_vals[1];
+    else if (strcmp(key, "size") == 0 && yaml_parse_ctx->array_idx >= 2) {
+        yaml_parse_ctx->half_width = yaml_parse_ctx->array_vals[0] / 2.0f; yaml_parse_ctx->half_height = yaml_parse_ctx->array_vals[1] / 2.0f;
     }
-    else if (strcmp(k, "from") == 0 && ctx->array_idx >= 2) {
-        ctx->x0 = ctx->array_vals[0]; ctx->y0 = ctx->array_vals[1];
-        ctx->ax = ctx->array_vals[0]; ctx->ay = ctx->array_vals[1];
+    else if (strcmp(key, "start") == 0 && yaml_parse_ctx->array_idx >= 2) {
+        yaml_parse_ctx->start_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->start_y = yaml_parse_ctx->array_vals[1];
     }
-    else if (strcmp(k, "to") == 0 && ctx->array_idx >= 2) {
-        ctx->x1 = ctx->array_vals[0]; ctx->y1 = ctx->array_vals[1];
-        ctx->bx = ctx->array_vals[0]; ctx->by = ctx->array_vals[1];
+    else if (strcmp(key, "end") == 0 && yaml_parse_ctx->array_idx >= 2) {
+        yaml_parse_ctx->end_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->end_y = yaml_parse_ctx->array_vals[1];
     }
-    else if (strcmp(k, "p0") == 0 && ctx->array_idx >= 2) {
-        ctx->ax = ctx->array_vals[0]; ctx->ay = ctx->array_vals[1];
+    else if (strcmp(key, "vertex_a") == 0 && yaml_parse_ctx->array_idx >= 2) {
+        yaml_parse_ctx->vertex_a_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->vertex_a_y = yaml_parse_ctx->array_vals[1];
     }
-    else if (strcmp(k, "p1") == 0 && ctx->array_idx >= 2) {
-        ctx->bx = ctx->array_vals[0]; ctx->by = ctx->array_vals[1];
+    else if (strcmp(key, "vertex_b") == 0 && yaml_parse_ctx->array_idx >= 2) {
+        yaml_parse_ctx->vertex_b_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->vertex_b_y = yaml_parse_ctx->array_vals[1];
     }
-    else if (strcmp(k, "p2") == 0 && ctx->array_idx >= 2) {
-        ctx->cx = ctx->array_vals[0]; ctx->cy = ctx->array_vals[1];
+    else if (strcmp(key, "vertex_c") == 0 && yaml_parse_ctx->array_idx >= 2) {
+        yaml_parse_ctx->vertex_c_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->vertex_c_y = yaml_parse_ctx->array_vals[1];
     }
-    else if (strcmp(k, "radii") == 0 && ctx->array_idx >= 2) {
-        ctx->rx = ctx->array_vals[0]; ctx->ry = ctx->array_vals[1];
+    else if (strcmp(key, "radii") == 0 && yaml_parse_ctx->array_idx >= 2) {
+        yaml_parse_ctx->radius_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->radius_y = yaml_parse_ctx->array_vals[1];
+    }
+    else if (strcmp(key, "aperture") == 0 && yaml_parse_ctx->array_idx >= 2) {
+        yaml_parse_ctx->aperture_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->aperture_y = yaml_parse_ctx->array_vals[1];
+    }
+    else if (strcmp(key, "normal") == 0 && yaml_parse_ctx->array_idx >= 2) {
+        yaml_parse_ctx->normal_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->normal_y = yaml_parse_ctx->array_vals[1];
     }
 }
 
-static void add_prim(struct ypaint_yaml_parse_ctx *ctx) {
+static void add_prim(struct ypaint_yaml_parse_ctx *yaml_parse_ctx) {
     float data[16];
-    uint32_t wc = 0, tmp;
-    float minX, minY, maxX, maxY;
+    uint32_t word_count = 0, tmp;
+    float min_x, min_y, max_x, max_y;
 
-    ydebug("add_prim: type='%s' cx=%f cy=%f r=%f fill=0x%08x", ctx->prim_type, ctx->cx, ctx->cy, ctx->r, ctx->fill_color);
+    ydebug("add_prim: type='%s' center_x=%f center_y=%f radius=%f fill=0x%08x", yaml_parse_ctx->prim_type, yaml_parse_ctx->center_x, yaml_parse_ctx->center_y, yaml_parse_ctx->radius, yaml_parse_ctx->fill_color);
 
-    if (strcmp(ctx->prim_type, "circle") == 0) {
+    if (strcmp(yaml_parse_ctx->prim_type, "circle") == 0) {
         tmp = YPAINT_SDF_CIRCLE; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->r;
-        wc = 8;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->radius;
+        word_count = 8;
     }
-    else if (strcmp(ctx->prim_type, "box") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "box") == 0) {
         tmp = YPAINT_SDF_BOX; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->hw;
-        data[8] = ctx->hh;
-        data[9] = ctx->round;
-        wc = 10;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->half_width;
+        data[8] = yaml_parse_ctx->half_height;
+        data[9] = yaml_parse_ctx->corner_radius;
+        word_count = 10;
     }
-    else if (strcmp(ctx->prim_type, "segment") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "segment") == 0) {
         tmp = YPAINT_SDF_SEGMENT; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->x0;
-        data[6] = ctx->y0;
-        data[7] = ctx->x1;
-        data[8] = ctx->y1;
-        wc = 9;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->start_x;
+        data[6] = yaml_parse_ctx->start_y;
+        data[7] = yaml_parse_ctx->end_x;
+        data[8] = yaml_parse_ctx->end_y;
+        word_count = 9;
     }
-    else if (strcmp(ctx->prim_type, "triangle") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "triangle") == 0) {
         tmp = YPAINT_SDF_TRIANGLE; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->ax;
-        data[6] = ctx->ay;
-        data[7] = ctx->bx;
-        data[8] = ctx->by;
-        data[9] = ctx->cx;
-        data[10] = ctx->cy;
-        wc = 11;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->vertex_a_x;
+        data[6] = yaml_parse_ctx->vertex_a_y;
+        data[7] = yaml_parse_ctx->vertex_b_x;
+        data[8] = yaml_parse_ctx->vertex_b_y;
+        data[9] = yaml_parse_ctx->vertex_c_x;
+        data[10] = yaml_parse_ctx->vertex_c_y;
+        word_count = 11;
     }
-    else if (strcmp(ctx->prim_type, "ellipse") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "ellipse") == 0) {
         tmp = YPAINT_SDF_ELLIPSE; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->rx;
-        data[8] = ctx->ry;
-        wc = 9;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->radius_x;
+        data[8] = yaml_parse_ctx->radius_y;
+        word_count = 9;
     }
-    else if (strcmp(ctx->prim_type, "arc") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "arc") == 0) {
         tmp = YPAINT_SDF_ARC; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->sc_x;
-        data[8] = ctx->sc_y;
-        data[9] = ctx->ra;
-        data[10] = ctx->rb;
-        wc = 11;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->aperture_x;
+        data[8] = yaml_parse_ctx->aperture_y;
+        data[9] = yaml_parse_ctx->radius;
+        data[10] = yaml_parse_ctx->thickness;
+        word_count = 11;
     }
-    else if (strcmp(ctx->prim_type, "rounded_box") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "rounded_box") == 0) {
         tmp = YPAINT_SDF_ROUNDED_BOX; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->hw;
-        data[8] = ctx->hh;
-        data[9] = ctx->r0;
-        data[10] = ctx->r1;
-        data[11] = ctx->r2;
-        data[12] = ctx->r3;
-        wc = 13;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->half_width;
+        data[8] = yaml_parse_ctx->half_height;
+        data[9] = yaml_parse_ctx->radius_top_right;
+        data[10] = yaml_parse_ctx->radius_bottom_right;
+        data[11] = yaml_parse_ctx->radius_top_left;
+        data[12] = yaml_parse_ctx->radius_bottom_left;
+        word_count = 13;
     }
-    else if (strcmp(ctx->prim_type, "rhombus") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "rhombus") == 0) {
         tmp = YPAINT_SDF_RHOMBUS; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->bx;
-        data[8] = ctx->by;
-        wc = 9;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->half_width;
+        data[8] = yaml_parse_ctx->half_height;
+        word_count = 9;
     }
-    else if (strcmp(ctx->prim_type, "pentagon") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "pentagon") == 0) {
         tmp = YPAINT_SDF_PENTAGON; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->r;
-        wc = 8;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->radius;
+        word_count = 8;
     }
-    else if (strcmp(ctx->prim_type, "hexagon") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "hexagon") == 0) {
         tmp = YPAINT_SDF_HEXAGON; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->r;
-        wc = 8;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->radius;
+        word_count = 8;
     }
-    else if (strcmp(ctx->prim_type, "star") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "star") == 0) {
         tmp = YPAINT_SDF_STAR; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->r;
-        data[8] = ctx->n;
-        data[9] = ctx->m;
-        wc = 10;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->radius;
+        data[8] = yaml_parse_ctx->num_points;
+        data[9] = yaml_parse_ctx->inner_ratio;
+        word_count = 10;
     }
-    else if (strcmp(ctx->prim_type, "pie") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "pie") == 0) {
         tmp = YPAINT_SDF_PIE; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->sc_x;
-        data[8] = ctx->sc_y;
-        data[9] = ctx->r;
-        wc = 10;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->aperture_x;
+        data[8] = yaml_parse_ctx->aperture_y;
+        data[9] = yaml_parse_ctx->radius;
+        word_count = 10;
     }
-    else if (strcmp(ctx->prim_type, "ring") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "ring") == 0) {
         tmp = YPAINT_SDF_RING; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->nx;
-        data[8] = ctx->ny;
-        data[9] = ctx->r;
-        data[10] = ctx->th;
-        wc = 11;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->normal_x;
+        data[8] = yaml_parse_ctx->normal_y;
+        data[9] = yaml_parse_ctx->radius;
+        data[10] = yaml_parse_ctx->thickness;
+        word_count = 11;
     }
-    else if (strcmp(ctx->prim_type, "heart") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "heart") == 0) {
         tmp = YPAINT_SDF_HEART; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->scale;
-        wc = 8;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->scale;
+        word_count = 8;
     }
-    else if (strcmp(ctx->prim_type, "cross") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "cross") == 0) {
         tmp = YPAINT_SDF_CROSS; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->bx;
-        data[8] = ctx->by;
-        data[9] = ctx->r;
-        wc = 10;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->half_width;
+        data[8] = yaml_parse_ctx->half_height;
+        data[9] = yaml_parse_ctx->corner_radius;
+        word_count = 10;
     }
-    else if (strcmp(ctx->prim_type, "rounded_x") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "rounded_x") == 0) {
         tmp = YPAINT_SDF_ROUNDED_X; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->w;
-        data[8] = ctx->r;
-        wc = 9;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->width;
+        data[8] = yaml_parse_ctx->radius;
+        word_count = 9;
     }
-    else if (strcmp(ctx->prim_type, "capsule") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "capsule") == 0) {
         tmp = YPAINT_SDF_CAPSULE; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->ax;
-        data[6] = ctx->ay;
-        data[7] = ctx->bx;
-        data[8] = ctx->by;
-        data[9] = ctx->r;
-        wc = 10;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->start_x;
+        data[6] = yaml_parse_ctx->start_y;
+        data[7] = yaml_parse_ctx->end_x;
+        data[8] = yaml_parse_ctx->end_y;
+        data[9] = yaml_parse_ctx->radius;
+        word_count = 10;
     }
-    else if (strcmp(ctx->prim_type, "moon") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "moon") == 0) {
         tmp = YPAINT_SDF_MOON; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->d;
-        data[8] = ctx->ra;
-        data[9] = ctx->rb;
-        wc = 10;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->offset;
+        data[8] = yaml_parse_ctx->radius_outer;
+        data[9] = yaml_parse_ctx->radius_inner;
+        word_count = 10;
     }
-    else if (strcmp(ctx->prim_type, "egg") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "egg") == 0) {
         tmp = YPAINT_SDF_EGG; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->ra;
-        data[8] = ctx->rb;
-        wc = 9;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->radius_outer;
+        data[8] = yaml_parse_ctx->radius_inner;
+        word_count = 9;
     }
-    else if (strcmp(ctx->prim_type, "octogon") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "octogon") == 0) {
         tmp = YPAINT_SDF_OCTOGON; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->r;
-        wc = 8;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->radius;
+        word_count = 8;
     }
-    else if (strcmp(ctx->prim_type, "hexagram") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "hexagram") == 0) {
         tmp = YPAINT_SDF_HEXAGRAM; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->r;
-        wc = 8;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->radius;
+        word_count = 8;
     }
-    else if (strcmp(ctx->prim_type, "pentagram") == 0) {
+    else if (strcmp(yaml_parse_ctx->prim_type, "pentagram") == 0) {
         tmp = YPAINT_SDF_PENTAGRAM; memcpy(&data[0], &tmp, sizeof(tmp));
-        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
-        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
-        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
-        data[4] = ctx->stroke_width;
-        data[5] = ctx->cx;
-        data[6] = ctx->cy;
-        data[7] = ctx->r;
-        wc = 8;
+        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));
+        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));
+        data[4] = yaml_parse_ctx->stroke_width;
+        data[5] = yaml_parse_ctx->center_x;
+        data[6] = yaml_parse_ctx->center_y;
+        data[7] = yaml_parse_ctx->radius;
+        word_count = 8;
     }
     else {
-        ydebug("ypaint_yaml: unknown type '%s'", ctx->prim_type);
-        ctx->z_order++;
+        ydebug("ypaint_yaml: unknown type '%s'", yaml_parse_ctx->prim_type);
+        yaml_parse_ctx->z_order++;
         return;
     }
 
-    ypaint_sdf_compute_aabb(data, wc, &minX, &minY, &maxX, &maxY);
-    ypaint_canvas_add_primitive(ctx->canvas, data, wc, minX, minY, maxX, maxY);
-    ctx->z_order++;
+    ypaint_sdf_compute_aabb(data, word_count, &min_x, &min_y, &max_x, &max_y);
+    ypaint_canvas_add_primitive(yaml_parse_ctx->canvas, data, word_count, min_x, min_y, max_x, max_y);
+    yaml_parse_ctx->z_order++;
 }
 
 /*=============================================================================
  * YAML event parser
  *===========================================================================*/
 
-int ypaint_sdf_yaml_parse(struct ypaint_canvas *canvas, const char *yaml, size_t len) {
+int ypaint_sdf_yaml_parse(struct ypaint_canvas *canvas, const char *yaml_str, size_t yaml_len) {
     yaml_parser_t parser;
-    yaml_event_t ev;
-    struct ypaint_yaml_parse_ctx ctx = {0};
+    yaml_event_t event;
+    struct ypaint_yaml_parse_ctx yaml_parse_ctx = {0};
     int done = 0, err = 0;
     int depth = 0;       /* mapping depth */
     int in_body = 0;     /* inside body sequence */
@@ -469,69 +476,69 @@ int ypaint_sdf_yaml_parse(struct ypaint_canvas *canvas, const char *yaml, size_t
     int in_prim_type = 0;/* inside primitive type map */
     int expect_value = 0;
 
-    if (!canvas || !yaml) return -1;
-    ctx.canvas = canvas;
+    if (!canvas || !yaml_str) return -1;
+    yaml_parse_ctx.canvas = canvas;
 
     if (!yaml_parser_initialize(&parser)) return -1;
-    yaml_parser_set_input_string(&parser, (const unsigned char *)yaml, len);
+    yaml_parser_set_input_string(&parser, (const unsigned char *)yaml_str, yaml_len);
 
     while (!done && !err) {
-        if (!yaml_parser_parse(&parser, &ev)) { err = 1; break; }
-        switch (ev.type) {
+        if (!yaml_parser_parse(&parser, &event)) { err = 1; break; }
+        switch (event.type) {
         case YAML_STREAM_END_EVENT: done = 1; break;
         case YAML_MAPPING_START_EVENT:
             depth++;
-            if (in_body && !in_prim) { in_prim = 1; reset_prim(&ctx); }
+            if (in_body && !in_prim) { in_prim = 1; reset_prim(&yaml_parse_ctx); }
             else if (in_prim && !in_prim_type) { in_prim_type = 1; }
             break;
         case YAML_MAPPING_END_EVENT:
-            if (in_prim_type) { add_prim(&ctx); in_prim_type = 0; in_prim = 0; }
+            if (in_prim_type) { add_prim(&yaml_parse_ctx); in_prim_type = 0; in_prim = 0; }
             depth--;
             break;
         case YAML_SEQUENCE_START_EVENT:
-            if (depth == 1 && strcmp(ctx.prop_key, "body") == 0) { in_body = 1; }
-            else if (in_prim_type) { ctx.in_array = 1; ctx.array_idx = 0; expect_value = 0; }
+            if (depth == 1 && strcmp(yaml_parse_ctx.prop_key, "body") == 0) { in_body = 1; }
+            else if (in_prim_type) { yaml_parse_ctx.in_array = 1; yaml_parse_ctx.array_idx = 0; expect_value = 0; }
             break;
         case YAML_SEQUENCE_END_EVENT:
-            if (ctx.in_array) { store_array(&ctx); ctx.in_array = 0; }
+            if (yaml_parse_ctx.in_array) { store_array(&yaml_parse_ctx); yaml_parse_ctx.in_array = 0; }
             else if (in_body && !in_prim) { in_body = 0; }
             break;
         case YAML_SCALAR_EVENT: {
-            const char *val = (const char *)ev.data.scalar.value;
-            if (ctx.in_array) {
-                if (ctx.array_idx < 8) ctx.array_vals[ctx.array_idx++] = strtof(val, NULL);
+            const char *scalar_value = (const char *)event.data.scalar.value;
+            if (yaml_parse_ctx.in_array) {
+                if (yaml_parse_ctx.array_idx < 8) yaml_parse_ctx.array_vals[yaml_parse_ctx.array_idx++] = strtof(scalar_value, NULL);
             } else if (in_prim && !in_prim_type) {
-                strncpy(ctx.prim_type, val, sizeof(ctx.prim_type)-1);
+                strncpy(yaml_parse_ctx.prim_type, scalar_value, sizeof(yaml_parse_ctx.prim_type)-1);
             } else if (in_prim_type) {
                 if (!expect_value) {
-                    strncpy(ctx.prop_key, val, sizeof(ctx.prop_key)-1);
+                    strncpy(yaml_parse_ctx.prop_key, scalar_value, sizeof(yaml_parse_ctx.prop_key)-1);
                     expect_value = 1;
                 } else {
-                    if (strcmp(ctx.prop_key, "fill") == 0) ctx.fill_color = parse_color(val);
-                    else if (strcmp(ctx.prop_key, "stroke") == 0) ctx.stroke_color = parse_color(val);
-                    else if (strcmp(ctx.prop_key, "stroke-width") == 0) ctx.stroke_width = strtof(val, NULL);
-                    else if (strcmp(ctx.prop_key, "radius") == 0) ctx.r = strtof(val, NULL);
-                    else if (strcmp(ctx.prop_key, "round") == 0) ctx.round = strtof(val, NULL);
-                    else if (strcmp(ctx.prop_key, "scale") == 0) ctx.scale = strtof(val, NULL);
-                    else if (strcmp(ctx.prop_key, "points") == 0) ctx.n = strtof(val, NULL);
-                    else if (strcmp(ctx.prop_key, "inner") == 0) ctx.m = strtof(val, NULL);
-                    else if (strcmp(ctx.prop_key, "thickness") == 0) ctx.th = strtof(val, NULL);
-                    else if (strcmp(ctx.prop_key, "distance") == 0) ctx.d = strtof(val, NULL);
-                    else if (strcmp(ctx.prop_key, "width") == 0) ctx.w = strtof(val, NULL);
-                    else if (strcmp(ctx.prop_key, "radius_outer") == 0) ctx.ra = strtof(val, NULL);
-                    else if (strcmp(ctx.prop_key, "radius_inner") == 0) ctx.rb = strtof(val, NULL);
+                    if (strcmp(yaml_parse_ctx.prop_key, "fill") == 0) yaml_parse_ctx.fill_color = parse_color(scalar_value);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "stroke") == 0) yaml_parse_ctx.stroke_color = parse_color(scalar_value);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "stroke_width") == 0) yaml_parse_ctx.stroke_width = strtof(scalar_value, NULL);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "radius") == 0) yaml_parse_ctx.radius = strtof(scalar_value, NULL);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "corner_radius") == 0) yaml_parse_ctx.corner_radius = strtof(scalar_value, NULL);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "scale") == 0) yaml_parse_ctx.scale = strtof(scalar_value, NULL);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "num_points") == 0) yaml_parse_ctx.num_points = strtof(scalar_value, NULL);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "inner_ratio") == 0) yaml_parse_ctx.inner_ratio = strtof(scalar_value, NULL);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "thickness") == 0) yaml_parse_ctx.thickness = strtof(scalar_value, NULL);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "offset") == 0) yaml_parse_ctx.offset = strtof(scalar_value, NULL);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "width") == 0) yaml_parse_ctx.width = strtof(scalar_value, NULL);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "radius_outer") == 0) yaml_parse_ctx.radius_outer = strtof(scalar_value, NULL);
+                    else if (strcmp(yaml_parse_ctx.prop_key, "radius_inner") == 0) yaml_parse_ctx.radius_inner = strtof(scalar_value, NULL);
                     expect_value = 0;
                 }
             } else if (depth == 1) {
-                strncpy(ctx.prop_key, val, sizeof(ctx.prop_key)-1);
+                strncpy(yaml_parse_ctx.prop_key, scalar_value, sizeof(yaml_parse_ctx.prop_key)-1);
             }
             break;
         }
         default: break;
         }
-        yaml_event_delete(&ev);
+        yaml_event_delete(&event);
     }
     yaml_parser_delete(&parser);
-    ydebug("ypaint_yaml: parsed %u primitives", ctx.z_order);
+    ydebug("ypaint_yaml: parsed %u primitives", yaml_parse_ctx.z_order);
     return err ? -1 : 0;
 }

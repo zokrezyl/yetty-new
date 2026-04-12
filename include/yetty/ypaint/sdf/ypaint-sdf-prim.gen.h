@@ -10,57 +10,57 @@
 extern "C" {
 #endif
 
-YPaintIdResult ypaint_sdf_add_circle(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfCircle* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_circle(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_circle *geom);
 
-YPaintIdResult ypaint_sdf_add_box(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfBox* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_box(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_box *geom);
 
-YPaintIdResult ypaint_sdf_add_segment(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfSegment* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_segment(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_segment *geom);
 
-YPaintIdResult ypaint_sdf_add_triangle(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfTriangle* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_triangle(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_triangle *geom);
 
-YPaintIdResult ypaint_sdf_add_ellipse(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfEllipse* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_ellipse(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_ellipse *geom);
 
-YPaintIdResult ypaint_sdf_add_arc(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfArc* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_arc(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_arc *geom);
 
-YPaintIdResult ypaint_sdf_add_rounded_box(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfRoundedBox* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_rounded_box(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_rounded_box *geom);
 
-YPaintIdResult ypaint_sdf_add_rhombus(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfRhombus* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_rhombus(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_rhombus *geom);
 
-YPaintIdResult ypaint_sdf_add_pentagon(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfPentagon* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_pentagon(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_pentagon *geom);
 
-YPaintIdResult ypaint_sdf_add_hexagon(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfHexagon* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_hexagon(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_hexagon *geom);
 
-YPaintIdResult ypaint_sdf_add_star(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfStar* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_star(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_star *geom);
 
-YPaintIdResult ypaint_sdf_add_pie(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfPie* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_pie(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_pie *geom);
 
-YPaintIdResult ypaint_sdf_add_ring(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfRing* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_ring(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_ring *geom);
 
-YPaintIdResult ypaint_sdf_add_heart(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfHeart* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_heart(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_heart *geom);
 
-YPaintIdResult ypaint_sdf_add_cross(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfCross* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_cross(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_cross *geom);
 
-YPaintIdResult ypaint_sdf_add_rounded_x(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfRoundedX* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_rounded_x(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_rounded_x *geom);
 
-YPaintIdResult ypaint_sdf_add_capsule(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfCapsule* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_capsule(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_capsule *geom);
 
-YPaintIdResult ypaint_sdf_add_moon(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfMoon* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_moon(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_moon *geom);
 
-YPaintIdResult ypaint_sdf_add_egg(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfEgg* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_egg(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_egg *geom);
 
-YPaintIdResult ypaint_sdf_add_octogon(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfOctogon* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_octogon(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_octogon *geom);
 
-YPaintIdResult ypaint_sdf_add_hexagram(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfHexagram* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_hexagram(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_hexagram *geom);
 
-YPaintIdResult ypaint_sdf_add_pentagram(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfPentagram* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_pentagram(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_pentagram *geom);
 
-YPaintIdResult ypaint_sdf_add_sphere_3d(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfSphere3D* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_sphere_3d(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_sphere_3d *geom);
 
-YPaintIdResult ypaint_sdf_add_box_3d(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfBox3D* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_box_3d(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_box_3d *geom);
 
-YPaintIdResult ypaint_sdf_add_torus_3d(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfTorus3D* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_torus_3d(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_torus_3d *geom);
 
-YPaintIdResult ypaint_sdf_add_cylinder_3d(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfCylinder3D* geom);
+struct yetty_ypaint_id_result ypaint_sdf_add_cylinder_3d(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_cylinder_3d *geom);
 
 #ifdef __cplusplus
 }

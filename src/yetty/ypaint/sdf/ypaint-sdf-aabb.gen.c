@@ -7,218 +7,219 @@
 #include <string.h>
 
 // Compute AABB for an SDF primitive
-// data: full primitive data (type + zOrder + style + geometry)
-// p: pointer to geometry args (data + 5)
-// expand: strokeWidth * 0.5f
+// data: full primitive data (type + z_order + style + geometry)
+// geom: pointer to geometry args (data + 5)
+// expand: stroke_width * 0.5f
 
-void ypaint_sdf_compute_aabb(const float* data, uint32_t wordCount,
-                              float* minX, float* minY, float* maxX, float* maxY) {
+void ypaint_sdf_compute_aabb(const float *data, uint32_t word_count,
+                              float *min_x, float *min_y, float *max_x, float *max_y) {
     uint32_t type;
     memcpy(&type, &data[0], sizeof(type));
-    const float* p = data + 5;  // geometry args
-    float strokeWidth = data[4];
-    float expand = strokeWidth * 0.5f;
+    const float *geom = data + 5;  // geometry args
+    float stroke_width = data[4];
+    float expand = stroke_width * 0.5f;
+    (void)word_count;
 
-    switch ((YPaintSdfType)type) {
+    switch ((enum ypaint_sdf_type)type) {
     case YPAINT_SDF_CIRCLE: {
-        float r = p[2] + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r;
-        *maxY = p[1] + r;
+        float total_radius = geom[2] + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius;
+        *max_y = geom[1] + total_radius;
         break;
     }
     case YPAINT_SDF_BOX: {
-        float hw = p[2] + p[4] + expand;
-        float hh = p[3] + p[4] + expand;
-        *minX = p[0] - hw;
-        *minY = p[1] - hh;
-        *maxX = p[0] + hw;
-        *maxY = p[1] + hh;
+        float hw = geom[2] + geom[4] + expand;
+        float hh = geom[3] + geom[4] + expand;
+        *min_x = geom[0] - hw;
+        *min_y = geom[1] - hh;
+        *max_x = geom[0] + hw;
+        *max_y = geom[1] + hh;
         break;
     }
     case YPAINT_SDF_SEGMENT: {
-        *minX = fminf(p[0], p[2]) - expand;
-        *minY = fminf(p[1], p[3]) - expand;
-        *maxX = fmaxf(p[0], p[2]) + expand;
-        *maxY = fmaxf(p[1], p[3]) + expand;
+        *min_x = fminf(geom[0], geom[2]) - expand;
+        *min_y = fminf(geom[1], geom[3]) - expand;
+        *max_x = fmaxf(geom[0], geom[2]) + expand;
+        *max_y = fmaxf(geom[1], geom[3]) + expand;
         break;
     }
     case YPAINT_SDF_TRIANGLE: {
-        float minx = fminf(fminf(p[0], p[2]), p[4]);
-        float miny = fminf(fminf(p[1], p[3]), p[5]);
-        float maxx = fmaxf(fmaxf(p[0], p[2]), p[4]);
-        float maxy = fmaxf(fmaxf(p[1], p[3]), p[5]);
-        *minX = minx - expand;
-        *minY = miny - expand;
-        *maxX = maxx + expand;
-        *maxY = maxy + expand;
+        float minx = fminf(fminf(geom[0], geom[2]), geom[4]);
+        float miny = fminf(fminf(geom[1], geom[3]), geom[5]);
+        float maxx = fmaxf(fmaxf(geom[0], geom[2]), geom[4]);
+        float maxy = fmaxf(fmaxf(geom[1], geom[3]), geom[5]);
+        *min_x = minx - expand;
+        *min_y = miny - expand;
+        *max_x = maxx + expand;
+        *max_y = maxy + expand;
         break;
     }
     case YPAINT_SDF_ELLIPSE: {
-        *minX = p[0] - p[2] - expand;
-        *minY = p[1] - p[3] - expand;
-        *maxX = p[0] + p[2] + expand;
-        *maxY = p[1] + p[3] + expand;
+        *min_x = geom[0] - geom[2] - expand;
+        *min_y = geom[1] - geom[3] - expand;
+        *max_x = geom[0] + geom[2] + expand;
+        *max_y = geom[1] + geom[3] + expand;
         break;
     }
     case YPAINT_SDF_ARC: {
-        float r = fmaxf(p[4], p[5]) + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r;
-        *maxY = p[1] + r;
+        float total_radius = fmaxf(geom[4], geom[5]) + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius;
+        *max_y = geom[1] + total_radius;
         break;
     }
     case YPAINT_SDF_ROUNDED_BOX: {
-        float maxR = fmaxf(fmaxf(p[4], p[5]), fmaxf(p[6], p[7]));
-        float hw = p[2] + maxR + expand;
-        float hh = p[3] + maxR + expand;
-        *minX = p[0] - hw;
-        *minY = p[1] - hh;
-        *maxX = p[0] + hw;
-        *maxY = p[1] + hh;
+        float max_radius = fmaxf(fmaxf(geom[4], geom[5]), fmaxf(geom[6], geom[7]));
+        float hw = geom[2] + max_radius + expand;
+        float hh = geom[3] + max_radius + expand;
+        *min_x = geom[0] - hw;
+        *min_y = geom[1] - hh;
+        *max_x = geom[0] + hw;
+        *max_y = geom[1] + hh;
         break;
     }
     case YPAINT_SDF_RHOMBUS: {
-        float hw = p[2] + expand;
-        float hh = p[3] + expand;
-        *minX = p[0] - hw;
-        *minY = p[1] - hh;
-        *maxX = p[0] + hw;
-        *maxY = p[1] + hh;
+        float hw = geom[2] + expand;
+        float hh = geom[3] + expand;
+        *min_x = geom[0] - hw;
+        *min_y = geom[1] - hh;
+        *max_x = geom[0] + hw;
+        *max_y = geom[1] + hh;
         break;
     }
     case YPAINT_SDF_PENTAGON: {
-        float r = p[2] + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r;
-        *maxY = p[1] + r;
+        float total_radius = geom[2] + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius;
+        *max_y = geom[1] + total_radius;
         break;
     }
     case YPAINT_SDF_HEXAGON: {
-        float r = p[2] + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r;
-        *maxY = p[1] + r;
+        float total_radius = geom[2] + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius;
+        *max_y = geom[1] + total_radius;
         break;
     }
     case YPAINT_SDF_STAR: {
-        float r = p[2] + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r;
-        *maxY = p[1] + r;
+        float total_radius = geom[2] + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius;
+        *max_y = geom[1] + total_radius;
         break;
     }
     case YPAINT_SDF_PIE: {
-        float r = p[4] + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r;
-        *maxY = p[1] + r;
+        float total_radius = geom[4] + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius;
+        *max_y = geom[1] + total_radius;
         break;
     }
     case YPAINT_SDF_RING: {
-        float r = p[4] + p[5] + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r;
-        *maxY = p[1] + r;
+        float total_radius = geom[4] + geom[5] + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius;
+        *max_y = geom[1] + total_radius;
         break;
     }
     case YPAINT_SDF_HEART: {
-        float s = p[2] * 1.5f + expand;
-        *minX = p[0] - s;
-        *minY = p[1] - s;
-        *maxX = p[0] + s;
-        *maxY = p[1] + s;
+        float extent = geom[2] * 1.5f + expand;
+        *min_x = geom[0] - extent;
+        *min_y = geom[1] - extent;
+        *max_x = geom[0] + extent;
+        *max_y = geom[1] + extent;
         break;
     }
     case YPAINT_SDF_CROSS: {
-        float hw = fmaxf(p[2], p[3]) + expand;
-        *minX = p[0] - hw;
-        *minY = p[1] - hw;
-        *maxX = p[0] + hw;
-        *maxY = p[1] + hw;
+        float extent = fmaxf(geom[2], geom[3]) + expand;
+        *min_x = geom[0] - extent;
+        *min_y = geom[1] - extent;
+        *max_x = geom[0] + extent;
+        *max_y = geom[1] + extent;
         break;
     }
     case YPAINT_SDF_ROUNDED_X: {
-        float s = p[2] + p[3] + expand;
-        *minX = p[0] - s;
-        *minY = p[1] - s;
-        *maxX = p[0] + s;
-        *maxY = p[1] + s;
+        float extent = geom[2] + geom[3] + expand;
+        *min_x = geom[0] - extent;
+        *min_y = geom[1] - extent;
+        *max_x = geom[0] + extent;
+        *max_y = geom[1] + extent;
         break;
     }
     case YPAINT_SDF_CAPSULE: {
-        float r = p[4] + expand;
-        *minX = fminf(p[0], p[2]) - r;
-        *minY = fminf(p[1], p[3]) - r;
-        *maxX = fmaxf(p[0], p[2]) + r;
-        *maxY = fmaxf(p[1], p[3]) + r;
+        float total_radius = geom[4] + expand;
+        *min_x = fminf(geom[0], geom[2]) - total_radius;
+        *min_y = fminf(geom[1], geom[3]) - total_radius;
+        *max_x = fmaxf(geom[0], geom[2]) + total_radius;
+        *max_y = fmaxf(geom[1], geom[3]) + total_radius;
         break;
     }
     case YPAINT_SDF_MOON: {
-        float r = fmaxf(p[3], p[4]) + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r + p[2];
-        *maxY = p[1] + r;
+        float total_radius = fmaxf(geom[3], geom[4]) + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius + geom[2];
+        *max_y = geom[1] + total_radius;
         break;
     }
     case YPAINT_SDF_EGG: {
-        float r = fmaxf(p[2], p[3]) + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r;
-        *maxY = p[1] + r + p[2];
+        float total_radius = fmaxf(geom[2], geom[3]) + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius;
+        *max_y = geom[1] + total_radius + geom[2];
         break;
     }
     case YPAINT_SDF_OCTOGON: {
-        float r = p[2] + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r;
-        *maxY = p[1] + r;
+        float total_radius = geom[2] + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius;
+        *max_y = geom[1] + total_radius;
         break;
     }
     case YPAINT_SDF_HEXAGRAM: {
-        float r = p[2] + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r;
-        *maxY = p[1] + r;
+        float total_radius = geom[2] + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius;
+        *max_y = geom[1] + total_radius;
         break;
     }
     case YPAINT_SDF_PENTAGRAM: {
-        float r = p[2] + expand;
-        *minX = p[0] - r;
-        *minY = p[1] - r;
-        *maxX = p[0] + r;
-        *maxY = p[1] + r;
+        float total_radius = geom[2] + expand;
+        *min_x = geom[0] - total_radius;
+        *min_y = geom[1] - total_radius;
+        *max_x = geom[0] + total_radius;
+        *max_y = geom[1] + total_radius;
         break;
     }
     case YPAINT_SDF_SPHERE_3D: {
-        *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;
+        *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;
         break;
     }
     case YPAINT_SDF_BOX_3D: {
-        *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;
+        *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;
         break;
     }
     case YPAINT_SDF_TORUS_3D: {
-        *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;
+        *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;
         break;
     }
     case YPAINT_SDF_CYLINDER_3D: {
-        *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;
+        *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;
         break;
     }
     default:
-        *minX = -1e10f; *minY = -1e10f; *maxX = 1e10f; *maxY = 1e10f;
+        *min_x = -1e10f; *min_y = -1e10f; *max_x = 1e10f; *max_y = 1e10f;
         break;
     }
 }

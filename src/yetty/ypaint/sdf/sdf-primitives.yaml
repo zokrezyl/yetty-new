@@ -1,106 +1,100 @@
 # sdf-primitives.yaml — Single source of truth for ypaint SDF primitives
 #
 # Each entry defines:
-#   - name: Primitive name (PascalCase)
+#   - name: Primitive name (snake_case)
 #   - type: Numeric type ID for GPU dispatch
 #   - category: sdf2d | sdf3d
-#   - args: Fields for SDF calculation (geometry params)
-#   - shader.code: WGSL SDF implementation (p = sample point, args as params)
-#   - aabb.code: C code for AABB computation (p = geometry args pointer, expand = strokeWidth/2)
+#   - args: Fields for SDF calculation (geometry params, snake_case)
+#   - shader.code: WGSL SDF implementation (sample_pos = sample point, args as params)
+#   - aabb.code: C code for AABB computation (geom = geometry args pointer, expand = stroke_width/2)
 #
-# YAML parsing is auto-generated from arg names:
-#   cx,cy → position: [x,y]    |  hw,hh → size: [w,h] (divided by 2)
-#   x0,y0,x1,y1 → from/to      |  ax,ay,bx,by,cx,cy → p0/p1/p2
-#   r → radius                 |  rx,ry → radii: [x,y]
-#   round → round              |  scale → scale
-#
-# Buffer layout: [type:u32][zOrder:u32][fillColor:u32][strokeColor:u32][strokeWidth:f32][args...]
-# Geometry offset = 5 (after type + zOrder + fillColor + strokeColor + strokeWidth)
+# Buffer layout: [type:u32][z_order:u32][fill_color:u32][stroke_color:u32][stroke_width:f32][args...]
+# Geometry offset = 5 (after type + z_order + fill_color + stroke_color + stroke_width)
 
 # =============================================================================
 # 2D SDF Primitives
 # =============================================================================
 
-- name: Circle
+- name: circle
   type: 0
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: r,  type: f32 }
+    - { name: center_x, type: f32 }
+    - { name: center_y, type: f32 }
+    - { name: radius,   type: f32 }
   shader:
     code: |
-      return length(p - vec2<f32>(cx, cy)) - r;
+      return length(sample_pos - vec2<f32>(center_x, center_y)) - radius;
   aabb:
     code: |
-      float r = p[2] + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r;
-      *maxY = p[1] + r;
+      float total_radius = geom[2] + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius;
+      *max_y = geom[1] + total_radius;
 
-- name: Box
+- name: box
   type: 1
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: hw, type: f32 }
-    - { name: hh, type: f32 }
-    - { name: round, type: f32 }
+    - { name: center_x,    type: f32 }
+    - { name: center_y,    type: f32 }
+    - { name: half_width,  type: f32 }
+    - { name: half_height, type: f32 }
+    - { name: corner_radius, type: f32 }
   shader:
     code: |
-      let d = abs(p - vec2<f32>(cx, cy)) - vec2<f32>(hw, hh) + round;
-      return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - round;
+      let d = abs(sample_pos - vec2<f32>(center_x, center_y)) - vec2<f32>(half_width, half_height) + corner_radius;
+      return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - corner_radius;
   aabb:
     code: |
-      float hw = p[2] + p[4] + expand;
-      float hh = p[3] + p[4] + expand;
-      *minX = p[0] - hw;
-      *minY = p[1] - hh;
-      *maxX = p[0] + hw;
-      *maxY = p[1] + hh;
+      float hw = geom[2] + geom[4] + expand;
+      float hh = geom[3] + geom[4] + expand;
+      *min_x = geom[0] - hw;
+      *min_y = geom[1] - hh;
+      *max_x = geom[0] + hw;
+      *max_y = geom[1] + hh;
 
-- name: Segment
+- name: segment
   type: 2
   category: sdf2d
   args:
-    - { name: x0, type: f32 }
-    - { name: y0, type: f32 }
-    - { name: x1, type: f32 }
-    - { name: y1, type: f32 }
+    - { name: start_x, type: f32 }
+    - { name: start_y, type: f32 }
+    - { name: end_x,   type: f32 }
+    - { name: end_y,   type: f32 }
   shader:
     code: |
-      let a = vec2<f32>(x0, y0);
-      let b = vec2<f32>(x1, y1);
-      let pa = p - a;
-      let ba = b - a;
-      let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-      return length(pa - ba * h);
+      let start_point = vec2<f32>(start_x, start_y);
+      let end_point = vec2<f32>(end_x, end_y);
+      let pos_to_start = sample_pos - start_point;
+      let start_to_end = end_point - start_point;
+      let t = clamp(dot(pos_to_start, start_to_end) / dot(start_to_end, start_to_end), 0.0, 1.0);
+      return length(pos_to_start - start_to_end * t);
   aabb:
     code: |
-      *minX = fminf(p[0], p[2]) - expand;
-      *minY = fminf(p[1], p[3]) - expand;
-      *maxX = fmaxf(p[0], p[2]) + expand;
-      *maxY = fmaxf(p[1], p[3]) + expand;
+      *min_x = fminf(geom[0], geom[2]) - expand;
+      *min_y = fminf(geom[1], geom[3]) - expand;
+      *max_x = fmaxf(geom[0], geom[2]) + expand;
+      *max_y = fmaxf(geom[1], geom[3]) + expand;
 
-- name: Triangle
+- name: triangle
   type: 3
   category: sdf2d
   args:
-    - { name: ax, type: f32 }
-    - { name: ay, type: f32 }
-    - { name: bx, type: f32 }
-    - { name: by, type: f32 }
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
+    - { name: vertex_a_x, type: f32 }
+    - { name: vertex_a_y, type: f32 }
+    - { name: vertex_b_x, type: f32 }
+    - { name: vertex_b_y, type: f32 }
+    - { name: vertex_c_x, type: f32 }
+    - { name: vertex_c_y, type: f32 }
   shader:
     code: |
-      let p0 = vec2<f32>(ax, ay);
-      let p1 = vec2<f32>(bx, by);
-      let p2 = vec2<f32>(cx, cy);
+      let p0 = vec2<f32>(vertex_a_x, vertex_a_y);
+      let p1 = vec2<f32>(vertex_b_x, vertex_b_y);
+      let p2 = vec2<f32>(vertex_c_x, vertex_c_y);
       let e0 = p1 - p0; let e1 = p2 - p1; let e2 = p0 - p2;
-      let v0 = p - p0; let v1 = p - p1; let v2 = p - p2;
+      let v0 = sample_pos - p0; let v1 = sample_pos - p1; let v2 = sample_pos - p2;
       let pq0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0.0, 1.0);
       let pq1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0.0, 1.0);
       let pq2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0.0, 1.0);
@@ -112,34 +106,34 @@
       return -sqrt(d.x) * sign(d.y);
   aabb:
     code: |
-      float minx = fminf(fminf(p[0], p[2]), p[4]);
-      float miny = fminf(fminf(p[1], p[3]), p[5]);
-      float maxx = fmaxf(fmaxf(p[0], p[2]), p[4]);
-      float maxy = fmaxf(fmaxf(p[1], p[3]), p[5]);
-      *minX = minx - expand;
-      *minY = miny - expand;
-      *maxX = maxx + expand;
-      *maxY = maxy + expand;
+      float minx = fminf(fminf(geom[0], geom[2]), geom[4]);
+      float miny = fminf(fminf(geom[1], geom[3]), geom[5]);
+      float maxx = fmaxf(fmaxf(geom[0], geom[2]), geom[4]);
+      float maxy = fmaxf(fmaxf(geom[1], geom[3]), geom[5]);
+      *min_x = minx - expand;
+      *min_y = miny - expand;
+      *max_x = maxx + expand;
+      *max_y = maxy + expand;
 
-- name: Ellipse
+- name: ellipse
   type: 6
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: rx, type: f32 }
-    - { name: ry, type: f32 }
+    - { name: center_x, type: f32 }
+    - { name: center_y, type: f32 }
+    - { name: radius_x, type: f32 }
+    - { name: radius_y, type: f32 }
   shader:
     code: |
-      let center = vec2<f32>(cx, cy);
-      let ab = vec2<f32>(rx, ry);
-      if (abs(ab.x - ab.y) < 0.001) { return length(p - center) - ab.x; }
-      var pp = abs(p - center);
-      var aab = ab;
-      if (pp.x > pp.y) { pp = pp.yx; aab = aab.yx; }
-      let l = aab.y * aab.y - aab.x * aab.x;
-      let m = aab.x * pp.x / l; let m2 = m * m;
-      let n = aab.y * pp.y / l; let n2 = n * n;
+      let center = vec2<f32>(center_x, center_y);
+      let radii = vec2<f32>(radius_x, radius_y);
+      if (abs(radii.x - radii.y) < 0.001) { return length(sample_pos - center) - radii.x; }
+      var pos = abs(sample_pos - center);
+      var ab = radii;
+      if (pos.x > pos.y) { pos = pos.yx; ab = ab.yx; }
+      let l = ab.y * ab.y - ab.x * ab.x;
+      let m = ab.x * pos.x / l; let m2 = m * m;
+      let n = ab.y * pos.y / l; let n2 = n * n;
       let c = (m2 + n2 - 1.0) / 3.0; let c3 = c * c * c;
       let q = c3 + m2 * n2 * 2.0;
       let d = c3 + m2 * n2;
@@ -160,514 +154,514 @@
           let rm = sqrt(rx * rx + ry * ry);
           co = (ry / sqrt(rm - rx) + 2.0 * g / rm - m) / 2.0;
       }
-      let r = aab * vec2<f32>(co, sqrt(1.0 - co * co));
-      return length(r - pp) * sign(pp.y - r.y);
+      let r = ab * vec2<f32>(co, sqrt(1.0 - co * co));
+      return length(r - pos) * sign(pos.y - r.y);
   aabb:
     code: |
-      *minX = p[0] - p[2] - expand;
-      *minY = p[1] - p[3] - expand;
-      *maxX = p[0] + p[2] + expand;
-      *maxY = p[1] + p[3] + expand;
+      *min_x = geom[0] - geom[2] - expand;
+      *min_y = geom[1] - geom[3] - expand;
+      *max_x = geom[0] + geom[2] + expand;
+      *max_y = geom[1] + geom[3] + expand;
 
-- name: Arc
+- name: arc
   type: 7
   category: sdf2d
   args:
-    - { name: cx,   type: f32 }
-    - { name: cy,   type: f32 }
-    - { name: sc_x, type: f32 }
-    - { name: sc_y, type: f32 }
-    - { name: ra,   type: f32 }
-    - { name: rb,   type: f32 }
+    - { name: center_x,    type: f32 }
+    - { name: center_y,    type: f32 }
+    - { name: aperture_x,  type: f32 }
+    - { name: aperture_y,  type: f32 }
+    - { name: radius,      type: f32 }
+    - { name: thickness,   type: f32 }
   shader:
     code: |
-      let center = vec2<f32>(cx, cy);
-      let sc = vec2<f32>(sc_x, sc_y);
-      var pp = abs(p - center);
-      if (sc.y * pp.x > sc.x * pp.y) { return length(pp - sc * ra) - rb; }
-      return abs(length(pp) - ra) - rb;
+      let center = vec2<f32>(center_x, center_y);
+      let aperture = vec2<f32>(aperture_x, aperture_y);
+      var pos = abs(sample_pos - center);
+      if (aperture.y * pos.x > aperture.x * pos.y) { return length(pos - aperture * radius) - thickness; }
+      return abs(length(pos) - radius) - thickness;
   aabb:
     code: |
-      float r = fmaxf(p[4], p[5]) + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r;
-      *maxY = p[1] + r;
+      float total_radius = fmaxf(geom[4], geom[5]) + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius;
+      *max_y = geom[1] + total_radius;
 
-- name: RoundedBox
+- name: rounded_box
   type: 8
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: hw, type: f32 }
-    - { name: hh, type: f32 }
-    - { name: r0, type: f32 }
-    - { name: r1, type: f32 }
-    - { name: r2, type: f32 }
-    - { name: r3, type: f32 }
+    - { name: center_x,          type: f32 }
+    - { name: center_y,          type: f32 }
+    - { name: half_width,        type: f32 }
+    - { name: half_height,       type: f32 }
+    - { name: radius_top_right,  type: f32 }
+    - { name: radius_bottom_right, type: f32 }
+    - { name: radius_top_left,   type: f32 }
+    - { name: radius_bottom_left, type: f32 }
   shader:
     code: |
-      let center = vec2<f32>(cx, cy);
-      let b = vec2<f32>(hw, hh);
-      let r = vec4<f32>(r0, r1, r2, r3);
-      var pp = p - center;
-      var rr = select(r.zw, r.xy, pp.x > 0.0).xyxy;
-      rr.x = select(rr.y, rr.x, pp.y > 0.0);
-      let q = abs(pp) - b + rr.x;
-      return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0))) - rr.x;
+      let center = vec2<f32>(center_x, center_y);
+      let half_size = vec2<f32>(half_width, half_height);
+      let radii = vec4<f32>(radius_top_right, radius_bottom_right, radius_top_left, radius_bottom_left);
+      var pos = sample_pos - center;
+      var corner_radii = select(radii.zw, radii.xy, pos.x > 0.0).xyxy;
+      corner_radii.x = select(corner_radii.y, corner_radii.x, pos.y > 0.0);
+      let q = abs(pos) - half_size + corner_radii.x;
+      return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0))) - corner_radii.x;
   aabb:
     code: |
-      float maxR = fmaxf(fmaxf(p[4], p[5]), fmaxf(p[6], p[7]));
-      float hw = p[2] + maxR + expand;
-      float hh = p[3] + maxR + expand;
-      *minX = p[0] - hw;
-      *minY = p[1] - hh;
-      *maxX = p[0] + hw;
-      *maxY = p[1] + hh;
+      float max_radius = fmaxf(fmaxf(geom[4], geom[5]), fmaxf(geom[6], geom[7]));
+      float hw = geom[2] + max_radius + expand;
+      float hh = geom[3] + max_radius + expand;
+      *min_x = geom[0] - hw;
+      *min_y = geom[1] - hh;
+      *max_x = geom[0] + hw;
+      *max_y = geom[1] + hh;
 
-- name: Rhombus
+- name: rhombus
   type: 9
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: bx, type: f32 }
-    - { name: by, type: f32 }
+    - { name: center_x,    type: f32 }
+    - { name: center_y,    type: f32 }
+    - { name: half_width,  type: f32 }
+    - { name: half_height, type: f32 }
   shader:
     code: |
-      var pp = abs(p - vec2<f32>(cx, cy));
-      var bb = vec2<f32>(bx, -by);
-      let h = clamp((dot(bb, pp) + bb.y * bb.y) / dot(bb, bb), 0.0, 1.0);
-      pp -= bb * vec2<f32>(h, h - 1.0);
-      return length(pp) * sign(pp.x);
+      var pos = abs(sample_pos - vec2<f32>(center_x, center_y));
+      var half_diag = vec2<f32>(half_width, -half_height);
+      let t = clamp((dot(half_diag, pos) + half_diag.y * half_diag.y) / dot(half_diag, half_diag), 0.0, 1.0);
+      pos -= half_diag * vec2<f32>(t, t - 1.0);
+      return length(pos) * sign(pos.x);
   aabb:
     code: |
-      float hw = p[2] + expand;
-      float hh = p[3] + expand;
-      *minX = p[0] - hw;
-      *minY = p[1] - hh;
-      *maxX = p[0] + hw;
-      *maxY = p[1] + hh;
+      float hw = geom[2] + expand;
+      float hh = geom[3] + expand;
+      *min_x = geom[0] - hw;
+      *min_y = geom[1] - hh;
+      *max_x = geom[0] + hw;
+      *max_y = geom[1] + hh;
 
-- name: Pentagon
+- name: pentagon
   type: 10
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: r,  type: f32 }
+    - { name: center_x, type: f32 }
+    - { name: center_y, type: f32 }
+    - { name: radius,   type: f32 }
   shader:
     code: |
       let k = vec3<f32>(0.809016994, 0.587785252, 0.726542528);
-      var pp = p - vec2<f32>(cx, cy);
-      pp.x = abs(pp.x);
-      pp -= 2.0 * min(dot(vec2<f32>(-k.x, k.y), pp), 0.0) * vec2<f32>(-k.x, k.y);
-      pp -= 2.0 * min(dot(vec2<f32>(k.x, k.y), pp), 0.0) * vec2<f32>(k.x, k.y);
-      pp -= vec2<f32>(clamp(pp.x, -r * k.z, r * k.z), r);
-      return length(pp) * sign(pp.y);
+      var pos = sample_pos - vec2<f32>(center_x, center_y);
+      pos.x = abs(pos.x);
+      pos -= 2.0 * min(dot(vec2<f32>(-k.x, k.y), pos), 0.0) * vec2<f32>(-k.x, k.y);
+      pos -= 2.0 * min(dot(vec2<f32>(k.x, k.y), pos), 0.0) * vec2<f32>(k.x, k.y);
+      pos -= vec2<f32>(clamp(pos.x, -radius * k.z, radius * k.z), radius);
+      return length(pos) * sign(pos.y);
   aabb:
     code: |
-      float r = p[2] + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r;
-      *maxY = p[1] + r;
+      float total_radius = geom[2] + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius;
+      *max_y = geom[1] + total_radius;
 
-- name: Hexagon
+- name: hexagon
   type: 11
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: r,  type: f32 }
+    - { name: center_x, type: f32 }
+    - { name: center_y, type: f32 }
+    - { name: radius,   type: f32 }
   shader:
     code: |
       let k = vec3<f32>(-0.866025404, 0.5, 0.577350269);
-      var pp = abs(p - vec2<f32>(cx, cy));
-      pp -= 2.0 * min(dot(k.xy, pp), 0.0) * k.xy;
-      pp -= vec2<f32>(clamp(pp.x, -k.z * r, k.z * r), r);
-      return length(pp) * sign(pp.y);
+      var pos = abs(sample_pos - vec2<f32>(center_x, center_y));
+      pos -= 2.0 * min(dot(k.xy, pos), 0.0) * k.xy;
+      pos -= vec2<f32>(clamp(pos.x, -k.z * radius, k.z * radius), radius);
+      return length(pos) * sign(pos.y);
   aabb:
     code: |
-      float r = p[2] + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r;
-      *maxY = p[1] + r;
+      float total_radius = geom[2] + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius;
+      *max_y = geom[1] + total_radius;
 
-- name: Star
+- name: star
   type: 12
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: r,  type: f32 }
-    - { name: n,  type: f32 }
-    - { name: m,  type: f32 }
+    - { name: center_x,    type: f32 }
+    - { name: center_y,    type: f32 }
+    - { name: radius,      type: f32 }
+    - { name: num_points,  type: f32 }
+    - { name: inner_ratio, type: f32 }
   shader:
     code: |
-      let an = 3.141593 / n;
-      let en = 3.141593 / m;
-      let acs = vec2<f32>(cos(an), sin(an));
-      let ecs = vec2<f32>(cos(en), sin(en));
-      var pp = p - vec2<f32>(cx, cy);
-      let angle = atan2(pp.x, pp.y);
-      let bn = ((angle % (2.0 * an)) + 2.0 * an) % (2.0 * an) - an;
-      pp = length(pp) * vec2<f32>(cos(bn), abs(sin(bn)));
-      pp -= r * acs;
-      pp += ecs * clamp(-dot(pp, ecs), 0.0, r * acs.y / ecs.y);
-      return length(pp) * sign(pp.x);
+      let angle_step = 3.141593 / num_points;
+      let inner_angle = 3.141593 / inner_ratio;
+      let outer_cos_sin = vec2<f32>(cos(angle_step), sin(angle_step));
+      let inner_cos_sin = vec2<f32>(cos(inner_angle), sin(inner_angle));
+      var pos = sample_pos - vec2<f32>(center_x, center_y);
+      let angle = atan2(pos.x, pos.y);
+      let normalized_angle = ((angle % (2.0 * angle_step)) + 2.0 * angle_step) % (2.0 * angle_step) - angle_step;
+      pos = length(pos) * vec2<f32>(cos(normalized_angle), abs(sin(normalized_angle)));
+      pos -= radius * outer_cos_sin;
+      pos += inner_cos_sin * clamp(-dot(pos, inner_cos_sin), 0.0, radius * outer_cos_sin.y / inner_cos_sin.y);
+      return length(pos) * sign(pos.x);
   aabb:
     code: |
-      float r = p[2] + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r;
-      *maxY = p[1] + r;
+      float total_radius = geom[2] + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius;
+      *max_y = geom[1] + total_radius;
 
-- name: Pie
+- name: pie
   type: 13
   category: sdf2d
   args:
-    - { name: cx,   type: f32 }
-    - { name: cy,   type: f32 }
-    - { name: sc_x, type: f32 }
-    - { name: sc_y, type: f32 }
-    - { name: r,    type: f32 }
+    - { name: center_x,   type: f32 }
+    - { name: center_y,   type: f32 }
+    - { name: aperture_x, type: f32 }
+    - { name: aperture_y, type: f32 }
+    - { name: radius,     type: f32 }
   shader:
     code: |
-      let c = vec2<f32>(sc_x, sc_y);
-      var pp = p - vec2<f32>(cx, cy);
-      pp.x = abs(pp.x);
-      let l = length(pp) - r;
-      let m = length(pp - c * clamp(dot(pp, c), 0.0, r));
-      return max(l, m * sign(c.y * pp.x - c.x * pp.y));
+      let aperture = vec2<f32>(aperture_x, aperture_y);
+      var pos = sample_pos - vec2<f32>(center_x, center_y);
+      pos.x = abs(pos.x);
+      let l = length(pos) - radius;
+      let m = length(pos - aperture * clamp(dot(pos, aperture), 0.0, radius));
+      return max(l, m * sign(aperture.y * pos.x - aperture.x * pos.y));
   aabb:
     code: |
-      float r = p[4] + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r;
-      *maxY = p[1] + r;
+      float total_radius = geom[4] + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius;
+      *max_y = geom[1] + total_radius;
 
-- name: Ring
+- name: ring
   type: 14
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: nx, type: f32 }
-    - { name: ny, type: f32 }
-    - { name: r,  type: f32 }
-    - { name: th, type: f32 }
+    - { name: center_x,  type: f32 }
+    - { name: center_y,  type: f32 }
+    - { name: normal_x,  type: f32 }
+    - { name: normal_y,  type: f32 }
+    - { name: radius,    type: f32 }
+    - { name: thickness, type: f32 }
   shader:
     code: |
-      let n = vec2<f32>(nx, ny);
-      var pp = p - vec2<f32>(cx, cy);
-      pp.x = abs(pp.x);
-      pp = mat2x2<f32>(n.x, n.y, -n.y, n.x) * pp;
-      return max(abs(length(pp) - r) - th * 0.5,
-                 length(vec2<f32>(pp.x, max(0.0, abs(r - pp.y) - th * 0.5))) * sign(pp.x));
+      let normal = vec2<f32>(normal_x, normal_y);
+      var pos = sample_pos - vec2<f32>(center_x, center_y);
+      pos.x = abs(pos.x);
+      pos = mat2x2<f32>(normal.x, normal.y, -normal.y, normal.x) * pos;
+      return max(abs(length(pos) - radius) - thickness * 0.5,
+                 length(vec2<f32>(pos.x, max(0.0, abs(radius - pos.y) - thickness * 0.5))) * sign(pos.x));
   aabb:
     code: |
-      float r = p[4] + p[5] + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r;
-      *maxY = p[1] + r;
+      float total_radius = geom[4] + geom[5] + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius;
+      *max_y = geom[1] + total_radius;
 
-- name: Heart
+- name: heart
   type: 15
   category: sdf2d
   args:
-    - { name: cx,    type: f32 }
-    - { name: cy,    type: f32 }
-    - { name: scale, type: f32 }
+    - { name: center_x, type: f32 }
+    - { name: center_y, type: f32 }
+    - { name: scale,    type: f32 }
   shader:
     code: |
-      var pp = (p - vec2<f32>(cx, cy)) / scale;
-      pp.x = abs(pp.x);
-      if (pp.y + pp.x > 1.0) {
-          return (length(pp - vec2<f32>(0.25, 0.75)) - sqrt(2.0) / 4.0) * scale;
+      var pos = (sample_pos - vec2<f32>(center_x, center_y)) / scale;
+      pos.x = abs(pos.x);
+      if (pos.y + pos.x > 1.0) {
+          return (length(pos - vec2<f32>(0.25, 0.75)) - sqrt(2.0) / 4.0) * scale;
       }
-      return (sqrt(min(dot(pp - vec2<f32>(0.0, 1.0), pp - vec2<f32>(0.0, 1.0)),
-                       dot(pp - 0.5 * max(pp.x + pp.y, 0.0), pp - 0.5 * max(pp.x + pp.y, 0.0)))) *
-              sign(pp.x - pp.y)) * scale;
+      return (sqrt(min(dot(pos - vec2<f32>(0.0, 1.0), pos - vec2<f32>(0.0, 1.0)),
+                       dot(pos - 0.5 * max(pos.x + pos.y, 0.0), pos - 0.5 * max(pos.x + pos.y, 0.0)))) *
+              sign(pos.x - pos.y)) * scale;
   aabb:
     code: |
-      float s = p[2] * 1.5f + expand;
-      *minX = p[0] - s;
-      *minY = p[1] - s;
-      *maxX = p[0] + s;
-      *maxY = p[1] + s;
+      float extent = geom[2] * 1.5f + expand;
+      *min_x = geom[0] - extent;
+      *min_y = geom[1] - extent;
+      *max_x = geom[0] + extent;
+      *max_y = geom[1] + extent;
 
-- name: Cross
+- name: cross
   type: 16
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: bx, type: f32 }
-    - { name: by, type: f32 }
-    - { name: r,  type: f32 }
+    - { name: center_x,    type: f32 }
+    - { name: center_y,    type: f32 }
+    - { name: half_width,  type: f32 }
+    - { name: half_height, type: f32 }
+    - { name: corner_radius, type: f32 }
   shader:
     code: |
-      let b = vec2<f32>(bx, by);
-      var pp = abs(p - vec2<f32>(cx, cy));
-      pp = select(pp, pp.yx, pp.y > pp.x);
-      let q = pp - b;
+      let half_size = vec2<f32>(half_width, half_height);
+      var pos = abs(sample_pos - vec2<f32>(center_x, center_y));
+      pos = select(pos, pos.yx, pos.y > pos.x);
+      let q = pos - half_size;
       let k = max(q.y, q.x);
-      let w = select(vec2<f32>(b.y - pp.x, -k), q, k > 0.0);
-      return sign(k) * length(max(w, vec2<f32>(0.0))) + r;
+      let w = select(vec2<f32>(half_size.y - pos.x, -k), q, k > 0.0);
+      return sign(k) * length(max(w, vec2<f32>(0.0))) + corner_radius;
   aabb:
     code: |
-      float hw = fmaxf(p[2], p[3]) + expand;
-      *minX = p[0] - hw;
-      *minY = p[1] - hw;
-      *maxX = p[0] + hw;
-      *maxY = p[1] + hw;
+      float extent = fmaxf(geom[2], geom[3]) + expand;
+      *min_x = geom[0] - extent;
+      *min_y = geom[1] - extent;
+      *max_x = geom[0] + extent;
+      *max_y = geom[1] + extent;
 
-- name: RoundedX
+- name: rounded_x
   type: 17
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: w,  type: f32 }
-    - { name: r,  type: f32 }
+    - { name: center_x, type: f32 }
+    - { name: center_y, type: f32 }
+    - { name: width,    type: f32 }
+    - { name: radius,   type: f32 }
   shader:
     code: |
-      let pp = abs(p - vec2<f32>(cx, cy));
-      return length(pp - min(pp.x + pp.y, w) * 0.5) - r;
+      let pos = abs(sample_pos - vec2<f32>(center_x, center_y));
+      return length(pos - min(pos.x + pos.y, width) * 0.5) - radius;
   aabb:
     code: |
-      float s = p[2] + p[3] + expand;
-      *minX = p[0] - s;
-      *minY = p[1] - s;
-      *maxX = p[0] + s;
-      *maxY = p[1] + s;
+      float extent = geom[2] + geom[3] + expand;
+      *min_x = geom[0] - extent;
+      *min_y = geom[1] - extent;
+      *max_x = geom[0] + extent;
+      *max_y = geom[1] + extent;
 
-- name: Capsule
+- name: capsule
   type: 18
   category: sdf2d
   args:
-    - { name: ax, type: f32 }
-    - { name: ay, type: f32 }
-    - { name: bx, type: f32 }
-    - { name: by, type: f32 }
-    - { name: r,  type: f32 }
+    - { name: start_x, type: f32 }
+    - { name: start_y, type: f32 }
+    - { name: end_x,   type: f32 }
+    - { name: end_y,   type: f32 }
+    - { name: radius,  type: f32 }
   shader:
     code: |
-      let a = vec2<f32>(ax, ay);
-      let b = vec2<f32>(bx, by);
-      let pa = p - a;
-      let ba = b - a;
-      let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-      return length(pa - ba * h) - r;
+      let start_point = vec2<f32>(start_x, start_y);
+      let end_point = vec2<f32>(end_x, end_y);
+      let pos_to_start = sample_pos - start_point;
+      let start_to_end = end_point - start_point;
+      let t = clamp(dot(pos_to_start, start_to_end) / dot(start_to_end, start_to_end), 0.0, 1.0);
+      return length(pos_to_start - start_to_end * t) - radius;
   aabb:
     code: |
-      float r = p[4] + expand;
-      *minX = fminf(p[0], p[2]) - r;
-      *minY = fminf(p[1], p[3]) - r;
-      *maxX = fmaxf(p[0], p[2]) + r;
-      *maxY = fmaxf(p[1], p[3]) + r;
+      float total_radius = geom[4] + expand;
+      *min_x = fminf(geom[0], geom[2]) - total_radius;
+      *min_y = fminf(geom[1], geom[3]) - total_radius;
+      *max_x = fmaxf(geom[0], geom[2]) + total_radius;
+      *max_y = fmaxf(geom[1], geom[3]) + total_radius;
 
-- name: Moon
+- name: moon
   type: 19
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: d,  type: f32 }
-    - { name: ra, type: f32 }
-    - { name: rb, type: f32 }
+    - { name: center_x,     type: f32 }
+    - { name: center_y,     type: f32 }
+    - { name: offset,       type: f32 }
+    - { name: radius_outer, type: f32 }
+    - { name: radius_inner, type: f32 }
   shader:
     code: |
-      var pp = p - vec2<f32>(cx, cy);
-      pp.y = abs(pp.y);
-      let a = (ra * ra - rb * rb + d * d) / (2.0 * d);
-      let b = sqrt(max(ra * ra - a * a, 0.0));
-      if (d * (pp.x * b - pp.y * a) > d * d * max(b - pp.y, 0.0)) {
-          return length(pp - vec2<f32>(a, b));
+      var pos = sample_pos - vec2<f32>(center_x, center_y);
+      pos.y = abs(pos.y);
+      let a = (radius_outer * radius_outer - radius_inner * radius_inner + offset * offset) / (2.0 * offset);
+      let b = sqrt(max(radius_outer * radius_outer - a * a, 0.0));
+      if (offset * (pos.x * b - pos.y * a) > offset * offset * max(b - pos.y, 0.0)) {
+          return length(pos - vec2<f32>(a, b));
       }
-      return max(length(pp) - ra, -(length(pp - vec2<f32>(d, 0.0)) - rb));
+      return max(length(pos) - radius_outer, -(length(pos - vec2<f32>(offset, 0.0)) - radius_inner));
   aabb:
     code: |
-      float r = fmaxf(p[3], p[4]) + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r + p[2];
-      *maxY = p[1] + r;
+      float total_radius = fmaxf(geom[3], geom[4]) + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius + geom[2];
+      *max_y = geom[1] + total_radius;
 
-- name: Egg
+- name: egg
   type: 20
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: ra, type: f32 }
-    - { name: rb, type: f32 }
+    - { name: center_x,     type: f32 }
+    - { name: center_y,     type: f32 }
+    - { name: radius_outer, type: f32 }
+    - { name: radius_inner, type: f32 }
   shader:
     code: |
-      var pp = p - vec2<f32>(cx, cy);
-      pp.x = abs(pp.x);
-      let r = ra - rb;
-      let k = select((rb * pp.y - ra * pp.x) / (ra * rb), length(pp) / r, pp.y < 0.0);
-      if (k < 0.0) { return length(pp) - ra; }
-      if (k > ra) { return length(pp - vec2<f32>(0.0, ra)) - rb; }
-      return length(pp - vec2<f32>(-r, 0.0)) - (ra + rb - r);
+      var pos = sample_pos - vec2<f32>(center_x, center_y);
+      pos.x = abs(pos.x);
+      let r = radius_outer - radius_inner;
+      let k = select((radius_inner * pos.y - radius_outer * pos.x) / (radius_outer * radius_inner), length(pos) / r, pos.y < 0.0);
+      if (k < 0.0) { return length(pos) - radius_outer; }
+      if (k > radius_outer) { return length(pos - vec2<f32>(0.0, radius_outer)) - radius_inner; }
+      return length(pos - vec2<f32>(-r, 0.0)) - (radius_outer + radius_inner - r);
   aabb:
     code: |
-      float r = fmaxf(p[2], p[3]) + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r;
-      *maxY = p[1] + r + p[2];
+      float total_radius = fmaxf(geom[2], geom[3]) + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius;
+      *max_y = geom[1] + total_radius + geom[2];
 
-- name: Octogon
+- name: octogon
   type: 28
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: r,  type: f32 }
+    - { name: center_x, type: f32 }
+    - { name: center_y, type: f32 }
+    - { name: radius,   type: f32 }
   shader:
     code: |
       let k = vec3<f32>(-0.9238795325, 0.3826834323, 0.4142135623);
-      var pp = abs(p - vec2<f32>(cx, cy));
-      pp = pp - 2.0 * min(dot(vec2<f32>(k.x, k.y), pp), 0.0) * vec2<f32>(k.x, k.y);
-      pp = pp - 2.0 * min(dot(vec2<f32>(-k.x, k.y), pp), 0.0) * vec2<f32>(-k.x, k.y);
-      pp = pp - vec2<f32>(clamp(pp.x, -k.z * r, k.z * r), r);
-      return length(pp) * sign(pp.y);
+      var pos = abs(sample_pos - vec2<f32>(center_x, center_y));
+      pos = pos - 2.0 * min(dot(vec2<f32>(k.x, k.y), pos), 0.0) * vec2<f32>(k.x, k.y);
+      pos = pos - 2.0 * min(dot(vec2<f32>(-k.x, k.y), pos), 0.0) * vec2<f32>(-k.x, k.y);
+      pos = pos - vec2<f32>(clamp(pos.x, -k.z * radius, k.z * radius), radius);
+      return length(pos) * sign(pos.y);
   aabb:
     code: |
-      float r = p[2] + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r;
-      *maxY = p[1] + r;
+      float total_radius = geom[2] + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius;
+      *max_y = geom[1] + total_radius;
 
-- name: Hexagram
+- name: hexagram
   type: 29
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: r,  type: f32 }
+    - { name: center_x, type: f32 }
+    - { name: center_y, type: f32 }
+    - { name: radius,   type: f32 }
   shader:
     code: |
       let k = vec4<f32>(-0.5, 0.8660254038, 0.5773502692, 1.7320508076);
-      var pp = abs(p - vec2<f32>(cx, cy));
-      pp = pp - 2.0 * min(dot(k.xy, pp), 0.0) * k.xy;
-      pp = pp - 2.0 * min(dot(k.yx, pp), 0.0) * k.yx;
-      pp = pp - vec2<f32>(clamp(pp.x, r * k.z, r * k.w), r);
-      return length(pp) * sign(pp.y);
+      var pos = abs(sample_pos - vec2<f32>(center_x, center_y));
+      pos = pos - 2.0 * min(dot(k.xy, pos), 0.0) * k.xy;
+      pos = pos - 2.0 * min(dot(k.yx, pos), 0.0) * k.yx;
+      pos = pos - vec2<f32>(clamp(pos.x, radius * k.z, radius * k.w), radius);
+      return length(pos) * sign(pos.y);
   aabb:
     code: |
-      float r = p[2] + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r;
-      *maxY = p[1] + r;
+      float total_radius = geom[2] + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius;
+      *max_y = geom[1] + total_radius;
 
-- name: Pentagram
+- name: pentagram
   type: 30
   category: sdf2d
   args:
-    - { name: cx, type: f32 }
-    - { name: cy, type: f32 }
-    - { name: r,  type: f32 }
+    - { name: center_x, type: f32 }
+    - { name: center_y, type: f32 }
+    - { name: radius,   type: f32 }
   shader:
     code: |
       let v1 = vec2<f32>(0.809016994, -0.587785252);
       let v2 = vec2<f32>(-0.809016994, -0.587785252);
       let v3 = vec2<f32>(0.309016994, -0.951056516);
       let k1z = 0.726542528;
-      var pp = p - vec2<f32>(cx, cy);
-      pp.x = abs(pp.x);
-      pp = pp - 2.0 * max(dot(v1, pp), 0.0) * v1;
-      pp = pp - 2.0 * max(dot(v2, pp), 0.0) * v2;
-      pp.x = abs(pp.x);
-      pp.y = pp.y - r;
-      return length(pp - v3 * clamp(dot(pp, v3), 0.0, k1z * r)) * sign(pp.y * v3.x - pp.x * v3.y);
+      var pos = sample_pos - vec2<f32>(center_x, center_y);
+      pos.x = abs(pos.x);
+      pos = pos - 2.0 * max(dot(v1, pos), 0.0) * v1;
+      pos = pos - 2.0 * max(dot(v2, pos), 0.0) * v2;
+      pos.x = abs(pos.x);
+      pos.y = pos.y - radius;
+      return length(pos - v3 * clamp(dot(pos, v3), 0.0, k1z * radius)) * sign(pos.y * v3.x - pos.x * v3.y);
   aabb:
     code: |
-      float r = p[2] + expand;
-      *minX = p[0] - r;
-      *minY = p[1] - r;
-      *maxX = p[0] + r;
-      *maxY = p[1] + r;
+      float total_radius = geom[2] + expand;
+      *min_x = geom[0] - total_radius;
+      *min_y = geom[1] - total_radius;
+      *max_x = geom[0] + total_radius;
+      *max_y = geom[1] + total_radius;
 
 # =============================================================================
 # 3D SDF Primitives (AABB returns zero - not used for 2D grid)
 # =============================================================================
 
-- name: Sphere3D
+- name: sphere_3d
   type: 100
   category: sdf3d
   args:
-    - { name: px, type: f32 }
-    - { name: py, type: f32 }
-    - { name: pz, type: f32 }
-    - { name: r,  type: f32 }
+    - { name: position_x, type: f32 }
+    - { name: position_y, type: f32 }
+    - { name: position_z, type: f32 }
+    - { name: radius,     type: f32 }
   shader:
     code: |
-      return length(p - vec3<f32>(px, py, pz)) - r;
+      return length(sample_pos - vec3<f32>(position_x, position_y, position_z)) - radius;
   aabb:
     code: |
-      *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;
+      *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;
 
-- name: Box3D
+- name: box_3d
   type: 101
   category: sdf3d
   args:
-    - { name: px, type: f32 }
-    - { name: py, type: f32 }
-    - { name: pz, type: f32 }
-    - { name: bx, type: f32 }
-    - { name: by, type: f32 }
-    - { name: bz, type: f32 }
+    - { name: position_x,  type: f32 }
+    - { name: position_y,  type: f32 }
+    - { name: position_z,  type: f32 }
+    - { name: half_size_x, type: f32 }
+    - { name: half_size_y, type: f32 }
+    - { name: half_size_z, type: f32 }
   shader:
     code: |
-      let q = abs(p - vec3<f32>(px, py, pz)) - vec3<f32>(bx, by, bz);
+      let q = abs(sample_pos - vec3<f32>(position_x, position_y, position_z)) - vec3<f32>(half_size_x, half_size_y, half_size_z);
       return length(max(q, vec3<f32>(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
   aabb:
     code: |
-      *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;
+      *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;
 
-- name: Torus3D
+- name: torus_3d
   type: 103
   category: sdf3d
   args:
-    - { name: px,     type: f32 }
-    - { name: py,     type: f32 }
-    - { name: pz,     type: f32 }
-    - { name: majorR, type: f32 }
-    - { name: minorR, type: f32 }
+    - { name: position_x,   type: f32 }
+    - { name: position_y,   type: f32 }
+    - { name: position_z,   type: f32 }
+    - { name: major_radius, type: f32 }
+    - { name: minor_radius, type: f32 }
   shader:
     code: |
-      let pos = p - vec3<f32>(px, py, pz);
-      let q = vec2<f32>(length(pos.xz) - majorR, pos.y);
-      return length(q) - minorR;
+      let pos = sample_pos - vec3<f32>(position_x, position_y, position_z);
+      let q = vec2<f32>(length(pos.xz) - major_radius, pos.y);
+      return length(q) - minor_radius;
   aabb:
     code: |
-      *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;
+      *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;
 
-- name: Cylinder3D
+- name: cylinder_3d
   type: 105
   category: sdf3d
   args:
-    - { name: px, type: f32 }
-    - { name: py, type: f32 }
-    - { name: pz, type: f32 }
-    - { name: r,  type: f32 }
-    - { name: h,  type: f32 }
+    - { name: position_x,  type: f32 }
+    - { name: position_y,  type: f32 }
+    - { name: position_z,  type: f32 }
+    - { name: radius,      type: f32 }
+    - { name: half_height, type: f32 }
   shader:
     code: |
-      let pos = p - vec3<f32>(px, py, pz);
-      let d = abs(vec2<f32>(length(pos.xz), pos.y)) - vec2<f32>(r, h);
+      let pos = sample_pos - vec3<f32>(position_x, position_y, position_z);
+      let d = abs(vec2<f32>(length(pos.xz), pos.y)) - vec2<f32>(radius, half_height);
       return min(max(d.x, d.y), 0.0) + length(max(d, vec2<f32>(0.0)));
   aabb:
     code: |
-      *minX = 0; *minY = 0; *maxX = 0; *maxY = 0;
+      *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;

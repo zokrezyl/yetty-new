@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-typedef enum YPaintSdfType {
+enum ypaint_sdf_type {
     YPAINT_SDF_CIRCLE = 0,
     YPAINT_SDF_BOX = 1,
     YPAINT_SDF_SEGMENT = 2,
@@ -36,205 +36,205 @@ typedef enum YPaintSdfType {
     YPAINT_SDF_BOX_3D = 101,
     YPAINT_SDF_TORUS_3D = 103,
     YPAINT_SDF_CYLINDER_3D = 105,
-} YPaintSdfType;
+};
 
-typedef struct YPaintSdfCircle {
-    float cx;
-    float cy;
-    float r;
-} YPaintSdfCircle;
+struct ypaint_sdf_circle {
+    float center_x;
+    float center_y;
+    float radius;
+};
 
-typedef struct YPaintSdfBox {
-    float cx;
-    float cy;
-    float hw;
-    float hh;
-    float round;
-} YPaintSdfBox;
+struct ypaint_sdf_box {
+    float center_x;
+    float center_y;
+    float half_width;
+    float half_height;
+    float corner_radius;
+};
 
-typedef struct YPaintSdfSegment {
-    float x0;
-    float y0;
-    float x1;
-    float y1;
-} YPaintSdfSegment;
+struct ypaint_sdf_segment {
+    float start_x;
+    float start_y;
+    float end_x;
+    float end_y;
+};
 
-typedef struct YPaintSdfTriangle {
-    float ax;
-    float ay;
-    float bx;
-    float by;
-    float cx;
-    float cy;
-} YPaintSdfTriangle;
+struct ypaint_sdf_triangle {
+    float vertex_a_x;
+    float vertex_a_y;
+    float vertex_b_x;
+    float vertex_b_y;
+    float vertex_c_x;
+    float vertex_c_y;
+};
 
-typedef struct YPaintSdfEllipse {
-    float cx;
-    float cy;
-    float rx;
-    float ry;
-} YPaintSdfEllipse;
+struct ypaint_sdf_ellipse {
+    float center_x;
+    float center_y;
+    float radius_x;
+    float radius_y;
+};
 
-typedef struct YPaintSdfArc {
-    float cx;
-    float cy;
-    float sc_x;
-    float sc_y;
-    float ra;
-    float rb;
-} YPaintSdfArc;
+struct ypaint_sdf_arc {
+    float center_x;
+    float center_y;
+    float aperture_x;
+    float aperture_y;
+    float radius;
+    float thickness;
+};
 
-typedef struct YPaintSdfRoundedBox {
-    float cx;
-    float cy;
-    float hw;
-    float hh;
-    float r0;
-    float r1;
-    float r2;
-    float r3;
-} YPaintSdfRoundedBox;
+struct ypaint_sdf_rounded_box {
+    float center_x;
+    float center_y;
+    float half_width;
+    float half_height;
+    float radius_top_right;
+    float radius_bottom_right;
+    float radius_top_left;
+    float radius_bottom_left;
+};
 
-typedef struct YPaintSdfRhombus {
-    float cx;
-    float cy;
-    float bx;
-    float by;
-} YPaintSdfRhombus;
+struct ypaint_sdf_rhombus {
+    float center_x;
+    float center_y;
+    float half_width;
+    float half_height;
+};
 
-typedef struct YPaintSdfPentagon {
-    float cx;
-    float cy;
-    float r;
-} YPaintSdfPentagon;
+struct ypaint_sdf_pentagon {
+    float center_x;
+    float center_y;
+    float radius;
+};
 
-typedef struct YPaintSdfHexagon {
-    float cx;
-    float cy;
-    float r;
-} YPaintSdfHexagon;
+struct ypaint_sdf_hexagon {
+    float center_x;
+    float center_y;
+    float radius;
+};
 
-typedef struct YPaintSdfStar {
-    float cx;
-    float cy;
-    float r;
-    float n;
-    float m;
-} YPaintSdfStar;
+struct ypaint_sdf_star {
+    float center_x;
+    float center_y;
+    float radius;
+    float num_points;
+    float inner_ratio;
+};
 
-typedef struct YPaintSdfPie {
-    float cx;
-    float cy;
-    float sc_x;
-    float sc_y;
-    float r;
-} YPaintSdfPie;
+struct ypaint_sdf_pie {
+    float center_x;
+    float center_y;
+    float aperture_x;
+    float aperture_y;
+    float radius;
+};
 
-typedef struct YPaintSdfRing {
-    float cx;
-    float cy;
-    float nx;
-    float ny;
-    float r;
-    float th;
-} YPaintSdfRing;
+struct ypaint_sdf_ring {
+    float center_x;
+    float center_y;
+    float normal_x;
+    float normal_y;
+    float radius;
+    float thickness;
+};
 
-typedef struct YPaintSdfHeart {
-    float cx;
-    float cy;
+struct ypaint_sdf_heart {
+    float center_x;
+    float center_y;
     float scale;
-} YPaintSdfHeart;
+};
 
-typedef struct YPaintSdfCross {
-    float cx;
-    float cy;
-    float bx;
-    float by;
-    float r;
-} YPaintSdfCross;
+struct ypaint_sdf_cross {
+    float center_x;
+    float center_y;
+    float half_width;
+    float half_height;
+    float corner_radius;
+};
 
-typedef struct YPaintSdfRoundedX {
-    float cx;
-    float cy;
-    float w;
-    float r;
-} YPaintSdfRoundedX;
+struct ypaint_sdf_rounded_x {
+    float center_x;
+    float center_y;
+    float width;
+    float radius;
+};
 
-typedef struct YPaintSdfCapsule {
-    float ax;
-    float ay;
-    float bx;
-    float by;
-    float r;
-} YPaintSdfCapsule;
+struct ypaint_sdf_capsule {
+    float start_x;
+    float start_y;
+    float end_x;
+    float end_y;
+    float radius;
+};
 
-typedef struct YPaintSdfMoon {
-    float cx;
-    float cy;
-    float d;
-    float ra;
-    float rb;
-} YPaintSdfMoon;
+struct ypaint_sdf_moon {
+    float center_x;
+    float center_y;
+    float offset;
+    float radius_outer;
+    float radius_inner;
+};
 
-typedef struct YPaintSdfEgg {
-    float cx;
-    float cy;
-    float ra;
-    float rb;
-} YPaintSdfEgg;
+struct ypaint_sdf_egg {
+    float center_x;
+    float center_y;
+    float radius_outer;
+    float radius_inner;
+};
 
-typedef struct YPaintSdfOctogon {
-    float cx;
-    float cy;
-    float r;
-} YPaintSdfOctogon;
+struct ypaint_sdf_octogon {
+    float center_x;
+    float center_y;
+    float radius;
+};
 
-typedef struct YPaintSdfHexagram {
-    float cx;
-    float cy;
-    float r;
-} YPaintSdfHexagram;
+struct ypaint_sdf_hexagram {
+    float center_x;
+    float center_y;
+    float radius;
+};
 
-typedef struct YPaintSdfPentagram {
-    float cx;
-    float cy;
-    float r;
-} YPaintSdfPentagram;
+struct ypaint_sdf_pentagram {
+    float center_x;
+    float center_y;
+    float radius;
+};
 
-typedef struct YPaintSdfSphere3D {
-    float px;
-    float py;
-    float pz;
-    float r;
-} YPaintSdfSphere3D;
+struct ypaint_sdf_sphere_3d {
+    float position_x;
+    float position_y;
+    float position_z;
+    float radius;
+};
 
-typedef struct YPaintSdfBox3D {
-    float px;
-    float py;
-    float pz;
-    float bx;
-    float by;
-    float bz;
-} YPaintSdfBox3D;
+struct ypaint_sdf_box_3d {
+    float position_x;
+    float position_y;
+    float position_z;
+    float half_size_x;
+    float half_size_y;
+    float half_size_z;
+};
 
-typedef struct YPaintSdfTorus3D {
-    float px;
-    float py;
-    float pz;
-    float majorR;
-    float minorR;
-} YPaintSdfTorus3D;
+struct ypaint_sdf_torus_3d {
+    float position_x;
+    float position_y;
+    float position_z;
+    float major_radius;
+    float minor_radius;
+};
 
-typedef struct YPaintSdfCylinder3D {
-    float px;
-    float py;
-    float pz;
-    float r;
-    float h;
-} YPaintSdfCylinder3D;
+struct ypaint_sdf_cylinder_3d {
+    float position_x;
+    float position_y;
+    float position_z;
+    float radius;
+    float half_height;
+};
 
 // Word count per SDF primitive type
-static inline uint32_t ypaint_sdf_word_count(YPaintSdfType type) {
+static inline uint32_t ypaint_sdf_word_count(enum ypaint_sdf_type type) {
     switch (type) {
         case YPAINT_SDF_CIRCLE: return 8u;
         case YPAINT_SDF_BOX: return 10u;

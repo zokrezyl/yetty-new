@@ -5,561 +5,561 @@
 #include <yetty/ypaint/sdf/ypaint-sdf-prim.gen.h>
 #include <string.h>
 
-YPaintIdResult ypaint_sdf_add_circle(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfCircle* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_circle(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_circle *geom) {
     float data[8];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_CIRCLE;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->r;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->radius;
 
-    return ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_buffer_add_prim(buf, data, 8);
 }
 
-YPaintIdResult ypaint_sdf_add_box(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfBox* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_box(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_box *geom) {
     float data[10];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_BOX;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->hw;
-    data[8] = geom->hh;
-    data[9] = geom->round;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->half_width;
+    data[8] = geom->half_height;
+    data[9] = geom->corner_radius;
 
-    return ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_buffer_add_prim(buf, data, 10);
 }
 
-YPaintIdResult ypaint_sdf_add_segment(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfSegment* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_segment(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_segment *geom) {
     float data[9];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_SEGMENT;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->x0;
-    data[6] = geom->y0;
-    data[7] = geom->x1;
-    data[8] = geom->y1;
+    data[4] = stroke_width;
+    data[5] = geom->start_x;
+    data[6] = geom->start_y;
+    data[7] = geom->end_x;
+    data[8] = geom->end_y;
 
-    return ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_buffer_add_prim(buf, data, 9);
 }
 
-YPaintIdResult ypaint_sdf_add_triangle(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfTriangle* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_triangle(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_triangle *geom) {
     float data[11];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_TRIANGLE;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->ax;
-    data[6] = geom->ay;
-    data[7] = geom->bx;
-    data[8] = geom->by;
-    data[9] = geom->cx;
-    data[10] = geom->cy;
+    data[4] = stroke_width;
+    data[5] = geom->vertex_a_x;
+    data[6] = geom->vertex_a_y;
+    data[7] = geom->vertex_b_x;
+    data[8] = geom->vertex_b_y;
+    data[9] = geom->vertex_c_x;
+    data[10] = geom->vertex_c_y;
 
-    return ypaint_buffer_add_prim(buf, data, 11);
+    return yetty_ypaint_buffer_add_prim(buf, data, 11);
 }
 
-YPaintIdResult ypaint_sdf_add_ellipse(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfEllipse* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_ellipse(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_ellipse *geom) {
     float data[9];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_ELLIPSE;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->rx;
-    data[8] = geom->ry;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->radius_x;
+    data[8] = geom->radius_y;
 
-    return ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_buffer_add_prim(buf, data, 9);
 }
 
-YPaintIdResult ypaint_sdf_add_arc(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfArc* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_arc(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_arc *geom) {
     float data[11];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_ARC;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->sc_x;
-    data[8] = geom->sc_y;
-    data[9] = geom->ra;
-    data[10] = geom->rb;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->aperture_x;
+    data[8] = geom->aperture_y;
+    data[9] = geom->radius;
+    data[10] = geom->thickness;
 
-    return ypaint_buffer_add_prim(buf, data, 11);
+    return yetty_ypaint_buffer_add_prim(buf, data, 11);
 }
 
-YPaintIdResult ypaint_sdf_add_rounded_box(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfRoundedBox* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_rounded_box(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_rounded_box *geom) {
     float data[13];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_ROUNDED_BOX;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->hw;
-    data[8] = geom->hh;
-    data[9] = geom->r0;
-    data[10] = geom->r1;
-    data[11] = geom->r2;
-    data[12] = geom->r3;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->half_width;
+    data[8] = geom->half_height;
+    data[9] = geom->radius_top_right;
+    data[10] = geom->radius_bottom_right;
+    data[11] = geom->radius_top_left;
+    data[12] = geom->radius_bottom_left;
 
-    return ypaint_buffer_add_prim(buf, data, 13);
+    return yetty_ypaint_buffer_add_prim(buf, data, 13);
 }
 
-YPaintIdResult ypaint_sdf_add_rhombus(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfRhombus* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_rhombus(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_rhombus *geom) {
     float data[9];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_RHOMBUS;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->bx;
-    data[8] = geom->by;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->half_width;
+    data[8] = geom->half_height;
 
-    return ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_buffer_add_prim(buf, data, 9);
 }
 
-YPaintIdResult ypaint_sdf_add_pentagon(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfPentagon* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_pentagon(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_pentagon *geom) {
     float data[8];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_PENTAGON;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->r;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->radius;
 
-    return ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_buffer_add_prim(buf, data, 8);
 }
 
-YPaintIdResult ypaint_sdf_add_hexagon(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfHexagon* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_hexagon(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_hexagon *geom) {
     float data[8];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_HEXAGON;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->r;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->radius;
 
-    return ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_buffer_add_prim(buf, data, 8);
 }
 
-YPaintIdResult ypaint_sdf_add_star(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfStar* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_star(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_star *geom) {
     float data[10];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_STAR;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->r;
-    data[8] = geom->n;
-    data[9] = geom->m;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->radius;
+    data[8] = geom->num_points;
+    data[9] = geom->inner_ratio;
 
-    return ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_buffer_add_prim(buf, data, 10);
 }
 
-YPaintIdResult ypaint_sdf_add_pie(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfPie* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_pie(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_pie *geom) {
     float data[10];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_PIE;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->sc_x;
-    data[8] = geom->sc_y;
-    data[9] = geom->r;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->aperture_x;
+    data[8] = geom->aperture_y;
+    data[9] = geom->radius;
 
-    return ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_buffer_add_prim(buf, data, 10);
 }
 
-YPaintIdResult ypaint_sdf_add_ring(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfRing* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_ring(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_ring *geom) {
     float data[11];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_RING;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->nx;
-    data[8] = geom->ny;
-    data[9] = geom->r;
-    data[10] = geom->th;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->normal_x;
+    data[8] = geom->normal_y;
+    data[9] = geom->radius;
+    data[10] = geom->thickness;
 
-    return ypaint_buffer_add_prim(buf, data, 11);
+    return yetty_ypaint_buffer_add_prim(buf, data, 11);
 }
 
-YPaintIdResult ypaint_sdf_add_heart(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfHeart* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_heart(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_heart *geom) {
     float data[8];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_HEART;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
     data[7] = geom->scale;
 
-    return ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_buffer_add_prim(buf, data, 8);
 }
 
-YPaintIdResult ypaint_sdf_add_cross(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfCross* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_cross(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_cross *geom) {
     float data[10];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_CROSS;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->bx;
-    data[8] = geom->by;
-    data[9] = geom->r;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->half_width;
+    data[8] = geom->half_height;
+    data[9] = geom->corner_radius;
 
-    return ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_buffer_add_prim(buf, data, 10);
 }
 
-YPaintIdResult ypaint_sdf_add_rounded_x(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfRoundedX* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_rounded_x(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_rounded_x *geom) {
     float data[9];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_ROUNDED_X;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->w;
-    data[8] = geom->r;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->width;
+    data[8] = geom->radius;
 
-    return ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_buffer_add_prim(buf, data, 9);
 }
 
-YPaintIdResult ypaint_sdf_add_capsule(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfCapsule* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_capsule(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_capsule *geom) {
     float data[10];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_CAPSULE;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->ax;
-    data[6] = geom->ay;
-    data[7] = geom->bx;
-    data[8] = geom->by;
-    data[9] = geom->r;
+    data[4] = stroke_width;
+    data[5] = geom->start_x;
+    data[6] = geom->start_y;
+    data[7] = geom->end_x;
+    data[8] = geom->end_y;
+    data[9] = geom->radius;
 
-    return ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_buffer_add_prim(buf, data, 10);
 }
 
-YPaintIdResult ypaint_sdf_add_moon(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfMoon* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_moon(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_moon *geom) {
     float data[10];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_MOON;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->d;
-    data[8] = geom->ra;
-    data[9] = geom->rb;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->offset;
+    data[8] = geom->radius_outer;
+    data[9] = geom->radius_inner;
 
-    return ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_buffer_add_prim(buf, data, 10);
 }
 
-YPaintIdResult ypaint_sdf_add_egg(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfEgg* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_egg(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_egg *geom) {
     float data[9];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_EGG;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->ra;
-    data[8] = geom->rb;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->radius_outer;
+    data[8] = geom->radius_inner;
 
-    return ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_buffer_add_prim(buf, data, 9);
 }
 
-YPaintIdResult ypaint_sdf_add_octogon(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfOctogon* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_octogon(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_octogon *geom) {
     float data[8];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_OCTOGON;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->r;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->radius;
 
-    return ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_buffer_add_prim(buf, data, 8);
 }
 
-YPaintIdResult ypaint_sdf_add_hexagram(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfHexagram* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_hexagram(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_hexagram *geom) {
     float data[8];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_HEXAGRAM;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->r;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->radius;
 
-    return ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_buffer_add_prim(buf, data, 8);
 }
 
-YPaintIdResult ypaint_sdf_add_pentagram(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfPentagram* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_pentagram(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_pentagram *geom) {
     float data[8];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_PENTAGRAM;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->cx;
-    data[6] = geom->cy;
-    data[7] = geom->r;
+    data[4] = stroke_width;
+    data[5] = geom->center_x;
+    data[6] = geom->center_y;
+    data[7] = geom->radius;
 
-    return ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_buffer_add_prim(buf, data, 8);
 }
 
-YPaintIdResult ypaint_sdf_add_sphere_3d(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfSphere3D* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_sphere_3d(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_sphere_3d *geom) {
     float data[9];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_SPHERE_3D;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->px;
-    data[6] = geom->py;
-    data[7] = geom->pz;
-    data[8] = geom->r;
+    data[4] = stroke_width;
+    data[5] = geom->position_x;
+    data[6] = geom->position_y;
+    data[7] = geom->position_z;
+    data[8] = geom->radius;
 
-    return ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_buffer_add_prim(buf, data, 9);
 }
 
-YPaintIdResult ypaint_sdf_add_box_3d(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfBox3D* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_box_3d(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_box_3d *geom) {
     float data[11];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_BOX_3D;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->px;
-    data[6] = geom->py;
-    data[7] = geom->pz;
-    data[8] = geom->bx;
-    data[9] = geom->by;
-    data[10] = geom->bz;
+    data[4] = stroke_width;
+    data[5] = geom->position_x;
+    data[6] = geom->position_y;
+    data[7] = geom->position_z;
+    data[8] = geom->half_size_x;
+    data[9] = geom->half_size_y;
+    data[10] = geom->half_size_z;
 
-    return ypaint_buffer_add_prim(buf, data, 11);
+    return yetty_ypaint_buffer_add_prim(buf, data, 11);
 }
 
-YPaintIdResult ypaint_sdf_add_torus_3d(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfTorus3D* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_torus_3d(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_torus_3d *geom) {
     float data[10];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_TORUS_3D;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->px;
-    data[6] = geom->py;
-    data[7] = geom->pz;
-    data[8] = geom->majorR;
-    data[9] = geom->minorR;
+    data[4] = stroke_width;
+    data[5] = geom->position_x;
+    data[6] = geom->position_y;
+    data[7] = geom->position_z;
+    data[8] = geom->major_radius;
+    data[9] = geom->minor_radius;
 
-    return ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_buffer_add_prim(buf, data, 10);
 }
 
-YPaintIdResult ypaint_sdf_add_cylinder_3d(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdfCylinder3D* geom) {
+struct yetty_ypaint_id_result ypaint_sdf_add_cylinder_3d(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_cylinder_3d *geom) {
     float data[10];
     uint32_t tmp;
 
     tmp = YPAINT_SDF_CYLINDER_3D;
     memcpy(&data[0], &tmp, sizeof(tmp));
-    tmp = zOrder;
+    tmp = z_order;
     memcpy(&data[1], &tmp, sizeof(tmp));
-    tmp = fillColor;
+    tmp = fill_color;
     memcpy(&data[2], &tmp, sizeof(tmp));
-    tmp = strokeColor;
+    tmp = stroke_color;
     memcpy(&data[3], &tmp, sizeof(tmp));
-    data[4] = strokeWidth;
-    data[5] = geom->px;
-    data[6] = geom->py;
-    data[7] = geom->pz;
-    data[8] = geom->r;
-    data[9] = geom->h;
+    data[4] = stroke_width;
+    data[5] = geom->position_x;
+    data[6] = geom->position_y;
+    data[7] = geom->position_z;
+    data[8] = geom->radius;
+    data[9] = geom->half_height;
 
-    return ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_buffer_add_prim(buf, data, 10);
 }

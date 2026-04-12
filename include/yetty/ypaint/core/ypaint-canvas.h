@@ -88,9 +88,24 @@ void ypaint_canvas_add_primitive(struct ypaint_canvas *canvas,
 				 float aabb_min_x, float aabb_min_y,
 				 float aabb_max_x, float aabb_max_y);
 
+// Commit buffer after adding primitives
+// Handles auto-scroll if primitives extend beyond visible area
+// @param max_row The maximum row reached by primitives in this buffer
+void ypaint_canvas_commit_buffer(struct ypaint_canvas *canvas, uint32_t max_row);
+
 //=============================================================================
 // Scrolling
 //=============================================================================
+
+// Scroll callback: called when primitive insertion requires scrolling
+// @param user_data User data pointer
+// @param num_lines Number of lines to scroll
+typedef void (*ypaint_canvas_scroll_callback)(void *user_data, uint16_t num_lines);
+
+// Set scroll callback (called when add_primitive triggers scroll)
+void ypaint_canvas_set_scroll_callback(struct ypaint_canvas *canvas,
+				       ypaint_canvas_scroll_callback callback,
+				       void *user_data);
 
 // Remove N lines from the top - primitives in those lines are deleted
 // Only valid in scrolling mode

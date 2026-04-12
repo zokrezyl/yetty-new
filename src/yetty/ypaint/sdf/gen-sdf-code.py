@@ -16,7 +16,6 @@ Generates:
   src/yetty/ypaint/sdf/ypaint-sdf.gen.wgsl         - WGSL SDF functions + dispatch
 """
 
-import re
 from pathlib import Path
 import yaml
 
@@ -41,26 +40,19 @@ HEADER_WGSL = """// Auto-generated from sdf-primitives.yaml - DO NOT EDIT
 """
 
 # Buffer layout (in 32-bit words):
-# [0] type (YPaintSdfType enum value)
-# [1] zOrder
-# [2] fillColor
-# [3] strokeColor
-# [4] strokeWidth
+# [0] type (enum ypaint_sdf_type value)
+# [1] z_order
+# [2] fill_color
+# [3] stroke_color
+# [4] stroke_width
 # [5+] geometry args
 
 GEOMETRY_OFFSET = 5
 
 
-def camel_to_snake(name: str) -> str:
-    """CamelCase -> snake_case"""
-    s = re.sub(r"([a-z])([A-Z])", r"\1_\2", name)
-    s = re.sub(r"([a-zA-Z])(\d)", r"\1_\2", s)
-    return s.lower()
-
-
-def camel_to_screaming(name: str) -> str:
-    """CamelCase -> SCREAMING_SNAKE"""
-    return camel_to_snake(name).upper()
+def to_upper(name: str) -> str:
+    """snake_case -> UPPER_SNAKE_CASE"""
+    return name.upper()
 
 
 def c_type(yaml_type: str) -> str:
@@ -78,10 +70,10 @@ def generate_sdf_types(prims: list[dict], out: Path) -> None:
     lines = [HEADER_C, "#pragma once", "", "#include <stdint.h>", "", "#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
 
     # Enum for SDF primitive types
-    lines.append("typedef enum YPaintSdfType {")
+    lines.append("enum ypaint_sdf_type {")
     for p in prims:
-        lines.append(f"    YPAINT_SDF_{camel_to_screaming(p['name'])} = {p['type']},")
-    lines.append("} YPaintSdfType;")
+        lines.append(f"    YPAINT_SDF_{to_upper(p['name'])} = {p['type']},")
+    lines.append("};")
     lines.append("")
 
     # Geometry structs for each SDF primitive
@@ -89,21 +81,21 @@ def generate_sdf_types(prims: list[dict], out: Path) -> None:
         name = p["name"]
         args = p.get("args", [])
 
-        lines.append(f"typedef struct YPaintSdf{name} {{")
+        lines.append(f"struct ypaint_sdf_{name} {{")
         for arg in args:
             lines.append(f"    {c_type(arg['type'])} {arg['name']};")
-        lines.append(f"}} YPaintSdf{name};")
+        lines.append("};")
         lines.append("")
 
     # Word count for each SDF primitive type
     lines.append("// Word count per SDF primitive type")
-    lines.append("static inline uint32_t ypaint_sdf_word_count(YPaintSdfType type) {")
+    lines.append("static inline uint32_t ypaint_sdf_word_count(enum ypaint_sdf_type type) {")
     lines.append("    switch (type) {")
     for p in prims:
         name = p["name"]
         args = p.get("args", [])
         word_count = GEOMETRY_OFFSET + len(args)
-        lines.append(f"        case YPAINT_SDF_{camel_to_screaming(name)}: return {word_count}u;")
+        lines.append(f"        case YPAINT_SDF_{to_upper(name)}: return {word_count}u;")
     lines.append("        default: return 0u;")
     lines.append("    }")
     lines.append("}")
@@ -131,8 +123,7 @@ def generate_sdf_prim_header(prims: list[dict], out: Path) -> None:
 
     for p in prims:
         name = p["name"]
-        snake = camel_to_snake(name)
-        lines.append(f"YPaintIdResult ypaint_sdf_add_{snake}(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdf{name}* geom);")
+        lines.append(f"struct yetty_ypaint_id_result ypaint_sdf_add_{name}(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_{name} *geom);")
         lines.append("")
 
     lines.append("#ifdef __cplusplus")
@@ -153,28 +144,27 @@ def generate_sdf_prim_impl(prims: list[dict], out: Path) -> None:
 
     for p in prims:
         name = p["name"]
-        snake = camel_to_snake(name)
         args = p.get("args", [])
         word_count = GEOMETRY_OFFSET + len(args)
 
-        lines.append(f"YPaintIdResult ypaint_sdf_add_{snake}(YPaintBufferHandle buf, uint32_t zOrder, uint32_t fillColor, uint32_t strokeColor, float strokeWidth, const YPaintSdf{name}* geom) {{")
+        lines.append(f"struct yetty_ypaint_id_result ypaint_sdf_add_{name}(struct yetty_ypaint_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct ypaint_sdf_{name} *geom) {{")
         lines.append(f"    float data[{word_count}];")
         lines.append("    uint32_t tmp;")
         lines.append("")
         # Type
-        lines.append(f"    tmp = YPAINT_SDF_{camel_to_screaming(name)};")
+        lines.append(f"    tmp = YPAINT_SDF_{to_upper(name)};")
         lines.append("    memcpy(&data[0], &tmp, sizeof(tmp));")
-        # zOrder
-        lines.append("    tmp = zOrder;")
+        # z_order
+        lines.append("    tmp = z_order;")
         lines.append("    memcpy(&data[1], &tmp, sizeof(tmp));")
-        # fillColor
-        lines.append("    tmp = fillColor;")
+        # fill_color
+        lines.append("    tmp = fill_color;")
         lines.append("    memcpy(&data[2], &tmp, sizeof(tmp));")
-        # strokeColor
-        lines.append("    tmp = strokeColor;")
+        # stroke_color
+        lines.append("    tmp = stroke_color;")
         lines.append("    memcpy(&data[3], &tmp, sizeof(tmp));")
-        # strokeWidth
-        lines.append("    data[4] = strokeWidth;")
+        # stroke_width
+        lines.append("    data[4] = stroke_width;")
         # Geometry args
         for i, arg in enumerate(args):
             offset = GEOMETRY_OFFSET + i
@@ -184,7 +174,7 @@ def generate_sdf_prim_impl(prims: list[dict], out: Path) -> None:
                 lines.append(f"    tmp = geom->{arg['name']};")
                 lines.append(f"    memcpy(&data[{offset}], &tmp, sizeof(tmp));")
         lines.append("")
-        lines.append(f"    return ypaint_buffer_add_prim(buf, data, {word_count});")
+        lines.append(f"    return yetty_ypaint_buffer_add_prim(buf, data, {word_count});")
         lines.append("}")
         lines.append("")
 
@@ -201,34 +191,35 @@ def generate_sdf_aabb(prims: list[dict], out: Path) -> None:
     lines.append('#include <string.h>')
     lines.append("")
     lines.append("// Compute AABB for an SDF primitive")
-    lines.append("// data: full primitive data (type + zOrder + style + geometry)")
-    lines.append("// p: pointer to geometry args (data + 5)")
-    lines.append("// expand: strokeWidth * 0.5f")
+    lines.append("// data: full primitive data (type + z_order + style + geometry)")
+    lines.append("// geom: pointer to geometry args (data + 5)")
+    lines.append("// expand: stroke_width * 0.5f")
     lines.append("")
-    lines.append("void ypaint_sdf_compute_aabb(const float* data, uint32_t wordCount,")
-    lines.append("                              float* minX, float* minY, float* maxX, float* maxY) {")
+    lines.append("void ypaint_sdf_compute_aabb(const float *data, uint32_t word_count,")
+    lines.append("                              float *min_x, float *min_y, float *max_x, float *max_y) {")
     lines.append("    uint32_t type;")
     lines.append("    memcpy(&type, &data[0], sizeof(type));")
-    lines.append(f"    const float* p = data + {GEOMETRY_OFFSET};  // geometry args")
-    lines.append("    float strokeWidth = data[4];")
-    lines.append("    float expand = strokeWidth * 0.5f;")
+    lines.append(f"    const float *geom = data + {GEOMETRY_OFFSET};  // geometry args")
+    lines.append("    float stroke_width = data[4];")
+    lines.append("    float expand = stroke_width * 0.5f;")
+    lines.append("    (void)word_count;")
     lines.append("")
-    lines.append("    switch ((YPaintSdfType)type) {")
+    lines.append("    switch ((enum ypaint_sdf_type)type) {")
 
     for p in prims:
         name = p["name"]
         aabb_code = p.get("aabb", {}).get("code", "").strip()
         if not aabb_code:
-            aabb_code = "*minX = -1e10f; *minY = -1e10f; *maxX = 1e10f; *maxY = 1e10f;"
+            aabb_code = "*min_x = -1e10f; *min_y = -1e10f; *max_x = 1e10f; *max_y = 1e10f;"
 
-        lines.append(f"    case YPAINT_SDF_{camel_to_screaming(name)}: {{")
+        lines.append(f"    case YPAINT_SDF_{to_upper(name)}: {{")
         for line in aabb_code.split("\n"):
             lines.append(f"        {line}")
         lines.append("        break;")
         lines.append("    }")
 
     lines.append("    default:")
-    lines.append("        *minX = -1e10f; *minY = -1e10f; *maxX = 1e10f; *maxY = 1e10f;")
+    lines.append("        *min_x = -1e10f; *min_y = -1e10f; *max_x = 1e10f; *max_y = 1e10f;")
     lines.append("        break;")
     lines.append("    }")
     lines.append("}")
@@ -251,12 +242,12 @@ def generate_sdf_wgsl(prims: list[dict], out: Path) -> None:
             continue
 
         # Function signature with explicit params
-        params = ["p: vec2<f32>"] if p["category"] == "sdf2d" else ["p: vec3<f32>"]
+        params = ["sample_pos: vec2<f32>"] if p["category"] == "sdf2d" else ["sample_pos: vec3<f32>"]
         for arg in args:
             wgsl_type = "f32" if arg["type"] == "f32" else "u32"
             params.append(f"{arg['name']}: {wgsl_type}")
 
-        lines.append(f"fn sdf{name}({', '.join(params)}) -> f32 {{")
+        lines.append(f"fn sdf_{name}({', '.join(params)}) -> f32 {{")
         for line in shader.strip().split("\n"):
             lines.append(f"    {line}")
         lines.append("}")
@@ -265,14 +256,14 @@ def generate_sdf_wgsl(prims: list[dict], out: Path) -> None:
     # Generate dispatcher for 2D
     sdf2d = [p for p in prims if p["category"] == "sdf2d"]
     if sdf2d:
-        lines.append("fn evaluateSDF2D(primOffset: u32, p: vec2<f32>) -> f32 {")
-        lines.append("    let primType = bitcast<u32>(buf[primOffset]);")
-        lines.append("    switch (primType) {")
+        lines.append("fn evaluate_sdf_2d(prim_offset: u32, sample_pos: vec2<f32>) -> f32 {")
+        lines.append("    let prim_type = bitcast<u32>(buf[prim_offset]);")
+        lines.append("    switch (prim_type) {")
         for p in sdf2d:
             name = p["name"]
             args = p.get("args", [])
-            arg_accesses = [f"buf[primOffset + {GEOMETRY_OFFSET + i}u]" for i in range(len(args))]
-            lines.append(f"        case {p['type']}u: {{ return sdf{name}(p, {', '.join(arg_accesses)}); }}")
+            arg_accesses = [f"buf[prim_offset + {GEOMETRY_OFFSET + i}u]" for i in range(len(args))]
+            lines.append(f"        case {p['type']}u: {{ return sdf_{name}(sample_pos, {', '.join(arg_accesses)}); }}")
         lines.append("        default: { return 1e10; }")
         lines.append("    }")
         lines.append("}")
@@ -281,25 +272,25 @@ def generate_sdf_wgsl(prims: list[dict], out: Path) -> None:
     # Generate dispatcher for 3D
     sdf3d = [p for p in prims if p["category"] == "sdf3d"]
     if sdf3d:
-        lines.append("fn evaluateSDF3D(primOffset: u32, p: vec3<f32>) -> f32 {")
-        lines.append("    let primType = bitcast<u32>(buf[primOffset]);")
-        lines.append("    switch (primType) {")
+        lines.append("fn evaluate_sdf_3d(prim_offset: u32, sample_pos: vec3<f32>) -> f32 {")
+        lines.append("    let prim_type = bitcast<u32>(buf[prim_offset]);")
+        lines.append("    switch (prim_type) {")
         for p in sdf3d:
             name = p["name"]
             args = p.get("args", [])
-            arg_accesses = [f"buf[primOffset + {GEOMETRY_OFFSET + i}u]" for i in range(len(args))]
-            lines.append(f"        case {p['type']}u: {{ return sdf{name}(p, {', '.join(arg_accesses)}); }}")
+            arg_accesses = [f"buf[prim_offset + {GEOMETRY_OFFSET + i}u]" for i in range(len(args))]
+            lines.append(f"        case {p['type']}u: {{ return sdf_{name}(sample_pos, {', '.join(arg_accesses)}); }}")
         lines.append("        default: { return 1e10; }")
         lines.append("    }")
         lines.append("}")
         lines.append("")
 
     # Style extraction
-    lines.append("fn getSdfPrimStyle(primOffset: u32) -> vec3<u32> {")
+    lines.append("fn get_sdf_prim_style(prim_offset: u32) -> vec3<u32> {")
     lines.append("    return vec3<u32>(")
-    lines.append("        bitcast<u32>(buf[primOffset + 2u]),  // fillColor")
-    lines.append("        bitcast<u32>(buf[primOffset + 3u]),  // strokeColor")
-    lines.append("        bitcast<u32>(buf[primOffset + 4u])   // strokeWidth as bits")
+    lines.append("        bitcast<u32>(buf[prim_offset + 2u]),  // fill_color")
+    lines.append("        bitcast<u32>(buf[prim_offset + 3u]),  // stroke_color")
+    lines.append("        bitcast<u32>(buf[prim_offset + 4u])   // stroke_width as bits")
     lines.append("    );")
     lines.append("}")
 
@@ -317,55 +308,45 @@ def infer_yaml_props(args: list[dict]) -> list[tuple[str, str, list[str], str]]:
     props = []
 
     # Position patterns
-    if "cx" in arg_names and "cy" in arg_names:
-        props.append(("position", "vec2", ["cx", "cy"], ""))
-    if "ax" in arg_names and "ay" in arg_names:
-        if "bx" in arg_names:  # Triangle or multi-point
-            props.append(("p0", "vec2", ["ax", "ay"], ""))
-            props.append(("p1", "vec2", ["bx", "by"], ""))
-            if "cx" in arg_names:
-                props.append(("p2", "vec2", ["cx", "cy"], ""))
-        else:  # Capsule-like (ax,ay,bx,by)
-            props.append(("from", "vec2", ["ax", "ay"], ""))
-            props.append(("to", "vec2", ["bx", "by"], ""))
-    if "x0" in arg_names and "y0" in arg_names:
-        props.append(("from", "vec2", ["x0", "y0"], ""))
-        props.append(("to", "vec2", ["x1", "y1"], ""))
+    if "center_x" in arg_names and "center_y" in arg_names:
+        props.append(("position", "vec2", ["center_x", "center_y"], ""))
+    if "vertex_a_x" in arg_names and "vertex_a_y" in arg_names:
+        props.append(("vertex_a", "vec2", ["vertex_a_x", "vertex_a_y"], ""))
+        props.append(("vertex_b", "vec2", ["vertex_b_x", "vertex_b_y"], ""))
+        if "vertex_c_x" in arg_names:
+            props.append(("vertex_c", "vec2", ["vertex_c_x", "vertex_c_y"], ""))
+    if "start_x" in arg_names and "start_y" in arg_names:
+        props.append(("start", "vec2", ["start_x", "start_y"], ""))
+        props.append(("end", "vec2", ["end_x", "end_y"], ""))
 
     # Size patterns
-    if "hw" in arg_names and "hh" in arg_names:
-        props.append(("size", "size", ["hw", "hh"], "/ 2.0f"))
+    if "half_width" in arg_names and "half_height" in arg_names:
+        props.append(("size", "size", ["half_width", "half_height"], "/ 2.0f"))
 
     # Radius patterns
-    if "r" in arg_names:
-        props.append(("radius", "scalar", ["r"], ""))
-    if "rx" in arg_names and "ry" in arg_names:
-        props.append(("radii", "vec2", ["rx", "ry"], ""))
-    if "ra" in arg_names and "rb" in arg_names:
-        props.append(("radius_outer", "scalar", ["ra"], ""))
-        props.append(("radius_inner", "scalar", ["rb"], ""))
+    if "radius" in arg_names:
+        props.append(("radius", "scalar", ["radius"], ""))
+    if "radius_x" in arg_names and "radius_y" in arg_names:
+        props.append(("radii", "vec2", ["radius_x", "radius_y"], ""))
+    if "radius_outer" in arg_names and "radius_inner" in arg_names:
+        props.append(("radius_outer", "scalar", ["radius_outer"], ""))
+        props.append(("radius_inner", "scalar", ["radius_inner"], ""))
 
     # Other scalars
-    if "round" in arg_names:
-        props.append(("round", "scalar", ["round"], ""))
+    if "corner_radius" in arg_names:
+        props.append(("corner_radius", "scalar", ["corner_radius"], ""))
     if "scale" in arg_names:
         props.append(("scale", "scalar", ["scale"], ""))
-    if "n" in arg_names:
-        props.append(("points", "scalar", ["n"], ""))
-    if "m" in arg_names:
-        props.append(("inner", "scalar", ["m"], ""))
-    if "th" in arg_names:
-        props.append(("thickness", "scalar", ["th"], ""))
-    if "d" in arg_names:
-        props.append(("distance", "scalar", ["d"], ""))
-
-    # Size for cross/rhombus (bx, by without position)
-    if "bx" in arg_names and "by" in arg_names and "cx" not in arg_names and "ax" not in arg_names:
-        props.append(("size", "vec2", ["bx", "by"], ""))
-
-    # Width for rounded_x
-    if "w" in arg_names:
-        props.append(("width", "scalar", ["w"], ""))
+    if "num_points" in arg_names:
+        props.append(("num_points", "scalar", ["num_points"], ""))
+    if "inner_ratio" in arg_names:
+        props.append(("inner_ratio", "scalar", ["inner_ratio"], ""))
+    if "thickness" in arg_names:
+        props.append(("thickness", "scalar", ["thickness"], ""))
+    if "offset" in arg_names:
+        props.append(("offset", "scalar", ["offset"], ""))
+    if "width" in arg_names:
+        props.append(("width", "scalar", ["width"], ""))
 
     return props
 
@@ -416,8 +397,8 @@ def generate_sdf_yaml_impl(prims: list[dict], out: Path) -> None:
 
     # External AABB function
     lines.append("/* External AABB function */")
-    lines.append("extern void ypaint_sdf_compute_aabb(const float *data, uint32_t wordCount,")
-    lines.append("                                     float *minX, float *minY, float *maxX, float *maxY);")
+    lines.append("extern void ypaint_sdf_compute_aabb(const float *data, uint32_t word_count,")
+    lines.append("                                     float *min_x, float *min_y, float *max_x, float *max_y);")
     lines.append("")
 
     # Color parsing helper
@@ -476,91 +457,93 @@ def generate_sdf_yaml_impl(prims: list[dict], out: Path) -> None:
     lines.append("")
 
     # Reset function
-    lines.append("static void reset_prim(struct ypaint_yaml_parse_ctx *ctx) {")
-    lines.append('    ctx->prim_type[0] = 0;')
-    lines.append('    ctx->prop_key[0] = 0;')
-    lines.append("    ctx->fill_color = 0;")
-    lines.append("    ctx->stroke_color = 0;")
-    lines.append("    ctx->stroke_width = 0;")
+    lines.append("static void reset_prim(struct ypaint_yaml_parse_ctx *yaml_parse_ctx) {")
+    lines.append('    yaml_parse_ctx->prim_type[0] = 0;')
+    lines.append('    yaml_parse_ctx->prop_key[0] = 0;')
+    lines.append("    yaml_parse_ctx->fill_color = 0;")
+    lines.append("    yaml_parse_ctx->stroke_color = 0;")
+    lines.append("    yaml_parse_ctx->stroke_width = 0;")
     for arg in sorted(all_args):
-        lines.append(f"    ctx->{arg} = 0;")
-    lines.append("    ctx->in_array = 0;")
-    lines.append("    ctx->array_idx = 0;")
+        lines.append(f"    yaml_parse_ctx->{arg} = 0;")
+    lines.append("    yaml_parse_ctx->in_array = 0;")
+    lines.append("    yaml_parse_ctx->array_idx = 0;")
     lines.append("}")
     lines.append("")
 
     # Store array values based on property key
-    lines.append("static void store_array(struct ypaint_yaml_parse_ctx *ctx) {")
-    lines.append('    const char *k = ctx->prop_key;')
-    lines.append('    ydebug("store_array: key=\'%s\' idx=%d vals=[%f,%f]", k, ctx->array_idx, ctx->array_vals[0], ctx->array_vals[1]);')
-    lines.append('    if (strcmp(k, "position") == 0 && ctx->array_idx >= 2) {')
-    lines.append("        ctx->cx = ctx->array_vals[0]; ctx->cy = ctx->array_vals[1];")
-    lines.append('        ydebug("store_array: set cx=%f cy=%f", ctx->cx, ctx->cy);')
+    lines.append("static void store_array(struct ypaint_yaml_parse_ctx *yaml_parse_ctx) {")
+    lines.append('    const char *key = yaml_parse_ctx->prop_key;')
+    lines.append('    ydebug("store_array: key=\'%s\' idx=%d vals=[%f,%f]", key, yaml_parse_ctx->array_idx, yaml_parse_ctx->array_vals[0], yaml_parse_ctx->array_vals[1]);')
+    lines.append('    if (strcmp(key, "position") == 0 && yaml_parse_ctx->array_idx >= 2) {')
+    lines.append("        yaml_parse_ctx->center_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->center_y = yaml_parse_ctx->array_vals[1];")
+    lines.append('        ydebug("store_array: set center_x=%f center_y=%f", yaml_parse_ctx->center_x, yaml_parse_ctx->center_y);')
     lines.append("    }")
-    lines.append('    else if (strcmp(k, "size") == 0 && ctx->array_idx >= 2) {')
-    lines.append("        ctx->hw = ctx->array_vals[0] / 2.0f; ctx->hh = ctx->array_vals[1] / 2.0f;")
-    lines.append("        ctx->bx = ctx->array_vals[0]; ctx->by = ctx->array_vals[1];")  # for cross/rhombus
+    lines.append('    else if (strcmp(key, "size") == 0 && yaml_parse_ctx->array_idx >= 2) {')
+    lines.append("        yaml_parse_ctx->half_width = yaml_parse_ctx->array_vals[0] / 2.0f; yaml_parse_ctx->half_height = yaml_parse_ctx->array_vals[1] / 2.0f;")
     lines.append("    }")
-    lines.append('    else if (strcmp(k, "from") == 0 && ctx->array_idx >= 2) {')
-    lines.append("        ctx->x0 = ctx->array_vals[0]; ctx->y0 = ctx->array_vals[1];")
-    lines.append("        ctx->ax = ctx->array_vals[0]; ctx->ay = ctx->array_vals[1];")
+    lines.append('    else if (strcmp(key, "start") == 0 && yaml_parse_ctx->array_idx >= 2) {')
+    lines.append("        yaml_parse_ctx->start_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->start_y = yaml_parse_ctx->array_vals[1];")
     lines.append("    }")
-    lines.append('    else if (strcmp(k, "to") == 0 && ctx->array_idx >= 2) {')
-    lines.append("        ctx->x1 = ctx->array_vals[0]; ctx->y1 = ctx->array_vals[1];")
-    lines.append("        ctx->bx = ctx->array_vals[0]; ctx->by = ctx->array_vals[1];")
+    lines.append('    else if (strcmp(key, "end") == 0 && yaml_parse_ctx->array_idx >= 2) {')
+    lines.append("        yaml_parse_ctx->end_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->end_y = yaml_parse_ctx->array_vals[1];")
     lines.append("    }")
-    lines.append('    else if (strcmp(k, "p0") == 0 && ctx->array_idx >= 2) {')
-    lines.append("        ctx->ax = ctx->array_vals[0]; ctx->ay = ctx->array_vals[1];")
+    lines.append('    else if (strcmp(key, "vertex_a") == 0 && yaml_parse_ctx->array_idx >= 2) {')
+    lines.append("        yaml_parse_ctx->vertex_a_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->vertex_a_y = yaml_parse_ctx->array_vals[1];")
     lines.append("    }")
-    lines.append('    else if (strcmp(k, "p1") == 0 && ctx->array_idx >= 2) {')
-    lines.append("        ctx->bx = ctx->array_vals[0]; ctx->by = ctx->array_vals[1];")
+    lines.append('    else if (strcmp(key, "vertex_b") == 0 && yaml_parse_ctx->array_idx >= 2) {')
+    lines.append("        yaml_parse_ctx->vertex_b_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->vertex_b_y = yaml_parse_ctx->array_vals[1];")
     lines.append("    }")
-    lines.append('    else if (strcmp(k, "p2") == 0 && ctx->array_idx >= 2) {')
-    lines.append("        ctx->cx = ctx->array_vals[0]; ctx->cy = ctx->array_vals[1];")
+    lines.append('    else if (strcmp(key, "vertex_c") == 0 && yaml_parse_ctx->array_idx >= 2) {')
+    lines.append("        yaml_parse_ctx->vertex_c_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->vertex_c_y = yaml_parse_ctx->array_vals[1];")
     lines.append("    }")
-    lines.append('    else if (strcmp(k, "radii") == 0 && ctx->array_idx >= 2) {')
-    lines.append("        ctx->rx = ctx->array_vals[0]; ctx->ry = ctx->array_vals[1];")
+    lines.append('    else if (strcmp(key, "radii") == 0 && yaml_parse_ctx->array_idx >= 2) {')
+    lines.append("        yaml_parse_ctx->radius_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->radius_y = yaml_parse_ctx->array_vals[1];")
+    lines.append("    }")
+    lines.append('    else if (strcmp(key, "aperture") == 0 && yaml_parse_ctx->array_idx >= 2) {')
+    lines.append("        yaml_parse_ctx->aperture_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->aperture_y = yaml_parse_ctx->array_vals[1];")
+    lines.append("    }")
+    lines.append('    else if (strcmp(key, "normal") == 0 && yaml_parse_ctx->array_idx >= 2) {')
+    lines.append("        yaml_parse_ctx->normal_x = yaml_parse_ctx->array_vals[0]; yaml_parse_ctx->normal_y = yaml_parse_ctx->array_vals[1];")
     lines.append("    }")
     lines.append("}")
     lines.append("")
 
     # Add primitive function
-    lines.append("static void add_prim(struct ypaint_yaml_parse_ctx *ctx) {")
+    lines.append("static void add_prim(struct ypaint_yaml_parse_ctx *yaml_parse_ctx) {")
     lines.append("    float data[16];")
-    lines.append("    uint32_t wc = 0, tmp;")
-    lines.append("    float minX, minY, maxX, maxY;")
+    lines.append("    uint32_t word_count = 0, tmp;")
+    lines.append("    float min_x, min_y, max_x, max_y;")
     lines.append("")
 
-    lines.append('    ydebug("add_prim: type=\'%s\' cx=%f cy=%f r=%f fill=0x%08x", ctx->prim_type, ctx->cx, ctx->cy, ctx->r, ctx->fill_color);')
+    lines.append('    ydebug("add_prim: type=\'%s\' center_x=%f center_y=%f radius=%f fill=0x%08x", yaml_parse_ctx->prim_type, yaml_parse_ctx->center_x, yaml_parse_ctx->center_y, yaml_parse_ctx->radius, yaml_parse_ctx->fill_color);')
     lines.append("")
 
     for i, p in enumerate(prims_2d):
         name = p["name"]
-        snake = camel_to_snake(name)
         args = p.get("args", [])
-        word_count = GEOMETRY_OFFSET + len(args)
+        prim_word_count = GEOMETRY_OFFSET + len(args)
         cond = "if" if i == 0 else "else if"
 
-        lines.append(f'    {cond} (strcmp(ctx->prim_type, "{snake}") == 0) {{')
-        lines.append(f"        tmp = YPAINT_SDF_{camel_to_screaming(name)}; memcpy(&data[0], &tmp, sizeof(tmp));")
-        lines.append(f"        tmp = ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));")
-        lines.append(f"        tmp = ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));")
-        lines.append(f"        tmp = ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));")
-        lines.append(f"        data[4] = ctx->stroke_width;")
+        lines.append(f'    {cond} (strcmp(yaml_parse_ctx->prim_type, "{name}") == 0) {{')
+        lines.append(f"        tmp = YPAINT_SDF_{to_upper(name)}; memcpy(&data[0], &tmp, sizeof(tmp));")
+        lines.append(f"        tmp = yaml_parse_ctx->z_order; memcpy(&data[1], &tmp, sizeof(tmp));")
+        lines.append(f"        tmp = yaml_parse_ctx->fill_color; memcpy(&data[2], &tmp, sizeof(tmp));")
+        lines.append(f"        tmp = yaml_parse_ctx->stroke_color; memcpy(&data[3], &tmp, sizeof(tmp));")
+        lines.append(f"        data[4] = yaml_parse_ctx->stroke_width;")
         for j, arg in enumerate(args):
-            lines.append(f"        data[{GEOMETRY_OFFSET + j}] = ctx->{arg['name']};")
-        lines.append(f"        wc = {word_count};")
+            lines.append(f"        data[{GEOMETRY_OFFSET + j}] = yaml_parse_ctx->{arg['name']};")
+        lines.append(f"        word_count = {prim_word_count};")
         lines.append("    }")
 
     lines.append("    else {")
-    lines.append('        ydebug("ypaint_yaml: unknown type \'%s\'", ctx->prim_type);')
-    lines.append("        ctx->z_order++;")
+    lines.append('        ydebug("ypaint_yaml: unknown type \'%s\'", yaml_parse_ctx->prim_type);')
+    lines.append("        yaml_parse_ctx->z_order++;")
     lines.append("        return;")
     lines.append("    }")
     lines.append("")
-    lines.append("    ypaint_sdf_compute_aabb(data, wc, &minX, &minY, &maxX, &maxY);")
-    lines.append("    ypaint_canvas_add_primitive(ctx->canvas, data, wc, minX, minY, maxX, maxY);")
-    lines.append("    ctx->z_order++;")
+    lines.append("    ypaint_sdf_compute_aabb(data, word_count, &min_x, &min_y, &max_x, &max_y);")
+    lines.append("    ypaint_canvas_add_primitive(yaml_parse_ctx->canvas, data, word_count, min_x, min_y, max_x, max_y);")
+    lines.append("    yaml_parse_ctx->z_order++;")
     lines.append("}")
     lines.append("")
 
@@ -569,10 +552,10 @@ def generate_sdf_yaml_impl(prims: list[dict], out: Path) -> None:
     lines.append(" * YAML event parser")
     lines.append(" *===========================================================================*/")
     lines.append("")
-    lines.append("int ypaint_sdf_yaml_parse(struct ypaint_canvas *canvas, const char *yaml, size_t len) {")
+    lines.append("int ypaint_sdf_yaml_parse(struct ypaint_canvas *canvas, const char *yaml_str, size_t yaml_len) {")
     lines.append("    yaml_parser_t parser;")
-    lines.append("    yaml_event_t ev;")
-    lines.append("    struct ypaint_yaml_parse_ctx ctx = {0};")
+    lines.append("    yaml_event_t event;")
+    lines.append("    struct ypaint_yaml_parse_ctx yaml_parse_ctx = {0};")
     lines.append("    int done = 0, err = 0;")
     lines.append("    int depth = 0;       /* mapping depth */")
     lines.append("    int in_body = 0;     /* inside body sequence */")
@@ -580,70 +563,70 @@ def generate_sdf_yaml_impl(prims: list[dict], out: Path) -> None:
     lines.append("    int in_prim_type = 0;/* inside primitive type map */")
     lines.append("    int expect_value = 0;")
     lines.append("")
-    lines.append("    if (!canvas || !yaml) return -1;")
-    lines.append("    ctx.canvas = canvas;")
+    lines.append("    if (!canvas || !yaml_str) return -1;")
+    lines.append("    yaml_parse_ctx.canvas = canvas;")
     lines.append("")
     lines.append("    if (!yaml_parser_initialize(&parser)) return -1;")
-    lines.append("    yaml_parser_set_input_string(&parser, (const unsigned char *)yaml, len);")
+    lines.append("    yaml_parser_set_input_string(&parser, (const unsigned char *)yaml_str, yaml_len);")
     lines.append("")
     lines.append("    while (!done && !err) {")
-    lines.append("        if (!yaml_parser_parse(&parser, &ev)) { err = 1; break; }")
-    lines.append("        switch (ev.type) {")
+    lines.append("        if (!yaml_parser_parse(&parser, &event)) { err = 1; break; }")
+    lines.append("        switch (event.type) {")
     lines.append("        case YAML_STREAM_END_EVENT: done = 1; break;")
     lines.append("        case YAML_MAPPING_START_EVENT:")
     lines.append("            depth++;")
-    lines.append("            if (in_body && !in_prim) { in_prim = 1; reset_prim(&ctx); }")
+    lines.append("            if (in_body && !in_prim) { in_prim = 1; reset_prim(&yaml_parse_ctx); }")
     lines.append("            else if (in_prim && !in_prim_type) { in_prim_type = 1; }")
     lines.append("            break;")
     lines.append("        case YAML_MAPPING_END_EVENT:")
-    lines.append("            if (in_prim_type) { add_prim(&ctx); in_prim_type = 0; in_prim = 0; }")
+    lines.append("            if (in_prim_type) { add_prim(&yaml_parse_ctx); in_prim_type = 0; in_prim = 0; }")
     lines.append("            depth--;")
     lines.append("            break;")
     lines.append("        case YAML_SEQUENCE_START_EVENT:")
-    lines.append('            if (depth == 1 && strcmp(ctx.prop_key, "body") == 0) { in_body = 1; }')
-    lines.append("            else if (in_prim_type) { ctx.in_array = 1; ctx.array_idx = 0; expect_value = 0; }")
+    lines.append('            if (depth == 1 && strcmp(yaml_parse_ctx.prop_key, "body") == 0) { in_body = 1; }')
+    lines.append("            else if (in_prim_type) { yaml_parse_ctx.in_array = 1; yaml_parse_ctx.array_idx = 0; expect_value = 0; }")
     lines.append("            break;")
     lines.append("        case YAML_SEQUENCE_END_EVENT:")
-    lines.append("            if (ctx.in_array) { store_array(&ctx); ctx.in_array = 0; }")
+    lines.append("            if (yaml_parse_ctx.in_array) { store_array(&yaml_parse_ctx); yaml_parse_ctx.in_array = 0; }")
     lines.append("            else if (in_body && !in_prim) { in_body = 0; }")
     lines.append("            break;")
     lines.append("        case YAML_SCALAR_EVENT: {")
-    lines.append("            const char *val = (const char *)ev.data.scalar.value;")
-    lines.append("            if (ctx.in_array) {")
-    lines.append("                if (ctx.array_idx < 8) ctx.array_vals[ctx.array_idx++] = strtof(val, NULL);")
+    lines.append("            const char *scalar_value = (const char *)event.data.scalar.value;")
+    lines.append("            if (yaml_parse_ctx.in_array) {")
+    lines.append("                if (yaml_parse_ctx.array_idx < 8) yaml_parse_ctx.array_vals[yaml_parse_ctx.array_idx++] = strtof(scalar_value, NULL);")
     lines.append("            } else if (in_prim && !in_prim_type) {")
-    lines.append("                strncpy(ctx.prim_type, val, sizeof(ctx.prim_type)-1);")
+    lines.append("                strncpy(yaml_parse_ctx.prim_type, scalar_value, sizeof(yaml_parse_ctx.prim_type)-1);")
     lines.append("            } else if (in_prim_type) {")
     lines.append("                if (!expect_value) {")
-    lines.append("                    strncpy(ctx.prop_key, val, sizeof(ctx.prop_key)-1);")
+    lines.append("                    strncpy(yaml_parse_ctx.prop_key, scalar_value, sizeof(yaml_parse_ctx.prop_key)-1);")
     lines.append("                    expect_value = 1;")
     lines.append("                } else {")
-    lines.append('                    if (strcmp(ctx.prop_key, "fill") == 0) ctx.fill_color = parse_color(val);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "stroke") == 0) ctx.stroke_color = parse_color(val);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "stroke-width") == 0) ctx.stroke_width = strtof(val, NULL);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "radius") == 0) ctx.r = strtof(val, NULL);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "round") == 0) ctx.round = strtof(val, NULL);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "scale") == 0) ctx.scale = strtof(val, NULL);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "points") == 0) ctx.n = strtof(val, NULL);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "inner") == 0) ctx.m = strtof(val, NULL);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "thickness") == 0) ctx.th = strtof(val, NULL);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "distance") == 0) ctx.d = strtof(val, NULL);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "width") == 0) ctx.w = strtof(val, NULL);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "radius_outer") == 0) ctx.ra = strtof(val, NULL);')
-    lines.append('                    else if (strcmp(ctx.prop_key, "radius_inner") == 0) ctx.rb = strtof(val, NULL);')
+    lines.append('                    if (strcmp(yaml_parse_ctx.prop_key, "fill") == 0) yaml_parse_ctx.fill_color = parse_color(scalar_value);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "stroke") == 0) yaml_parse_ctx.stroke_color = parse_color(scalar_value);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "stroke_width") == 0) yaml_parse_ctx.stroke_width = strtof(scalar_value, NULL);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "radius") == 0) yaml_parse_ctx.radius = strtof(scalar_value, NULL);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "corner_radius") == 0) yaml_parse_ctx.corner_radius = strtof(scalar_value, NULL);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "scale") == 0) yaml_parse_ctx.scale = strtof(scalar_value, NULL);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "num_points") == 0) yaml_parse_ctx.num_points = strtof(scalar_value, NULL);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "inner_ratio") == 0) yaml_parse_ctx.inner_ratio = strtof(scalar_value, NULL);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "thickness") == 0) yaml_parse_ctx.thickness = strtof(scalar_value, NULL);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "offset") == 0) yaml_parse_ctx.offset = strtof(scalar_value, NULL);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "width") == 0) yaml_parse_ctx.width = strtof(scalar_value, NULL);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "radius_outer") == 0) yaml_parse_ctx.radius_outer = strtof(scalar_value, NULL);')
+    lines.append('                    else if (strcmp(yaml_parse_ctx.prop_key, "radius_inner") == 0) yaml_parse_ctx.radius_inner = strtof(scalar_value, NULL);')
     lines.append("                    expect_value = 0;")
     lines.append("                }")
     lines.append("            } else if (depth == 1) {")
-    lines.append("                strncpy(ctx.prop_key, val, sizeof(ctx.prop_key)-1);")
+    lines.append("                strncpy(yaml_parse_ctx.prop_key, scalar_value, sizeof(yaml_parse_ctx.prop_key)-1);")
     lines.append("            }")
     lines.append("            break;")
     lines.append("        }")
     lines.append("        default: break;")
     lines.append("        }")
-    lines.append("        yaml_event_delete(&ev);")
+    lines.append("        yaml_event_delete(&event);")
     lines.append("    }")
     lines.append("    yaml_parser_delete(&parser);")
-    lines.append('    ydebug("ypaint_yaml: parsed %u primitives", ctx.z_order);')
+    lines.append('    ydebug("ypaint_yaml: parsed %u primitives", yaml_parse_ctx.z_order);')
     lines.append("    return err ? -1 : 0;")
     lines.append("}")
 
