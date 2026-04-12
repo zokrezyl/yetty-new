@@ -5,6 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
+#include <yetty/ypaint/core/ypaint-buffer.h>
+
+// External AABB computation from generated code
+extern void ypaint_sdf_compute_aabb(const float *data, uint32_t word_count,
+                                    float *min_x, float *min_y,
+                                    float *max_x, float *max_y);
 
 //=============================================================================
 // Internal data structures
@@ -491,12 +497,14 @@ static uint32_t cell_x_from_world(struct ypaint_canvas *canvas, float world_x) {
   return (uint32_t)normalized;
 }
 
-void ypaint_canvas_add_primitive(struct ypaint_canvas *canvas,
-                                 const float *prim_data, uint32_t word_count,
-                                 float aabb_min_x, float aabb_min_y,
-                                 float aabb_max_x, float aabb_max_y) {
+// Internal: add a single primitive with pre-computed AABB
+// Returns the max_row (bottom row of AABB) for this primitive
+static uint32_t canvas_add_primitive(struct ypaint_canvas *canvas,
+                                     const float *prim_data, uint32_t word_count,
+                                     float aabb_min_x, float aabb_min_y,
+                                     float aabb_max_x, float aabb_max_y) {
   if (!canvas || !prim_data || word_count == 0 || word_count > 32)
-    return;
+    return 0;
 
   // Offset AABB Y by cursor position for grid placement
   float cursor_y_offset = canvas->cursor_row * canvas->cell_size_y;
@@ -541,26 +549,29 @@ void ypaint_canvas_add_primitive(struct ypaint_canvas *canvas,
     grid_line_ensure_cells(line, cell_max_x + 1);
 
     uint16_t lines_ahead = (uint16_t)(prim_max_row - row);
-    for (uint32_t cx = cell_min_x; cx <= cell_max_x; cx++) {
+    for (uint32_t col = cell_min_x; col <= cell_max_x; col++) {
       struct ypaint_canvas_prim_ref ref = {lines_ahead, (uint16_t)prim_index};
-      prim_ref_array_push(&line->cells[cx].refs, ref);
+      prim_ref_array_push(&line->cells[col].refs, ref);
     }
   }
 
   canvas->dirty = true;
+  return prim_max_row;
 }
 
-void ypaint_canvas_commit_buffer(struct ypaint_canvas *canvas,
+// Internal: commit buffer after adding all primitives
+// Handles auto-scroll if primitives extend beyond visible area
+static void canvas_commit_buffer(struct ypaint_canvas *canvas,
                                  uint32_t max_row) {
   if (!canvas || canvas->grid_height == 0)
     return;
 
   // Target cursor = row after the buffer's max row
-  uint32_t target_cursor = max_row + 1;
+  uint32_t target_cursor_row = max_row + 1;
 
-  if (target_cursor >= canvas->grid_height) {
+  if (target_cursor_row >= canvas->grid_height) {
     uint16_t lines_to_scroll =
-        (uint16_t)(target_cursor - canvas->grid_height + 1);
+        (uint16_t)(target_cursor_row - canvas->grid_height + 1);
 
     // Notify other layers via callback BEFORE scrolling
     if (canvas->scroll_callback)
@@ -574,8 +585,90 @@ void ypaint_canvas_commit_buffer(struct ypaint_canvas *canvas,
     canvas->cursor_row = (uint16_t)(canvas->grid_height - 1);
   } else {
     // No scroll needed, just move cursor
-    canvas->cursor_row = (uint16_t)target_cursor;
+    canvas->cursor_row = (uint16_t)target_cursor_row;
   }
+}
+
+//=============================================================================
+// Buffer management (public API)
+//=============================================================================
+
+void ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
+                              struct yetty_ypaint_buffer *buffer) {
+  if (!canvas || !buffer)
+    return;
+
+  const uint8_t *buffer_data = yetty_ypaint_buffer_data(buffer);
+  uint32_t buffer_size = yetty_ypaint_buffer_size(buffer);
+
+  if (!buffer_data || buffer_size == 0)
+    return;
+
+  uint32_t max_row_seen = 0;
+  uint32_t offset = 0;
+
+  // Iterate through primitives in buffer
+  while (offset < buffer_size) {
+    const float *prim_data = (const float *)(buffer_data + offset);
+
+    // Read primitive type from first word to get word count
+    uint32_t prim_type;
+    memcpy(&prim_type, prim_data, sizeof(prim_type));
+
+    // Get word count for this primitive type
+    // Word count includes: type + z_order + fill_color + stroke_color + stroke_width + geometry
+    uint32_t word_count = 0;
+    switch (prim_type) {
+    case 0:  word_count = 8;  break;  // circle: 5 + 3
+    case 1:  word_count = 10; break;  // box: 5 + 5
+    case 2:  word_count = 9;  break;  // segment: 5 + 4
+    case 3:  word_count = 11; break;  // triangle: 5 + 6
+    case 6:  word_count = 9;  break;  // ellipse: 5 + 4
+    case 7:  word_count = 11; break;  // arc: 5 + 6
+    case 8:  word_count = 13; break;  // rounded_box: 5 + 8
+    case 9:  word_count = 9;  break;  // rhombus: 5 + 4
+    case 10: word_count = 8;  break;  // pentagon: 5 + 3
+    case 11: word_count = 8;  break;  // hexagon: 5 + 3
+    case 12: word_count = 10; break;  // star: 5 + 5
+    case 13: word_count = 10; break;  // pie: 5 + 5
+    case 14: word_count = 11; break;  // ring: 5 + 6
+    case 15: word_count = 8;  break;  // heart: 5 + 3
+    case 16: word_count = 10; break;  // cross: 5 + 5
+    case 17: word_count = 9;  break;  // rounded_x: 5 + 4
+    case 18: word_count = 10; break;  // capsule: 5 + 5
+    case 19: word_count = 10; break;  // moon: 5 + 5
+    case 20: word_count = 9;  break;  // egg: 5 + 4
+    case 28: word_count = 8;  break;  // octogon: 5 + 3
+    case 29: word_count = 8;  break;  // hexagram: 5 + 3
+    case 30: word_count = 8;  break;  // pentagram: 5 + 3
+    default:
+      // Unknown primitive type, skip rest of buffer
+      return;
+    }
+
+    uint32_t byte_count = word_count * sizeof(float);
+    if (offset + byte_count > buffer_size)
+      break;  // Incomplete primitive at end
+
+    // Compute AABB for this primitive
+    float aabb_min_x, aabb_min_y, aabb_max_x, aabb_max_y;
+    ypaint_sdf_compute_aabb(prim_data, word_count,
+                            &aabb_min_x, &aabb_min_y,
+                            &aabb_max_x, &aabb_max_y);
+
+    // Add primitive to canvas, get its max_row
+    uint32_t prim_max_row = canvas_add_primitive(canvas, prim_data, word_count,
+                                                  aabb_min_x, aabb_min_y,
+                                                  aabb_max_x, aabb_max_y);
+
+    if (prim_max_row > max_row_seen)
+      max_row_seen = prim_max_row;
+
+    offset += byte_count;
+  }
+
+  // Commit buffer: handle scrolling if needed
+  canvas_commit_buffer(canvas, max_row_seen);
 }
 
 //=============================================================================

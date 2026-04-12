@@ -24,8 +24,8 @@ struct yetty_ypaint_id_result {
 #define YPAINT_ERR_OVERFLOW 2
 #define YPAINT_ERR_ALLOC    3
 
-// Create a new buffer with initial capacity (in bytes)
-struct yetty_ypaint_buffer *yetty_ypaint_buffer_create(uint32_t initial_capacity);
+// Create a new buffer (grows automatically like std::vector)
+struct yetty_ypaint_buffer *yetty_ypaint_buffer_create(void);
 
 // Destroy a buffer
 void yetty_ypaint_buffer_destroy(struct yetty_ypaint_buffer *buf);

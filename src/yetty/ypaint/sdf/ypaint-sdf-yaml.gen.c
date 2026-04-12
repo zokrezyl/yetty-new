@@ -4,15 +4,12 @@
 
 #include <yetty/ypaint/sdf/ypaint-sdf-yaml.gen.h>
 #include <yetty/ypaint/sdf/ypaint-sdf-types.gen.h>
+#include <yetty/ypaint/core/ypaint-buffer.h>
 #include <yetty/ytrace.h>
 #include <yaml.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-
-/* External AABB function */
-extern void ypaint_sdf_compute_aabb(const float *data, uint32_t word_count,
-                                     float *min_x, float *min_y, float *max_x, float *max_y);
 
 /*=============================================================================
  * Helpers
@@ -43,6 +40,7 @@ static uint32_t parse_color(const char *str) {
 
 struct ypaint_yaml_parse_ctx {
     struct ypaint_canvas *canvas;
+    struct yetty_ypaint_buffer *buffer;
     uint32_t z_order;
     /* Current primitive state */
     char prim_type[32];
@@ -173,7 +171,6 @@ static void store_array(struct ypaint_yaml_parse_ctx *yaml_parse_ctx) {
 static void add_prim(struct ypaint_yaml_parse_ctx *yaml_parse_ctx) {
     float data[16];
     uint32_t word_count = 0, tmp;
-    float min_x, min_y, max_x, max_y;
 
     ydebug("add_prim: type='%s' center_x=%f center_y=%f radius=%f fill=0x%08x", yaml_parse_ctx->prim_type, yaml_parse_ctx->center_x, yaml_parse_ctx->center_y, yaml_parse_ctx->radius, yaml_parse_ctx->fill_color);
 
@@ -456,8 +453,8 @@ static void add_prim(struct ypaint_yaml_parse_ctx *yaml_parse_ctx) {
         return;
     }
 
-    ypaint_sdf_compute_aabb(data, word_count, &min_x, &min_y, &max_x, &max_y);
-    ypaint_canvas_add_primitive(yaml_parse_ctx->canvas, data, word_count, min_x, min_y, max_x, max_y);
+    /* Add primitive to buffer */
+    yetty_ypaint_buffer_add_prim(yaml_parse_ctx->buffer, data, word_count);
     yaml_parse_ctx->z_order++;
 }
 
@@ -477,6 +474,10 @@ int ypaint_sdf_yaml_parse(struct ypaint_canvas *canvas, const char *yaml_str, si
     int expect_value = 0;
 
     if (!canvas || !yaml_str) return -1;
+
+    /* Create buffer for primitives */
+    yaml_parse_ctx.buffer = yetty_ypaint_buffer_create();
+    if (!yaml_parse_ctx.buffer) return -1;
     yaml_parse_ctx.canvas = canvas;
 
     if (!yaml_parser_initialize(&parser)) return -1;
@@ -539,6 +540,13 @@ int ypaint_sdf_yaml_parse(struct ypaint_canvas *canvas, const char *yaml_str, si
         yaml_event_delete(&event);
     }
     yaml_parser_delete(&parser);
+
+    /* Add buffer to canvas (handles scrolling) */
+    if (!err && yetty_ypaint_buffer_size(yaml_parse_ctx.buffer) > 0) {
+        ypaint_canvas_add_buffer(yaml_parse_ctx.canvas, yaml_parse_ctx.buffer);
+    }
+
+    yetty_ypaint_buffer_destroy(yaml_parse_ctx.buffer);
     ydebug("ypaint_yaml: parsed %u primitives", yaml_parse_ctx.z_order);
     return err ? -1 : 0;
 }

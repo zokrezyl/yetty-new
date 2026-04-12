@@ -10,7 +10,9 @@ struct yetty_ypaint_buffer {
     uint32_t capacity;   // allocated capacity in bytes
 };
 
-struct yetty_ypaint_buffer *yetty_ypaint_buffer_create(uint32_t initial_capacity)
+#define YPAINT_BUFFER_INITIAL_CAPACITY 1024
+
+struct yetty_ypaint_buffer *yetty_ypaint_buffer_create(void)
 {
     struct yetty_ypaint_buffer *buf;
 
@@ -18,14 +20,14 @@ struct yetty_ypaint_buffer *yetty_ypaint_buffer_create(uint32_t initial_capacity
     if (!buf)
         return NULL;
 
-    buf->data = calloc(1, initial_capacity);
+    buf->data = calloc(1, YPAINT_BUFFER_INITIAL_CAPACITY);
     if (!buf->data) {
         free(buf);
         return NULL;
     }
 
     buf->size = 0;
-    buf->capacity = initial_capacity;
+    buf->capacity = YPAINT_BUFFER_INITIAL_CAPACITY;
     return buf;
 }
 

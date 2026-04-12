@@ -76,22 +76,17 @@ uint16_t ypaint_canvas_cursor_row(struct ypaint_canvas *canvas);
 uint32_t ypaint_canvas_row0_absolute(struct ypaint_canvas *canvas);
 
 //=============================================================================
-// Primitive management
+// Buffer management
 //=============================================================================
 
-// Add a primitive with pre-computed AABB
-// prim_data: raw primitive data WITHOUT grid_offset (type, z_order, style, geometry)
-// In scrolling mode: positioned relative to cursor
-// In non-scrolling mode: positioned at absolute scene coordinates
-void ypaint_canvas_add_primitive(struct ypaint_canvas *canvas,
-				 const float *prim_data, uint32_t word_count,
-				 float aabb_min_x, float aabb_min_y,
-				 float aabb_max_x, float aabb_max_y);
+struct yetty_ypaint_buffer;
 
-// Commit buffer after adding primitives
-// Handles auto-scroll if primitives extend beyond visible area
-// @param max_row The maximum row reached by primitives in this buffer
-void ypaint_canvas_commit_buffer(struct ypaint_canvas *canvas, uint32_t max_row);
+// Add all primitives from a buffer to canvas
+// Computes AABB for each primitive, tracks max_row, handles scrolling
+// In scrolling mode: primitives positioned relative to cursor
+// In non-scrolling mode: primitives positioned at absolute scene coordinates
+void ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
+			      struct yetty_ypaint_buffer *buffer);
 
 //=============================================================================
 // Scrolling
