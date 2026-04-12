@@ -625,18 +625,23 @@ ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
   if (!prims_data || prims_size == 0)
     return YETTY_OK_VOID(); // Empty buffer is OK
 
-  uint32_t max_row_seen = 0;
+  // Save original cursor - primitives coords are relative to THIS position
+  uint16_t original_cursor_row = canvas->cursor_row;
+  uint32_t original_rolling_row_0 = canvas->rolling_row_0;
+
+  ydebug("add_buffer: START cursor_row=%u grid_rows=%u rolling_row_0=%u",
+         canvas->cursor_row, canvas->grid_size.rows, canvas->rolling_row_0);
+
+  // PASS 1: Compute max_row needed WITHOUT adding primitives
+  uint32_t max_row_needed = 0;
   uint32_t byte_offset = 0;
 
-  // Iterate through primitives in buffer
   while (byte_offset < prims_size) {
     const float *prim_data = (const float *)(prims_data + byte_offset);
 
-    // Read primitive type from first word
     uint32_t prim_type;
     memcpy(&prim_type, prim_data, sizeof(prim_type));
 
-    // Get word count from generated function
     uint32_t word_count =
         ypaint_sdf_word_count((enum ypaint_sdf_type)prim_type);
     if (word_count == 0) {
@@ -646,17 +651,95 @@ ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
 
     uint32_t byte_count = word_count * sizeof(float);
     if (byte_offset + byte_count > prims_size)
-      break; // Incomplete primitive at end
+      break;
 
-    // Compute AABB using generated function
+    // Compute AABB to find max row (using ORIGINAL cursor position)
     float aabb_min_x, aabb_min_y, aabb_max_x, aabb_max_y;
     ypaint_sdf_compute_aabb(prim_data, word_count, &aabb_min_x, &aabb_min_y,
                             &aabb_max_x, &aabb_max_y);
 
-    // Add primitive to canvas, get its max_row
+    float cursor_y_offset = original_cursor_row * canvas->cell_size.height;
+    float abs_max_y = aabb_max_y + cursor_y_offset;
+    uint32_t prim_max_row =
+        (canvas->cell_size.height > 0)
+            ? (uint32_t)floorf(abs_max_y / canvas->cell_size.height)
+            : 0;
+
+    if (prim_max_row > max_row_needed)
+      max_row_needed = prim_max_row;
+
+    byte_offset += byte_count;
+  }
+
+  ydebug("add_buffer: PASS1 max_row_needed=%u (cursor-relative to row %u)",
+         max_row_needed, original_cursor_row);
+
+  // SCROLL FIRST if primitives would extend beyond visible area
+  uint16_t lines_scrolled = 0;
+  uint32_t target_cursor_row = max_row_needed + 1;
+  if (target_cursor_row >= canvas->grid_size.rows) {
+    lines_scrolled = (uint16_t)(target_cursor_row - canvas->grid_size.rows + 1);
+
+    ydebug("add_buffer: SCROLL NEEDED target=%u >= grid_rows=%u, scroll %u",
+           target_cursor_row, canvas->grid_size.rows, lines_scrolled);
+
+    // Notify text layer BEFORE scrolling
+    if (!canvas->scroll_callback) {
+      yerror("ypaint_canvas_add_buffer: scroll_callback is NULL");
+      return YETTY_ERR(yetty_core_void, "scroll_callback is NULL");
+    }
+    struct yetty_core_void_result scroll_res = canvas->scroll_callback(
+        canvas->scroll_callback_user_data, lines_scrolled);
+    if (YETTY_IS_ERR(scroll_res)) {
+      yerror("ypaint_canvas_add_buffer: scroll_callback failed");
+      return scroll_res;
+    }
+
+    // Scroll ypaint grid (this updates rolling_row_0 and cursor_row)
+    ypaint_canvas_scroll_lines(canvas, lines_scrolled);
+
+    ydebug("add_buffer: after scroll cursor_row=%u rolling_row_0=%u",
+           canvas->cursor_row, canvas->rolling_row_0);
+  }
+
+  // PASS 2: Add primitives
+  // Use ADJUSTED cursor = original - lines_scrolled (where prims should land)
+  uint16_t adjusted_cursor = (original_cursor_row >= lines_scrolled)
+                                 ? (original_cursor_row - lines_scrolled)
+                                 : 0;
+  canvas->cursor_row = adjusted_cursor;
+
+  ydebug("add_buffer: PASS2 using adjusted cursor_row=%u (original=%u - scrolled=%u)",
+         adjusted_cursor, original_cursor_row, lines_scrolled);
+
+  uint32_t max_row_seen = 0;
+  byte_offset = 0;
+
+  while (byte_offset < prims_size) {
+    const float *prim_data = (const float *)(prims_data + byte_offset);
+
+    uint32_t prim_type;
+    memcpy(&prim_type, prim_data, sizeof(prim_type));
+
+    uint32_t word_count =
+        ypaint_sdf_word_count((enum ypaint_sdf_type)prim_type);
+    if (word_count == 0)
+      break; // Already validated in pass 1
+
+    uint32_t byte_count = word_count * sizeof(float);
+    if (byte_offset + byte_count > prims_size)
+      break;
+
+    float aabb_min_x, aabb_min_y, aabb_max_x, aabb_max_y;
+    ypaint_sdf_compute_aabb(prim_data, word_count, &aabb_min_x, &aabb_min_y,
+                            &aabb_max_x, &aabb_max_y);
+
     uint32_t prim_max_row = ypaint_canvas_add_primitive_internal(
         canvas, prim_data, word_count, aabb_min_x, aabb_min_y, aabb_max_x,
         aabb_max_y);
+
+    ydebug("add_buffer: PASS2 added prim type=%u max_row=%u", prim_type,
+           prim_max_row);
 
     if (prim_max_row > max_row_seen)
       max_row_seen = prim_max_row;
@@ -664,8 +747,25 @@ ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
     byte_offset += byte_count;
   }
 
-  // Commit buffer: handle scrolling if needed
-  return ypaint_canvas_commit_buffer_internal(canvas, max_row_seen);
+  // Set final cursor position = row after max primitive row
+  uint32_t final_cursor = max_row_seen + 1;
+  if (final_cursor >= canvas->grid_size.rows) {
+    // Shouldn't happen since we scrolled, but clamp just in case
+    final_cursor = canvas->grid_size.rows - 1;
+  }
+  canvas->cursor_row = (uint16_t)final_cursor;
+
+  // Notify text layer of final cursor position
+  if (canvas->cursor_set_callback) {
+    canvas->cursor_set_callback(canvas->cursor_set_callback_user_data,
+                                canvas->cursor_row);
+  }
+
+  ydebug("add_buffer: END cursor_row=%u max_row_seen=%u rolling_row_0=%u",
+         canvas->cursor_row, max_row_seen, canvas->rolling_row_0);
+
+  canvas->dirty = true;
+  return YETTY_OK_VOID();
 }
 
 //=============================================================================
