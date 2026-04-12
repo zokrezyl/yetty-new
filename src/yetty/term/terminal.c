@@ -79,23 +79,28 @@ static void terminal_scroll_callback(struct yetty_term_terminal_layer *source, i
 }
 
 /* Cursor callback - propagate cursor position from source layer to all other layers */
-static void terminal_cursor_callback(struct yetty_term_terminal_layer *source, int col, int row, void *userdata)
-{
-    struct yetty_term_terminal *terminal = userdata;
-    ydebug("terminal_cursor_callback ENTER: source=%p col=%d row=%d layer_count=%zu",
-           (void*)source, col, row, terminal->layer_count);
+static void terminal_cursor_callback(struct yetty_term_terminal_layer *source,
+                                     struct grid_cursor_pos cursor_pos,
+                                     void *userdata) {
+  struct yetty_term_terminal *terminal = userdata;
+  ydebug("terminal_cursor_callback ENTER: source=%p col=%u row=%u layer_count=%zu",
+         (void *)source, cursor_pos.cols, cursor_pos.rows, terminal->layer_count);
 
-    for (size_t i = 0; i < terminal->layer_count; i++) {
-        struct yetty_term_terminal_layer *layer = terminal->layers[i];
-        if (layer != source && layer->ops && layer->ops->set_cursor) {
-            ydebug("terminal_cursor_callback: calling layer[%zu]=%p set_cursor(%d,%d)", i, (void*)layer, col, row);
-            layer->ops->set_cursor(layer, col, row);
-        } else {
-            ydebug("terminal_cursor_callback: skipping layer[%zu]=%p (source=%d has_set_cursor=%d)",
-                   i, (void*)layer, layer == source, layer->ops && layer->ops->set_cursor);
-        }
+  for (size_t i = 0; i < terminal->layer_count; i++) {
+    struct yetty_term_terminal_layer *layer = terminal->layers[i];
+    if (layer != source && layer->ops && layer->ops->set_cursor) {
+      ydebug("terminal_cursor_callback: calling layer[%zu]=%p set_cursor(%u,%u)",
+             i, (void *)layer, cursor_pos.cols, cursor_pos.rows);
+      layer->ops->set_cursor(layer, cursor_pos.cols, cursor_pos.rows);
+    } else {
+      ydebug("terminal_cursor_callback: skipping layer[%zu]=%p (source=%d "
+             "has_set_cursor=%d)",
+             i, (void *)layer, layer == source,
+             layer->ops && layer->ops->set_cursor);
     }
-    ydebug("terminal_cursor_callback EXIT: col=%d row=%d", col, row);
+  }
+  ydebug("terminal_cursor_callback EXIT: col=%u row=%u", cursor_pos.cols,
+         cursor_pos.rows);
 }
 
 /* Event handler */
@@ -195,8 +200,8 @@ static int terminal_event_handler(
         /* Calculate grid dimensions from first layer's cell size */
         if (terminal->layer_count > 0) {
             struct yetty_term_terminal_layer *layer = terminal->layers[0];
-            float cell_w = layer->cell_width > 0 ? layer->cell_width : 10.0f;
-            float cell_h = layer->cell_height > 0 ? layer->cell_height : 20.0f;
+            float cell_w = layer->cell_size.width > 0 ? layer->cell_size.width : 10.0f;
+            float cell_h = layer->cell_size.height > 0 ? layer->cell_size.height : 20.0f;
             uint32_t new_cols = (uint32_t)(width / cell_w);
             uint32_t new_rows = (uint32_t)(height / cell_h);
 
@@ -204,7 +209,8 @@ static int terminal_event_handler(
                 (new_cols != terminal->cols || new_rows != terminal->rows)) {
                 ydebug("terminal: resizing grid from %ux%u to %ux%u",
                        terminal->cols, terminal->rows, new_cols, new_rows);
-                yetty_term_terminal_resize(terminal, new_cols, new_rows);
+                yetty_term_terminal_resize_grid(terminal,
+                    (struct grid_size){.cols = new_cols, .rows = new_rows});
 
                 /* Also resize PTY */
                 if (terminal->context.pty && terminal->context.pty->ops &&
@@ -287,22 +293,23 @@ static void terminal_read_pty(struct yetty_term_terminal *terminal)
 
 /* Terminal creation/destruction */
 
-struct yetty_term_terminal_result yetty_term_terminal_create(
-    uint32_t cols, uint32_t rows,
-    const struct yetty_context *yetty_context)
-{
-    struct yetty_term_terminal *terminal;
-    struct yetty_core_void_result res;
+struct yetty_term_terminal_result
+yetty_term_terminal_create(struct grid_size grid_size,
+                           const struct yetty_context *yetty_context) {
+  struct yetty_term_terminal *terminal;
+  struct yetty_core_void_result res;
+  uint32_t cols = grid_size.cols;
+  uint32_t rows = grid_size.rows;
 
-    ydebug("terminal_create: cols=%u rows=%u", cols, rows);
+  ydebug("terminal_create: cols=%u rows=%u", cols, rows);
 
-    terminal = calloc(1, sizeof(struct yetty_term_terminal));
-    if (!terminal)
-        return YETTY_ERR(yetty_term_terminal, "failed to allocate terminal");
+  terminal = calloc(1, sizeof(struct yetty_term_terminal));
+  if (!terminal)
+    return YETTY_ERR(yetty_term_terminal, "failed to allocate terminal");
 
-    terminal->listener.handler = terminal_event_handler;
-    terminal->cols = cols;
-    terminal->rows = rows;
+  terminal->listener.handler = terminal_event_handler;
+  terminal->cols = cols;
+  terminal->rows = rows;
     terminal->layer_count = 0;
     terminal->context.yetty_context = *yetty_context;
 
@@ -434,7 +441,7 @@ struct yetty_term_terminal_result yetty_term_terminal_create(
         struct yetty_term_terminal_layer *text_layer = text_layer_res.value;
         struct yetty_term_terminal_layer_result ypaint_res = yetty_term_ypaint_layer_create(
             cols, rows,
-            text_layer->cell_width, text_layer->cell_height,
+            text_layer->cell_size.width, text_layer->cell_size.height,
             1,  /* scrolling_mode = true */
             terminal_request_render_callback, terminal,
             terminal_scroll_callback, terminal,
@@ -630,22 +637,19 @@ void yetty_term_terminal_write(struct yetty_term_terminal *terminal,
     }
 }
 
-void yetty_term_terminal_resize(struct yetty_term_terminal *terminal,
-                                uint32_t cols, uint32_t rows)
-{
-    size_t i;
+void yetty_term_terminal_resize_grid(struct yetty_term_terminal *terminal,
+                                     struct grid_size grid_size) {
+  if (!terminal)
+    return;
 
-    if (!terminal)
-        return;
+  terminal->cols = grid_size.cols;
+  terminal->rows = grid_size.rows;
 
-    terminal->cols = cols;
-    terminal->rows = rows;
-
-    for (i = 0; i < terminal->layer_count; i++) {
-        struct yetty_term_terminal_layer *layer = terminal->layers[i];
-        if (layer && layer->ops && layer->ops->resize)
-            layer->ops->resize(layer, cols, rows);
-    }
+  for (size_t i = 0; i < terminal->layer_count; i++) {
+    struct yetty_term_terminal_layer *layer = terminal->layers[i];
+    if (layer && layer->ops && layer->ops->resize_grid)
+      layer->ops->resize_grid(layer, grid_size);
+  }
 }
 
 /* Terminal state */

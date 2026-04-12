@@ -3,9 +3,10 @@
 
 #pragma once
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <yetty/core/result.h>
+#include <yetty/core/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,24 +22,21 @@ struct ypaint_canvas;
 struct ypaint_canvas *ypaint_canvas_create(bool scrolling_mode);
 
 // Destroy a canvas
-void ypaint_canvas_destroy(struct ypaint_canvas *canvas);
+struct yetty_core_void_result
+ypaint_canvas_destroy(struct ypaint_canvas *canvas);
 
 //=============================================================================
 // Configuration
 //=============================================================================
 
-// Set scene bounds (world coordinates)
-void ypaint_canvas_set_scene_bounds(struct ypaint_canvas *canvas,
-				    float min_x, float min_y,
-				    float max_x, float max_y);
-
-// Set grid cell size (scene units)
-void ypaint_canvas_set_cell_size(struct ypaint_canvas *canvas,
-				 float size_x, float size_y);
-
-// Set maximum primitives per cell (for GPU culling efficiency)
-void ypaint_canvas_set_max_prims_per_cell(struct ypaint_canvas *canvas,
-					  uint32_t max);
+// Set grid cell size (pixels)
+struct yetty_core_void_result
+ypaint_canvas_set_cell_size(struct ypaint_canvas *canvas,
+                            struct pixel_size pixel_size);
+// Set grid dimensions (cols/rows)
+struct yetty_core_void_result
+ypaint_canvas_set_grid_size(struct ypaint_canvas *canvas,
+                            struct grid_size grid_size);
 
 //=============================================================================
 // Accessors
@@ -46,34 +44,27 @@ void ypaint_canvas_set_max_prims_per_cell(struct ypaint_canvas *canvas,
 
 bool ypaint_canvas_scrolling_mode(struct ypaint_canvas *canvas);
 
-float ypaint_canvas_scene_min_x(struct ypaint_canvas *canvas);
-float ypaint_canvas_scene_min_y(struct ypaint_canvas *canvas);
-float ypaint_canvas_scene_max_x(struct ypaint_canvas *canvas);
-float ypaint_canvas_scene_max_y(struct ypaint_canvas *canvas);
+struct pixel_size
+ypaint_canvas_cell_get_pixel_size(struct ypaint_canvas *canvas);
 
-float ypaint_canvas_cell_size_x(struct ypaint_canvas *canvas);
-float ypaint_canvas_cell_size_y(struct ypaint_canvas *canvas);
-uint32_t ypaint_canvas_grid_width(struct ypaint_canvas *canvas);
-uint32_t ypaint_canvas_grid_height(struct ypaint_canvas *canvas);
-uint32_t ypaint_canvas_max_prims_per_cell(struct ypaint_canvas *canvas);
+struct grid_size ypaint_canvas_get_grid_size(struct ypaint_canvas *canvas);
 
 uint32_t ypaint_canvas_line_count(struct ypaint_canvas *canvas);
-uint32_t ypaint_canvas_height_in_lines(struct ypaint_canvas *canvas);
 
 //=============================================================================
 // Cursor (scrolling mode only)
 //=============================================================================
 
-void ypaint_canvas_set_cursor(struct ypaint_canvas *canvas,
-			      uint16_t col, uint16_t row);
-uint16_t ypaint_canvas_cursor_col(struct ypaint_canvas *canvas);
-uint16_t ypaint_canvas_cursor_row(struct ypaint_canvas *canvas);
+struct yetty_core_void_result
+ypaint_canvas_set_cursor_pos(struct ypaint_canvas *canvas,
+                             struct grid_cursor_pos grid_cursor_pos);
 
 //=============================================================================
 // Rolling offset (for shader uniform)
 //=============================================================================
 
-// Get rolling_row_0: absolute row of visible line 0 (pass to shader as row_origin)
+// Get rolling_row_0: absolute row of visible line 0 (pass to shader as
+// row_origin)
 uint32_t ypaint_canvas_rolling_row_0(struct ypaint_canvas *canvas);
 
 //=============================================================================
@@ -86,8 +77,9 @@ struct yetty_ypaint_buffer;
 // Computes AABB for each primitive, tracks max_row, handles scrolling
 // In scrolling mode: primitives positioned relative to cursor
 // In non-scrolling mode: primitives positioned at absolute scene coordinates
-struct yetty_core_void_result ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
-                                                       struct yetty_ypaint_buffer *buffer);
+struct yetty_core_void_result
+ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
+                         struct yetty_ypaint_buffer *buffer);
 
 //=============================================================================
 // Scrolling
@@ -96,58 +88,66 @@ struct yetty_core_void_result ypaint_canvas_add_buffer(struct ypaint_canvas *can
 // Scroll callback: called when primitive insertion requires scrolling
 // @param user_data User data pointer
 // @param num_lines Number of lines to scroll
-typedef struct yetty_core_void_result (*ypaint_canvas_scroll_callback)(void *user_data, uint16_t num_lines);
+typedef struct yetty_core_void_result (*ypaint_canvas_scroll_callback)(
+    struct yetty_core_void_result *user_data, uint16_t num_lines);
 
 // Cursor set callback: called when cursor moves WITHOUT scrolling
 // @param user_data User data pointer
 // @param new_row New cursor row position
-typedef struct yetty_core_void_result (*ypaint_canvas_cursor_set_callback)(void *user_data, uint16_t new_row);
+typedef struct yetty_core_void_result (*ypaint_canvas_cursor_set_callback)(
+    struct yetty_core_void_result *user_data, uint16_t new_row);
 
 // Set scroll callback (called when add_buffer triggers scroll)
-void ypaint_canvas_set_scroll_callback(struct ypaint_canvas *canvas,
-				       ypaint_canvas_scroll_callback callback,
-				       void *user_data);
+struct yetty_core_void_result
+ypaint_canvas_set_scroll_callback(struct ypaint_canvas *canvas,
+                                  ypaint_canvas_scroll_callback callback,
+                                  struct yetty_core_void_result *user_data);
 
 // Set cursor callback (called when cursor moves without scroll)
-void ypaint_canvas_set_cursor_callback(struct ypaint_canvas *canvas,
-				       ypaint_canvas_cursor_set_callback callback,
-				       void *user_data);
+struct yetty_core_void_result
+ypaint_canvas_set_cursor_callback(struct ypaint_canvas *canvas,
+                                  ypaint_canvas_cursor_set_callback callback,
+                                  struct yetty_core_void_result *user_data);
 
 // Remove N lines from the top - primitives in those lines are deleted
 // Only valid in scrolling mode
 // O(1) for offset update, O(n) only for deleting the actual lines
-void ypaint_canvas_scroll_lines(struct ypaint_canvas *canvas, uint16_t num_lines);
+struct yetty_core_void_result
+ypaint_canvas_scroll_lines(struct ypaint_canvas *canvas, uint16_t num_lines);
 
 //=============================================================================
 // Packed GPU format
 //=============================================================================
 
 // Mark grid as dirty (needs rebuild)
-void ypaint_canvas_mark_dirty(struct ypaint_canvas *canvas);
+struct yetty_core_void_result
+ypaint_canvas_mark_dirty(struct ypaint_canvas *canvas);
 
 // Check if grid needs rebuild
 bool ypaint_canvas_is_dirty(struct ypaint_canvas *canvas);
 
 // Rebuild packed grid format for GPU upload
-void ypaint_canvas_rebuild_grid(struct ypaint_canvas *canvas);
+struct yetty_core_void_result
+ypaint_canvas_rebuild_grid(struct ypaint_canvas *canvas);
 
 // Glyph bounds callback: returns AABB for glyph at index
-typedef void (*ypaint_canvas_glyph_bounds_func)(void *user_data, uint32_t index,
-						float *min_x, float *min_y,
-						float *max_x, float *max_y);
+typedef struct yetty_core_void_result (*ypaint_canvas_glyph_bounds_func)(
+    void *user_data, uint32_t index, float *min_x, float *min_y, float *max_x,
+    float *max_y);
 
 // Rebuild packed grid with glyphs
-void ypaint_canvas_rebuild_grid_with_glyphs(struct ypaint_canvas *canvas,
-					    uint32_t glyph_count,
-					    ypaint_canvas_glyph_bounds_func bounds_func,
-					    void *user_data);
+struct yetty_core_void_result ypaint_canvas_rebuild_grid_with_glyphs(
+    struct ypaint_canvas *canvas, uint32_t glyph_count,
+    ypaint_canvas_glyph_bounds_func bounds_func,
+    struct yetty_core_void_result *user_data);
 
 // Get packed grid data for GPU upload
 const uint32_t *ypaint_canvas_grid_data(struct ypaint_canvas *canvas);
 uint32_t ypaint_canvas_grid_word_count(struct ypaint_canvas *canvas);
 
 // Clear packed grid staging
-void ypaint_canvas_clear_staging(struct ypaint_canvas *canvas);
+struct yetty_core_void_result
+ypaint_canvas_clear_staging(struct ypaint_canvas *canvas);
 
 //=============================================================================
 // Primitive staging for GPU
@@ -156,7 +156,7 @@ void ypaint_canvas_clear_staging(struct ypaint_canvas *canvas);
 // Build primitive staging data for GPU upload
 // Returns pointer to staging buffer, sets word_count
 const uint32_t *ypaint_canvas_build_prim_staging(struct ypaint_canvas *canvas,
-						 uint32_t *word_count);
+                                                 uint32_t *word_count);
 
 // Get total GPU size for primitives (in bytes)
 uint32_t ypaint_canvas_prim_gpu_size(struct ypaint_canvas *canvas);
@@ -166,7 +166,7 @@ uint32_t ypaint_canvas_prim_gpu_size(struct ypaint_canvas *canvas);
 //=============================================================================
 
 // Clear all lines and primitives
-void ypaint_canvas_clear(struct ypaint_canvas *canvas);
+struct yetty_core_void_result ypaint_canvas_clear(struct ypaint_canvas *canvas);
 
 // Check if canvas has any content
 bool ypaint_canvas_empty(struct ypaint_canvas *canvas);

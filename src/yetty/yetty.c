@@ -241,7 +241,7 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
     /* Create terminal */
     ydebug("yetty_create: Creating terminal 80x24...");
     struct yetty_term_terminal_result term_res = yetty_term_terminal_create(
-        80, 24, &yetty->context);
+        (struct grid_size){.cols = 80, .rows = 24}, &yetty->context);
     if (!YETTY_IS_OK(term_res)) {
         yetty_destroy(yetty);
         return YETTY_ERR(yetty_yetty, "Failed to create terminal");

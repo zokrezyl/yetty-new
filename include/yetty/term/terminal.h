@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <yetty/core/result.h>
+#include <yetty/core/types.h>
 #include <yetty/render/gpu-resource-set.h>
 #include <yetty/yetty.h>
 
@@ -20,88 +21,110 @@ struct yetty_platform_pty;
 
 /* Result types */
 YETTY_RESULT_DECLARE(yetty_term_terminal, struct yetty_term_terminal *);
-YETTY_RESULT_DECLARE(yetty_term_terminal_layer, struct yetty_term_terminal_layer *);
+YETTY_RESULT_DECLARE(yetty_term_terminal_layer,
+                     struct yetty_term_terminal_layer *);
 
 /* PTY write callback - called when layer needs to send data to PTY */
-typedef void (*yetty_term_pty_write_fn)(const char *data, size_t len, void *userdata);
+typedef void (*yetty_term_pty_write_fn)(const char *data, size_t len,
+                                        void *userdata);
 
 /* Request render callback - called when layer needs a render frame */
 typedef void (*yetty_term_request_render_fn)(void *userdata);
 
-/* Scroll callback - called when layer scrolls, passes source layer and line count */
-typedef void (*yetty_term_scroll_fn)(struct yetty_term_terminal_layer *source, int lines, void *userdata);
+/* Scroll callback - called when layer scrolls, passes source layer and line
+ * count */
+typedef void (*yetty_term_scroll_fn)(struct yetty_term_terminal_layer *source,
+                                     int lines, void *userdata);
 
-/* Cursor callback - called when layer moves cursor, passes source layer and position */
-typedef void (*yetty_term_cursor_fn)(struct yetty_term_terminal_layer *source, int col, int row, void *userdata);
+/* Cursor callback - called when layer moves cursor, passes source layer and
+ * position */
+typedef void (*yetty_term_cursor_fn)(struct yetty_term_terminal_layer *source,
+                                     struct grid_cursor_pos cursor_pos,
+                                     void *userdata);
 
 /* Layer ops */
 struct yetty_term_terminal_layer_ops {
-    void (*destroy)(struct yetty_term_terminal_layer *self);
-    void (*write)(struct yetty_term_terminal_layer *self, const char *data, size_t len);
-    void (*resize)(struct yetty_term_terminal_layer *self, uint32_t cols, uint32_t rows);
-    struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(const struct yetty_term_terminal_layer *self);
-    /* Returns 1 if layer has no content to render (skip rendering, use transparent texture) */
-    int (*is_empty)(const struct yetty_term_terminal_layer *self);
-    /* Keyboard input - returns 1 if handled */
-    int (*on_key)(struct yetty_term_terminal_layer *self, int key, int mods);
-    int (*on_char)(struct yetty_term_terminal_layer *self, uint32_t codepoint, int mods);
-    /* Scroll - called when another layer scrolls, lines > 0 = scroll down */
-    void (*scroll)(struct yetty_term_terminal_layer *self, int lines);
-    /* Cursor - called when another layer moves cursor */
-    void (*set_cursor)(struct yetty_term_terminal_layer *self, int col, int row);
+  void (*destroy)(struct yetty_term_terminal_layer *self);
+  void (*write)(struct yetty_term_terminal_layer *self, const char *data,
+                size_t len);
+  struct yetty_core_void_result (*resize_grid)(
+      struct yetty_term_terminal_layer *self, struct grid_size grid_size);
+  struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(
+      const struct yetty_term_terminal_layer *self);
+  /* Returns 1 if layer has no content to render (skip rendering, use
+   * transparent texture) */
+  int (*is_empty)(const struct yetty_term_terminal_layer *self);
+  /* Keyboard input - returns 1 if handled */
+  int (*on_key)(struct yetty_term_terminal_layer *self, int key, int mods);
+  int (*on_char)(struct yetty_term_terminal_layer *self, uint32_t codepoint,
+                 int mods);
+  /* Scroll - called when another layer scrolls, lines > 0 = scroll down */
+  void (*scroll)(struct yetty_term_terminal_layer *self, int lines);
+  /* Cursor - called when another layer moves cursor */
+  void (*set_cursor)(struct yetty_term_terminal_layer *self, int col, int row);
 };
 
 /* Layer base - embed as first member in subclasses */
 struct yetty_term_terminal_layer {
-    const struct yetty_term_terminal_layer_ops *ops;
-    uint32_t cols;
-    uint32_t rows;
-    float cell_width;
-    float cell_height;
-    int dirty;
-    /* PTY write callback - set by creator */
-    yetty_term_pty_write_fn pty_write_fn;
-    void *pty_write_userdata;
-    /* Request render callback - set by creator */
-    yetty_term_request_render_fn request_render_fn;
-    void *request_render_userdata;
-    /* Scroll callback - set by creator */
-    yetty_term_scroll_fn scroll_fn;
-    void *scroll_userdata;
-    /* Cursor callback - set by creator */
-    yetty_term_cursor_fn cursor_fn;
-    void *cursor_userdata;
+  const struct yetty_term_terminal_layer_ops *ops;
+  struct grid_size grid_size;
+  struct pixel_size cell_size;
+
+  int dirty;
+  /* PTY write callback - set by creator */
+  yetty_term_pty_write_fn pty_write_fn;
+  void *pty_write_userdata;
+  /* Request render callback - set by creator */
+  yetty_term_request_render_fn request_render_fn;
+  void *request_render_userdata;
+  /* Scroll callback - set by creator */
+  yetty_term_scroll_fn scroll_fn;
+  void *scroll_userdata;
+  /* Cursor callback - set by creator */
+  yetty_term_cursor_fn cursor_fn;
+  void *cursor_userdata;
 };
 
 /* Terminal context - contains yetty context plus terminal-owned objects */
 struct yetty_term_terminal_context {
-    struct yetty_context yetty_context;
-    struct yetty_core_event_loop *event_loop;
-    struct yetty_platform_pty *pty;
+  struct yetty_context yetty_context;
+  struct yetty_core_event_loop *event_loop;
+  struct yetty_platform_pty *pty;
 };
 
 /* Terminal creation/destruction */
-struct yetty_term_terminal_result yetty_term_terminal_create(
-    uint32_t cols, uint32_t rows,
-    const struct yetty_context *yetty_context);
+struct yetty_term_terminal_result
+yetty_term_terminal_create(struct grid_size grid_size,
+                           const struct yetty_context *yetty_context);
 void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal);
 
 /* Terminal run */
-struct yetty_core_void_result yetty_term_terminal_run(struct yetty_term_terminal *terminal);
+struct yetty_core_void_result
+yetty_term_terminal_run(struct yetty_term_terminal *terminal);
 
 /* Terminal input */
-void yetty_term_terminal_write(struct yetty_term_terminal *terminal, const char *data, size_t len);
-void yetty_term_terminal_resize(struct yetty_term_terminal *terminal, uint32_t cols, uint32_t rows);
+void yetty_term_terminal_write(struct yetty_term_terminal *terminal,
+                               const char *data, size_t len);
+
+void yetty_term_terminal_resize_grid(struct yetty_term_terminal *terminal,
+                                     struct grid_size grid_size);
 
 /* Terminal state */
-uint32_t yetty_term_terminal_get_cols(const struct yetty_term_terminal *terminal);
-uint32_t yetty_term_terminal_get_rows(const struct yetty_term_terminal *terminal);
+uint32_t
+yetty_term_terminal_get_cols(const struct yetty_term_terminal *terminal);
+uint32_t
+yetty_term_terminal_get_rows(const struct yetty_term_terminal *terminal);
 
 /* Layer management */
-void yetty_term_terminal_layer_add(struct yetty_term_terminal *terminal, struct yetty_term_terminal_layer *layer);
-void yetty_term_terminal_layer_remove(struct yetty_term_terminal *terminal, struct yetty_term_terminal_layer *layer);
-size_t yetty_term_terminal_layer_count(const struct yetty_term_terminal *terminal);
-struct yetty_term_terminal_layer *yetty_term_terminal_layer_get(const struct yetty_term_terminal *terminal, size_t index);
+void yetty_term_terminal_layer_add(struct yetty_term_terminal *terminal,
+                                   struct yetty_term_terminal_layer *layer);
+void yetty_term_terminal_layer_remove(struct yetty_term_terminal *terminal,
+                                      struct yetty_term_terminal_layer *layer);
+size_t
+yetty_term_terminal_layer_count(const struct yetty_term_terminal *terminal);
+struct yetty_term_terminal_layer *
+yetty_term_terminal_layer_get(const struct yetty_term_terminal *terminal,
+                              size_t index);
 
 #ifdef __cplusplus
 }

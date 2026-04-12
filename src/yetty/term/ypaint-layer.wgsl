@@ -231,9 +231,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let prim_offset = prims_offset + prim_count + data_offset;
 
         // Compute primitive's screen Y offset from its rolling_row
+        // Use signed arithmetic to handle scrolling past the primitive
         let rolling_row = ypaint_read_rolling_row(prim_offset);
         let rolling_row_0 = uniforms.ypaint_scroll_ypaint_rolling_row_0;
-        let y_offset = f32(rolling_row - rolling_row_0) * cell_size.y;
+        let y_offset = f32(i32(rolling_row) - i32(rolling_row_0)) * cell_size.y;
 
         // Adjust scene position - primitive coords are relative to its line
         let prim_scene_pos = vec2<f32>(pixel_pos.x, pixel_pos.y - y_offset);
