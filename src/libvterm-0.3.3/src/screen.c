@@ -1210,3 +1210,45 @@ size_t vterm_screen_get_buffer_size(const VTermScreen *screen)
 {
   return (size_t)screen->rows * (size_t)screen->cols * sizeof(VTermScreenCell);
 }
+
+/* yetty: set cursor position directly and notify via callback */
+void vterm_screen_set_cursorpos(VTermScreen *screen, VTermPos pos)
+{
+  if(!screen || !screen->state)
+    return;
+
+  VTermPos oldpos;
+  vterm_state_get_cursorpos(screen->state, &oldpos);
+
+  /* Clamp to screen bounds */
+  if(pos.row < 0) pos.row = 0;
+  if(pos.row >= screen->rows) pos.row = screen->rows - 1;
+  if(pos.col < 0) pos.col = 0;
+  if(pos.col >= screen->cols) pos.col = screen->cols - 1;
+
+  /* Set position in state */
+  screen->state->pos = pos;
+
+  /* Notify via callback if position changed */
+  if(pos.row != oldpos.row || pos.col != oldpos.col) {
+    if(screen->callbacks && screen->callbacks->movecursor)
+      (*screen->callbacks->movecursor)(pos, oldpos, 1, screen->cbdata);
+  }
+}
+
+/* yetty: scroll screen content by N lines (positive = scroll up/content moves up) */
+void vterm_screen_scroll_lines(VTermScreen *screen, int lines)
+{
+  if(!screen || lines == 0)
+    return;
+
+  VTermRect rect = {
+    .start_row = 0,
+    .end_row = screen->rows,
+    .start_col = 0,
+    .end_col = screen->cols,
+  };
+
+  scrollrect(rect, lines, 0, screen);
+  vterm_screen_flush_damage(screen);
+}

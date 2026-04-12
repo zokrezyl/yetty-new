@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <yetty/core/result.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/ypaint/core/ypaint-buffer.h>
 #include <yetty/ypaint/sdf/ypaint-sdf-types.gen.h>
@@ -560,18 +561,21 @@ uint32_t ypaint_canvas_add_primitive_internal(struct ypaint_canvas *canvas,
   return prim_max_row;
 }
 
-// Commit buffer after adding all primitives (internal, used by ypaint-canvas-buffer.c)
+// Commit buffer after adding all primitives (internal)
 // Handles auto-scroll if primitives extend beyond visible area
-void ypaint_canvas_commit_buffer_internal(struct ypaint_canvas *canvas,
-                                 uint32_t max_row) {
+struct yetty_core_void_result ypaint_canvas_commit_buffer_internal(
+    struct ypaint_canvas *canvas, uint32_t max_row) {
   if (!canvas) {
     yerror("ypaint_canvas_commit_buffer_internal: canvas is NULL");
-    return;
+    return YETTY_ERR(yetty_core_void, "canvas is NULL");
   }
   if (canvas->grid_height == 0) {
     yerror("ypaint_canvas_commit_buffer_internal: grid_height is 0, scene bounds not set?");
-    return;
+    return YETTY_ERR(yetty_core_void, "grid_height is 0");
   }
+
+  ydebug("ypaint_canvas_commit_buffer_internal: max_row=%u cursor_row=%u grid_height=%u",
+         max_row, canvas->cursor_row, canvas->grid_height);
 
   // Target cursor = row after the buffer's max row
   uint32_t target_cursor_row = max_row + 1;
@@ -580,12 +584,19 @@ void ypaint_canvas_commit_buffer_internal(struct ypaint_canvas *canvas,
     uint16_t lines_to_scroll =
         (uint16_t)(target_cursor_row - canvas->grid_height + 1);
 
+    ydebug("ypaint_canvas_commit_buffer_internal: SCROLL target=%u >= grid_height=%u, scroll %u lines",
+           target_cursor_row, canvas->grid_height, lines_to_scroll);
+
     // Notify other layers via callback BEFORE scrolling
     if (!canvas->scroll_callback) {
-      yerror("ypaint_canvas_commit_buffer_internal: scroll_callback is NULL, cannot notify other layers");
-    } else {
-      canvas->scroll_callback(canvas->scroll_callback_user_data,
-                              lines_to_scroll);
+      yerror("ypaint_canvas_commit_buffer_internal: scroll_callback is NULL");
+      return YETTY_ERR(yetty_core_void, "scroll_callback is NULL");
+    }
+    struct yetty_core_void_result scroll_res =
+        canvas->scroll_callback(canvas->scroll_callback_user_data, lines_to_scroll);
+    if (YETTY_IS_ERR(scroll_res)) {
+      yerror("ypaint_canvas_commit_buffer_internal: scroll_callback failed");
+      return scroll_res;
     }
 
     // Scroll ypaint grid
@@ -593,34 +604,53 @@ void ypaint_canvas_commit_buffer_internal(struct ypaint_canvas *canvas,
 
     // Cursor at last visible row
     canvas->cursor_row = (uint16_t)(canvas->grid_height - 1);
+    ydebug("ypaint_canvas_commit_buffer_internal: cursor_row set to %u (last visible)", canvas->cursor_row);
   } else {
     // No scroll needed, just move cursor
     uint16_t new_row = (uint16_t)target_cursor_row;
+
+    ydebug("ypaint_canvas_commit_buffer_internal: CURSOR MOVE target=%u < grid_height=%u, new_row=%u",
+           target_cursor_row, canvas->grid_height, new_row);
+
     canvas->cursor_row = new_row;
 
     // Notify other layers of cursor position change
     if (!canvas->cursor_set_callback) {
-      yerror("ypaint_canvas_commit_buffer_internal: cursor_set_callback is NULL, cannot notify other layers");
-    } else {
-      canvas->cursor_set_callback(canvas->cursor_set_callback_user_data, new_row);
+      yerror("ypaint_canvas_commit_buffer_internal: cursor_set_callback is NULL");
+      return YETTY_ERR(yetty_core_void, "cursor_set_callback is NULL");
     }
+    struct yetty_core_void_result cursor_res =
+        canvas->cursor_set_callback(canvas->cursor_set_callback_user_data, new_row);
+    if (YETTY_IS_ERR(cursor_res)) {
+      yerror("ypaint_canvas_commit_buffer_internal: cursor_set_callback failed");
+      return cursor_res;
+    }
+    ydebug("ypaint_canvas_commit_buffer_internal: cursor_set_callback succeeded");
   }
+
+  return YETTY_OK_VOID();
 }
 
 //=============================================================================
 // Buffer management (public API)
 //=============================================================================
 
-void ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
-                              struct yetty_ypaint_buffer *buffer) {
-  if (!canvas || !buffer)
-    return;
+struct yetty_core_void_result ypaint_canvas_add_buffer(
+    struct ypaint_canvas *canvas, struct yetty_ypaint_buffer *buffer) {
+  if (!canvas) {
+    yerror("ypaint_canvas_add_buffer: canvas is NULL");
+    return YETTY_ERR(yetty_core_void, "canvas is NULL");
+  }
+  if (!buffer) {
+    yerror("ypaint_canvas_add_buffer: buffer is NULL");
+    return YETTY_ERR(yetty_core_void, "buffer is NULL");
+  }
 
   const uint8_t *prims_data = buffer->prims.buf.data;
   size_t prims_size = buffer->prims.buf.size;
 
   if (!prims_data || prims_size == 0)
-    return;
+    return YETTY_OK_VOID();  // Empty buffer is OK
 
   uint32_t max_row_seen = 0;
   uint32_t byte_offset = 0;
@@ -635,8 +665,10 @@ void ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
 
     // Get word count from generated function
     uint32_t word_count = ypaint_sdf_word_count((enum ypaint_sdf_type)prim_type);
-    if (word_count == 0)
-      return;  // Unknown primitive type
+    if (word_count == 0) {
+      yerror("ypaint_canvas_add_buffer: unknown primitive type %u", prim_type);
+      return YETTY_ERR(yetty_core_void, "unknown primitive type");
+    }
 
     uint32_t byte_count = word_count * sizeof(float);
     if (byte_offset + byte_count > prims_size)
@@ -660,7 +692,7 @@ void ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
   }
 
   // Commit buffer: handle scrolling if needed
-  ypaint_canvas_commit_buffer_internal(canvas, max_row_seen);
+  return ypaint_canvas_commit_buffer_internal(canvas, max_row_seen);
 }
 
 //=============================================================================

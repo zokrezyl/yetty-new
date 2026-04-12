@@ -5,6 +5,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <yetty/core/result.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -85,8 +86,8 @@ struct yetty_ypaint_buffer;
 // Computes AABB for each primitive, tracks max_row, handles scrolling
 // In scrolling mode: primitives positioned relative to cursor
 // In non-scrolling mode: primitives positioned at absolute scene coordinates
-void ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
-			      struct yetty_ypaint_buffer *buffer);
+struct yetty_core_void_result ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
+                                                       struct yetty_ypaint_buffer *buffer);
 
 //=============================================================================
 // Scrolling
@@ -95,12 +96,12 @@ void ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
 // Scroll callback: called when primitive insertion requires scrolling
 // @param user_data User data pointer
 // @param num_lines Number of lines to scroll
-typedef void (*ypaint_canvas_scroll_callback)(void *user_data, uint16_t num_lines);
+typedef struct yetty_core_void_result (*ypaint_canvas_scroll_callback)(void *user_data, uint16_t num_lines);
 
 // Cursor set callback: called when cursor moves WITHOUT scrolling
 // @param user_data User data pointer
 // @param new_row New cursor row position
-typedef void (*ypaint_canvas_cursor_set_callback)(void *user_data, uint16_t new_row);
+typedef struct yetty_core_void_result (*ypaint_canvas_cursor_set_callback)(void *user_data, uint16_t new_row);
 
 // Set scroll callback (called when add_buffer triggers scroll)
 void ypaint_canvas_set_scroll_callback(struct ypaint_canvas *canvas,

@@ -129,6 +129,37 @@ static int text_layer_is_empty(const struct yetty_term_terminal_layer *self)
     return 0;
 }
 
+/* Receive scroll from other layers (e.g., ypaint) */
+static void text_layer_scroll(struct yetty_term_terminal_layer *self, int lines)
+{
+    struct yetty_term_terminal_text_layer *text_layer =
+        container_of(self, struct yetty_term_terminal_text_layer, base);
+
+    ydebug("text_layer_scroll: lines=%d", lines);
+
+    if (!text_layer->screen || lines <= 0)
+        return;
+
+    vterm_screen_scroll_lines(text_layer->screen, lines);
+    text_layer->base.dirty = 1;
+}
+
+/* Receive cursor position from other layers (e.g., ypaint) */
+static void text_layer_set_cursor(struct yetty_term_terminal_layer *self, int col, int row)
+{
+    struct yetty_term_terminal_text_layer *text_layer =
+        container_of(self, struct yetty_term_terminal_text_layer, base);
+
+    ydebug("text_layer_set_cursor: col=%d row=%d", col, row);
+
+    if (!text_layer->screen)
+        return;
+
+    VTermPos pos = { .row = row, .col = col };
+    vterm_screen_set_cursorpos(text_layer->screen, pos);
+    text_layer->base.dirty = 1;
+}
+
 /* Ops */
 static const struct yetty_term_terminal_layer_ops text_layer_ops = {
     .destroy = text_layer_destroy,
@@ -138,7 +169,8 @@ static const struct yetty_term_terminal_layer_ops text_layer_ops = {
     .is_empty = text_layer_is_empty,
     .on_key = text_layer_on_key,
     .on_char = text_layer_on_char,
-    .scroll = NULL,  /* text layer is scroll source, doesn't receive scroll */
+    .scroll = text_layer_scroll,
+    .set_cursor = text_layer_set_cursor,
 };
 
 /* VTerm screen callbacks */

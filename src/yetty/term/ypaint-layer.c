@@ -1,5 +1,6 @@
 #include <yetty/term/ypaint-layer.h>
 #include <yetty/term/osc-args.h>
+#include <yetty/core/result.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/ypaint/sdf/ypaint-sdf-yaml.gen.h>
 #include <yetty/render/gpu-resource-set.h>
@@ -79,6 +80,28 @@ static int ypaint_layer_is_empty(const struct yetty_term_terminal_layer *self);
 static void ypaint_layer_scroll(struct yetty_term_terminal_layer *self, int lines);
 static void ypaint_layer_set_cursor(struct yetty_term_terminal_layer *self, int col, int row);
 
+/* Canvas scroll callback - propagate to other layers */
+static struct yetty_core_void_result on_canvas_scroll(void *user_data, uint16_t num_lines) {
+    struct yetty_term_ypaint_layer *layer = user_data;
+    if (!layer->base.scroll_fn) {
+        yerror("on_canvas_scroll: scroll_fn is NULL");
+        return YETTY_ERR(yetty_core_void, "scroll_fn is NULL");
+    }
+    layer->base.scroll_fn(&layer->base, (int)num_lines, layer->base.scroll_userdata);
+    return YETTY_OK_VOID();
+}
+
+/* Canvas cursor callback - propagate to other layers */
+static struct yetty_core_void_result on_canvas_cursor_set(void *user_data, uint16_t new_row) {
+    struct yetty_term_ypaint_layer *layer = user_data;
+    if (!layer->base.cursor_fn) {
+        yerror("on_canvas_cursor_set: cursor_fn is NULL");
+        return YETTY_ERR(yetty_core_void, "cursor_fn is NULL");
+    }
+    layer->base.cursor_fn(&layer->base, 0, (int)new_row, layer->base.cursor_userdata);
+    return YETTY_OK_VOID();
+}
+
 /* Ops */
 static const struct yetty_term_terminal_layer_ops ypaint_layer_ops = {
     .destroy = ypaint_layer_destroy,
@@ -139,6 +162,10 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
     float scene_height = (float)rows * cell_height;
     ypaint_canvas_set_scene_bounds(layer->canvas, 0.0f, 0.0f, scene_width, scene_height);
     ypaint_canvas_set_cell_size(layer->canvas, cell_width, cell_height);
+
+    /* Register scroll/cursor callbacks for propagation to other layers */
+    ypaint_canvas_set_scroll_callback(layer->canvas, on_canvas_scroll, layer);
+    ypaint_canvas_set_cursor_callback(layer->canvas, on_canvas_cursor_set, layer);
 
     /* Resource set */
     strncpy(layer->rs.namespace, scrolling_mode ? "ypaint_scroll" : "ypaint_overlay",
