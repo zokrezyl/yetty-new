@@ -97,9 +97,19 @@ void ypaint_canvas_add_buffer(struct ypaint_canvas *canvas,
 // @param num_lines Number of lines to scroll
 typedef void (*ypaint_canvas_scroll_callback)(void *user_data, uint16_t num_lines);
 
-// Set scroll callback (called when add_primitive triggers scroll)
+// Cursor set callback: called when cursor moves WITHOUT scrolling
+// @param user_data User data pointer
+// @param new_row New cursor row position
+typedef void (*ypaint_canvas_cursor_set_callback)(void *user_data, uint16_t new_row);
+
+// Set scroll callback (called when add_buffer triggers scroll)
 void ypaint_canvas_set_scroll_callback(struct ypaint_canvas *canvas,
 				       ypaint_canvas_scroll_callback callback,
+				       void *user_data);
+
+// Set cursor callback (called when cursor moves without scroll)
+void ypaint_canvas_set_cursor_callback(struct ypaint_canvas *canvas,
+				       ypaint_canvas_cursor_set_callback callback,
 				       void *user_data);
 
 // Remove N lines from the top - primitives in those lines are deleted

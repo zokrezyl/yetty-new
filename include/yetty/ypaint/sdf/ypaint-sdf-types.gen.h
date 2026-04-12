@@ -266,6 +266,13 @@ static inline uint32_t ypaint_sdf_word_count(enum ypaint_sdf_type type) {
     }
 }
 
+// Compute AABB for an SDF primitive
+// data: full primitive data (type + z_order + style + geometry)
+// word_count: number of 32-bit words in data
+void ypaint_sdf_compute_aabb(const float *data, uint32_t word_count,
+                              float *min_x, float *min_y,
+                              float *max_x, float *max_y);
+
 #ifdef __cplusplus
 }
 #endif
