@@ -86,8 +86,9 @@ struct yetty_term_terminal_text_layer {
 
 /* Forward declarations */
 static void text_layer_destroy(struct yetty_term_terminal_layer *self);
-static void text_layer_write(struct yetty_term_terminal_layer *self,
-                             const char *data, size_t len);
+static struct yetty_core_void_result
+text_layer_write(struct yetty_term_terminal_layer *self,
+                 const char *data, size_t len);
 static struct yetty_core_void_result
 text_layer_resize_grid(struct yetty_term_terminal_layer *self,
                        struct grid_size grid_size);
@@ -305,14 +306,20 @@ static void text_layer_destroy(struct yetty_term_terminal_layer *self)
     free(text_layer);
 }
 
-static void text_layer_write(struct yetty_term_terminal_layer *self,
-                             const char *data, size_t len)
+static struct yetty_core_void_result
+text_layer_write(struct yetty_term_terminal_layer *self,
+                 const char *data, size_t len)
 {
     struct yetty_term_terminal_text_layer *text_layer =
         container_of(self, struct yetty_term_terminal_text_layer, base);
 
-    if (text_layer->vterm && len > 0)
+    if (!text_layer->vterm)
+        return YETTY_ERR(yetty_core_void, "vterm is NULL");
+
+    if (len > 0)
         vterm_input_write(text_layer->vterm, data, len);
+
+    return YETTY_OK_VOID();
 }
 
 static struct yetty_core_void_result

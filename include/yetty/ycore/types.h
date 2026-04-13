@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <yetty/ycore/result.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,14 +31,16 @@ struct yetty_color_rgba {
 
 #define YETTY_CORE_NAMED_BUFFER_MAX_NAME_LENGTH 32
 
-struct yetty_buffer {
+struct yetty_core_buffer {
   uint8_t *data;
   size_t capacity;
   size_t size;
 };
 
-struct yetty_named_buffer {
-  struct yetty_buffer buf;
+YETTY_RESULT_DECLARE(yetty_core_buffer, struct yetty_core_buffer);
+
+struct yetty_core_named_buffer {
+  struct yetty_core_buffer buf;
   char name[YETTY_CORE_NAMED_BUFFER_MAX_NAME_LENGTH];
 };
 
@@ -46,7 +49,7 @@ struct yetty_named_buffer {
  *===========================================================================*/
 
 struct yetty_font_blob {
-  struct yetty_named_buffer named_buf;
+  struct yetty_core_named_buffer named_buf;
   int32_t font_id;
 };
 
@@ -55,7 +58,7 @@ struct yetty_font_blob {
  *===========================================================================*/
 
 struct yetty_image_data {
-  struct yetty_named_buffer named_buf;
+  struct yetty_core_named_buffer named_buf;
   float x, y, w, h;
   uint32_t pixel_width;
   uint32_t pixel_height;
@@ -68,7 +71,7 @@ struct yetty_image_data {
  *===========================================================================*/
 
 struct yetty_text_span {
-  struct yetty_named_buffer named_buf;
+  struct yetty_core_named_buffer named_buf;
   float x, y;
   float font_size;
   float rotation;

@@ -2,6 +2,8 @@
 #define YETTY_TERM_OSC_ARGS_H
 
 #include <stddef.h>
+#include <yetty/ycore/result.h>
+#include <yetty/ycore/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,6 +67,12 @@ int yetty_term_osc_args_get_int(
     const struct yetty_term_osc_args *args,
     const char *key,
     int default_val);
+
+/**
+ * Get payload as a yetty_core_buffer_result.
+ */
+struct yetty_core_buffer_result yetty_term_osc_args_get_payload_buffer(
+    const struct yetty_term_osc_args *args);
 
 #ifdef __cplusplus
 }

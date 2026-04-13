@@ -100,6 +100,7 @@ if(YETTY_ENABLE_FEATURE_YRICH)
 endif()
 
 if(YETTY_ENABLE_FEATURE_YPAINT)
+    add_subdirectory(ypaint-core)
     add_subdirectory(ysdf)
     add_subdirectory(ypaint)
 endif()

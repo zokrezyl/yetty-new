@@ -45,8 +45,8 @@ typedef void (*yetty_term_cursor_fn)(struct yetty_term_terminal_layer *source,
 /* Layer ops */
 struct yetty_term_terminal_layer_ops {
   void (*destroy)(struct yetty_term_terminal_layer *self);
-  void (*write)(struct yetty_term_terminal_layer *self, const char *data,
-                size_t len);
+  struct yetty_core_void_result (*write)(struct yetty_term_terminal_layer *self,
+                                         const char *data, size_t len);
   struct yetty_core_void_result (*resize_grid)(
       struct yetty_term_terminal_layer *self, struct grid_size grid_size);
   struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(

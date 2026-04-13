@@ -5,7 +5,7 @@
 
 #include <stddef.h>
 #include <yetty/ypaint-core/buffer.h>
-#include <yetty/ysdf/ypaint-sdf-types.gen.h>
+#include <yetty/ysdf/types.gen.h>
 
 #ifdef __cplusplus
 extern "C" {
