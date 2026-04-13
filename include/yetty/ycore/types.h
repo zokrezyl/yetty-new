@@ -105,6 +105,7 @@ struct rectangle {
   struct pixel_coord max;
 };
 
+YETTY_RESULT_DECLARE(uint32, uint32_t);
 YETTY_RESULT_DECLARE(rectangle, struct rectangle);
 
 #ifdef __cplusplus
