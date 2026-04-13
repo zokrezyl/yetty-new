@@ -183,7 +183,7 @@ def generate_sdf_prim_impl(prims: list[dict], out: Path) -> None:
                 lines.append(f"    tmp = geom->{arg['name']};")
                 lines.append(f"    memcpy(&data[{offset}], &tmp, sizeof(tmp));")
         lines.append("")
-        lines.append(f"    return yetty_ypaint_buffer_add_prim(buf, data, {word_count});")
+        lines.append(f"    return yetty_ypaint_core_buffer_add_prim(buf, data, {word_count} * sizeof(float));")
         lines.append("}")
         lines.append("")
 
@@ -545,7 +545,7 @@ def generate_sdf_yaml_impl(prims: list[dict], out: Path) -> None:
     lines.append("    }")
     lines.append("")
     lines.append("    /* Add primitive to buffer */")
-    lines.append("    yetty_ypaint_buffer_add_prim(yaml_parse_ctx->buffer, data, word_count);")
+    lines.append("    yetty_ypaint_core_buffer_add_prim(yaml_parse_ctx->buffer, data, word_count * sizeof(float));")
     lines.append("    yaml_parse_ctx->z_order++;")
     lines.append("}")
     lines.append("")

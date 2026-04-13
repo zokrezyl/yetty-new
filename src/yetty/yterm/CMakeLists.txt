@@ -27,5 +27,6 @@ target_compile_definitions(yetty_term PRIVATE
 target_link_libraries(yetty_term
     vterm
     webgpu
-    ypaint_core
+    yetty_ypaint_core
+    yetty_yfont
 )

@@ -437,12 +437,12 @@ uint32_t yetty_yetty_ypaint_canvas_rolling_row_0(
 // Primitive management
 //=============================================================================
 
-// Add a single primitive with pre-computed AABB (internal, used by
-// ypaint-canvas-buffer.c) Returns the max_row (bottom row of AABB) for this
-// primitive
-uint32_t yetty_ypaint_canvas_add_primitive_internal(
-    struct yetty_yetty_ypaint_canvas *canvas, const float *prim_data) {
-  if (!canvas || !prim_data || word_count == 0 || word_count > 32)
+// Add a single primitive (internal)
+// Returns the max_row (bottom row of AABB) for this primitive
+static uint32_t add_primitive_internal(
+    struct yetty_yetty_ypaint_canvas *canvas,
+    const struct yetty_ypaint_core_primitive_iter *iter) {
+  if (!canvas || !iter || !iter->data || iter->size == 0)
     return 0;
 
   // Validate cell_height to avoid division issues
@@ -452,8 +452,9 @@ uint32_t yetty_ypaint_canvas_add_primitive_internal(
     return 0;
   }
 
+  uint32_t word_count = iter->size / sizeof(float);
   float aabb_min_x, aabb_min_y, aabb_max_x, aabb_max_y;
-  yetty_ysdf_compute_aabb(prim_data, word_count, &aabb_min_x, &aabb_min_y,
+  yetty_ysdf_compute_aabb(iter->data, word_count, &aabb_min_x, &aabb_min_y,
                           &aabb_max_x, &aabb_max_y);
 
   // Check for inverted AABB (bug in compute_aabb)
@@ -511,7 +512,7 @@ uint32_t yetty_ypaint_canvas_add_primitive_internal(
       line_buffer_get(&canvas->lines, rolling_row);
 
   uint32_t prim_index = prim_data_array_push(&base_line->prims, rolling_row,
-                                             prim_data, word_count);
+                                             iter->data, word_count);
 
   // Add grid cell references (convert pixel x to column)
   uint32_t col_min = (canvas->cell_size.width > 0)
@@ -654,44 +655,30 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
     return YETTY_ERR(yetty_core_void, "buffer is NULL");
   }
 
-  const uint8_t *prims_data = buffer->prims.buf.data;
-  size_t prims_size = buffer->prims.buf.size;
-
-  if (!prims_data || prims_size == 0)
+  // Check if buffer is empty
+  struct yetty_ypaint_core_primitive_iter_result iter_res =
+      yetty_ypaint_core_buffer_prim_first(buffer);
+  if (YETTY_IS_ERR(iter_res))
     return YETTY_OK_VOID(); // Empty buffer is OK
 
   // Save original cursor - primitives coords are relative to THIS position
   uint16_t original_cursor_row = canvas->cursor_row;
   uint32_t original_rolling_row_0 = canvas->rolling_row_0;
+  (void)original_rolling_row_0;
 
   ydebug("add_buffer: START cursor_row=%u grid_rows=%u rolling_row_0=%u",
          canvas->cursor_row, canvas->grid_size.rows, canvas->rolling_row_0);
 
   // PASS 1: Compute max_row needed WITHOUT adding primitives
   uint32_t max_row_needed = 0;
-  uint32_t byte_offset = 0;
+  struct yetty_ypaint_core_primitive_iter iter = iter_res.value;
 
-  while (byte_offset < prims_size) {
-    const float *prim_data = (const float *)(prims_data + byte_offset);
-
-    uint32_t prim_type;
-    memcpy(&prim_type, prim_data, sizeof(prim_type));
-
-    uint32_t word_count =
-        yetty_ysdf_word_count((enum ypaint_sdf_type)prim_type);
-    if (word_count == 0) {
-      yerror("yetty_ypaint_canvas_add_buffer: unknown primitive type %u",
-             prim_type);
-      return YETTY_ERR(yetty_core_void, "unknown primitive type");
-    }
-
-    uint32_t byte_count = word_count * sizeof(float);
-    if (byte_offset + byte_count > prims_size)
-      break;
+  while (1) {
+    uint32_t word_count = iter.size / sizeof(float);
 
     // Compute AABB to find max row (using ORIGINAL cursor position)
     float aabb_min_x, aabb_min_y, aabb_max_x, aabb_max_y;
-    yetty_ysdf_compute_aabb(prim_data, word_count, &aabb_min_x, &aabb_min_y,
+    yetty_ysdf_compute_aabb(iter.data, word_count, &aabb_min_x, &aabb_min_y,
                             &aabb_max_x, &aabb_max_y);
 
     float cursor_y_offset = original_cursor_row * canvas->cell_size.height;
@@ -704,7 +691,10 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
     if (prim_max_row > max_row_needed)
       max_row_needed = prim_max_row;
 
-    byte_offset += byte_count;
+    iter_res = yetty_ypaint_core_buffer_prim_next(buffer, &iter);
+    if (YETTY_IS_ERR(iter_res))
+      break;
+    iter = iter_res.value;
   }
 
   ydebug("add_buffer: PASS1 max_row_needed=%u (cursor-relative to row %u)",
@@ -750,33 +740,26 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
          adjusted_cursor, original_cursor_row, lines_scrolled);
 
   uint32_t max_row_seen = 0;
-  byte_offset = 0;
 
-  while (byte_offset < prims_size) {
-    const float *prim_data = (const float *)(prims_data + byte_offset);
+  // Restart iteration for pass 2
+  iter_res = yetty_ypaint_core_buffer_prim_first(buffer);
+  if (YETTY_IS_ERR(iter_res))
+    return YETTY_OK_VOID();
+  iter = iter_res.value;
 
-    uint32_t prim_type;
-    memcpy(&prim_type, prim_data, sizeof(prim_type));
+  while (1) {
+    uint32_t prim_max_row = add_primitive_internal(canvas, &iter);
 
-    uint32_t word_count =
-        yetty_ysdf_word_count((enum ypaint_sdf_type)prim_type);
-    if (word_count == 0)
-      break; // Already validated in pass 1
-
-    uint32_t byte_count = word_count * sizeof(float);
-    if (byte_offset + byte_count > prims_size)
-      break;
-
-    uint32_t prim_max_row = yetty_ypaint_canvas_add_primitive_internal(
-        canvas, prim_data, word_count);
-
-    ydebug("add_buffer: PASS2 added prim type=%u max_row=%u", prim_type,
+    ydebug("add_buffer: PASS2 added prim type=%u max_row=%u", iter.type,
            prim_max_row);
 
     if (prim_max_row > max_row_seen)
       max_row_seen = prim_max_row;
 
-    byte_offset += byte_count;
+    iter_res = yetty_ypaint_core_buffer_prim_next(buffer, &iter);
+    if (YETTY_IS_ERR(iter_res))
+      break;
+    iter = iter_res.value;
   }
 
   // Set final cursor position = row after max primitive row

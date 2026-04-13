@@ -1,7 +1,6 @@
 # yetty core (C)
 add_library(yetty_core STATIC
-    config.c
-    yetty.c
+    util.c
 )
 
 target_include_directories(yetty_core PUBLIC
@@ -11,7 +10,5 @@ target_include_directories(yetty_core PUBLIC
 )
 
 target_link_libraries(yetty_core PUBLIC
-    ytrace::ytrace
     webgpu
-    yetty_term
 )

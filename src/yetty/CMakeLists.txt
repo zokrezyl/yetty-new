@@ -73,7 +73,7 @@ set(YETTY_RENDERER_INCLUDES "" PARENT_SCOPE)
 # Library subdirectories — guarded by YETTY_ENABLE_FEATURE_*
 #-----------------------------------------------------------------------------
 
-if(YETTY_ENABLE_FEATURE_CORE)
+if(YETTY_ENABLE_FEATURE_YCORE)
     add_subdirectory(ycore)
 endif()
 
