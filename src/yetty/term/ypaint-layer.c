@@ -1,6 +1,7 @@
 #include <yetty/term/ypaint-layer.h>
 #include <yetty/term/osc-args.h>
 #include <yetty/core/result.h>
+#include <yetty/ypaint/core/ypaint-buffer.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/ypaint/sdf/ypaint-sdf-yaml.gen.h>
 #include <yetty/render/gpu-resource-set.h>
@@ -271,12 +272,34 @@ static void ypaint_layer_write(struct yetty_term_terminal_layer *self,
     ydebug("ypaint_layer_write: yaml=%d payload_len=%zu decoded_len=%zu",
            yetty_term_osc_args_has(&args, "yaml"), args.payload_len, decoded_len);
 
-    /* Handle --yaml format */
+    /* Handle format */
     if (yetty_term_osc_args_has(&args, "yaml")) {
         if (ypaint_sdf_yaml_parse(layer->canvas, decoded, decoded_len) < 0)
             yerror("ypaint_layer_write: yaml parse failed");
+    } else if (yetty_term_osc_args_has(&args, "bin")) {
+        /* Binary format: raw float primitives */
+        struct yetty_ypaint_buffer *buf = yetty_ypaint_buffer_create();
+        if (buf) {
+            size_t prim_bytes = decoded_len;
+            if (prim_bytes > 0 && (prim_bytes % sizeof(float)) == 0) {
+                if (buf->prims.buf.capacity < prim_bytes) {
+                    uint8_t *new_data = realloc(buf->prims.buf.data, prim_bytes);
+                    if (new_data) {
+                        buf->prims.buf.data = new_data;
+                        buf->prims.buf.capacity = prim_bytes;
+                    }
+                }
+                if (buf->prims.buf.capacity >= prim_bytes) {
+                    memcpy(buf->prims.buf.data, decoded, prim_bytes);
+                    buf->prims.buf.size = prim_bytes;
+                    ypaint_canvas_add_buffer(layer->canvas, buf);
+                    ydebug("ypaint_layer_write: bin %zu bytes", prim_bytes);
+                }
+            }
+            yetty_ypaint_buffer_destroy(buf);
+        }
     } else {
-        ydebug("ypaint_layer_write: binary format (not implemented)");
+        ydebug("ypaint_layer_write: unknown format (use --yaml or --bin)");
     }
 
     free(decoded);
