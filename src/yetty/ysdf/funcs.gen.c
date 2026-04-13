@@ -22,7 +22,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_circle(struct yetty_ypaint_core_buf
     data[6] = geom->center_y;
     data[7] = geom->radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 8);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_box(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_box *geom) {
@@ -44,7 +44,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_box(struct yetty_ypaint_core_buffer
     data[8] = geom->half_height;
     data[9] = geom->corner_radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 10);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_segment(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_segment *geom) {
@@ -65,7 +65,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_segment(struct yetty_ypaint_core_bu
     data[7] = geom->end_x;
     data[8] = geom->end_y;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 9);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_triangle(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_triangle *geom) {
@@ -88,7 +88,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_triangle(struct yetty_ypaint_core_b
     data[9] = geom->vertex_c_x;
     data[10] = geom->vertex_c_y;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 11);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 11);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_ellipse(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_ellipse *geom) {
@@ -109,7 +109,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_ellipse(struct yetty_ypaint_core_bu
     data[7] = geom->radius_x;
     data[8] = geom->radius_y;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 9);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_arc(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_arc *geom) {
@@ -132,7 +132,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_arc(struct yetty_ypaint_core_buffer
     data[9] = geom->radius;
     data[10] = geom->thickness;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 11);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 11);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_rounded_box(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_rounded_box *geom) {
@@ -157,7 +157,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_rounded_box(struct yetty_ypaint_cor
     data[11] = geom->radius_top_left;
     data[12] = geom->radius_bottom_left;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 13);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 13);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_rhombus(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_rhombus *geom) {
@@ -178,7 +178,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_rhombus(struct yetty_ypaint_core_bu
     data[7] = geom->half_width;
     data[8] = geom->half_height;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 9);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_pentagon(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_pentagon *geom) {
@@ -198,7 +198,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_pentagon(struct yetty_ypaint_core_b
     data[6] = geom->center_y;
     data[7] = geom->radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 8);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_hexagon(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_hexagon *geom) {
@@ -218,7 +218,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_hexagon(struct yetty_ypaint_core_bu
     data[6] = geom->center_y;
     data[7] = geom->radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 8);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_star(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_star *geom) {
@@ -240,7 +240,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_star(struct yetty_ypaint_core_buffe
     data[8] = geom->num_points;
     data[9] = geom->inner_ratio;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 10);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_pie(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_pie *geom) {
@@ -262,7 +262,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_pie(struct yetty_ypaint_core_buffer
     data[8] = geom->aperture_y;
     data[9] = geom->radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 10);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_ring(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_ring *geom) {
@@ -285,7 +285,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_ring(struct yetty_ypaint_core_buffe
     data[9] = geom->radius;
     data[10] = geom->thickness;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 11);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 11);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_heart(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_heart *geom) {
@@ -305,7 +305,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_heart(struct yetty_ypaint_core_buff
     data[6] = geom->center_y;
     data[7] = geom->scale;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 8);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_cross(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_cross *geom) {
@@ -327,7 +327,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_cross(struct yetty_ypaint_core_buff
     data[8] = geom->half_height;
     data[9] = geom->corner_radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 10);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_rounded_x(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_rounded_x *geom) {
@@ -348,7 +348,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_rounded_x(struct yetty_ypaint_core_
     data[7] = geom->width;
     data[8] = geom->radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 9);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_capsule(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_capsule *geom) {
@@ -370,7 +370,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_capsule(struct yetty_ypaint_core_bu
     data[8] = geom->end_y;
     data[9] = geom->radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 10);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_moon(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_moon *geom) {
@@ -392,7 +392,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_moon(struct yetty_ypaint_core_buffe
     data[8] = geom->radius_outer;
     data[9] = geom->radius_inner;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 10);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_egg(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_egg *geom) {
@@ -413,7 +413,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_egg(struct yetty_ypaint_core_buffer
     data[7] = geom->radius_outer;
     data[8] = geom->radius_inner;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 9);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_octogon(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_octogon *geom) {
@@ -433,7 +433,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_octogon(struct yetty_ypaint_core_bu
     data[6] = geom->center_y;
     data[7] = geom->radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 8);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_hexagram(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_hexagram *geom) {
@@ -453,7 +453,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_hexagram(struct yetty_ypaint_core_b
     data[6] = geom->center_y;
     data[7] = geom->radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 8);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_pentagram(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_pentagram *geom) {
@@ -473,7 +473,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_pentagram(struct yetty_ypaint_core_
     data[6] = geom->center_y;
     data[7] = geom->radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 8);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 8);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_sphere_3d(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_sphere_3d *geom) {
@@ -494,7 +494,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_sphere_3d(struct yetty_ypaint_core_
     data[7] = geom->position_z;
     data[8] = geom->radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 9);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 9);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_box_3d(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_box_3d *geom) {
@@ -517,7 +517,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_box_3d(struct yetty_ypaint_core_buf
     data[9] = geom->half_size_y;
     data[10] = geom->half_size_z;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 11);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 11);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_torus_3d(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_torus_3d *geom) {
@@ -539,7 +539,7 @@ struct yetty_ypaint_id_result yetty_ysdf_add_torus_3d(struct yetty_ypaint_core_b
     data[8] = geom->major_radius;
     data[9] = geom->minor_radius;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 10);
 }
 
 struct yetty_ypaint_id_result yetty_ysdf_add_cylinder_3d(struct yetty_ypaint_core_buffer *buf, uint32_t z_order, uint32_t fill_color, uint32_t stroke_color, float stroke_width, const struct yetty_ysdf_cylinder_3d *geom) {
@@ -561,5 +561,5 @@ struct yetty_ypaint_id_result yetty_ysdf_add_cylinder_3d(struct yetty_ypaint_cor
     data[8] = geom->radius;
     data[9] = geom->half_height;
 
-    return yetty_ypaint_buffer_add_prim(buf, data, 10);
+    return yetty_ypaint_core_buffer_add_prim(buf, data, 10);
 }

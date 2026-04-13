@@ -453,7 +453,7 @@ static void add_prim(struct ypaint_yaml_parse_ctx *yaml_parse_ctx) {
     }
 
     /* Add primitive to buffer */
-    yetty_ypaint_buffer_add_prim(yaml_parse_ctx->buffer, data, word_count);
+    yetty_ypaint_core_buffer_add_prim(yaml_parse_ctx->buffer, data, word_count);
     yaml_parse_ctx->z_order++;
 }
 

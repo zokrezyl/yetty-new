@@ -30,14 +30,14 @@ YETTY_RESULT_DECLARE(yetty_ypaint_core_buffer, struct yetty_ypaint_core_buffer *
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(void);
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
     const struct yetty_core_buffer *base64_buf);
-void yetty_ypaint_buffer_destroy(struct yetty_ypaint_core_buffer *buf);
+void yetty_ypaint_core_buffer_destroy(struct yetty_ypaint_core_buffer *buf);
 
 // Clear all data (keeps allocation)
-void yetty_ypaint_buffer_clear(struct yetty_ypaint_core_buffer *buf);
+void yetty_ypaint_core_buffer_clear(struct yetty_ypaint_core_buffer *buf);
 
 // Add raw primitive data, returns byte offset
 struct yetty_ypaint_id_result
-yetty_ypaint_buffer_add_prim(struct yetty_ypaint_core_buffer *buf,
+yetty_ypaint_core_buffer_add_prim(struct yetty_ypaint_core_buffer *buf,
                              const float *data, uint32_t word_count);
 
 #ifdef __cplusplus

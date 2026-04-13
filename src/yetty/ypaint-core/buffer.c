@@ -69,7 +69,7 @@ struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(void) {
   return YETTY_OK(yetty_ypaint_core_buffer, buf);
 }
 
-void yetty_ypaint_buffer_destroy(struct yetty_ypaint_core_buffer *buf) {
+void yetty_ypaint_core_buffer_destroy(struct yetty_ypaint_core_buffer *buf) {
   if (!buf)
     return;
 
@@ -77,26 +77,26 @@ void yetty_ypaint_buffer_destroy(struct yetty_ypaint_core_buffer *buf) {
   free(buf);
 }
 
-void yetty_ypaint_buffer_clear(struct yetty_ypaint_core_buffer *buf) {
+void yetty_ypaint_core_buffer_clear(struct yetty_ypaint_core_buffer *buf) {
   if (!buf) {
-    yerror("yetty_ypaint_buffer_clear: buf is NULL");
+    yerror("yetty_ypaint_core_buffer_clear: buf is NULL");
     return;
   }
   buf->primitives.buf.size = 0;
 }
 
 struct yetty_ypaint_id_result
-yetty_ypaint_buffer_add_prim(struct yetty_ypaint_core_buffer *buf, const float *data,
+yetty_ypaint_core_buffer_add_prim(struct yetty_ypaint_core_buffer *buf, const float *data,
                              uint32_t word_count) {
   struct yetty_ypaint_id_result result = {0, 0};
 
   if (!buf) {
-    yerror("yetty_ypaint_buffer_add_prim: buf is NULL");
+    yerror("yetty_ypaint_core_buffer_add_prim: buf is NULL");
     result.error = YPAINT_ERR_NULL;
     return result;
   }
   if (!data) {
-    yerror("yetty_ypaint_buffer_add_prim: data is NULL");
+    yerror("yetty_ypaint_core_buffer_add_prim: data is NULL");
     result.error = YPAINT_ERR_NULL;
     return result;
   }
@@ -112,7 +112,7 @@ yetty_ypaint_buffer_add_prim(struct yetty_ypaint_core_buffer *buf, const float *
 
     uint8_t *new_data = realloc(buf->primitives.buf.data, new_capacity);
     if (!new_data) {
-      yerror("yetty_ypaint_buffer_add_prim: realloc failed for %zu bytes",
+      yerror("yetty_ypaint_core_buffer_add_prim: realloc failed for %zu bytes",
              new_capacity);
       result.error = YPAINT_ERR_ALLOC;
       return result;

@@ -295,7 +295,7 @@ ypaint_layer_write(struct yetty_term_terminal_layer *self,
       return YETTY_ERR(yetty_core_void, res.error.msg);
     }
     if (yetty_ysdf_yaml_parse(res.value, decoded, decoded_len) < 0) {
-      yetty_ypaint_buffer_destroy(res.value);
+      yetty_ypaint_core_buffer_destroy(res.value);
       free(decoded);
       yetty_term_osc_args_free(&args);
       return YETTY_ERR(yetty_core_void, "yaml parse failed");
@@ -303,8 +303,8 @@ ypaint_layer_write(struct yetty_term_terminal_layer *self,
     free(decoded);
 
     struct yetty_core_void_result add_res =
-        yetty_yetty_ypaint_canvas_add_buffer(layer->canvas, res.value);
-    yetty_ypaint_buffer_destroy(res.value);
+        yetty_ypaint_canvas_add_buffer(layer->canvas, res.value);
+    yetty_ypaint_core_buffer_destroy(res.value);
     if (YETTY_IS_ERR(add_res)) {
       yetty_term_osc_args_free(&args);
       return add_res;
@@ -327,8 +327,8 @@ ypaint_layer_write(struct yetty_term_terminal_layer *self,
     }
 
     struct yetty_core_void_result add_res =
-        yetty_yetty_ypaint_canvas_add_buffer(layer->canvas, res.value);
-    yetty_ypaint_buffer_destroy(res.value);
+        yetty_ypaint_canvas_add_buffer(layer->canvas, res.value);
+    yetty_ypaint_core_buffer_destroy(res.value);
     if (YETTY_IS_ERR(add_res)) {
       yetty_term_osc_args_free(&args);
       return add_res;

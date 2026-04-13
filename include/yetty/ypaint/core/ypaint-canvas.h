@@ -78,7 +78,7 @@ struct yetty_ypaint_core_buffer;
 // In scrolling mode: primitives positioned relative to cursor
 // In non-scrolling mode: primitives positioned at absolute scene coordinates
 struct yetty_core_void_result
-yetty_yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
+yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
                          struct yetty_ypaint_core_buffer *buffer);
 
 //=============================================================================
