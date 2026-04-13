@@ -77,7 +77,7 @@ if(YETTY_ENABLE_FEATURE_YCORE)
     add_subdirectory(ycore)
 endif()
 
-if(YETTY_ENABLE_FEATURE_FONT)
+if(YETTY_ENABLE_FEATURE_YFONT)
     add_subdirectory(yfont)
 endif()
 

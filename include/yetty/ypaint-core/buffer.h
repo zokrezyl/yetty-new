@@ -43,8 +43,9 @@ yetty_ypaint_core_buffer_add_prim(struct yetty_ypaint_core_buffer *buf,
 // Primitive size callback: given type, return size in bytes (0 = unknown type)
 typedef size_t (*yetty_ypaint_core_primitive_size_fn)(uint32_t type);
 
-// Register handler for type range [type_min, type_max]
-struct yetty_core_void_result yetty_ypaint_core_register_primitive_handler(
+// Register handler for type range [type_min, type_max] with buffer instance
+struct yetty_core_void_result yetty_ypaint_core_buffer_register_handler(
+    struct yetty_ypaint_core_buffer *buf,
     uint32_t type_min,
     uint32_t type_max,
     yetty_ypaint_core_primitive_size_fn size_fn);

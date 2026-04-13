@@ -6,43 +6,40 @@
 #include <math.h>
 #include <string.h>
 
-// Compute AABB for an SDF primitive
-// data: full primitive data (type + z_order + style + geometry)
-// geom: pointer to geometry args (data + 5)
-// expand: stroke_width * 0.5f
-
-void yetty_ysdf_compute_aabb(const float *data, uint32_t word_count,
-                              float *min_x, float *min_y, float *max_x, float *max_y) {
+struct rectangle_result yetty_ysdf_compute_aabb(const float *data, uint32_t word_count) {
+    if (!data)
+        return YETTY_ERR(rectangle, "data is NULL");
     uint32_t type;
     memcpy(&type, &data[0], sizeof(type));
     const float *geom = data + 5;  // geometry args
     float stroke_width = data[4];
     float expand = stroke_width * 0.5f;
+    struct rectangle rect = {0};
     (void)word_count;
 
     switch ((enum yetty_ysdf_type)type) {
     case YETTY_YSDF_CIRCLE: {
         float total_radius = geom[2] + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius;
-        *max_y = geom[1] + total_radius;
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius;
+        rect.max.y = geom[1] + total_radius;
         break;
     }
     case YETTY_YSDF_BOX: {
         float hw = geom[2] + geom[4] + expand;
         float hh = geom[3] + geom[4] + expand;
-        *min_x = geom[0] - hw;
-        *min_y = geom[1] - hh;
-        *max_x = geom[0] + hw;
-        *max_y = geom[1] + hh;
+        rect.min.x = geom[0] - hw;
+        rect.min.y = geom[1] - hh;
+        rect.max.x = geom[0] + hw;
+        rect.max.y = geom[1] + hh;
         break;
     }
     case YETTY_YSDF_SEGMENT: {
-        *min_x = fminf(geom[0], geom[2]) - expand;
-        *min_y = fminf(geom[1], geom[3]) - expand;
-        *max_x = fmaxf(geom[0], geom[2]) + expand;
-        *max_y = fmaxf(geom[1], geom[3]) + expand;
+        rect.min.x = fminf(geom[0], geom[2]) - expand;
+        rect.min.y = fminf(geom[1], geom[3]) - expand;
+        rect.max.x = fmaxf(geom[0], geom[2]) + expand;
+        rect.max.y = fmaxf(geom[1], geom[3]) + expand;
         break;
     }
     case YETTY_YSDF_TRIANGLE: {
@@ -50,176 +47,176 @@ void yetty_ysdf_compute_aabb(const float *data, uint32_t word_count,
         float miny = fminf(fminf(geom[1], geom[3]), geom[5]);
         float maxx = fmaxf(fmaxf(geom[0], geom[2]), geom[4]);
         float maxy = fmaxf(fmaxf(geom[1], geom[3]), geom[5]);
-        *min_x = minx - expand;
-        *min_y = miny - expand;
-        *max_x = maxx + expand;
-        *max_y = maxy + expand;
+        rect.min.x = minx - expand;
+        rect.min.y = miny - expand;
+        rect.max.x = maxx + expand;
+        rect.max.y = maxy + expand;
         break;
     }
     case YETTY_YSDF_ELLIPSE: {
-        *min_x = geom[0] - geom[2] - expand;
-        *min_y = geom[1] - geom[3] - expand;
-        *max_x = geom[0] + geom[2] + expand;
-        *max_y = geom[1] + geom[3] + expand;
+        rect.min.x = geom[0] - geom[2] - expand;
+        rect.min.y = geom[1] - geom[3] - expand;
+        rect.max.x = geom[0] + geom[2] + expand;
+        rect.max.y = geom[1] + geom[3] + expand;
         break;
     }
     case YETTY_YSDF_ARC: {
         float total_radius = fmaxf(geom[4], geom[5]) + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius;
-        *max_y = geom[1] + total_radius;
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius;
+        rect.max.y = geom[1] + total_radius;
         break;
     }
     case YETTY_YSDF_ROUNDED_BOX: {
         float max_radius = fmaxf(fmaxf(geom[4], geom[5]), fmaxf(geom[6], geom[7]));
         float hw = geom[2] + max_radius + expand;
         float hh = geom[3] + max_radius + expand;
-        *min_x = geom[0] - hw;
-        *min_y = geom[1] - hh;
-        *max_x = geom[0] + hw;
-        *max_y = geom[1] + hh;
+        rect.min.x = geom[0] - hw;
+        rect.min.y = geom[1] - hh;
+        rect.max.x = geom[0] + hw;
+        rect.max.y = geom[1] + hh;
         break;
     }
     case YETTY_YSDF_RHOMBUS: {
         float hw = geom[2] + expand;
         float hh = geom[3] + expand;
-        *min_x = geom[0] - hw;
-        *min_y = geom[1] - hh;
-        *max_x = geom[0] + hw;
-        *max_y = geom[1] + hh;
+        rect.min.x = geom[0] - hw;
+        rect.min.y = geom[1] - hh;
+        rect.max.x = geom[0] + hw;
+        rect.max.y = geom[1] + hh;
         break;
     }
     case YETTY_YSDF_PENTAGON: {
         float total_radius = geom[2] + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius;
-        *max_y = geom[1] + total_radius;
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius;
+        rect.max.y = geom[1] + total_radius;
         break;
     }
     case YETTY_YSDF_HEXAGON: {
         float total_radius = geom[2] + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius;
-        *max_y = geom[1] + total_radius;
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius;
+        rect.max.y = geom[1] + total_radius;
         break;
     }
     case YETTY_YSDF_STAR: {
         float total_radius = geom[2] + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius;
-        *max_y = geom[1] + total_radius;
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius;
+        rect.max.y = geom[1] + total_radius;
         break;
     }
     case YETTY_YSDF_PIE: {
         float total_radius = geom[4] + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius;
-        *max_y = geom[1] + total_radius;
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius;
+        rect.max.y = geom[1] + total_radius;
         break;
     }
     case YETTY_YSDF_RING: {
         float total_radius = geom[4] + geom[5] + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius;
-        *max_y = geom[1] + total_radius;
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius;
+        rect.max.y = geom[1] + total_radius;
         break;
     }
     case YETTY_YSDF_HEART: {
         float extent = geom[2] * 1.5f + expand;
-        *min_x = geom[0] - extent;
-        *min_y = geom[1] - extent;
-        *max_x = geom[0] + extent;
-        *max_y = geom[1] + extent;
+        rect.min.x = geom[0] - extent;
+        rect.min.y = geom[1] - extent;
+        rect.max.x = geom[0] + extent;
+        rect.max.y = geom[1] + extent;
         break;
     }
     case YETTY_YSDF_CROSS: {
         float extent = fmaxf(geom[2], geom[3]) + expand;
-        *min_x = geom[0] - extent;
-        *min_y = geom[1] - extent;
-        *max_x = geom[0] + extent;
-        *max_y = geom[1] + extent;
+        rect.min.x = geom[0] - extent;
+        rect.min.y = geom[1] - extent;
+        rect.max.x = geom[0] + extent;
+        rect.max.y = geom[1] + extent;
         break;
     }
     case YETTY_YSDF_ROUNDED_X: {
         float extent = geom[2] + geom[3] + expand;
-        *min_x = geom[0] - extent;
-        *min_y = geom[1] - extent;
-        *max_x = geom[0] + extent;
-        *max_y = geom[1] + extent;
+        rect.min.x = geom[0] - extent;
+        rect.min.y = geom[1] - extent;
+        rect.max.x = geom[0] + extent;
+        rect.max.y = geom[1] + extent;
         break;
     }
     case YETTY_YSDF_CAPSULE: {
         float total_radius = geom[4] + expand;
-        *min_x = fminf(geom[0], geom[2]) - total_radius;
-        *min_y = fminf(geom[1], geom[3]) - total_radius;
-        *max_x = fmaxf(geom[0], geom[2]) + total_radius;
-        *max_y = fmaxf(geom[1], geom[3]) + total_radius;
+        rect.min.x = fminf(geom[0], geom[2]) - total_radius;
+        rect.min.y = fminf(geom[1], geom[3]) - total_radius;
+        rect.max.x = fmaxf(geom[0], geom[2]) + total_radius;
+        rect.max.y = fmaxf(geom[1], geom[3]) + total_radius;
         break;
     }
     case YETTY_YSDF_MOON: {
         float total_radius = fmaxf(geom[3], geom[4]) + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius + geom[2];
-        *max_y = geom[1] + total_radius;
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius + geom[2];
+        rect.max.y = geom[1] + total_radius;
         break;
     }
     case YETTY_YSDF_EGG: {
         float total_radius = fmaxf(geom[2], geom[3]) + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius;
-        *max_y = geom[1] + total_radius + geom[2];
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius;
+        rect.max.y = geom[1] + total_radius + geom[2];
         break;
     }
     case YETTY_YSDF_OCTOGON: {
         float total_radius = geom[2] + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius;
-        *max_y = geom[1] + total_radius;
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius;
+        rect.max.y = geom[1] + total_radius;
         break;
     }
     case YETTY_YSDF_HEXAGRAM: {
         float total_radius = geom[2] + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius;
-        *max_y = geom[1] + total_radius;
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius;
+        rect.max.y = geom[1] + total_radius;
         break;
     }
     case YETTY_YSDF_PENTAGRAM: {
         float total_radius = geom[2] + expand;
-        *min_x = geom[0] - total_radius;
-        *min_y = geom[1] - total_radius;
-        *max_x = geom[0] + total_radius;
-        *max_y = geom[1] + total_radius;
+        rect.min.x = geom[0] - total_radius;
+        rect.min.y = geom[1] - total_radius;
+        rect.max.x = geom[0] + total_radius;
+        rect.max.y = geom[1] + total_radius;
         break;
     }
     case YETTY_YSDF_SPHERE_3D: {
-        *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;
+        rect.min.x = 0; rect.min.y = 0; rect.max.x = 0; rect.max.y = 0;
         break;
     }
     case YETTY_YSDF_BOX_3D: {
-        *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;
+        rect.min.x = 0; rect.min.y = 0; rect.max.x = 0; rect.max.y = 0;
         break;
     }
     case YETTY_YSDF_TORUS_3D: {
-        *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;
+        rect.min.x = 0; rect.min.y = 0; rect.max.x = 0; rect.max.y = 0;
         break;
     }
     case YETTY_YSDF_CYLINDER_3D: {
-        *min_x = 0; *min_y = 0; *max_x = 0; *max_y = 0;
+        rect.min.x = 0; rect.min.y = 0; rect.max.x = 0; rect.max.y = 0;
         break;
     }
     default:
-        *min_x = -1e10f; *min_y = -1e10f; *max_x = 1e10f; *max_y = 1e10f;
-        break;
+        return YETTY_ERR(rectangle, "unknown SDF type");
     }
+    return YETTY_OK(rectangle, rect);
 }

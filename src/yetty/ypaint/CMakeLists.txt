@@ -6,6 +6,6 @@ add_library(yetty_ypaint STATIC
 )
 
 target_link_libraries(yetty_ypaint PUBLIC
-    ypaint_core
-    ypaint_sdf
+    yetty_ypaint_core
+    yetty_ysdf
 )

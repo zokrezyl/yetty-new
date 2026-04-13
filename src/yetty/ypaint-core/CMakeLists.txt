@@ -8,5 +8,5 @@ target_include_directories(yetty_ypaint_core PUBLIC
 )
 
 target_link_libraries(yetty_ypaint_core PUBLIC
-    yetty_core
+    yetty_ycore
 )

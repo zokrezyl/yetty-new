@@ -67,7 +67,7 @@ def load_primitives(path: Path) -> list[dict]:
 
 def generate_sdf_types(prims: list[dict], out: Path) -> None:
     """Generate ypaint-sdf-types.gen.h - enums and geometry structs for SDF primitives"""
-    lines = [HEADER_C, "#pragma once", "", "#include <stdint.h>", "", "#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
+    lines = [HEADER_C, "#pragma once", "", "#include <stddef.h>", "#include <stdint.h>", "", "#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
 
     # Enum for SDF primitive types
     lines.append("enum yetty_ysdf_type {")
@@ -101,13 +101,20 @@ def generate_sdf_types(prims: list[dict], out: Path) -> None:
     lines.append("}")
     lines.append("")
 
+    # Primitive size in bytes (callback compatible)
+    lines.append("// Primitive size in bytes - use as yetty_ypaint_core_primitive_size_fn callback")
+    lines.append("static inline size_t yetty_ysdf_primitive_size(uint32_t type) {")
+    lines.append("    return yetty_ysdf_word_count((enum yetty_ysdf_type)type) * sizeof(float);")
+    lines.append("}")
+    lines.append("")
+
     # AABB computation function declaration
     lines.append("// Compute AABB for an SDF primitive")
     lines.append("// data: full primitive data (type + z_order + style + geometry)")
     lines.append("// word_count: number of 32-bit words in data")
-    lines.append("void yetty_ysdf_compute_aabb(const float *data, uint32_t word_count,")
-    lines.append("                              float *min_x, float *min_y,")
-    lines.append("                              float *max_x, float *max_y);")
+    lines.append("#include <yetty/ycore/types.h>")
+    lines.append("")
+    lines.append("struct rectangle_result yetty_ysdf_compute_aabb(const float *data, uint32_t word_count);")
     lines.append("")
 
     lines.append("#ifdef __cplusplus")
@@ -199,18 +206,15 @@ def generate_sdf_aabb(prims: list[dict], out: Path) -> None:
     lines.append('#include <math.h>')
     lines.append('#include <string.h>')
     lines.append("")
-    lines.append("// Compute AABB for an SDF primitive")
-    lines.append("// data: full primitive data (type + z_order + style + geometry)")
-    lines.append("// geom: pointer to geometry args (data + 5)")
-    lines.append("// expand: stroke_width * 0.5f")
-    lines.append("")
-    lines.append("void yetty_ysdf_compute_aabb(const float *data, uint32_t word_count,")
-    lines.append("                              float *min_x, float *min_y, float *max_x, float *max_y) {")
+    lines.append("struct rectangle_result yetty_ysdf_compute_aabb(const float *data, uint32_t word_count) {")
+    lines.append("    if (!data)")
+    lines.append('        return YETTY_ERR(rectangle, "data is NULL");')
     lines.append("    uint32_t type;")
     lines.append("    memcpy(&type, &data[0], sizeof(type));")
     lines.append(f"    const float *geom = data + {GEOMETRY_OFFSET};  // geometry args")
     lines.append("    float stroke_width = data[4];")
     lines.append("    float expand = stroke_width * 0.5f;")
+    lines.append("    struct rectangle rect = {0};")
     lines.append("    (void)word_count;")
     lines.append("")
     lines.append("    switch ((enum yetty_ysdf_type)type) {")
@@ -219,7 +223,13 @@ def generate_sdf_aabb(prims: list[dict], out: Path) -> None:
         name = p["name"]
         aabb_code = p.get("aabb", {}).get("code", "").strip()
         if not aabb_code:
-            aabb_code = "*min_x = -1e10f; *min_y = -1e10f; *max_x = 1e10f; *max_y = 1e10f;"
+            aabb_code = "rect.min.x = -1e10f; rect.min.y = -1e10f; rect.max.x = 1e10f; rect.max.y = 1e10f;"
+        else:
+            # Replace *min_x/*min_y/*max_x/*max_y with rect.min.x etc.
+            aabb_code = aabb_code.replace("*min_x", "rect.min.x")
+            aabb_code = aabb_code.replace("*min_y", "rect.min.y")
+            aabb_code = aabb_code.replace("*max_x", "rect.max.x")
+            aabb_code = aabb_code.replace("*max_y", "rect.max.y")
 
         lines.append(f"    case YETTY_YSDF_{to_upper(name)}: {{")
         for line in aabb_code.split("\n"):
@@ -228,9 +238,9 @@ def generate_sdf_aabb(prims: list[dict], out: Path) -> None:
         lines.append("    }")
 
     lines.append("    default:")
-    lines.append("        *min_x = -1e10f; *min_y = -1e10f; *max_x = 1e10f; *max_y = 1e10f;")
-    lines.append("        break;")
+    lines.append('        return YETTY_ERR(rectangle, "unknown SDF type");')
     lines.append("    }")
+    lines.append("    return YETTY_OK(rectangle, rect);")
     lines.append("}")
 
     out.parent.mkdir(parents=True, exist_ok=True)

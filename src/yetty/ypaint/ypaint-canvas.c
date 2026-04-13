@@ -439,9 +439,9 @@ uint32_t yetty_yetty_ypaint_canvas_rolling_row_0(
 
 // Add a single primitive (internal)
 // Returns the max_row (bottom row of AABB) for this primitive
-static uint32_t add_primitive_internal(
-    struct yetty_yetty_ypaint_canvas *canvas,
-    const struct yetty_ypaint_core_primitive_iter *iter) {
+static uint32_t
+add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
+                       const struct yetty_ypaint_core_primitive_iter *iter) {
   if (!canvas || !iter || !iter->data || iter->size == 0)
     return 0;
 
@@ -453,84 +453,71 @@ static uint32_t add_primitive_internal(
   }
 
   uint32_t word_count = iter->size / sizeof(float);
-  float aabb_min_x, aabb_min_y, aabb_max_x, aabb_max_y;
-  yetty_ysdf_compute_aabb(iter->data, word_count, &aabb_min_x, &aabb_min_y,
-                          &aabb_max_x, &aabb_max_y);
+  struct rectangle_result aabb_res =
+      yetty_ysdf_compute_aabb(iter->data, word_count);
+  if (YETTY_IS_ERR(aabb_res))
+    return 0;
+  struct rectangle aabb = aabb_res.value;
 
   // Check for inverted AABB (bug in compute_aabb)
-  if (aabb_min_y > aabb_max_y) {
-    yerror("BUG: inverted AABB! aabb_min_y=%.1f > aabb_max_y=%.1f", aabb_min_y,
-           aabb_max_y);
-    // Swap to fix
-    float tmp = aabb_min_y;
-    aabb_min_y = aabb_max_y;
-    aabb_max_y = tmp;
+  if (aabb.min.y > aabb.max.y) {
+    yerror("BUG: inverted AABB! min.y=%.1f > max.y=%.1f", aabb.min.y,
+           aabb.max.y);
+    float tmp = aabb.min.y;
+    aabb.min.y = aabb.max.y;
+    aabb.max.y = tmp;
   }
+  // TODO: this method should return uint32_t_res with potential error
 
-  // Offset AABB Y by cursor position for grid placement
-  float cursor_y_offset = canvas->cursor_row * canvas->cell_size.height;
-  aabb_min_y += cursor_y_offset;
-  aabb_max_y += cursor_y_offset;
+  uint32_t primitive_max_in_rows =
+      (uint32_t)floorf(aabb.max.y / canvas->cell_size.height);
 
-  // Row range within primitive's AABB
-  int32_t local_min_row =
-      (int32_t)floorf(aabb_min_y / canvas->cell_size.height);
-  int32_t local_max_row =
-      (int32_t)floorf(aabb_max_y / canvas->cell_size.height);
-  if (local_min_row < 0)
-    local_min_row = 0;
-  if (local_max_row < 0)
-    local_max_row = 0;
-
-  uint32_t prim_min_row = (uint32_t)local_min_row;
-  uint32_t prim_max_row = (uint32_t)local_max_row;
-
-  // BUG CHECK: if min > max, AABB is inverted (bug in compute_aabb or cell_size
-  // issue)
-  if (prim_min_row > prim_max_row) {
-    yerror("BUG: prim_min_row=%u > prim_max_row=%u! aabb_y=[%.1f,%.1f] "
-           "cell_height=%.1f",
-           prim_min_row, prim_max_row, aabb_min_y, aabb_max_y,
-           canvas->cell_size.height);
-    // Swap to avoid crash, but this is a BUG that needs fixing
-    uint32_t tmp = prim_min_row;
-    prim_min_row = prim_max_row;
-    prim_max_row = tmp;
-  }
+  uint32_t primitive_grid_line = canvas->cursor_row + primitive_max_in_rows;
+  uint32_t primitive_rolling_row = primitive_grid_line + canvas->rolling_row_0;
 
   // Ensure lines exist
-  canvas_ensure_lines(canvas, prim_max_row + 1);
-
-  // rolling_row = rolling_row_0 + cursor_row
-  // Encodes absolute cursor position at insertion time for shader y_offset
-  uint32_t rolling_row = canvas->rolling_row_0 + canvas->cursor_row;
+  canvas_ensure_lines(canvas, primitive_grid_line);
 
   // Store primitive at prim_max_row (bottom of AABB - for scroll deletion)
   // Geometry coordinates stored as-is (no transformation)
   // Shader adjusts test position using y_offset from rolling_row
   struct yetty_yetty_ypaint_canvas_grid_line *base_line =
-      line_buffer_get(&canvas->lines, rolling_row);
+      line_buffer_get(&canvas->lines, primitive_grid_line);
 
-  uint32_t prim_index = prim_data_array_push(&base_line->prims, rolling_row,
-                                             iter->data, word_count);
+  uint32_t prim_index = prim_data_array_push(
+      &base_line->prims, primitive_rolling_row, iter->data, word_count);
 
+  // TODO return ERROR IF CELL_SIZE HAS WRONG VALUES!
   // Add grid cell references (convert pixel x to column)
-  uint32_t col_min = (canvas->cell_size.width > 0)
-                         ? (uint32_t)(aabb_min_x / canvas->cell_size.width)
-                         : 0;
-  uint32_t col_max = (canvas->cell_size.width > 0)
-                         ? (uint32_t)(aabb_max_x / canvas->cell_size.width)
-                         : 0;
+  uint32_t prim_col_min = (canvas->cell_size.width > 0)
+                              ? (uint32_t)(aabb.min.x / canvas->cell_size.width)
+                              : 0;
+  uint32_t prim_col_max = (canvas->cell_size.width > 0)
+                              ? (uint32_t)(aabb.max.x / canvas->cell_size.width)
+                              : 0;
+  uint32_t prim_row_min =
+      (canvas->cell_size.height > 0)
+          ? (uint32_t)(aabb.min.y / canvas->cell_size.height)
+          : 0;
+  uint32_t prim_row_max =
+      (canvas->cell_size.height > 0)
+          ? (uint32_t)(aabb.max.y / canvas->cell_size.height)
+          : 0;
+
+  // TODO THIS IS A SERIOUS ERROR! COL_MAX SHOULD BE AVAILABLE AT THIS MOMENT!
+  // THE GRID MUST HAVE SCROLLED BEFORE!
+  /*
   if (col_max >= canvas->grid_size.cols && canvas->grid_size.cols > 0)
     col_max = canvas->grid_size.cols - 1;
-
-  for (uint32_t row = prim_min_row; row <= prim_max_row; row++) {
+  */
+  for (uint32_t row = prim_row_min; row <= prim_row_max; row++) {
     struct yetty_yetty_ypaint_canvas_grid_line *line =
         line_buffer_get(&canvas->lines, row);
-    grid_line_ensure_cells(line, col_max + 1);
+    grid_line_ensure_cells(line, prim_col_max + 1);
 
-    uint16_t lines_ahead = (uint16_t)(prim_max_row - row);
-    for (uint32_t col = col_min; col <= col_max; col++) {
+    uint16_t lines_ahead = (uint16_t)(canvas->cursor_row + row);
+
+    for (uint32_t col = prim_col_min; col <= prim_col_max; col++) {
       struct yetty_yetty_ypaint_canvas_prim_ref ref = {lines_ahead,
                                                        (uint16_t)prim_index};
       prim_ref_array_push(&line->cells[col].refs, ref);
@@ -539,13 +526,13 @@ static uint32_t add_primitive_internal(
 
   ydebug("add_primitive_internal: aabb_y=[%.1f,%.1f] cell_height=%.1f "
          "cursor_row=%u",
-         aabb_min_y, aabb_max_y, canvas->cell_size.height, canvas->cursor_row);
+         aabb.min.y, aabb.max.y, canvas->cell_size.height, canvas->cursor_row);
   ydebug(
       "add_primitive_internal: prim_min_row=%u prim_max_row=%u lines.count=%u",
-      prim_min_row, prim_max_row, canvas->lines.count);
+      prim_row_min, prim_row_max, canvas->lines.count);
 
   canvas->dirty = true;
-  return rolling_row;
+  return primitive_grid_line;
 }
 
 // Commit buffer after adding all primitives (internal)
@@ -677,12 +664,14 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
     uint32_t word_count = iter.size / sizeof(float);
 
     // Compute AABB to find max row (using ORIGINAL cursor position)
-    float aabb_min_x, aabb_min_y, aabb_max_x, aabb_max_y;
-    yetty_ysdf_compute_aabb(iter.data, word_count, &aabb_min_x, &aabb_min_y,
-                            &aabb_max_x, &aabb_max_y);
+    struct rectangle_result aabb_res =
+        yetty_ysdf_compute_aabb(iter.data, word_count);
+    if (YETTY_IS_ERR(aabb_res))
+      break;
+    struct rectangle aabb = aabb_res.value;
 
     float cursor_y_offset = original_cursor_row * canvas->cell_size.height;
-    float abs_max_y = aabb_max_y + cursor_y_offset;
+    float abs_max_y = aabb.max.y + cursor_y_offset;
     uint32_t prim_max_row =
         (canvas->cell_size.height > 0)
             ? (uint32_t)floorf(abs_max_y / canvas->cell_size.height)

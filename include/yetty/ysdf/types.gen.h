@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -266,12 +267,17 @@ static inline uint32_t yetty_ysdf_word_count(enum yetty_ysdf_type type) {
     }
 }
 
+// Primitive size in bytes - use as yetty_ypaint_core_primitive_size_fn callback
+static inline size_t yetty_ysdf_primitive_size(uint32_t type) {
+    return yetty_ysdf_word_count((enum yetty_ysdf_type)type) * sizeof(float);
+}
+
 // Compute AABB for an SDF primitive
 // data: full primitive data (type + z_order + style + geometry)
 // word_count: number of 32-bit words in data
-void yetty_ysdf_compute_aabb(const float *data, uint32_t word_count,
-                              float *min_x, float *min_y,
-                              float *max_x, float *max_y);
+#include <yetty/ycore/types.h>
+
+struct rectangle_result yetty_ysdf_compute_aabb(const float *data, uint32_t word_count);
 
 #ifdef __cplusplus
 }

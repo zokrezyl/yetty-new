@@ -5,6 +5,7 @@
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/yrender/gpu-resource-set.h>
+#include <yetty/ysdf/types.gen.h>
 #include <yetty/ysdf/yaml.gen.h>
 #include <yetty/yterm/osc-args.h>
 #include <yetty/yterm/ypaint-layer.h>
@@ -294,6 +295,7 @@ ypaint_layer_write(struct yetty_term_terminal_layer *self,
       yetty_term_osc_args_free(&args);
       return YETTY_ERR(yetty_core_void, res.error.msg);
     }
+    yetty_ypaint_core_buffer_register_handler(res.value, 0, 255, yetty_ysdf_primitive_size);
     if (yetty_ysdf_yaml_parse(res.value, decoded, decoded_len) < 0) {
       yetty_ypaint_core_buffer_destroy(res.value);
       free(decoded);
@@ -325,6 +327,7 @@ ypaint_layer_write(struct yetty_term_terminal_layer *self,
       yetty_term_osc_args_free(&args);
       return YETTY_ERR(yetty_core_void, res.error.msg);
     }
+    yetty_ypaint_core_buffer_register_handler(res.value, 0, 255, yetty_ysdf_primitive_size);
 
     struct yetty_core_void_result add_res =
         yetty_ypaint_canvas_add_buffer(layer->canvas, res.value);

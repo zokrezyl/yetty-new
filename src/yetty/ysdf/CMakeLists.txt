@@ -1,12 +1,12 @@
-add_library(ypaint_sdf STATIC
+add_library(yetty_ysdf STATIC
     funcs.gen.c
     aabb.gen.c
     yaml.gen.c
 )
 
-target_include_directories(ypaint_sdf PUBLIC
+target_include_directories(yetty_ysdf PUBLIC
     ${YETTY_ROOT}/include
     ${YETTY_ROOT}/src
 )
 
-target_link_libraries(ypaint_sdf PUBLIC yaml)
+target_link_libraries(yetty_ysdf PUBLIC yaml)
