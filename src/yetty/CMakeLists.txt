@@ -127,8 +127,8 @@ if(YETTY_ENABLE_FEATURE_CARDS)
     add_subdirectory(cards)
 endif()
 
-if(YETTY_ENABLE_FEATURE_YAST)
-    add_subdirectory(yast)
+if(YETTY_ENABLE_FEATURE_YEXPR)
+    add_subdirectory(yexpr)
 endif()
 
 if(YETTY_ENABLE_FEATURE_YFSVM)

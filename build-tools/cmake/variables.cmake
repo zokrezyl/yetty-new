@@ -88,8 +88,8 @@ option(YETTY_ENABLE_FEATURE_SSH       "ssh — SSH connectivity"               O
 option(YETTY_ENABLE_FEATURE_RPC       "rpc — msgpack-RPC interface"          OFF)
 
 # Misc
-option(YETTY_ENABLE_FEATURE_YAST      "yast — AST support"                   OFF)
-option(YETTY_ENABLE_FEATURE_YFSVM     "yfsvm — filesystem VM"                OFF)
+option(YETTY_ENABLE_FEATURE_YEXPR     "yexpr — expression parser"            ON)
+option(YETTY_ENABLE_FEATURE_YFSVM     "yfsvm — fragment shader VM"           ON)
 option(YETTY_ENABLE_FEATURE_YCAT      "ycat — file viewer"                   OFF)
 
 # Build pipeline

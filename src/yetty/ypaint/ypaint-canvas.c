@@ -486,10 +486,21 @@ add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
       (uint32_t)(aabb.min.x / canvas->cell_size.width);
   uint32_t prim_col_max =
       (uint32_t)(aabb.max.x / canvas->cell_size.width);
-  uint32_t prim_row_min =
-      canvas->cursor_row + (uint32_t)(aabb.min.y / canvas->cell_size.height);
-  uint32_t prim_row_max =
-      canvas->cursor_row + (uint32_t)(aabb.max.y / canvas->cell_size.height);
+
+  int32_t row_min_rel = (int32_t)floorf(aabb.min.y / canvas->cell_size.height);
+  int32_t row_max_rel = (int32_t)floorf(aabb.max.y / canvas->cell_size.height);
+  if (row_min_rel < 0)
+    row_min_rel = 0;
+  if (row_max_rel < 0)
+    row_max_rel = 0;
+
+  uint32_t prim_row_min = canvas->cursor_row + (uint32_t)row_min_rel;
+  uint32_t prim_row_max = canvas->cursor_row + (uint32_t)row_max_rel;
+
+  if (prim_row_min > prim_row_max)
+    return YETTY_ERR(uint32, "AABB row min > max after clamp");
+  if (prim_col_min > prim_col_max)
+    return YETTY_ERR(uint32, "AABB col min > max");
 
   if (canvas->grid_size.cols == 0)
     return YETTY_ERR(uint32, "grid_size.cols is 0");
