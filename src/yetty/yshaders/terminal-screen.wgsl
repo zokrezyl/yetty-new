@@ -1,0 +1,603 @@
+// Shared uniforms (managed by Yetty, group 0)
+struct SharedUniforms {
+    time: f32,           // 4 bytes - animation time
+    deltaTime: f32,      // 4 bytes
+    screenWidth: f32,    // 4 bytes
+    screenHeight: f32,   // 4 bytes
+    mouseX: f32,         // 4 bytes
+    mouseY: f32,         // 4 bytes
+    lastChar: u32,       // 4 bytes - last typed character glyph index
+    lastCharTime: f32,   // 4 bytes - time when last character was typed
+};
+
+// Grid uniforms (managed by renderer, group 1)
+struct GridUniforms {
+    projection: mat4x4<f32>,   // 64 bytes
+    screenSize: vec2<f32>,     // 8 bytes
+    cellSize: vec2<f32>,       // 8 bytes
+    gridSize: vec2<f32>,       // 8 bytes (cols, rows)
+    pixelRange: f32,           // 4 bytes
+    scale: f32,                // 4 bytes
+    cursorPos: vec2<f32>,      // 8 bytes (col, row)
+    cursorVisible: f32,        // 4 bytes
+    cursorShape: f32,          // 4 bytes (1=block, 2=underline, 3=bar)
+    viewportOrigin: vec2<f32>, // 8 bytes - viewport origin in framebuffer
+    cursorBlink: f32,          // 4 bytes (0=no blink, 1=blink)
+    hasSelection: f32,         // 4 bytes (0=no, 1=yes)
+    selStart: vec2<f32>,       // 8 bytes (col, row)
+    selEnd: vec2<f32>,         // 8 bytes (col, row)
+    // Effects (per gpu-screen instance)
+    preEffectIndex: u32,       // 4 bytes (0 = no effect)
+    postEffectIndex: u32,      // 4 bytes (0 = no effect)
+    preEffectP0: f32,          // 4 bytes - pre-effect params
+    preEffectP1: f32,          // 4 bytes
+    preEffectP2: f32,          // 4 bytes
+    preEffectP3: f32,          // 4 bytes
+    preEffectP4: f32,          // 4 bytes
+    preEffectP5: f32,          // 4 bytes
+    postEffectP0: f32,         // 4 bytes - post-effect params
+    postEffectP1: f32,         // 4 bytes
+    postEffectP2: f32,         // 4 bytes
+    postEffectP3: f32,         // 4 bytes
+    postEffectP4: f32,         // 4 bytes
+    postEffectP5: f32,         // 4 bytes
+    defaultFg: u32,            // 4 bytes - packed RGBA like cell.fg
+    defaultBg: u32,            // 4 bytes - packed RGB like cell.bg
+    spaceGlyph: u32,           // 4 bytes - glyph index for space character
+    // Coordinate distortion effects (no prefix - just "effect")
+    effectIndex: u32,          // 4 bytes (0 = no effect)
+    effectP0: f32,             // 4 bytes
+    effectP1: f32,             // 4 bytes
+    effectP2: f32,             // 4 bytes
+    effectP3: f32,             // 4 bytes
+    effectP4: f32,             // 4 bytes
+    effectP5: f32,             // 4 bytes
+    // Visual Zoom (shader-based magnification)
+    visualZoomScale: f32,      // 4 bytes: 1.0 = off, >1.0 = zoomed
+    visualZoomOffsetX: f32,    // 4 bytes: pan X in pixels
+    visualZoomOffsetY: f32,    // 4 bytes: pan Y in pixels
+    // YPaint overlay painters (full-screen layers)
+    ypaintScrollingSlot: u32,  // 4 bytes: slot index (0 = disabled)
+    ypaintOverlaySlot: u32,    // 4 bytes: slot index (0 = disabled)
+    _pad0: f32,                // 4 bytes: alignment padding
+    _pad1: f32,                // 4 bytes: alignment padding
+    _pad2: f32,                // 4 bytes: alignment padding for 16-byte
+};  // Total: 272 bytes (16-byte aligned)
+
+// Glyph metadata (40 bytes per glyph, matches C++ GlyphMetadataGPU)
+struct GlyphMetadata {
+    uvMin: vec2<f32>,      // 8 bytes
+    uvMax: vec2<f32>,      // 8 bytes
+    size: vec2<f32>,       // 8 bytes (glyph size in pixels)
+    bearing: vec2<f32>,    // 8 bytes (glyph offset from baseline)
+    advance: f32,          // 4 bytes
+    _pad: f32,             // 4 bytes
+};
+
+// Emoji glyph metadata (32 bytes per emoji, matches C++ EmojiGlyphMetadata)
+struct EmojiGlyphMetadata {
+    uvMin: vec2<f32>,      // 8 bytes
+    uvMax: vec2<f32>,      // 8 bytes
+    size: vec2<f32>,       // 8 bytes (glyph size in pixels at atlas resolution)
+    _pad: vec2<f32>,       // 8 bytes padding
+};
+
+// Raster glyph UV (8 bytes per glyph) - minimal for monospace terminal
+// uvMax = uvMin + glyphSizeUV (computed from uniform)
+struct RasterGlyphUV {
+    uv: vec2<f32>,         // 8 bytes (UV top-left corner)
+};
+
+// Cell structure - matches C++ Cell struct (12 bytes)
+// Uploaded directly from CPU, zero-copy
+struct Cell {
+    glyph: u32,    // 4 bytes - glyph index (room for shader-based glyphs)
+    fg: u32,       // 4 bytes - packed: fgR | (fgG << 8) | (fgB << 16) | (alpha << 24)
+    bg: u32,       // 4 bytes - packed: bgR | (bgG << 8) | (bgB << 16) | (style << 24)
+};
+
+// Shared bindings (group 0 - managed by Yetty)
+@group(0) @binding(0) var<uniform> globals: SharedUniforms;
+@group(0) @binding(1) var<storage, read> cardMetadata: array<u32>;
+@group(0) @binding(2) var<storage, read> cardStorage: array<f32>;
+// Card image atlas texture
+@group(0) @binding(3) var cardImageAtlas: texture_2d<f32>;
+@group(0) @binding(4) var cardImageSampler: sampler;
+
+// Render layer bindings (group 1 - generated by ShaderManager from GpuResourceSets)
+// RENDER_LAYER_BINDINGS_PLACEHOLDER
+
+// Attribute bit masks (matches CellAttrs in grid.h)
+const ATTR_BOLD: u32 = 0x01u;           // Bit 0
+const ATTR_ITALIC: u32 = 0x02u;         // Bit 1
+const ATTR_UNDERLINE_MASK: u32 = 0x0Cu; // Bits 2-3 (0=none, 1=single, 2=double, 3=curly)
+const ATTR_STRIKETHROUGH: u32 = 0x10u;  // Bit 4
+const ATTR_FONT_RENDER_METHOD_MASK: u32 = 0xE0u; // Bits 5-7 - font render method
+
+// Font render method constants (bits 5-7 of style byte)
+// Must match FontRenderMethod enum in font.hpp
+const FONT_RENDER_METHOD_MSDF: u32 = 0u;     // MSDF text rendering (default)
+const FONT_RENDER_METHOD_BITMAP: u32 = 1u;   // Bitmap fonts (emoji, color fonts)
+const FONT_RENDER_METHOD_SHADER: u32 = 2u;   // Single-cell shader glyphs
+const FONT_RENDER_METHOD_CARD: u32 = 3u;     // Multi-cell card glyphs
+const FONT_RENDER_METHOD_VECTOR: u32 = 4u;   // Vector font (SDF curves)
+const FONT_RENDER_METHOD_COVERAGE: u32 = 5u; // Vector font (coverage-based)
+const FONT_RENDER_METHOD_RASTER: u32 = 6u;   // Raster font (texture atlas)
+
+// Legacy alias for backward compatibility
+const ATTR_EMOJI: u32 = 0x20u;      // Bit 5 - same position as FONT_RENDER_METHOD_BITMAP
+
+
+// Vertex input/output
+struct VertexInput {
+    @location(0) position: vec2<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+};
+
+@vertex
+fn vs_main(input: VertexInput) -> VertexOutput {
+    var output: VertexOutput;
+    // Pass through clip-space coordinates directly
+    output.position = vec4<f32>(input.position, 0.0, 1.0);
+    return output;
+}
+
+// Note: median() function moved to lib/text.wgsl
+
+// Helper function to check if pixel is in underline region
+fn isInUnderline(localY: f32, cellHeight: f32, underlineType: u32, scale: f32) -> bool {
+    // Underline position: slightly below baseline (baseline is at 80%)
+    let baseline = cellHeight * 0.8;
+    let underlineY = baseline + 2.0 * scale;
+    let lineThickness = max(1.0, 1.5 * scale);
+
+    if (underlineType == 1u) {
+        // Single underline
+        return localY >= underlineY && localY < underlineY + lineThickness;
+    } else if (underlineType == 2u) {
+        // Double underline
+        let gap = lineThickness * 1.5;
+        let inFirst = localY >= underlineY && localY < underlineY + lineThickness;
+        let inSecond = localY >= underlineY + gap && localY < underlineY + gap + lineThickness;
+        return inFirst || inSecond;
+    } else if (underlineType == 3u) {
+        // Curly/wavy underline (simplified sine wave)
+        let waveHeight = lineThickness * 1.5;
+        let waveFreq = 0.15;  // Wave frequency
+        // We can't access localX here easily, so we'll handle curly differently
+        // For now, treat curly as a thicker single underline (TODO: proper wavy)
+        return localY >= underlineY && localY < underlineY + lineThickness * 2.0;
+    }
+    return false;
+}
+
+// Helper for curly underline with X position
+fn isInCurlyUnderline(localX: f32, localY: f32, cellWidth: f32, cellHeight: f32, scale: f32) -> bool {
+    let baseline = cellHeight * 0.8;
+    let underlineY = baseline + 2.0 * scale;
+    let lineThickness = max(1.0, 1.5 * scale);
+    let waveHeight = lineThickness * 1.2;
+    let waveFreq = 3.14159 * 2.0 / (cellWidth * 0.5);  // One full wave per half cell
+
+    // Calculate wave offset
+    let waveOffset = sin(localX * waveFreq) * waveHeight;
+    let waveCenterY = underlineY + waveHeight;  // Center the wave
+
+    return localY >= waveCenterY + waveOffset - lineThickness * 0.5 &&
+           localY < waveCenterY + waveOffset + lineThickness * 0.5;
+}
+
+// Helper function to check if pixel is in strikethrough region
+fn isInStrikethrough(localY: f32, cellHeight: f32, scale: f32) -> bool {
+    // Strikethrough at middle of cell (approximately 45% from top for x-height)
+    let strikeY = cellHeight * 0.45;
+    let lineThickness = max(1.0, 1.5 * scale);
+    return localY >= strikeY && localY < strikeY + lineThickness;
+}
+
+// Extract font render method from cell attrs (bits 5-7)
+fn getFontRenderMethod(attrs: u32) -> u32 {
+    return (attrs >> 5u) & 0x7u;
+}
+
+// ==== PRE-EFFECT FUNCTIONS (injected by loader) ====
+// PRE_EFFECT_FUNCTIONS_PLACEHOLDER
+
+// ==== COORD EFFECT FUNCTIONS (injected by loader) ====
+// EFFECT_FUNCTIONS_PLACEHOLDER
+
+// ==== POST-EFFECT FUNCTIONS (injected by loader) ====
+// POST_EFFECT_FUNCTIONS_PLACEHOLDER
+
+// ==== SHADER GLYPH FUNCTIONS (injected by loader) ====
+// SHADER_GLYPH_FUNCTIONS_PLACEHOLDER
+
+// Helper to unpack u32 color to vec3<f32>
+fn unpackColor(packed: u32) -> vec3<f32> {
+    return vec3<f32>(
+        f32(packed & 0xFFu) / 255.0,
+        f32((packed >> 8u) & 0xFFu) / 255.0,
+        f32((packed >> 16u) & 0xFFu) / 255.0
+    );
+}
+
+// Helper to unpack u32 color to vec4<f32> (with alpha)
+fn unpackColorAlpha(packed: u32) -> vec4<f32> {
+    return vec4<f32>(
+        f32(packed & 0xFFu) / 255.0,
+        f32((packed >> 8u) & 0xFFu) / 255.0,
+        f32((packed >> 16u) & 0xFFu) / 255.0,
+        f32((packed >> 24u) & 0xFFu) / 255.0
+    );
+}
+
+// Dispatch to shader glyph by codepoint
+// Returns rendered color, or bgColor if glyph not found
+// pixelPos: absolute pixel coordinates on screen (for tiled effects like fractals)
+// mousePos: current mouse position in pixels
+// fg/bg: raw packed u32 from cell - cards use as metadata index, regular glyphs unpack to color
+fn renderShaderGlyph(glyphIndex: u32, localUV: vec2<f32>, time: f32, fg: u32, bg: u32, pixelPos: vec2<f32>, mousePos: vec2<f32>, lastChar: u32, lastCharTime: f32) -> vec3<f32> {
+    // shaderGlyphDispatch
+    // (loader generates: if glyphIndex == 1052672u { return shaderGlyph_1048577(...); } else if ...)
+    return unpackColor(bg);  // Fallback if no shader glyph matches
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    // Convert fragment position to viewport-local pixel coordinates
+    // input.position.xy is in framebuffer space; subtract viewport origin
+    // so grid calculations start at (0,0) within the pane's client area
+    let fbPixelPos = input.position.xy;
+    var pixelPos = fbPixelPos - grid.viewportOrigin;
+
+    // ==== VISUAL ZOOM: transform coordinates before all other processing ====
+    // This is shader-based magnification that doesn't change terminal structure
+    if (grid.visualZoomScale > 1.0) {
+        // Zoom centered on viewport center, then apply pan offset
+        let viewportCenter = grid.screenSize * 0.5;
+        // Inverse transform: divide by scale (2x zoom = sample half the area)
+        pixelPos = (pixelPos - viewportCenter) / grid.visualZoomScale
+                 + viewportCenter
+                 + vec2<f32>(grid.visualZoomOffsetX, grid.visualZoomOffsetY);
+    }
+
+    // Calculate grid dimensions in pixels
+    let gridPixelWidth = grid.gridSize.x * grid.cellSize.x;
+    let gridPixelHeight = grid.gridSize.y * grid.cellSize.y;
+
+    // Check if outside the grid area
+    if (pixelPos.x < 0.0 || pixelPos.y < 0.0 || pixelPos.x >= gridPixelWidth || pixelPos.y >= gridPixelHeight) {
+        return vec4<f32>(0.1, 0.1, 0.1, 1.0);  // Background color
+    }
+
+    // ==== COORD EFFECT: distort pixel position before cell lookup ====
+    // effectIndex 0 = no effect, 1+ = apply effect
+    var distortedPos = pixelPos;
+    // EFFECT_APPLY_PLACEHOLDER
+
+    // Calculate which cell we're in (clamped to valid range after effects)
+    let cellCol = clamp(floor(distortedPos.x / grid.cellSize.x), 0.0, grid.gridSize.x - 1.0);
+    let cellRow = clamp(floor(distortedPos.y / grid.cellSize.y), 0.0, grid.gridSize.y - 1.0);
+    let cellCoord = vec2<i32>(i32(cellCol), i32(cellRow));
+
+    // Position within the cell (pixels from top-left of cell)
+    let localPxBase = vec2<f32>(
+        distortedPos.x - cellCol * grid.cellSize.x,
+        distortedPos.y - cellRow * grid.cellSize.y
+    );
+
+    // Get cell data from storage buffer (zero-copy from CPU)
+    let cellIndex = u32(cellCoord.y) * u32(grid.gridSize.x) + u32(cellCoord.x);
+    let cell = cellBuffer[cellIndex];
+
+    // Unpack cell data
+    var glyphIndex = cell.glyph;
+    let fgColor = vec4<f32>(
+        f32(cell.fg & 0xFFu) / 255.0,
+        f32((cell.fg >> 8u) & 0xFFu) / 255.0,
+        f32((cell.fg >> 16u) & 0xFFu) / 255.0,
+        f32((cell.fg >> 24u) & 0xFFu) / 255.0
+    );
+    let bgColor = vec4<f32>(
+        f32(cell.bg & 0xFFu) / 255.0,
+        f32((cell.bg >> 8u) & 0xFFu) / 255.0,
+        f32((cell.bg >> 16u) & 0xFFu) / 255.0,
+        1.0  // bg alpha always 1.0
+    );
+    let cellAttrs = (cell.bg >> 24u) & 0xFFu;  // style is in high byte of bg
+
+    // Extract attribute flags
+    let underlineType = (cellAttrs & ATTR_UNDERLINE_MASK) >> 2u;
+    let hasStrikethrough = (cellAttrs & ATTR_STRIKETHROUGH) != 0u;
+    let fontRenderMethod = getFontRenderMethod(cellAttrs);
+    // Backward compatible: if fontType is BITMAP or legacy emoji bit is set
+    let isEmoji = fontRenderMethod == FONT_RENDER_METHOD_BITMAP;
+    // Backward compatible: also check legacy emoji bit
+    // let isEmoji = fontRenderMethod == FONT_RENDER_METHOD_BITMAP || (cellAttrs & ATTR_EMOJI) != 0u;
+
+    // ==== PRE-EFFECT: modify cell data before rendering ====
+    // PRE_EFFECT_APPLY_PLACEHOLDER
+
+    // Check if cursor should be rendered on this cell
+    let cursorCol = i32(grid.cursorPos.x);
+    let cursorRow = i32(grid.cursorPos.y);
+    let isCursor = grid.cursorVisible > 0.5 &&
+                   cellCoord.x == cursorCol &&
+                   cellCoord.y == cursorRow;
+
+    // Handle wide character continuation (0xFFFE) - look at previous cell
+    var cellOffset = 0.0;
+    if (glyphIndex == 0xFFFEu) {
+        if (cellCoord.x > 0) {
+            let prevCellIndex = u32(cellCoord.y) * u32(grid.gridSize.x) + u32(cellCoord.x - 1);
+            glyphIndex = cellBuffer[prevCellIndex].glyph;
+            cellOffset = grid.cellSize.x;  // Offset by one cell width to continue rendering
+        } else {
+            // Edge case: continuation at column 0 (shouldn't happen)
+            var resultColor = bgColor.rgb;
+            if (isCursor) {
+                resultColor = vec3<f32>(1.0, 1.0, 1.0) - resultColor;
+            }
+            return vec4<f32>(resultColor, 1.0);
+        }
+    }
+
+    // Current pixel position within cell (offset for wide char continuation)
+    let localPx = localPxBase + vec2<f32>(cellOffset, 0.0);
+
+    // Start with background color
+    var finalColor = bgColor.rgb;
+    var hasGlyph = false;
+
+    // Check if we should render a glyph
+    // Note: for emojis, index 0 is valid (first emoji in atlas), so don't skip it
+    let skipGlyph = (!isEmoji && glyphIndex == 0u) || glyphIndex == 0xFFFFu ||
+                    (glyphIndex >= 0xF000u && glyphIndex <= 0xFFFDu);
+
+    if (!skipGlyph) {
+        // Dispatch based on font type encoded in cell style byte (bits 5-7)
+        if (fontRenderMethod == FONT_RENDER_METHOD_VECTOR) {
+            // Vector font: render using SDF curves
+            // Curves are normalized to font metrics (ascender/descender/advance)
+            // Just flip Y for screen coordinates
+            let localUV = vec2<f32>(
+                localPxBase.x / grid.cellSize.x,
+                1.0 - localPxBase.y / grid.cellSize.y
+            );
+
+            let sd = sampleVectorGlyph(glyphIndex, localUV);
+
+            // Anti-aliasing: compute pixel width in UV space from cell size
+            // One pixel in UV space = 1.0 / cellSize
+            let pixelWidth = 1.0 / min(grid.cellSize.x, grid.cellSize.y);
+
+            // Smooth anti-aliasing with ~1.5 pixel transition zone
+            let alpha = clamp(0.5 - sd / (pixelWidth * 1.5), 0.0, 1.0);
+
+            finalColor = mix(bgColor.rgb, fgColor.rgb, alpha);
+            hasGlyph = alpha > 0.01;
+        } else if (fontRenderMethod == FONT_RENDER_METHOD_COVERAGE) {
+            // Coverage font: render using multi-sample coverage calculation
+            let localUV = vec2<f32>(
+                localPxBase.x / grid.cellSize.x,
+                1.0 - localPxBase.y / grid.cellSize.y
+            );
+
+            // Pixel size in UV space
+            let pixelSize = vec2<f32>(1.0 / grid.cellSize.x, 1.0 / grid.cellSize.y);
+
+            // Get coverage value (0-1)
+            let coverage = sampleCoverageGlyph(glyphIndex, localUV, pixelSize);
+
+            finalColor = mix(bgColor.rgb, fgColor.rgb, coverage);
+            hasGlyph = coverage > 0.01;
+        } else if (fontRenderMethod == FONT_RENDER_METHOD_RASTER) {
+            // Raster font: sample from texture atlas using glyph index directly
+            let glyphUV = rasterFontBuffer[glyphIndex].uv;
+
+            // Skip empty glyphs (marked with negative UV)
+            if (glyphUV.x >= 0.0) {
+                // Compute UV within the glyph cell
+                // glyphSizeUV should be passed as uniform, for now assume square cells
+                let glyphSizeUV = vec2<f32>(grid.cellSize.x / 1024.0, grid.cellSize.y / 1024.0);
+                let localUV = localPxBase / grid.cellSize;
+                let sampleUV = glyphUV + localUV * glyphSizeUV;
+
+                // Sample grayscale texture (R channel) - use Level to avoid non-uniform control flow issue
+                let alpha = textureSampleLevel(rasterFontTexture, rasterFontSampler, sampleUV, 0.0).r;
+
+                finalColor = mix(bgColor.rgb, fgColor.rgb, alpha);
+                hasGlyph = alpha > 0.01;
+            }
+        } else if (fontRenderMethod == FONT_RENDER_METHOD_SHADER || fontRenderMethod == FONT_RENDER_METHOD_CARD) {
+            // Card or shader glyph: render via shader function
+            let localUV = localPxBase / grid.cellSize;  // Normalize to 0-1
+            let mousePos = vec2<f32>(globals.mouseX, globals.mouseY);
+            finalColor = renderShaderGlyph(glyphIndex, localUV, globals.time, cell.fg, cell.bg, fbPixelPos, mousePos, globals.lastChar, globals.lastCharTime);
+            hasGlyph = true;
+        } else if (fontRenderMethod == FONT_RENDER_METHOD_BITMAP) {
+            // Emoji rendering: glyphIndex is the emoji index in emojiFontBuffer array
+            let emoji = emojiFontBuffer[glyphIndex];
+
+            // Emoji fills the cell, centered and scaled to fit
+            // emoji.size contains the actual glyph size in atlas pixels
+            let emojiAspect = emoji.size.x / emoji.size.y;
+            let cellAspect = grid.cellSize.x / grid.cellSize.y;
+
+            // Scale emoji to fit within cell while maintaining aspect ratio
+            var scaledSize: vec2<f32>;
+            if (emojiAspect > cellAspect) {
+                // Emoji is wider - fit to width
+                scaledSize = vec2<f32>(grid.cellSize.x, grid.cellSize.x / emojiAspect);
+            } else {
+                // Emoji is taller - fit to height
+                scaledSize = vec2<f32>(grid.cellSize.y * emojiAspect, grid.cellSize.y);
+            }
+
+            // Center in cell
+            let offset = (grid.cellSize - scaledSize) * 0.5;
+
+            // Check if inside emoji bounds
+            if (localPx.x >= offset.x && localPx.x < offset.x + scaledSize.x &&
+                localPx.y >= offset.y && localPx.y < offset.y + scaledSize.y) {
+                // Calculate UV for sampling
+                let emojiLocalPos = (localPx - offset) / scaledSize;
+                let uv = mix(emoji.uvMin, emoji.uvMax, emojiLocalPos);
+
+                // Sample emoji texture (pre-rendered RGBA)
+                let emojiColor = textureSampleLevel(emojiFontTexture, emojiFontSampler, uv, 0.0);
+
+                // Alpha blend emoji over background
+                finalColor = mix(bgColor.rgb, emojiColor.rgb, emojiColor.a);
+                hasGlyph = emojiColor.a > 0.01;
+            }
+        } else {
+            // MSDF text rendering (fontRenderMethod == FONT_RENDER_METHOD_MSDF or default)
+            let glyph = msdfFontBuffer[glyphIndex];
+
+            // Calculate glyph position within cell
+            let scaledGlyphSize = glyph.size * grid.scale;
+            let scaledBearing = glyph.bearing * grid.scale;
+
+            // Baseline at 80% of cell height
+            let baseline = grid.cellSize.y * 0.8;
+            let glyphTop = baseline - scaledBearing.y;
+            let glyphLeft = scaledBearing.x;
+
+            // Glyph bounds in cell pixel space
+            let glyphMinPx = vec2<f32>(glyphLeft, glyphTop);
+            let glyphMaxPx = vec2<f32>(glyphLeft + scaledGlyphSize.x, glyphTop + scaledGlyphSize.y);
+
+            // Check if inside glyph bounds
+            if (localPx.x >= glyphMinPx.x && localPx.x < glyphMaxPx.x &&
+                localPx.y >= glyphMinPx.y && localPx.y < glyphMaxPx.y) {
+                // Calculate UV for MSDF sampling
+                let glyphLocalPos = (localPx - glyphMinPx) / scaledGlyphSize;
+                let uv = mix(glyph.uvMin, glyph.uvMax, glyphLocalPos);
+
+                // Sample MSDF texture
+                let msdf = textureSampleLevel(msdfFontTexture, msdfFontSampler, uv, 0.0);
+
+                // Calculate signed distance
+                let sd = median(msdf.r, msdf.g, msdf.b);
+
+                // Apply anti-aliased edge
+                let screenPxRange = grid.pixelRange * grid.scale;
+                let alpha = clamp((sd - 0.5) * screenPxRange + 0.5, 0.0, 1.0);
+
+                // Blend foreground over background
+                finalColor = mix(bgColor.rgb, fgColor.rgb, alpha);
+                hasGlyph = alpha > 0.01;
+            }
+        }
+    }
+
+    // Apply text decorations (underline and strikethrough)
+    let localY = localPxBase.y;  // Use base position, not offset
+    let localX = localPxBase.x;
+
+    // Check underline
+    if (underlineType > 0u) {
+        var inUnderline = false;
+        if (underlineType == 3u) {
+            // Curly underline needs X position
+            inUnderline = isInCurlyUnderline(localX, localY, grid.cellSize.x, grid.cellSize.y, grid.scale);
+        } else {
+            inUnderline = isInUnderline(localY, grid.cellSize.y, underlineType, grid.scale);
+        }
+        if (inUnderline) {
+            finalColor = fgColor.rgb;
+        }
+    }
+
+    // Check strikethrough
+    if (hasStrikethrough) {
+        if (isInStrikethrough(localY, grid.cellSize.y, grid.scale)) {
+            finalColor = fgColor.rgb;
+        }
+    }
+
+    // Cursor rendering: shape + blink
+    if (isCursor) {
+        // Blink: skip drawing cursor during off-phase (1Hz, 50% duty)
+        var cursorOn = true;
+        if (grid.cursorBlink > 0.5) {
+            cursorOn = fract(globals.time) < 0.5;
+        }
+
+        if (cursorOn) {
+            let localUV = localPxBase / grid.cellSize;
+            let shape = i32(grid.cursorShape);
+            var drawCursor = false;
+
+            if (shape == 2) {
+                // Underline: bottom 15% of cell
+                drawCursor = localUV.y > 0.85;
+            } else if (shape == 3) {
+                // Bar: left 10% of cell
+                drawCursor = localUV.x < 0.1;
+            } else {
+                // Block (1 or default): full cell
+                drawCursor = true;
+            }
+
+            if (drawCursor) {
+                finalColor = vec3<f32>(1.0, 1.0, 1.0) - finalColor;
+            }
+        }
+    }
+
+    // Selection highlighting
+    if (grid.hasSelection > 0.5) {
+        let col = i32(cellCol);
+        let row = i32(cellRow);
+        let sStartCol = i32(grid.selStart.x);
+        let sStartRow = i32(grid.selStart.y);
+        let sEndCol = i32(grid.selEnd.x);
+        let sEndRow = i32(grid.selEnd.y);
+
+        var inSelection = false;
+        if (row > sStartRow && row < sEndRow) {
+            // Entire row is selected
+            inSelection = true;
+        } else if (row == sStartRow && row == sEndRow) {
+            // Single-row selection
+            inSelection = col >= sStartCol && col <= sEndCol;
+        } else if (row == sStartRow) {
+            // First row of multi-row selection
+            inSelection = col >= sStartCol;
+        } else if (row == sEndRow) {
+            // Last row of multi-row selection
+            inSelection = col <= sEndCol;
+        }
+
+        if (inSelection) {
+            // Highlight: blend with selection color (blue tint)
+            finalColor = mix(finalColor, vec3<f32>(0.3, 0.5, 0.8), 0.4);
+        }
+    }
+
+    // ==== POST-EFFECT: modify final pixel color ====
+    // POST_EFFECT_APPLY_PLACEHOLDER
+
+    // ==== YPAINT OVERLAYS: render full-screen painter layers ====
+    // Layer 1: Scrolling painter (scrolls with terminal content)
+    if (grid.ypaintScrollingSlot > 0u) {
+        let scrollingColor = renderYpaintOverlay(grid.ypaintScrollingSlot, pixelPos);
+        if (scrollingColor.a > 0.01) {
+            finalColor = mix(finalColor, scrollingColor.rgb, scrollingColor.a);
+        }
+    }
+    // Layer 2: Overlay painter (fixed position, on top)
+    if (grid.ypaintOverlaySlot > 0u) {
+        let overlayColor = renderYpaintOverlay(grid.ypaintOverlaySlot, pixelPos);
+        if (overlayColor.a > 0.01) {
+            finalColor = mix(finalColor, overlayColor.rgb, overlayColor.a);
+        }
+    }
+
+    return vec4<f32>(finalColor, 1.0);
+}

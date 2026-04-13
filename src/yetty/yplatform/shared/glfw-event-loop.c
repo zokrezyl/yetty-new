@@ -1,0 +1,189 @@
+/* glfw-event-loop.c - OS event loop using GLFW */
+
+#include <yetty/platform/platform-input-pipe.h>
+#include <yetty/ycore/event.h>
+#include <GLFW/glfw3.h>
+
+static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
+{
+    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_core_event event = {0};
+
+    if (!pipe)
+        return;
+
+    if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+        if (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) {
+            if (key == GLFW_KEY_SPACE) {
+                event.type = YETTY_EVENT_CHAR;
+                event.chr.codepoint = ' ';
+                event.chr.mods = mods;
+                pipe->ops->write(pipe, &event, sizeof(event));
+                return;
+            }
+            const char *key_name = glfwGetKeyName(key, scancode);
+            if (key_name && key_name[0] && !key_name[1]) {
+                event.type = YETTY_EVENT_CHAR;
+                event.chr.codepoint = (uint32_t)(unsigned char)key_name[0];
+                event.chr.mods = mods;
+                pipe->ops->write(pipe, &event, sizeof(event));
+                return;
+            }
+        }
+        event.type = YETTY_EVENT_KEY_DOWN;
+        event.key.key = key;
+        event.key.mods = mods;
+        event.key.scancode = scancode;
+    } else if (action == GLFW_RELEASE) {
+        event.type = YETTY_EVENT_KEY_UP;
+        event.key.key = key;
+        event.key.mods = mods;
+        event.key.scancode = scancode;
+    } else {
+        return;
+    }
+
+    pipe->ops->write(pipe, &event, sizeof(event));
+}
+
+static void char_callback(GLFWwindow *window, unsigned int codepoint)
+{
+    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_core_event event = {0};
+
+    if (!pipe)
+        return;
+
+    event.type = YETTY_EVENT_CHAR;
+    event.chr.codepoint = codepoint;
+    event.chr.mods = 0;
+    pipe->ops->write(pipe, &event, sizeof(event));
+}
+
+static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
+{
+    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_core_event event = {0};
+    double x, y;
+
+    if (!pipe)
+        return;
+
+    glfwGetCursorPos(window, &x, &y);
+
+    if (action == GLFW_PRESS) {
+        event.type = YETTY_EVENT_MOUSE_DOWN;
+    } else {
+        event.type = YETTY_EVENT_MOUSE_UP;
+    }
+    event.mouse.x = (float)x;
+    event.mouse.y = (float)y;
+    event.mouse.button = button;
+    event.mouse.mods = mods;
+
+    pipe->ops->write(pipe, &event, sizeof(event));
+}
+
+static void cursor_pos_callback(GLFWwindow *window, double x, double y)
+{
+    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_core_event event = {0};
+
+    if (!pipe)
+        return;
+
+    event.type = YETTY_EVENT_MOUSE_MOVE;
+    event.mouse.x = (float)x;
+    event.mouse.y = (float)y;
+
+    pipe->ops->write(pipe, &event, sizeof(event));
+}
+
+static void scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
+{
+    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_core_event event = {0};
+    double x, y;
+    int mods = 0;
+
+    if (!pipe)
+        return;
+
+    glfwGetCursorPos(window, &x, &y);
+
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS)
+        mods |= GLFW_MOD_SHIFT;
+    if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS)
+        mods |= GLFW_MOD_CONTROL;
+    if (glfwGetKey(window, GLFW_KEY_LEFT_ALT) == GLFW_PRESS ||
+        glfwGetKey(window, GLFW_KEY_RIGHT_ALT) == GLFW_PRESS)
+        mods |= GLFW_MOD_ALT;
+
+    event.type = YETTY_EVENT_SCROLL;
+    event.scroll.x = (float)x;
+    event.scroll.y = (float)y;
+    event.scroll.dx = (float)xoffset;
+    event.scroll.dy = (float)yoffset;
+    event.scroll.mods = mods;
+
+    pipe->ops->write(pipe, &event, sizeof(event));
+}
+
+static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
+{
+    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_core_event event = {0};
+
+    if (!pipe)
+        return;
+
+    event.type = YETTY_EVENT_RESIZE;
+    event.resize.width = (float)width;
+    event.resize.height = (float)height;
+
+    pipe->ops->write(pipe, &event, sizeof(event));
+}
+
+static void window_close_callback(GLFWwindow *window)
+{
+    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_core_event event = {0};
+
+    if (!pipe)
+        return;
+
+    event.type = YETTY_EVENT_SHUTDOWN;
+    pipe->ops->write(pipe, &event, sizeof(event));
+}
+
+static void window_refresh_callback(GLFWwindow *window)
+{
+    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_core_event event = {0};
+
+    if (!pipe)
+        return;
+
+    event.type = YETTY_EVENT_RENDER;
+    pipe->ops->write(pipe, &event, sizeof(event));
+}
+
+void yetty_platform_setup_window_callbacks(GLFWwindow *window)
+{
+    glfwSetKeyCallback(window, key_callback);
+    glfwSetCharCallback(window, char_callback);
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
+    glfwSetCursorPosCallback(window, cursor_pos_callback);
+    glfwSetScrollCallback(window, scroll_callback);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetWindowCloseCallback(window, window_close_callback);
+    glfwSetWindowRefreshCallback(window, window_refresh_callback);
+}
+
+void yetty_platform_run_os_event_loop(GLFWwindow *window, int *running)
+{
+    while (*running && !glfwWindowShouldClose(window))
+        glfwWaitEvents();
+}
