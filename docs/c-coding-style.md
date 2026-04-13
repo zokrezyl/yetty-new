@@ -173,6 +173,24 @@ Window close → SHUTDOWN event → event_loop stops → caller destroys termina
 
 ## Result Types
 
+**See [docs/result.md](result.md) for full documentation.**
+
+**Rule: Any C function that can error must return a Result type, even if the success value is void.**
+
+For void functions that can fail, use `struct yetty_core_void_result`:
+
+```c
+struct yetty_core_void_result yetty_thing_init(struct yetty_thing *thing)
+{
+    if (!thing)
+        return YETTY_ERR(yetty_core_void, "thing is NULL");
+
+    /* ... initialization ... */
+
+    return YETTY_OK_VOID();
+}
+```
+
 Each module declares its own result types using `YETTY_RESULT_DECLARE`:
 
 ```c
