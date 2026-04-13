@@ -18,17 +18,17 @@ endif()
 # Platform sources — Windows-specific + shared GLFW (C)
 # Windows uses GLFW for window/surface but ConPTY for terminal and Windows pipes
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-main.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-surface.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-event-loop.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-clipboard-manager.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.c
-    ${YETTY_ROOT}/src/yetty/platform/windows/conpty.c
-    ${YETTY_ROOT}/src/yetty/platform/windows/pipe.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-main.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-surface.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-event-loop.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-window.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-clipboard-manager.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/yplatform/windows/conpty.c
+    ${YETTY_ROOT}/src/yetty/yplatform/windows/pipe.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
-    ${YETTY_ROOT}/src/yetty/platform/windows/platform-paths.c
+    ${YETTY_ROOT}/src/yetty/yplatform/windows/platform-paths.c
 )
 
 # Create executable with core sources + platform

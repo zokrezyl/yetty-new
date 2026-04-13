@@ -31,13 +31,13 @@ endif()
 
 # Platform sources — Android-specific + shared Unix components (all C)
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/android/main.c
-    ${YETTY_ROOT}/src/yetty/platform/android/platform-paths.c
-    ${YETTY_ROOT}/src/yetty/platform/android/surface.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.c
+    ${YETTY_ROOT}/src/yetty/yplatform/android/main.c
+    ${YETTY_ROOT}/src/yetty/yplatform/android/platform-paths.c
+    ${YETTY_ROOT}/src/yetty/yplatform/android/surface.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pipe.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pty.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
 )
 

@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include <yetty/ypaint/sdf/ypaint-sdf-types.gen.h>
-#include <yetty/ypaint/core/ypaint-canvas.h>
 #include <stddef.h>
+#include <yetty/ypaint-core/buffer.h>
+#include <yetty/ysdf/ypaint-sdf-types.gen.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +18,8 @@ extern "C" {
  * @param len Length of YAML string
  * @return 0 on success, -1 on error
  */
-int ypaint_sdf_yaml_parse(struct ypaint_canvas *canvas, const char *yaml, size_t len);
+int ypaint_sdf_yaml_parse(struct yetty_ypaint_buffer *canvas, const char *yaml,
+                          size_t len);
 
 #ifdef __cplusplus
 }

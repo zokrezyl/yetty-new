@@ -10,8 +10,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <yetty/core/result.h>
-#include <yetty/render/gpu-resource-set.h>
+#include <yetty/ycore/result.h>
+#include <yetty/yrender/gpu-resource-set.h>
 
 #ifdef __cplusplus
 extern "C" {

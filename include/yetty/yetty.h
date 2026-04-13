@@ -1,7 +1,7 @@
 #ifndef YETTY_YETTY_H
 #define YETTY_YETTY_H
 
-#include <yetty/core/result.h>
+#include <yetty/ycore/result.h>
 #include <webgpu/webgpu.h>
 #include <stdint.h>
 

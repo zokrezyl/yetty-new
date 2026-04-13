@@ -1,7 +1,7 @@
 #ifndef YETTY_PLATFORM_PTY_FACTORY_H
 #define YETTY_PLATFORM_PTY_FACTORY_H
 
-#include <yetty/core/result.h>
+#include <yetty/ycore/result.h>
 #include <yetty/platform/pty.h>
 
 #ifdef __cplusplus

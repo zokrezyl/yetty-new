@@ -16,13 +16,13 @@ file(MAKE_DIRECTORY ${IOS_ASSETS_DIR})
 # Platform sources — iOS-specific (Objective-C) + shared Unix (C)
 # iOS uses TinyEMU for PTY (RISC-V Linux VM) instead of unix-pty
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/ios/main.m
-    ${YETTY_ROOT}/src/yetty/platform/ios/platform-paths.m
-    ${YETTY_ROOT}/src/yetty/platform/ios/surface.m
-    ${YETTY_ROOT}/src/yetty/platform/ios/tinyemu-pty.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.c
+    ${YETTY_ROOT}/src/yetty/yplatform/ios/main.m
+    ${YETTY_ROOT}/src/yetty/yplatform/ios/platform-paths.m
+    ${YETTY_ROOT}/src/yetty/yplatform/ios/surface.m
+    ${YETTY_ROOT}/src/yetty/yplatform/ios/tinyemu-pty.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pipe.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
 )
 
