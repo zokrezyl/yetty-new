@@ -1,0 +1,27 @@
+#!/bin/bash
+# Mass replace words recursively in the codebase
+# Usage: replace <what> <with>
+
+set -e
+
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 <what> <with>"
+    echo "Example: $0 old_name new_name"
+    exit 1
+fi
+
+WHAT="$1"
+WITH="$2"
+
+# Find and replace in source files, excluding build dirs and .git
+find . \
+    -type f \( -name '*.c' -o -name '*.h' -o -name '*.md' -o -name '*.txt' -o -name 'CMakeLists.txt' -o -name 'Makefile' \) \
+    ! -path './build*' \
+    ! -path './.git/*' \
+    ! -path './tmp/*' \
+    -exec grep -l "$WHAT" {} \; 2>/dev/null | while read -r file; do
+    echo "Replacing in: $file"
+    sed -i "s|$WHAT|$WITH|g" "$file"
+done
+
+echo "Done."

@@ -61,6 +61,7 @@ struct yetty_config {
 #define YETTY_CONFIG_KEY_SCROLLBACK_LINES "scrollback/lines"
 #define YETTY_CONFIG_KEY_DEBUG_DAMAGE_RECTS "debug/damage-rects"
 #define YETTY_CONFIG_KEY_FONT_FAMILY "font/family"
+#define YETTY_CONFIG_KEY_TERMINAL_FONT_RENDER_METHOD "terminal/text-layer/font/render-method"
 #define YETTY_CONFIG_KEY_RPC_SOCKET_PATH "rpc/socket-path"
 
 /* Create config */

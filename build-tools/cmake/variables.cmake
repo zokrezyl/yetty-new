@@ -88,8 +88,12 @@ option(YETTY_ENABLE_FEATURE_SSH       "ssh — SSH connectivity"               O
 option(YETTY_ENABLE_FEATURE_RPC       "rpc — msgpack-RPC interface"          OFF)
 
 # Misc
+option(YETTY_ENABLE_FEATURE_YCDB      "ycdb — constant database wrapper"     ON)
 option(YETTY_ENABLE_FEATURE_YEXPR     "yexpr — expression parser"            ON)
 option(YETTY_ENABLE_FEATURE_YFSVM     "yfsvm — fragment shader VM"           ON)
+option(YETTY_ENABLE_FEATURE_YIMAGE    "yimage — image complex primitive"     ON)
+option(YETTY_ENABLE_FEATURE_YMSDF_GEN_CPU "ymsdf-gen-cpu — CPU MSDF generator" ON)
+option(YETTY_ENABLE_FEATURE_YMS_MSDF  "yms-msdf — monospace MSDF CDB gen"   ON)
 option(YETTY_ENABLE_FEATURE_YCAT      "ycat — file viewer"                   OFF)
 
 # Build pipeline

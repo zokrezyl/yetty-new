@@ -77,6 +77,10 @@ if(YETTY_ENABLE_FEATURE_YCORE)
     add_subdirectory(ycore)
 endif()
 
+if(YETTY_ENABLE_FEATURE_YCDB)
+    add_subdirectory(ycdb)
+endif()
+
 if(YETTY_ENABLE_FEATURE_YFONT)
     add_subdirectory(yfont)
 endif()
@@ -137,6 +141,18 @@ endif()
 
 if(YETTY_ENABLE_FEATURE_YPLOT)
     add_subdirectory(yplot)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YIMAGE)
+    add_subdirectory(yimage)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YMSDF_GEN_CPU)
+    add_subdirectory(ymsdf-gen-cpu)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YMS_MSDF)
+    add_subdirectory(yms-msdf)
 endif()
 
 if(YETTY_ENABLE_FEATURE_MSDF_WGSL)

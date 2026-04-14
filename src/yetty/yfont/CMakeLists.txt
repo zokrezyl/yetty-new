@@ -1,6 +1,7 @@
 # yetty font subsystem (C)
 add_library(yetty_yfont STATIC
     raster-font.c
+    msdf-font.c
 )
 
 target_include_directories(yetty_yfont PUBLIC
@@ -9,4 +10,4 @@ target_include_directories(yetty_yfont PUBLIC
     ${FREETYPE_INCLUDE_DIR}
 )
 
-target_link_libraries(yetty_yfont PUBLIC ${FREETYPE_ALL_LIBS} ytrace::ytrace webgpu)
+target_link_libraries(yetty_yfont PUBLIC ${FREETYPE_ALL_LIBS} webgpu yetty_ycdb)
