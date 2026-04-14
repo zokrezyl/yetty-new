@@ -1,7 +1,7 @@
 #include <yetty/yterm/text-layer.h>
-#include <yetty/yfont/font.h>
-#include <yetty/yfont/raster-font.h>
-#include <yetty/yfont/msdf-font.h>
+#include <yetty/yfont/ms-font.h>
+#include <yetty/yfont/ms-raster-font.h>
+#include <yetty/yfont/ms-msdf-font.h>
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/types.h>
@@ -82,7 +82,7 @@ struct yetty_term_terminal_text_layer {
     struct yetty_term_terminal_layer base;
     VTerm *vterm;
     VTermScreen *screen;
-    struct yetty_font_font *font;  /* not owned */
+    struct yetty_font_ms_font *font;
     struct yetty_render_gpu_resource_set rs;
 };
 
@@ -114,14 +114,16 @@ static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
     if (!text_layer->font || !text_layer->font->ops || count == 0)
         return result;
 
-    enum yetty_font_style style = YETTY_FONT_STYLE_REGULAR;
-    if (bold && italic)      style = YETTY_FONT_STYLE_BOLD_ITALIC;
-    else if (bold)           style = YETTY_FONT_STYLE_BOLD;
-    else if (italic)         style = YETTY_FONT_STYLE_ITALIC;
+    enum yetty_font_ms_style style = YETTY_FONT_MS_STYLE_REGULAR;
+    if (bold && italic)      style = YETTY_FONT_MS_STYLE_BOLD_ITALIC;
+    else if (bold)           style = YETTY_FONT_MS_STYLE_BOLD;
+    else if (italic)         style = YETTY_FONT_MS_STYLE_ITALIC;
 
-    result.glyph_index = text_layer->font->ops->get_glyph_index_styled(
+    struct uint32_result glyph_res = text_layer->font->ops->get_glyph_index_styled(
         text_layer->font, chars[0], style);
-    result.font_type = YETTY_FONT_RENDER_METHOD_RASTER;
+    if (YETTY_IS_OK(glyph_res))
+        result.glyph_index = glyph_res.value;
+    result.font_type = 0;
 
     return result;
 }
@@ -243,20 +245,19 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     const char *render_method = config->ops->get_string(
         config, YETTY_CONFIG_KEY_TERMINAL_FONT_RENDER_METHOD, "raster");
     ydebug("text_layer: render_method='%s'", render_method);
-    struct yetty_font_font_result font_res;
+    struct yetty_font_ms_font_result font_res;
     if (strcmp(render_method, "msdf") == 0) {
         const char *fonts_dir = config->ops->get_string(config, "paths/fonts", "");
         const char *font_family = config->ops->font_family(config);
         if (!font_family || strcmp(font_family, "default") == 0)
             font_family = "DejaVuSansMNerdFontMono";
         char cdb_path[512];
-        snprintf(cdb_path, sizeof(cdb_path), "%s/../msdf-fonts/%s-Regular.cdb",
+        snprintf(cdb_path, sizeof(cdb_path), "%s/../msdf-fonts/%s-Regular.ms-cdb",
                  fonts_dir, font_family);
-        ydebug("text_layer: msdf cdb_path='%s' fonts_dir='%s' family='%s'",
-               cdb_path, fonts_dir, font_family ? font_family : "(null)");
-        font_res = yetty_font_msdf_font_create(cdb_path, 4.0f);
+        ydebug("text_layer: ms-msdf cdb_path='%s'", cdb_path);
+        font_res = yetty_font_ms_msdf_font_create(cdb_path);
     } else {
-        font_res = yetty_font_raster_font_create(
+        font_res = yetty_font_ms_raster_font_create(
             config,
             text_layer->base.cell_size.width,
             text_layer->base.cell_size.height);
@@ -266,8 +267,7 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
         free(text_layer);
         return YETTY_ERR(yetty_term_terminal_layer, font_res.error.msg);
     }
-    ydebug("text_layer: font created, render_method=%d",
-           font_res.value->ops->render_method(font_res.value));
+    ydebug("text_layer: font created");
     text_layer->font = font_res.value;
 
     text_layer->vterm = vterm_new((int)rows, (int)cols);

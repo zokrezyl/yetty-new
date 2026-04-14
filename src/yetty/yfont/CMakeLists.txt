@@ -1,7 +1,7 @@
 # yetty font subsystem (C)
 add_library(yetty_yfont STATIC
-    raster-font.c
-    msdf-font.c
+    ms-raster-font.c
+    ms-msdf-font.c
 )
 
 target_include_directories(yetty_yfont PUBLIC
