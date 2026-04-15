@@ -1,7 +1,7 @@
 // Raster font shader — provides font_sample()
 // Uses R8 atlas texture + per-glyph UV buffer
 
-fn font_sample(glyph_index: u32, local_uv: vec2<f32>, cell_size: vec2<f32>) -> f32 {
+fn font_sample(glyph_index: u32, local_px: vec2<f32>, cell_size: vec2<f32>) -> f32 {
     let base = raster_font_buffer_offset + glyph_index * 2u;
     let glyph_uv = vec2<f32>(
         bitcast<f32>(storage_buffer[base]),
@@ -12,6 +12,7 @@ fn font_sample(glyph_index: u32, local_uv: vec2<f32>, cell_size: vec2<f32>) -> f
         return 0.0;
     }
 
+    let local_uv = local_px / cell_size;
     let region = raster_font_texture_region;
     let region_size = region.zw - region.xy;
     let atlas_size = vec2<f32>(f32(textureDimensions(atlas_r8_texture).x),

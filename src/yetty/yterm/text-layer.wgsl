@@ -84,8 +84,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     var final_color = bg_color;
 
     if (glyph != 0u) {
-        let local_uv = local_px / cell_size;
-        let alpha = font_sample(glyph, local_uv, cell_size);
+        let alpha = font_sample(glyph, local_px, cell_size);
         final_color = mix(bg_color, fg_color, alpha);
     }
 

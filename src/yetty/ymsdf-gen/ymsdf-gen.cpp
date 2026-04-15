@@ -120,14 +120,11 @@ static glyph_result generate_glyph(worker_ctx &ctx, uint32_t codepoint)
 
 	msdfgen::Shape::Bounds bounds = shape.getBounds();
 
+	int padding = static_cast<int>(std::ceil(ctx.pixel_range));
 	double logical_w = (bounds.r - bounds.l) * scale;
 	double logical_h = (bounds.t - bounds.b) * scale;
-	int bmp_w = static_cast<int>(std::ceil(logical_w));
-	int bmp_h = static_cast<int>(std::ceil(logical_h));
-
-	ydebug("glyph U+%04X bounds=[%.2f,%.2f,%.2f,%.2f] bmp=%dx%d scale=%.4f",
-	       codepoint, bounds.l, bounds.b, bounds.r, bounds.t,
-	       bmp_w, bmp_h, scale);
+	int bmp_w = static_cast<int>(std::ceil(logical_w)) + padding * 2;
+	int bmp_h = static_cast<int>(std::ceil(logical_h)) + padding * 2;
 
 	if (bmp_w <= 0 || bmp_h <= 0)
 		return res;
@@ -136,15 +133,15 @@ static glyph_result generate_glyph(worker_ctx &ctx, uint32_t codepoint)
 	res.header.height = static_cast<uint16_t>(bmp_h);
 	res.header.size_x = static_cast<float>(bmp_w);
 	res.header.size_y = static_cast<float>(bmp_h);
-	res.header.bearing_x = static_cast<float>(bounds.l * scale);
-	res.header.bearing_y = static_cast<float>(bounds.t * scale);
+	res.header.bearing_x = static_cast<float>(bounds.l * scale - padding);
+	res.header.bearing_y = static_cast<float>(bounds.t * scale + padding);
 
 	msdfgen::edgeColoringSimple(shape, 3.0);
 
 	msdfgen::Bitmap<float, 3> msdf(bmp_w, bmp_h);
 	msdfgen::Vector2 translate(
-		-bounds.l,
-		-bounds.b);
+		padding / scale - bounds.l,
+		padding / scale - bounds.b);
 	msdfgen::generateMSDF(msdf, shape, ctx.pixel_range, scale, translate);
 
 	/* Convert to RGBA8 with Y-flip */
