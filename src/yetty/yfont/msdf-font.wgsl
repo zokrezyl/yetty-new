@@ -31,8 +31,7 @@ fn font_sample(glyph_index: u32, local_px: vec2<f32>, cell_size: vec2<f32>) -> f
         return 0.0;
     }
 
-    // Scale = 1.0 for native rendering (TODO: proper zoom support)
-    let scale = 1.0;
+    let scale = uniforms.ms_msdf_font_scale;
     let scaled_size = glyph_size * scale;
     let scaled_bearing = bearing * scale;
 

@@ -258,7 +258,9 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
         snprintf(cdb_path, sizeof(cdb_path), "%s/../msdf-fonts/%s-Regular.cdb",
                  fonts_dir, font_family);
         ydebug("text_layer: ms-msdf cdb_path='%s'", cdb_path);
-        font_res = yetty_font_ms_msdf_font_create(cdb_path);
+        float msdf_font_size = (float)config->ops->get_int(
+            config, "terminal/text-layer/font/size", 14);
+        font_res = yetty_font_ms_msdf_font_create(cdb_path, msdf_font_size);
     } else {
         font_res = yetty_font_ms_raster_font_create(
             config,
@@ -273,6 +275,17 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     ydebug("text_layer: font created");
     text_layer->font = font_res.value;
     text_layer->font_type = (strcmp(render_method, "msdf") == 0) ? 0u : 6u;
+
+    /* Get cell size from font */
+    struct pixel_size_result cs_res = text_layer->font->ops->get_cell_size(text_layer->font);
+    if (YETTY_IS_ERR(cs_res)) {
+        free(text_layer);
+        return YETTY_ERR(yetty_term_terminal_layer, cs_res.error.msg);
+    }
+    text_layer->base.cell_size.width = cs_res.value.width;
+    text_layer->base.cell_size.height = cs_res.value.height;
+    ydebug("text_layer: cell_size from font: %.1fx%.1f",
+           cs_res.value.width, cs_res.value.height);
 
     text_layer->vterm = vterm_new((int)rows, (int)cols);
     if (!text_layer->vterm) {

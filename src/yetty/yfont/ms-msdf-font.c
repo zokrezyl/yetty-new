@@ -68,8 +68,10 @@ struct ms_msdf_font {
 	/* Codepoint -> slot */
 	struct yetty_core_map glyph_map;
 
-	/* Font metrics (from first loaded glyph) */
-	float advance;
+	/* Font sizing */
+	float base_size;       /* CDB generation font size */
+	float requested_size;  /* user-requested font size */
+	float hw_ratio;        /* height/width ratio (from first glyph) */
 	float pixel_range;
 
 	/* GPU resource set */
@@ -131,9 +133,9 @@ static struct uint32_result load_one(struct ms_msdf_font *f, uint32_t cp)
 		return YETTY_ERR(uint32, "glyph pixel data truncated");
 	}
 
-	/* Store advance from first real glyph */
-	if (f->advance == 0 && hdr.advance > 0)
-		f->advance = hdr.advance;
+	/* Compute hw_ratio from first real glyph with advance */
+	if (f->hw_ratio == 0.0f && hdr.advance > 0)
+		f->hw_ratio = hdr.size_y / hdr.advance;
 
 	/* Allocate slot */
 	uint32_t slot = f->next_slot;
@@ -248,10 +250,11 @@ ms_msdf_get_cell_size(const struct yetty_font_ms_font *self)
 	const struct ms_msdf_font *f = (const struct ms_msdf_font *)self;
 	if (!f)
 		return YETTY_ERR(pixel_size, "font is NULL");
-	/* For monospace, cell width = advance, height derived from font metrics */
+	if (f->hw_ratio <= 0.0f)
+		return YETTY_ERR(pixel_size, "hw_ratio not set");
 	struct pixel_size sz;
-	sz.width = f->advance;
-	sz.height = f->advance * 2.0f; /* TODO: proper ascender-descender */
+	sz.height = f->requested_size;
+	sz.width = f->requested_size / f->hw_ratio;
 	return YETTY_OK(pixel_size, sz);
 }
 
@@ -274,9 +277,11 @@ ms_msdf_get_glyph_index_styled(struct yetty_font_ms_font *self,
 static struct yetty_core_void_result
 ms_msdf_resize(struct yetty_font_ms_font *self, float font_size)
 {
-	(void)self;
-	(void)font_size;
-	/* MSDF is resolution-independent */
+	struct ms_msdf_font *f = (struct ms_msdf_font *)self;
+	if (!f)
+		return YETTY_ERR(yetty_core_void, "font is NULL");
+	f->requested_size = font_size;
+	f->dirty = 1;
 	return YETTY_OK_VOID();
 }
 
@@ -324,6 +329,11 @@ ms_msdf_get_gpu_resource_set(struct yetty_font_ms_font *self)
 		f->rs.buffers[0].size = (size_t)f->next_slot * sizeof(struct glyph_meta_gpu);
 		f->rs.buffers[0].dirty = 1;
 
+		/* Update uniforms */
+		f->rs.uniforms[0].f32 = f->pixel_range;
+		f->rs.uniforms[1].f32 = (f->base_size > 0) ?
+			f->requested_size / f->base_size : 1.0f;
+
 		f->dirty = 0;
 	}
 
@@ -347,10 +357,12 @@ static const struct yetty_font_ms_font_ops ms_msdf_ops = {
  *===========================================================================*/
 
 struct yetty_font_ms_font_result
-yetty_font_ms_msdf_font_create(const char *cdb_path)
+yetty_font_ms_msdf_font_create(const char *cdb_path, float font_size)
 {
 	if (!cdb_path)
 		return YETTY_ERR(yetty_font_ms_font, "cdb_path is NULL");
+	if (font_size <= 0.0f)
+		return YETTY_ERR(yetty_font_ms_font, "font_size must be > 0");
 
 	ydebug("ms_msdf_font: opening %s", cdb_path);
 
@@ -366,6 +378,9 @@ yetty_font_ms_msdf_font_create(const char *cdb_path)
 
 	f->base.ops = &ms_msdf_ops;
 	f->cdb = cdb_res.value;
+	f->requested_size = font_size;
+	f->base_size = 32.0f; /* TODO: read from CDB or config */
+	f->pixel_range = 4.0f;
 	f->dirty = 1;
 
 	/* Init atlas */
@@ -426,16 +441,28 @@ yetty_font_ms_msdf_font_create(const char *cdb_path)
 	f->rs.uniform_count = 2;
 	strncpy(f->rs.uniforms[0].name, "pixel_range", YETTY_RENDER_NAME_MAX - 1);
 	f->rs.uniforms[0].type = YETTY_RENDER_UNIFORM_F32;
-	f->rs.uniforms[0].f32 = 4.0f; /* default pixel range */
+	f->rs.uniforms[0].f32 = f->pixel_range;
 
-	strncpy(f->rs.uniforms[1].name, "glyph_cell_size", YETTY_RENDER_NAME_MAX - 1);
-	f->rs.uniforms[1].type = YETTY_RENDER_UNIFORM_VEC2;
-	/* Will be updated when first glyph is loaded */
+	strncpy(f->rs.uniforms[1].name, "scale", YETTY_RENDER_NAME_MAX - 1);
+	f->rs.uniforms[1].type = YETTY_RENDER_UNIFORM_F32;
+	f->rs.uniforms[1].f32 = f->requested_size / f->base_size;
 
 	yetty_render_shader_code_set(&f->rs.shader,
 		(const char *)gmsdf_font_shader_data, gmsdf_font_shader_size);
 
-	yinfo("ms_msdf_font: created from %s", cdb_path);
+	/* Load a glyph to determine hw_ratio */
+	load_one(f, 'M');
+	if (f->hw_ratio <= 0.0f) {
+		free(f->meta);
+		free(f->atlas_pixels);
+		yetty_core_map_destroy(&f->glyph_map);
+		yetty_ycdb_reader_close(f->cdb);
+		free(f);
+		return YETTY_ERR(yetty_font_ms_font, "failed to determine hw_ratio");
+	}
+
+	yinfo("ms_msdf_font: created from %s, size=%.0f, hw_ratio=%.3f",
+	      cdb_path, font_size, f->hw_ratio);
 
 	return YETTY_OK(yetty_font_ms_font, &f->base);
 }
