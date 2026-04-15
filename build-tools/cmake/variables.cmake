@@ -92,13 +92,12 @@ option(YETTY_ENABLE_FEATURE_YCDB      "ycdb — constant database wrapper"     O
 option(YETTY_ENABLE_FEATURE_YEXPR     "yexpr — expression parser"            ON)
 option(YETTY_ENABLE_FEATURE_YFSVM     "yfsvm — fragment shader VM"           ON)
 option(YETTY_ENABLE_FEATURE_YIMAGE    "yimage — image complex primitive"     ON)
-option(YETTY_ENABLE_FEATURE_YMSDF_GEN_CPU "ymsdf-gen-cpu — CPU MSDF generator" ON)
-option(YETTY_ENABLE_FEATURE_YMS_MSDF  "yms-msdf — monospace MSDF CDB gen"   ON)
+option(YETTY_ENABLE_FEATURE_YMSDF_GEN "ymsdf-gen — MSDF glyph generator"    ON)
 option(YETTY_ENABLE_FEATURE_YCAT      "ycat — file viewer"                   OFF)
 
 # Build pipeline
 option(YETTY_ENABLE_FEATURE_ASSETS    "assets — runtime asset copying"       ON)
-option(YETTY_ENABLE_FEATURE_CDB_GEN   "cdb-gen — CDB font generation"       OFF)
+option(YETTY_ENABLE_FEATURE_CDB_GEN   "cdb-gen — CDB font generation"       ON)
 option(YETTY_ENABLE_FEATURE_TESTS     "tests — unit tests"                   OFF)
 option(YETTY_ENABLE_FEATURE_TOOLS     "tools — build tools"                  OFF)
 option(YETTY_ENABLE_FEATURE_DEMO      "demo — demo programs"                 OFF)

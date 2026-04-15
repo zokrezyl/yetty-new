@@ -1,14 +1,14 @@
 /*
  * ms-msdf-font.c - Monospace MSDF font implementation
  *
- * Reads .ms-cdb files (pre-composited fixed cells, bearing baked in).
+ * Reads .cdb files (glyph header + RGBA bitmap per glyph).
+ * Packs glyphs into own atlas, builds per-glyph UV metadata buffer.
  * Implements yetty_font_ms_font interface.
- * Grid atlas, shader computes UV from glyph_index + uniforms.
  */
 
 #include <yetty/yfont/ms-msdf-font.h>
 #include <yetty/yfont/ms-font.h>
-#include <yetty/yms-msdf/yms-msdf.h>
+#include <yetty/ymsdf-gen/ymsdf-gen.h>
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/ycdb/ycdb.h>
 #include <yetty/ycore/map.h>
@@ -18,39 +18,72 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ATLAS_COLS 32
-#define ATLAS_MAX_DIM 8192
+#define INCBIN_STYLE 1
+#include <incbin.h>
+INCBIN(msdf_font_shader, YETTY_YFONT_SHADER_DIR "/msdf-font.wgsl");
+
+#define ATLAS_INITIAL_W 1024
+#define ATLAS_INITIAL_H 512
+#define ATLAS_MAX_DIM 16384
+#define ATLAS_PADDING 2
 #define MAP_CAPACITY 8192
+
+/*=============================================================================
+ * Per-glyph GPU metadata (40 bytes, matches old GlyphMetadataGPU)
+ *===========================================================================*/
+
+struct glyph_meta_gpu {
+	float uv_min_x, uv_min_y;
+	float uv_max_x, uv_max_y;
+	float size_x, size_y;
+	float bearing_x, bearing_y;
+	float advance;
+	float _pad;
+};
+
+/*=============================================================================
+ * Internal struct
+ *===========================================================================*/
 
 struct ms_msdf_font {
 	struct yetty_font_ms_font base;
 
 	struct yetty_ycdb_reader *cdb;
 
-	uint32_t cell_width;
-	uint32_t cell_height;
-	float pixel_range;
-	float font_size;
-
+	/* Atlas (RGBA8) */
 	uint8_t *atlas_pixels;
 	uint32_t atlas_width;
 	uint32_t atlas_height;
-	uint32_t glyphs_per_row;
+
+	/* Shelf packer */
+	uint32_t shelf_x;
+	uint32_t shelf_y;
+	uint32_t shelf_height;
+
+	/* Per-glyph metadata buffer */
+	struct glyph_meta_gpu *meta;
+	uint32_t meta_capacity;
 	uint32_t next_slot;
 
+	/* Codepoint -> slot */
 	struct yetty_core_map glyph_map;
 
+	/* Font metrics (from first loaded glyph) */
+	float advance;
+	float pixel_range;
+
+	/* GPU resource set */
 	struct yetty_render_gpu_resource_set rs;
 	int dirty;
 };
 
 /*=============================================================================
- * Helpers
+ * Atlas helpers
  *===========================================================================*/
 
 static void atlas_grow(struct ms_msdf_font *f)
 {
-	uint32_t new_h = f->atlas_height + f->cell_height;
+	uint32_t new_h = f->atlas_height + 512;
 	if (new_h > ATLAS_MAX_DIM)
 		return;
 
@@ -71,6 +104,7 @@ static struct uint32_result load_one(struct ms_msdf_font *f, uint32_t cp)
 	if (existing)
 		return YETTY_OK(uint32, *existing);
 
+	/* Read from CDB */
 	uint32_t key = cp;
 	void *data = NULL;
 	size_t data_len = 0;
@@ -80,34 +114,112 @@ static struct uint32_result load_one(struct ms_msdf_font *f, uint32_t cp)
 	if (YETTY_IS_ERR(res))
 		return YETTY_ERR(uint32, res.error.msg);
 	if (!data)
-		return YETTY_ERR(uint32, "glyph not found in ms-cdb");
+		return YETTY_ERR(uint32, "glyph not found");
 
-	size_t expected = (size_t)f->cell_width * f->cell_height * 4;
-	if (data_len != expected) {
+	if (data_len < sizeof(struct yetty_ymsdf_gen_glyph_header)) {
 		free(data);
-		return YETTY_ERR(uint32, "glyph data size mismatch");
+		return YETTY_ERR(uint32, "glyph data too small");
 	}
 
-	uint32_t slot = f->next_slot++;
-	uint32_t col = slot % f->glyphs_per_row;
-	uint32_t row = slot / f->glyphs_per_row;
+	struct yetty_ymsdf_gen_glyph_header hdr;
+	memcpy(&hdr, data, sizeof(hdr));
+	const uint8_t *pixels = (const uint8_t *)data + sizeof(hdr);
+	size_t pixel_bytes = (size_t)hdr.width * hdr.height * 4;
 
-	while ((row + 1) * f->cell_height > f->atlas_height)
+	if (data_len < sizeof(hdr) + pixel_bytes) {
+		free(data);
+		return YETTY_ERR(uint32, "glyph pixel data truncated");
+	}
+
+	/* Store advance from first real glyph */
+	if (f->advance == 0 && hdr.advance > 0)
+		f->advance = hdr.advance;
+
+	/* Allocate slot */
+	uint32_t slot = f->next_slot;
+
+	/* Grow metadata buffer if needed */
+	if (slot >= f->meta_capacity) {
+		uint32_t new_cap = f->meta_capacity * 2;
+		struct glyph_meta_gpu *new_meta = realloc(f->meta,
+			new_cap * sizeof(struct glyph_meta_gpu));
+		if (!new_meta) {
+			free(data);
+			return YETTY_ERR(uint32, "meta realloc failed");
+		}
+		f->meta = new_meta;
+		f->meta_capacity = new_cap;
+	}
+
+	/* Set glyph_cell_size uniform from first real glyph */
+	if (hdr.width > 0 && hdr.height > 0 &&
+	    f->rs.uniforms[1].vec2[0] == 0.0f) {
+		f->rs.uniforms[1].vec2[0] = hdr.size_x;
+		f->rs.uniforms[1].vec2[1] = hdr.size_y;
+	}
+
+	/* Empty glyph (space etc) — just metadata, no atlas pixels */
+	if (hdr.width == 0 || hdr.height == 0) {
+		struct glyph_meta_gpu *m = &f->meta[slot];
+		memset(m, 0, sizeof(*m));
+		m->advance = hdr.advance;
+		f->next_slot++;
+
+		if (yetty_core_map_put(&f->glyph_map, cp, slot) < 0) {
+			free(data);
+			return YETTY_ERR(uint32, "map full");
+		}
+		f->dirty = 1;
+		free(data);
+		return YETTY_OK(uint32, slot);
+	}
+
+	/* Shelf-pack into atlas */
+	uint32_t gw = hdr.width;
+	uint32_t gh = hdr.height;
+
+	if (f->shelf_x + gw + ATLAS_PADDING > f->atlas_width) {
+		/* Next shelf */
+		f->shelf_x = ATLAS_PADDING;
+		f->shelf_y += f->shelf_height + ATLAS_PADDING;
+		f->shelf_height = 0;
+	}
+
+	while (f->shelf_y + gh + ATLAS_PADDING > f->atlas_height)
 		atlas_grow(f);
 
-	uint32_t dx = col * f->cell_width;
-	uint32_t dy = row * f->cell_height;
+	uint32_t ax = f->shelf_x;
+	uint32_t ay = f->shelf_y;
 
-	for (uint32_t y = 0; y < f->cell_height; y++) {
-		size_t dst = ((size_t)(dy + y) * f->atlas_width + dx) * 4;
-		size_t src = (size_t)y * f->cell_width * 4;
-		memcpy(f->atlas_pixels + dst, (uint8_t *)data + src,
-		       f->cell_width * 4);
+	/* Copy pixels into atlas */
+	for (uint32_t y = 0; y < gh; y++) {
+		size_t dst = ((size_t)(ay + y) * f->atlas_width + ax) * 4;
+		size_t src = (size_t)y * gw * 4;
+		memcpy(f->atlas_pixels + dst, pixels + src, gw * 4);
 	}
+
+	f->shelf_x = ax + gw + ATLAS_PADDING;
+	if (gh > f->shelf_height)
+		f->shelf_height = gh;
+
+	/* Fill metadata */
+	struct glyph_meta_gpu *m = &f->meta[slot];
+	m->uv_min_x = (float)ax / (float)f->atlas_width;
+	m->uv_min_y = (float)ay / (float)f->atlas_height;
+	m->uv_max_x = (float)(ax + gw) / (float)f->atlas_width;
+	m->uv_max_y = (float)(ay + gh) / (float)f->atlas_height;
+	m->size_x = hdr.size_x;
+	m->size_y = hdr.size_y;
+	m->bearing_x = hdr.bearing_x;
+	m->bearing_y = hdr.bearing_y;
+	m->advance = hdr.advance;
+	m->_pad = 0;
+
+	f->next_slot++;
 
 	if (yetty_core_map_put(&f->glyph_map, cp, slot) < 0) {
 		free(data);
-		return YETTY_ERR(uint32, "glyph map full");
+		return YETTY_ERR(uint32, "map full");
 	}
 
 	f->dirty = 1;
@@ -122,9 +234,9 @@ static struct uint32_result load_one(struct ms_msdf_font *f, uint32_t cp)
 static void ms_msdf_destroy(struct yetty_font_ms_font *self)
 {
 	struct ms_msdf_font *f = (struct ms_msdf_font *)self;
-	if (!f)
-		return;
+	if (!f) return;
 	free(f->atlas_pixels);
+	free(f->meta);
 	yetty_core_map_destroy(&f->glyph_map);
 	yetty_ycdb_reader_close(f->cdb);
 	free(f);
@@ -136,9 +248,10 @@ ms_msdf_get_cell_size(const struct yetty_font_ms_font *self)
 	const struct ms_msdf_font *f = (const struct ms_msdf_font *)self;
 	if (!f)
 		return YETTY_ERR(pixel_size, "font is NULL");
+	/* For monospace, cell width = advance, height derived from font metrics */
 	struct pixel_size sz;
-	sz.width = (float)f->cell_width;
-	sz.height = (float)f->cell_height;
+	sz.width = f->advance;
+	sz.height = f->advance * 2.0f; /* TODO: proper ascender-descender */
 	return YETTY_OK(pixel_size, sz);
 }
 
@@ -146,8 +259,7 @@ static struct uint32_result
 ms_msdf_get_glyph_index(struct yetty_font_ms_font *self, uint32_t cp)
 {
 	struct ms_msdf_font *f = (struct ms_msdf_font *)self;
-	if (!f)
-		return YETTY_ERR(uint32, "font is NULL");
+	if (!f) return YETTY_ERR(uint32, "font is NULL");
 	return load_one(f, cp);
 }
 
@@ -162,9 +274,9 @@ ms_msdf_get_glyph_index_styled(struct yetty_font_ms_font *self,
 static struct yetty_core_void_result
 ms_msdf_resize(struct yetty_font_ms_font *self, float font_size)
 {
-	/* MSDF is resolution-independent — no-op */
 	(void)self;
 	(void)font_size;
+	/* MSDF is resolution-independent */
 	return YETTY_OK_VOID();
 }
 
@@ -173,8 +285,7 @@ ms_msdf_load_glyphs(struct yetty_font_ms_font *self,
 		    const uint32_t *cps, size_t count)
 {
 	struct ms_msdf_font *f = (struct ms_msdf_font *)self;
-	if (!f)
-		return YETTY_ERR(yetty_core_void, "font is NULL");
+	if (!f) return YETTY_ERR(yetty_core_void, "font is NULL");
 	for (size_t i = 0; i < count; i++)
 		load_one(f, cps[i]);
 	return YETTY_OK_VOID();
@@ -184,8 +295,7 @@ static struct yetty_core_void_result
 ms_msdf_load_basic_latin(struct yetty_font_ms_font *self)
 {
 	struct ms_msdf_font *f = (struct ms_msdf_font *)self;
-	if (!f)
-		return YETTY_ERR(yetty_core_void, "font is NULL");
+	if (!f) return YETTY_ERR(yetty_core_void, "font is NULL");
 	for (uint32_t cp = 0x20; cp <= 0x7E; cp++)
 		load_one(f, cp);
 	return YETTY_OK_VOID();
@@ -200,21 +310,19 @@ static struct yetty_render_gpu_resource_set_result
 ms_msdf_get_gpu_resource_set(struct yetty_font_ms_font *self)
 {
 	struct ms_msdf_font *f = (struct ms_msdf_font *)self;
-	if (!f)
-		return YETTY_ERR(yetty_render_gpu_resource_set, "font is NULL");
+	if (!f) return YETTY_ERR(yetty_render_gpu_resource_set, "font is NULL");
 
 	if (f->dirty) {
+		/* Update atlas texture */
 		f->rs.textures[0].data = f->atlas_pixels;
 		f->rs.textures[0].width = f->atlas_width;
 		f->rs.textures[0].height = f->atlas_height;
 		f->rs.textures[0].dirty = 1;
 
-		f->rs.uniforms[0].u32 = f->glyphs_per_row;
-		f->rs.uniforms[1].vec2[0] = (float)f->cell_width;
-		f->rs.uniforms[1].vec2[1] = (float)f->cell_height;
-		f->rs.uniforms[2].vec2[0] = (float)f->atlas_width;
-		f->rs.uniforms[2].vec2[1] = (float)f->atlas_height;
-		f->rs.uniforms[3].f32 = f->pixel_range;
+		/* Update metadata buffer */
+		f->rs.buffers[0].data = (uint8_t *)f->meta;
+		f->rs.buffers[0].size = (size_t)f->next_slot * sizeof(struct glyph_meta_gpu);
+		f->rs.buffers[0].dirty = 1;
 
 		f->dirty = 0;
 	}
@@ -239,36 +347,16 @@ static const struct yetty_font_ms_font_ops ms_msdf_ops = {
  *===========================================================================*/
 
 struct yetty_font_ms_font_result
-yetty_font_ms_msdf_font_create(const char *ms_cdb_path)
+yetty_font_ms_msdf_font_create(const char *cdb_path)
 {
-	if (!ms_cdb_path)
-		return YETTY_ERR(yetty_font_ms_font, "ms_cdb_path is NULL");
+	if (!cdb_path)
+		return YETTY_ERR(yetty_font_ms_font, "cdb_path is NULL");
 
-	struct yetty_ycdb_reader_result cdb_res = yetty_ycdb_reader_open(ms_cdb_path);
+	ydebug("ms_msdf_font: opening %s", cdb_path);
+
+	struct yetty_ycdb_reader_result cdb_res = yetty_ycdb_reader_open(cdb_path);
 	if (YETTY_IS_ERR(cdb_res))
 		return YETTY_ERR(yetty_font_ms_font, cdb_res.error.msg);
-
-	uint32_t meta_key = YETTY_YMS_MSDF_META_KEY;
-	void *meta_data = NULL;
-	size_t meta_len = 0;
-
-	struct yetty_core_void_result get_res = yetty_ycdb_reader_get(
-		cdb_res.value, &meta_key, sizeof(meta_key), &meta_data, &meta_len);
-	if (YETTY_IS_ERR(get_res) || !meta_data ||
-	    meta_len < sizeof(struct yetty_yms_msdf_meta)) {
-		free(meta_data);
-		yetty_ycdb_reader_close(cdb_res.value);
-		return YETTY_ERR(yetty_font_ms_font, "invalid ms-cdb metadata");
-	}
-
-	struct yetty_yms_msdf_meta meta;
-	memcpy(&meta, meta_data, sizeof(meta));
-	free(meta_data);
-
-	if (meta.cell_width == 0 || meta.cell_height == 0) {
-		yetty_ycdb_reader_close(cdb_res.value);
-		return YETTY_ERR(yetty_font_ms_font, "ms-cdb cell size is 0");
-	}
 
 	struct ms_msdf_font *f = calloc(1, sizeof(struct ms_msdf_font));
 	if (!f) {
@@ -278,33 +366,47 @@ yetty_font_ms_msdf_font_create(const char *ms_cdb_path)
 
 	f->base.ops = &ms_msdf_ops;
 	f->cdb = cdb_res.value;
-	f->cell_width = meta.cell_width;
-	f->cell_height = meta.cell_height;
-	f->pixel_range = meta.pixel_range;
-	f->font_size = meta.font_size;
-	f->glyphs_per_row = ATLAS_COLS;
-	f->next_slot = 1;
 	f->dirty = 1;
 
-	if (yetty_core_map_init(&f->glyph_map, MAP_CAPACITY) < 0) {
-		yetty_ycdb_reader_close(f->cdb);
-		free(f);
-		return YETTY_ERR(yetty_font_ms_font, "map init failed");
-	}
-
-	f->atlas_width = f->cell_width * f->glyphs_per_row;
-	f->atlas_height = f->cell_height;
+	/* Init atlas */
+	f->atlas_width = ATLAS_INITIAL_W;
+	f->atlas_height = ATLAS_INITIAL_H;
 	size_t atlas_bytes = (size_t)f->atlas_width * f->atlas_height * 4;
 	f->atlas_pixels = calloc(atlas_bytes, 1);
 	if (!f->atlas_pixels) {
-		yetty_core_map_destroy(&f->glyph_map);
 		yetty_ycdb_reader_close(f->cdb);
 		free(f);
 		return YETTY_ERR(yetty_font_ms_font, "atlas allocation failed");
 	}
 
+	/* Init shelf packer */
+	f->shelf_x = ATLAS_PADDING;
+	f->shelf_y = ATLAS_PADDING;
+
+	/* Init metadata buffer */
+	f->meta_capacity = 256;
+	f->meta = calloc(f->meta_capacity, sizeof(struct glyph_meta_gpu));
+	if (!f->meta) {
+		free(f->atlas_pixels);
+		yetty_ycdb_reader_close(f->cdb);
+		free(f);
+		return YETTY_ERR(yetty_font_ms_font, "meta allocation failed");
+	}
+	f->next_slot = 1; /* slot 0 = empty/space */
+
+	/* Init glyph map */
+	if (yetty_core_map_init(&f->glyph_map, MAP_CAPACITY) < 0) {
+		free(f->meta);
+		free(f->atlas_pixels);
+		yetty_ycdb_reader_close(f->cdb);
+		free(f);
+		return YETTY_ERR(yetty_font_ms_font, "map init failed");
+	}
+
+	/* GPU resource set */
 	strncpy(f->rs.namespace, "ms_msdf_font", YETTY_RENDER_NAME_MAX - 1);
 
+	/* Texture: RGBA8 atlas */
 	f->rs.texture_count = 1;
 	struct yetty_render_texture *tex = &f->rs.textures[0];
 	strncpy(tex->name, "texture", YETTY_RENDER_NAME_MAX - 1);
@@ -313,23 +415,27 @@ yetty_font_ms_msdf_font_create(const char *ms_cdb_path)
 	tex->format = WGPUTextureFormat_RGBA8Unorm;
 	tex->sampler_filter = WGPUFilterMode_Linear;
 
-	f->rs.uniform_count = 4;
+	/* Buffer: per-glyph metadata */
+	f->rs.buffer_count = 1;
+	struct yetty_render_buffer *buf = &f->rs.buffers[0];
+	strncpy(buf->name, "buffer", YETTY_RENDER_NAME_MAX - 1);
+	strncpy(buf->wgsl_type, "array<f32>", YETTY_RENDER_WGSL_TYPE_MAX - 1);
+	buf->readonly = 1;
 
-	strncpy(f->rs.uniforms[0].name, "glyphs_per_row", YETTY_RENDER_NAME_MAX - 1);
-	f->rs.uniforms[0].type = YETTY_RENDER_UNIFORM_U32;
+	/* Uniforms for shader */
+	f->rs.uniform_count = 2;
+	strncpy(f->rs.uniforms[0].name, "pixel_range", YETTY_RENDER_NAME_MAX - 1);
+	f->rs.uniforms[0].type = YETTY_RENDER_UNIFORM_F32;
+	f->rs.uniforms[0].f32 = 4.0f; /* default pixel range */
 
 	strncpy(f->rs.uniforms[1].name, "glyph_cell_size", YETTY_RENDER_NAME_MAX - 1);
 	f->rs.uniforms[1].type = YETTY_RENDER_UNIFORM_VEC2;
+	/* Will be updated when first glyph is loaded */
 
-	strncpy(f->rs.uniforms[2].name, "atlas_size", YETTY_RENDER_NAME_MAX - 1);
-	f->rs.uniforms[2].type = YETTY_RENDER_UNIFORM_VEC2;
+	yetty_render_shader_code_set(&f->rs.shader,
+		(const char *)gmsdf_font_shader_data, gmsdf_font_shader_size);
 
-	strncpy(f->rs.uniforms[3].name, "pixel_range", YETTY_RENDER_NAME_MAX - 1);
-	f->rs.uniforms[3].type = YETTY_RENDER_UNIFORM_F32;
-	f->rs.uniforms[3].f32 = f->pixel_range;
-
-	yinfo("ms_msdf_font: created from %s, cell=%ux%u pixel_range=%.1f",
-	      ms_cdb_path, meta.cell_width, meta.cell_height, f->pixel_range);
+	yinfo("ms_msdf_font: created from %s", cdb_path);
 
 	return YETTY_OK(yetty_font_ms_font, &f->base);
 }

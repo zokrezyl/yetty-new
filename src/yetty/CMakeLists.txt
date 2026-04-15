@@ -147,12 +147,8 @@ if(YETTY_ENABLE_FEATURE_YIMAGE)
     add_subdirectory(yimage)
 endif()
 
-if(YETTY_ENABLE_FEATURE_YMSDF_GEN_CPU)
-    add_subdirectory(ymsdf-gen-cpu)
-endif()
-
-if(YETTY_ENABLE_FEATURE_YMS_MSDF)
-    add_subdirectory(yms-msdf)
+if(YETTY_ENABLE_FEATURE_YMSDF_GEN)
+    add_subdirectory(ymsdf-gen)
 endif()
 
 if(YETTY_ENABLE_FEATURE_MSDF_WGSL)

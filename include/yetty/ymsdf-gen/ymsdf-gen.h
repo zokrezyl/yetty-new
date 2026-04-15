@@ -2,14 +2,11 @@
 #define YETTY_YMSDF_GEN_H
 
 /*
- * ymsdf-gen - MSDF glyph generation interface
+ * ymsdf-gen - MSDF glyph CDB generation
  *
- * Abstract interface for generating MSDF bitmaps from font glyphs.
- * Two implementations:
- *   - ymsdf-gen-cpu: uses msdfgen C++ library (CPU, multi-threaded)
- *   - ymsdf-gen-gpu: uses WebGPU compute shaders (GPU)
- *
- * Each implementation provides a yetty_ymsdf_gen that satisfies the ops vtable.
+ * Generates .cdb files from TTF fonts containing MSDF glyph bitmaps.
+ * Each glyph entry: msdf_glyph_header (28 bytes) + RGBA8 pixel data.
+ * CPU implementation uses msdfgen library with multi-threaded generation.
  */
 
 #include <stddef.h>
@@ -21,69 +18,42 @@ extern "C" {
 #endif
 
 /*=============================================================================
- * Generated glyph — output from the generator
+ * CDB glyph header (28 bytes, matches old MsdfGlyphData)
  *===========================================================================*/
 
-struct yetty_ymsdf_gen_glyph {
+struct yetty_ymsdf_gen_glyph_header {
 	uint32_t codepoint;
-	uint16_t width;          /* bitmap width in pixels */
-	uint16_t height;         /* bitmap height in pixels */
+	uint16_t width;
+	uint16_t height;
 	float bearing_x;
 	float bearing_y;
+	float size_x;
+	float size_y;
 	float advance;
-	uint8_t *pixels;         /* RGBA8, width * height * 4 bytes, caller frees */
+	/* followed by width * height * 4 bytes RGBA8 pixel data */
 };
-
-YETTY_RESULT_DECLARE(yetty_ymsdf_gen_glyph, struct yetty_ymsdf_gen_glyph);
 
 /*=============================================================================
- * Font metrics — queried from the generator
+ * Config
  *===========================================================================*/
 
-struct yetty_ymsdf_gen_metrics {
-	float ascender;
-	float descender;
-	float max_advance;
-	float units_per_em;
-	int is_monospace;
+struct yetty_ymsdf_gen_config {
+	const char *ttf_path;
+	const char *output_dir;
+	float font_size;          /* pixels, default 32 */
+	float pixel_range;        /* default 4 */
+	int thread_count;         /* 0 = auto */
+	int include_nerd_fonts;
+	int include_cjk;
+	int all_glyphs;
 };
-
-YETTY_RESULT_DECLARE(yetty_ymsdf_gen_metrics, struct yetty_ymsdf_gen_metrics);
 
 /*=============================================================================
- * Generator (opaque, polymorphic)
+ * API
  *===========================================================================*/
 
-struct yetty_ymsdf_gen;
-
-struct yetty_ymsdf_gen_ops {
-	void (*destroy)(struct yetty_ymsdf_gen *self);
-
-	/* Get font metrics (scaled by font_size) */
-	struct yetty_ymsdf_gen_metrics_result
-	(*get_metrics)(const struct yetty_ymsdf_gen *self);
-
-	/* Generate MSDF bitmap for a single glyph.
-	 * Returns tight bitmap + bearing. Caller frees pixels.
-	 */
-	struct yetty_ymsdf_gen_glyph_result
-	(*generate_glyph)(struct yetty_ymsdf_gen *self, uint32_t codepoint);
-};
-
-struct yetty_ymsdf_gen {
-	const struct yetty_ymsdf_gen_ops *ops;
-};
-
-YETTY_RESULT_DECLARE(yetty_ymsdf_gen, struct yetty_ymsdf_gen *);
-
-/*=============================================================================
- * CPU implementation (msdfgen library)
- *===========================================================================*/
-
-struct yetty_ymsdf_gen_result
-yetty_ymsdf_gen_cpu_create(const char *ttf_path,
-			   float font_size,
-			   float pixel_range);
+struct yetty_core_void_result
+yetty_ymsdf_gen_cpu_generate(const struct yetty_ymsdf_gen_config *config);
 
 #ifdef __cplusplus
 }

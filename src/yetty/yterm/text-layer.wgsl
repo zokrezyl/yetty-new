@@ -52,13 +52,7 @@ fn read_cell_bg(cell_index: u32) -> vec3<f32> {
     );
 }
 
-fn read_glyph_uv(glyph_index: u32) -> vec2<f32> {
-    let base = raster_font_buffer_offset + glyph_index * 2u;
-    return vec2<f32>(
-        bitcast<f32>(storage_buffer[base]),
-        bitcast<f32>(storage_buffer[base + 1u])
-    );
-}
+// font_sample is provided by the child font shader (raster or msdf)
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
@@ -90,24 +84,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     var final_color = bg_color;
 
     if (glyph != 0u) {
-        let glyph_uv = read_glyph_uv(glyph);
-        if (glyph_uv.x >= 0.0) {
-            // Map local pixel to atlas UV via region
-            let region = raster_font_texture_region;
-            let region_size = region.zw - region.xy;
-            let atlas_size = vec2<f32>(f32(textureDimensions(atlas_r8_texture).x),
-                                       f32(textureDimensions(atlas_r8_texture).y));
-            // glyph_uv is in [0,1] relative to the original font atlas
-            // region maps that to the packed atlas position
-            let glyph_size_uv = cell_size / atlas_size;
-            let local_uv = local_px / cell_size;
-            let sample_uv = region.xy + glyph_uv * region_size + local_uv * glyph_size_uv;
-            let alpha = textureSampleLevel(atlas_r8_texture, atlas_r8_sampler, sample_uv, 0.0).r;
-            final_color = mix(bg_color, fg_color, alpha);
-
-            // DEBUG: Show red tint where glyph should appear
-            // final_color = vec3<f32>(final_color.r + 0.3, final_color.g, final_color.b);
-        }
+        let local_uv = local_px / cell_size;
+        let alpha = font_sample(glyph, local_uv, cell_size);
+        final_color = mix(bg_color, fg_color, alpha);
     }
 
 

@@ -49,6 +49,7 @@ struct yetty_incbin_assets {
 #include "yetty_msdf-fonts_manifest.h"
 #endif
 
+
 /* Helper to add asset entry */
 static void add_asset(struct yetty_incbin_assets *assets, const char *name,
                       const uint8_t *data, size_t size, int compressed)
@@ -103,6 +104,7 @@ struct yetty_incbin_assets *yetty_incbin_assets_create(void)
     register_msdf_fonts_assets_c(register_asset_callback);
     ydebug("Registered MSDF font assets from manifest");
 #endif
+
 
     g_current_assets = NULL;
 

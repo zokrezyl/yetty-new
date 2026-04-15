@@ -26,7 +26,8 @@ INCBIN(text_layer_shader, TEXT_LAYER_SHADER_PATH);
 #define U_SCALE           5
 #define U_DEFAULT_FG      6
 #define U_DEFAULT_BG      7
-#define U_COUNT           8
+#define U_FONT_TYPE       8
+#define U_COUNT           9
 
 /* Setters */
 static inline void set_grid_size(struct yetty_render_gpu_resource_set *rs, float cols, float rows) {
@@ -70,6 +71,7 @@ static void init_uniforms(struct yetty_render_gpu_resource_set *rs)
     rs->uniforms[U_SCALE]          = (struct yetty_render_uniform){"scale",          YETTY_RENDER_UNIFORM_F32};
     rs->uniforms[U_DEFAULT_FG]     = (struct yetty_render_uniform){"default_fg",     YETTY_RENDER_UNIFORM_U32};
     rs->uniforms[U_DEFAULT_BG]     = (struct yetty_render_uniform){"default_bg",     YETTY_RENDER_UNIFORM_U32};
+    rs->uniforms[U_FONT_TYPE]     = (struct yetty_render_uniform){"font_type",     YETTY_RENDER_UNIFORM_U32};
 
     set_scale(rs, 1.0f);
     set_cursor_shape(rs, 1.0f);
@@ -83,6 +85,7 @@ struct yetty_term_terminal_text_layer {
     VTerm *vterm;
     VTermScreen *screen;
     struct yetty_font_ms_font *font;
+    uint32_t font_type; /* 0=msdf, 6=raster */
     struct yetty_render_gpu_resource_set rs;
 };
 
@@ -252,7 +255,7 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
         if (!font_family || strcmp(font_family, "default") == 0)
             font_family = "DejaVuSansMNerdFontMono";
         char cdb_path[512];
-        snprintf(cdb_path, sizeof(cdb_path), "%s/../msdf-fonts/%s-Regular.ms-cdb",
+        snprintf(cdb_path, sizeof(cdb_path), "%s/../msdf-fonts/%s-Regular.cdb",
                  fonts_dir, font_family);
         ydebug("text_layer: ms-msdf cdb_path='%s'", cdb_path);
         font_res = yetty_font_ms_msdf_font_create(cdb_path);
@@ -269,6 +272,7 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     }
     ydebug("text_layer: font created");
     text_layer->font = font_res.value;
+    text_layer->font_type = (strcmp(render_method, "msdf") == 0) ? 0u : 6u;
 
     text_layer->vterm = vterm_new((int)rows, (int)cols);
     if (!text_layer->vterm) {
@@ -297,6 +301,7 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     init_uniforms(&text_layer->rs);
     set_grid_size(&text_layer->rs, (float)cols, (float)rows);
     set_cell_size(&text_layer->rs, text_layer->base.cell_size.width, text_layer->base.cell_size.height);
+    text_layer->rs.uniforms[U_FONT_TYPE].u32 = text_layer->font_type;
 
     yetty_render_shader_code_set(&text_layer->rs.shader,
         (const char *)gtext_layer_shader_data, gtext_layer_shader_size);

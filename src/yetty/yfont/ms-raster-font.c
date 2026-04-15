@@ -17,6 +17,10 @@
 #include <string.h>
 #include <stdint.h>
 
+#define INCBIN_STYLE 1
+#include <incbin.h>
+INCBIN(raster_font_shader, YETTY_YFONT_SHADER_DIR "/raster-font.wgsl");
+
 /* Shorthand accessors into rs */
 #define FONT_ATLAS(f)    ((f)->rs.textures[0])
 #define FONT_UV_BUF(f)   ((f)->rs.buffers[0])
@@ -514,6 +518,9 @@ struct yetty_font_ms_font_result yetty_font_ms_raster_font_create(
     FONT_UVS(font)[0].uv_y = -1.0f;
     FONT_UV_BUF(font).size = sizeof(struct raster_glyph_uv);
     font->next_slot_idx = 1;
+
+    yetty_render_shader_code_set(&font->rs.shader,
+        (const char *)graster_font_shader_data, graster_font_shader_size);
 
     /* FreeType */
     if (FT_Init_FreeType(&font->ft_library)) {
