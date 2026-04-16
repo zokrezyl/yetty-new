@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include <yetty/ycore/result.h>
 #include <yetty/yrender/gpu-resource-set.h>
+#include <yetty/ypaint-core/complex-prim.h>
 
 #ifdef __cplusplus
 extern "C" {

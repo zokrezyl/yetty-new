@@ -7,12 +7,11 @@
 extern "C" {
 #endif
 
-/* Create monospace MSDF font from CDB file path.
- * cdb_path: path to the .cdb file with pre-generated MSDF glyphs
- * pixel_range: SDF pixel range (typically 4.0)
+/* Create non-monospace MSDF font from .cdb file.
+ * Can be used at any font size — scaling handled by shader.
  */
 struct yetty_font_font_result
-yetty_font_msdf_font_create(const char *cdb_path, float pixel_range);
+yetty_font_msdf_font_create(const char *cdb_path);
 
 #ifdef __cplusplus
 }

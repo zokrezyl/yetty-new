@@ -66,6 +66,40 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_nex
     const struct yetty_ypaint_core_buffer *buf,
     const struct yetty_ypaint_core_primitive_iter *iter);
 
+/*=============================================================================
+ * Font blob storage
+ *===========================================================================*/
+
+/* Add font TTF data to buffer. Returns fontId for use in text spans. */
+struct yetty_core_int_result
+yetty_ypaint_core_buffer_add_font(struct yetty_ypaint_core_buffer *buf,
+                                  const struct yetty_core_buffer *ttf_data,
+                                  const char *name);
+
+uint32_t yetty_ypaint_core_buffer_font_count(
+    const struct yetty_ypaint_core_buffer *buf);
+
+const struct yetty_font_blob *yetty_ypaint_core_buffer_get_font(
+    const struct yetty_ypaint_core_buffer *buf, uint32_t index);
+
+/*=============================================================================
+ * Text span storage
+ *===========================================================================*/
+
+struct yetty_core_void_result
+yetty_ypaint_core_buffer_add_text(struct yetty_ypaint_core_buffer *buf,
+                                  float x, float y,
+                                  const struct yetty_core_buffer *text,
+                                  float font_size, uint32_t color,
+                                  uint32_t layer, int32_t font_id,
+                                  float rotation);
+
+uint32_t yetty_ypaint_core_buffer_text_span_count(
+    const struct yetty_ypaint_core_buffer *buf);
+
+const struct yetty_text_span *yetty_ypaint_core_buffer_get_text_span(
+    const struct yetty_ypaint_core_buffer *buf, uint32_t index);
+
 #ifdef __cplusplus
 }
 #endif

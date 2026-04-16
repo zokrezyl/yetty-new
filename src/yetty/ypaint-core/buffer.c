@@ -16,11 +16,20 @@ struct primitive_handler {
     yetty_ypaint_core_primitive_size_fn size_fn;
 };
 
-// YPaint buffer - contains primitive data and handlers
+#define YPAINT_MAX_FONTS 8
+#define YPAINT_MAX_TEXT_SPANS 64
+
+// YPaint buffer - contains primitive data, fonts, text spans
 struct yetty_ypaint_core_buffer {
   struct yetty_core_named_buffer primitives;
   struct primitive_handler handlers[YPAINT_MAX_HANDLERS];
   size_t handler_count;
+
+  struct yetty_font_blob fonts[YPAINT_MAX_FONTS];
+  uint32_t font_count;
+
+  struct yetty_text_span text_spans[YPAINT_MAX_TEXT_SPANS];
+  uint32_t text_span_count;
 };
 
 struct yetty_core_void_result yetty_ypaint_core_buffer_register_handler(
@@ -213,4 +222,112 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_nex
       .size = size_res.value,
   };
   return YETTY_OK(yetty_ypaint_core_primitive_iter, new_iter);
+}
+
+/*=============================================================================
+ * Font blob storage
+ *===========================================================================*/
+
+struct yetty_core_int_result
+yetty_ypaint_core_buffer_add_font(struct yetty_ypaint_core_buffer *buf,
+                                  const struct yetty_core_buffer *ttf_data,
+                                  const char *name)
+{
+  if (!buf)
+    return YETTY_ERR(yetty_core_int, "buf is NULL");
+  if (!ttf_data || !ttf_data->data || ttf_data->size == 0)
+    return YETTY_ERR(yetty_core_int, "ttf_data is empty");
+  if (buf->font_count >= YPAINT_MAX_FONTS)
+    return YETTY_ERR(yetty_core_int, "max fonts reached");
+
+  struct yetty_font_blob *fb = &buf->fonts[buf->font_count];
+  fb->font_id = (int32_t)buf->font_count;
+
+  /* Copy TTF data */
+  fb->named_buf.buf.data = malloc(ttf_data->size);
+  if (!fb->named_buf.buf.data)
+    return YETTY_ERR(yetty_core_int, "allocation failed");
+  memcpy(fb->named_buf.buf.data, ttf_data->data, ttf_data->size);
+  fb->named_buf.buf.size = ttf_data->size;
+  fb->named_buf.buf.capacity = ttf_data->size;
+
+  if (name) {
+    strncpy(fb->named_buf.name, name,
+            YETTY_CORE_NAMED_BUFFER_MAX_NAME_LENGTH - 1);
+  }
+
+  int id = (int)buf->font_count;
+  buf->font_count++;
+  return YETTY_OK(yetty_core_int, id);
+}
+
+uint32_t yetty_ypaint_core_buffer_font_count(
+    const struct yetty_ypaint_core_buffer *buf)
+{
+  return buf ? buf->font_count : 0;
+}
+
+const struct yetty_font_blob *yetty_ypaint_core_buffer_get_font(
+    const struct yetty_ypaint_core_buffer *buf, uint32_t index)
+{
+  if (!buf || index >= buf->font_count)
+    return NULL;
+  return &buf->fonts[index];
+}
+
+/*=============================================================================
+ * Text span storage
+ *===========================================================================*/
+
+struct yetty_core_void_result
+yetty_ypaint_core_buffer_add_text(struct yetty_ypaint_core_buffer *buf,
+                                  float x, float y,
+                                  const struct yetty_core_buffer *text,
+                                  float font_size, uint32_t color,
+                                  uint32_t layer, int32_t font_id,
+                                  float rotation)
+{
+  if (!buf)
+    return YETTY_ERR(yetty_core_void, "buf is NULL");
+  if (!text || !text->data || text->size == 0)
+    return YETTY_ERR(yetty_core_void, "text is empty");
+  if (buf->text_span_count >= YPAINT_MAX_TEXT_SPANS)
+    return YETTY_ERR(yetty_core_void, "max text spans reached");
+
+  struct yetty_text_span *ts = &buf->text_spans[buf->text_span_count];
+  ts->x = x;
+  ts->y = y;
+  ts->font_size = font_size;
+  ts->color.r = (uint8_t)(color & 0xFF);
+  ts->color.g = (uint8_t)((color >> 8) & 0xFF);
+  ts->color.b = (uint8_t)((color >> 16) & 0xFF);
+  ts->color.a = (uint8_t)((color >> 24) & 0xFF);
+  ts->layer = layer;
+  ts->font_id = font_id;
+  ts->rotation = rotation;
+
+  /* Copy text data */
+  ts->named_buf.buf.data = malloc(text->size);
+  if (!ts->named_buf.buf.data)
+    return YETTY_ERR(yetty_core_void, "allocation failed");
+  memcpy(ts->named_buf.buf.data, text->data, text->size);
+  ts->named_buf.buf.size = text->size;
+  ts->named_buf.buf.capacity = text->size;
+
+  buf->text_span_count++;
+  return YETTY_OK_VOID();
+}
+
+uint32_t yetty_ypaint_core_buffer_text_span_count(
+    const struct yetty_ypaint_core_buffer *buf)
+{
+  return buf ? buf->text_span_count : 0;
+}
+
+const struct yetty_text_span *yetty_ypaint_core_buffer_get_text_span(
+    const struct yetty_ypaint_core_buffer *buf, uint32_t index)
+{
+  if (!buf || index >= buf->text_span_count)
+    return NULL;
+  return &buf->text_spans[index];
 }
