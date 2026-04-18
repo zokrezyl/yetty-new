@@ -22,8 +22,8 @@ struct yetty_core_event_loop;
 struct yetty_core_event_listener;
 struct yetty_platform_pty_poll_source;
 
-/* Event listener callback - returns 1 if handled, 0 if not */
-typedef int (*yetty_core_event_handler)(
+/* Event listener callback - returns int (1=handled, 0=not) or error */
+typedef struct yetty_core_int_result (*yetty_core_event_handler)(
     struct yetty_core_event_listener *listener,
     const struct yetty_core_event *event
 );

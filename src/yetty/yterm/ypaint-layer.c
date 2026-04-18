@@ -238,6 +238,10 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
    */
   init_uniforms(&layer->rs);
 
+  /* Set initial pixel size for render target */
+  layer->rs.pixel_size.width = (float)cols * cell_width;
+  layer->rs.pixel_size.height = (float)rows * cell_height;
+
   yetty_render_shader_code_set(&layer->rs.shader,
                                (const char *)gypaint_layer_shader_data,
                                gypaint_layer_shader_size);
@@ -421,6 +425,10 @@ ypaint_layer_get_gpu_resource_set(
     uint32_t prim_count =
         yetty_yetty_ypaint_canvas_primitive_count(layer->canvas);
     set_prim_count(&layer->rs, prim_count);
+
+    /* Set pixel size for render target */
+    layer->rs.pixel_size.width = (float)gs.cols * cs.width;
+    layer->rs.pixel_size.height = (float)gs.rows * cs.height;
 
     ydebug("ypaint_layer: grid=%ux%u, cell=%.1fx%.1f, prims=%u", gs.cols,
            gs.rows, cs.width, cs.height, prim_count);

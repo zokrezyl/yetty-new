@@ -4,8 +4,7 @@ add_library(yetty_render
     gpu-resource-binder.c
     render-target-surface.c
     rendered-layer.c
-    layer-renderer.c
-    blender.c
+    layer-renderer-surface.c
 )
 
 target_include_directories(yetty_render PUBLIC
