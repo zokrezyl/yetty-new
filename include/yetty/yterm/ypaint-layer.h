@@ -27,6 +27,7 @@ extern "C" {
  * @param cols, rows: grid dimensions
  * @param cell_width, cell_height: cell size in pixels
  * @param scrolling_mode: true for scrolling layer (syncs with text), false for overlay
+ * @param context: yetty context for config access (fonts path, etc.)
  * @param request_render_fn: callback to request re-render
  * @param request_render_userdata: userdata for callback
  */
@@ -34,6 +35,7 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
     uint32_t cols, uint32_t rows,
     float cell_width, float cell_height,
     int scrolling_mode,
+    const struct yetty_context *context,
     yetty_term_request_render_fn request_render_fn,
     void *request_render_userdata,
     yetty_term_scroll_fn scroll_fn,

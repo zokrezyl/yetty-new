@@ -572,6 +572,7 @@ def generate_sdf_yaml_factory_impl(prims: list[dict], out: Path) -> None:
     lines.append("        case YAML_SEQUENCE_END_EVENT:")
     lines.append("            store_array(&ctx);")
     lines.append("            ctx.in_array = 0;")
+    lines.append("            expect_value = 0;")
     lines.append("            break;")
     lines.append("        case YAML_SCALAR_EVENT: {")
     lines.append("            const char *val = (const char *)event.data.scalar.value;")

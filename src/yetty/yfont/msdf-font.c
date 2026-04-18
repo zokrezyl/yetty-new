@@ -2,7 +2,8 @@
  * msdf-font.c - Non-monospace MSDF font implementation
  *
  * Reads .cdb files (glyph header + RGBA bitmap per glyph).
- * Shelf-packs into own atlas, builds per-glyph UV metadata buffer.
+ * Uses uniform cell grid atlas — all glyphs in same-size cells.
+ * UV computed from slot index; bearing/advance handle layout.
  * Implements yetty_font_font interface (non-monospace).
  * Can be used at any font size — shader scales from base_size.
  */
@@ -29,13 +30,13 @@ INCBIN(msdf_font_shader, YETTY_YFONT_SHADER_DIR "/msdf-font.wgsl");
 #define ATLAS_PADDING 2
 #define MAP_CAPACITY 8192
 
-/* Per-glyph GPU metadata (40 bytes) */
+/* Per-glyph GPU metadata (24 bytes, 6 floats)
+ * UV is computed from slot index using uniform cell grid.
+ */
 struct glyph_meta_gpu {
-	float uv_min_x, uv_min_y;
-	float uv_max_x, uv_max_y;
-	float size_x, size_y;
-	float bearing_x, bearing_y;
-	float advance;
+	float size_x, size_y;       /* logical glyph size */
+	float bearing_x, bearing_y; /* offset from pen position */
+	float advance;              /* horizontal advance */
 	float _pad;
 };
 
@@ -48,9 +49,10 @@ struct msdf_font {
 	uint32_t atlas_width;
 	uint32_t atlas_height;
 
-	uint32_t shelf_x;
-	uint32_t shelf_y;
-	uint32_t shelf_height;
+	/* Uniform cell grid */
+	uint32_t cell_size;   /* uniform cell size (square) */
+	uint32_t atlas_cols;  /* cells per row */
+	uint32_t next_cell;   /* next cell index to use */
 
 	struct glyph_meta_gpu *meta;
 	uint32_t meta_capacity;
@@ -71,7 +73,9 @@ struct msdf_font {
 
 static void atlas_grow(struct msdf_font *f)
 {
-	uint32_t new_h = f->atlas_height + 512;
+	/* Add more rows */
+	uint32_t rows_to_add = 4;
+	uint32_t new_h = f->atlas_height + rows_to_add * f->cell_size;
 	if (new_h > ATLAS_MAX_DIM) return;
 
 	size_t old_sz = (size_t)f->atlas_width * f->atlas_height * 4;
@@ -130,7 +134,7 @@ static struct uint32_result load_one(struct msdf_font *f, uint32_t cp)
 		f->meta_capacity = new_cap;
 	}
 
-	/* Empty glyph (space) */
+	/* Empty glyph (space) — just metadata, no atlas pixels */
 	if (hdr.width == 0 || hdr.height == 0) {
 		struct glyph_meta_gpu *m = &f->meta[slot];
 		memset(m, 0, sizeof(*m));
@@ -142,35 +146,35 @@ static struct uint32_result load_one(struct msdf_font *f, uint32_t cp)
 		return YETTY_OK(uint32, slot);
 	}
 
-	/* Shelf-pack into atlas */
-	uint32_t gw = hdr.width;
-	uint32_t gh = hdr.height;
+	/* Place in uniform cell grid */
+	uint32_t cell_idx = f->next_cell;
+	uint32_t col = cell_idx % f->atlas_cols;
+	uint32_t row = cell_idx / f->atlas_cols;
 
-	if (f->shelf_x + gw + ATLAS_PADDING > f->atlas_width) {
-		f->shelf_x = ATLAS_PADDING;
-		f->shelf_y += f->shelf_height + ATLAS_PADDING;
-		f->shelf_height = 0;
-	}
-	while (f->shelf_y + gh + ATLAS_PADDING > f->atlas_height)
+	/* Grow atlas if needed */
+	while ((row + 1) * f->cell_size > f->atlas_height)
 		atlas_grow(f);
 
-	uint32_t ax = f->shelf_x;
-	uint32_t ay = f->shelf_y;
+	uint32_t ax = col * f->cell_size;
+	uint32_t ay = row * f->cell_size;
 
+	/* Center glyph in cell */
+	uint32_t gw = hdr.width;
+	uint32_t gh = hdr.height;
+	uint32_t ox = (f->cell_size - gw) / 2;
+	uint32_t oy = (f->cell_size - gh) / 2;
+
+	/* Copy pixels into atlas cell */
 	for (uint32_t y = 0; y < gh; y++) {
-		size_t dst = ((size_t)(ay + y) * f->atlas_width + ax) * 4;
+		size_t dst = ((size_t)(ay + oy + y) * f->atlas_width + ax + ox) * 4;
 		size_t src = (size_t)y * gw * 4;
 		memcpy(f->atlas_pixels + dst, pixels + src, gw * 4);
 	}
 
-	f->shelf_x = ax + gw + ATLAS_PADDING;
-	if (gh > f->shelf_height) f->shelf_height = gh;
+	f->next_cell++;
 
+	/* Fill metadata (no UV — computed from slot index in shader) */
 	struct glyph_meta_gpu *m = &f->meta[slot];
-	m->uv_min_x = (float)ax / (float)f->atlas_width;
-	m->uv_min_y = (float)ay / (float)f->atlas_height;
-	m->uv_max_x = (float)(ax + gw) / (float)f->atlas_width;
-	m->uv_max_y = (float)(ay + gh) / (float)f->atlas_height;
 	m->size_x = hdr.size_x;
 	m->size_y = hdr.size_y;
 	m->bearing_x = hdr.bearing_x;
@@ -266,6 +270,8 @@ msdf_get_gpu_resource_set(struct yetty_font_font *self)
 
 		f->rs.uniforms[0].f32 = f->pixel_range;
 		f->rs.uniforms[1].f32 = f->base_size;
+		f->rs.uniforms[2].u32 = f->cell_size;
+		f->rs.uniforms[3].u32 = f->atlas_cols;
 
 		f->dirty = 0;
 	}
@@ -287,6 +293,8 @@ static const struct yetty_font_font_ops msdf_font_ops = {
 /*=============================================================================
  * Create
  *===========================================================================*/
+
+#define DEFAULT_CELL_SIZE 64
 
 struct yetty_font_font_result
 yetty_font_msdf_font_create(const char *cdb_path)
@@ -312,8 +320,13 @@ yetty_font_msdf_font_create(const char *cdb_path)
 	f->pixel_range = 4.0f;
 	f->dirty = 1;
 
+	/* Uniform cell grid */
+	f->cell_size = DEFAULT_CELL_SIZE;
 	f->atlas_width = ATLAS_INITIAL_W;
+	f->atlas_cols = f->atlas_width / f->cell_size;
 	f->atlas_height = ATLAS_INITIAL_H;
+	f->next_cell = 0;
+
 	size_t atlas_bytes = (size_t)f->atlas_width * f->atlas_height * 4;
 	f->atlas_pixels = calloc(atlas_bytes, 1);
 	if (!f->atlas_pixels) {
@@ -321,9 +334,6 @@ yetty_font_msdf_font_create(const char *cdb_path)
 		free(f);
 		return YETTY_ERR(yetty_font_font, "atlas allocation failed");
 	}
-
-	f->shelf_x = ATLAS_PADDING;
-	f->shelf_y = ATLAS_PADDING;
 
 	f->meta_capacity = 256;
 	f->meta = calloc(f->meta_capacity, sizeof(struct glyph_meta_gpu));
@@ -360,7 +370,7 @@ yetty_font_msdf_font_create(const char *cdb_path)
 	strncpy(buf->wgsl_type, "array<f32>", YETTY_RENDER_WGSL_TYPE_MAX - 1);
 	buf->readonly = 1;
 
-	f->rs.uniform_count = 2;
+	f->rs.uniform_count = 4;
 	strncpy(f->rs.uniforms[0].name, "pixel_range", YETTY_RENDER_NAME_MAX - 1);
 	f->rs.uniforms[0].type = YETTY_RENDER_UNIFORM_F32;
 	f->rs.uniforms[0].f32 = f->pixel_range;
@@ -368,6 +378,14 @@ yetty_font_msdf_font_create(const char *cdb_path)
 	strncpy(f->rs.uniforms[1].name, "base_size", YETTY_RENDER_NAME_MAX - 1);
 	f->rs.uniforms[1].type = YETTY_RENDER_UNIFORM_F32;
 	f->rs.uniforms[1].f32 = f->base_size;
+
+	strncpy(f->rs.uniforms[2].name, "cell_size", YETTY_RENDER_NAME_MAX - 1);
+	f->rs.uniforms[2].type = YETTY_RENDER_UNIFORM_U32;
+	f->rs.uniforms[2].u32 = f->cell_size;
+
+	strncpy(f->rs.uniforms[3].name, "atlas_cols", YETTY_RENDER_NAME_MAX - 1);
+	f->rs.uniforms[3].type = YETTY_RENDER_UNIFORM_U32;
+	f->rs.uniforms[3].u32 = f->atlas_cols;
 
 	yetty_render_shader_code_set(&f->rs.shader,
 		(const char *)gmsdf_font_shader_data, gmsdf_font_shader_size);

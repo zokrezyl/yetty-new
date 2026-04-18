@@ -13,13 +13,13 @@ extern "C" {
 #endif
 
 struct yetty_yetty_ypaint_canvas;
-
-// High bit marker for glyph indices in packed grid
-#define YPAINT_GLYPH_BIT 0x80000000u
+struct yetty_context;
 
 // Create a canvas
 // @param scrolling_mode If true, primitives are cursor-relative and scroll
-struct yetty_yetty_ypaint_canvas *yetty_yetty_ypaint_canvas_create(bool scrolling_mode);
+// @param context Yetty context for config access (fonts path, etc.)
+struct yetty_yetty_ypaint_canvas *yetty_yetty_ypaint_canvas_create(
+    bool scrolling_mode, const struct yetty_context *context);
 
 // Destroy a canvas
 struct yetty_core_void_result
@@ -130,17 +130,6 @@ bool yetty_yetty_ypaint_canvas_is_dirty(struct yetty_yetty_ypaint_canvas *canvas
 struct yetty_core_void_result
 yetty_yetty_ypaint_canvas_rebuild_grid(struct yetty_yetty_ypaint_canvas *canvas);
 
-// Glyph bounds callback: returns AABB for glyph at index
-typedef struct yetty_core_void_result (*yetty_yetty_ypaint_canvas_glyph_bounds_func)(
-    void *user_data, uint32_t index, float *min_x, float *min_y, float *max_x,
-    float *max_y);
-
-// Rebuild packed grid with glyphs
-struct yetty_core_void_result yetty_yetty_ypaint_canvas_rebuild_grid_with_glyphs(
-    struct yetty_yetty_ypaint_canvas *canvas, uint32_t glyph_count,
-    yetty_yetty_ypaint_canvas_glyph_bounds_func bounds_func,
-    struct yetty_core_void_result *user_data);
-
 // Get packed grid data for GPU upload
 const uint32_t *yetty_yetty_ypaint_canvas_grid_data(struct yetty_yetty_ypaint_canvas *canvas);
 uint32_t yetty_yetty_ypaint_canvas_grid_word_count(struct yetty_yetty_ypaint_canvas *canvas);
@@ -173,6 +162,10 @@ bool yetty_yetty_ypaint_canvas_empty(struct yetty_yetty_ypaint_canvas *canvas);
 
 // Get total primitive count across all lines
 uint32_t yetty_yetty_ypaint_canvas_primitive_count(struct yetty_yetty_ypaint_canvas *canvas);
+
+// Get default font (for gpu resource set child inclusion)
+struct yetty_font_font *yetty_yetty_ypaint_canvas_get_default_font(
+    struct yetty_yetty_ypaint_canvas *canvas);
 
 #ifdef __cplusplus
 }

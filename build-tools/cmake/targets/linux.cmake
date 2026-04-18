@@ -110,10 +110,8 @@ if(YETTY_ENABLE_FEATURE_ASSETS)
 endif()
 
 # Tests
-if(YETTY_ENABLE_FEATURE_TESTS)
-    enable_testing()
-    add_subdirectory(${YETTY_ROOT}/test/ut ${CMAKE_BINARY_DIR}/test/ut)
-endif()
+enable_testing()
+add_subdirectory(${YETTY_ROOT}/test/ut ${CMAKE_BINARY_DIR}/test/ut)
 
 # Tools (ydraw-maze, ydraw-zoo, etc.)
 if(YETTY_ENABLE_FEATURE_TOOLS)

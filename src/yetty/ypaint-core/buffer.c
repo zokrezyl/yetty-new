@@ -116,6 +116,11 @@ void yetty_ypaint_core_buffer_destroy(struct yetty_ypaint_core_buffer *buf) {
     return;
 
   free(buf->primitives.buf.data);
+
+  /* Free text span data (text_spans is embedded array, only free inner data) */
+  for (uint32_t i = 0; i < buf->text_span_count; i++)
+    free(buf->text_spans[i].named_buf.buf.data);
+
   free(buf);
 }
 

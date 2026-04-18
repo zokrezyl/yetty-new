@@ -23,6 +23,7 @@ const YPAINT_SDF_SEGMENT: u32 = 2u;
 const YPAINT_SDF_TRIANGLE: u32 = 3u;
 const YPAINT_SDF_ELLIPSE: u32 = 6u;
 const YPAINT_SDF_CAPSULE: u32 = 18u;
+const YPAINT_SDF_GLYPH: u32 = 200u;
 
 // =============================================================================
 // Vertex Shader
@@ -110,6 +111,35 @@ fn ypaint_read_stroke_width(prim_offset: u32) -> f32 {
 fn ypaint_read_geom_f32(prim_offset: u32, idx: u32) -> f32 {
     return bitcast<f32>(storage_buffer[prim_offset + 6u + idx]);
 }
+
+// =============================================================================
+// Glyph Primitive Layout (different from SDF):
+//   [0] rolling_row
+//   [1] type (200 = GLYPH)
+//   [2] z_order
+//   [3] x           - glyph position
+//   [4] y           - glyph position
+//   [5] packed      - glyph_index (low 16) | font_id (high 16)
+//   [6] color       - packed RGBA
+// =============================================================================
+
+fn glyph_read_x(prim_offset: u32) -> f32 {
+    return bitcast<f32>(storage_buffer[prim_offset + 3u]);
+}
+
+fn glyph_read_y(prim_offset: u32) -> f32 {
+    return bitcast<f32>(storage_buffer[prim_offset + 4u]);
+}
+
+fn glyph_read_packed(prim_offset: u32) -> u32 {
+    return storage_buffer[prim_offset + 5u];
+}
+
+fn glyph_read_color(prim_offset: u32) -> u32 {
+    return storage_buffer[prim_offset + 6u];
+}
+
+// median3 is defined in msdf-font.wgsl (merged by binder)
 
 // Evaluate SDF for a primitive at given scene position
 fn ypaint_evaluate_sdf(prim_offset: u32, scene_pos: vec2<f32>) -> f32 {
@@ -219,11 +249,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     for (var i = 0u; i < loop_count; i++) {
         let raw_idx = storage_buffer[grid_offset + cell_start + 1u + i];
 
-        // Skip glyphs (bit 31 set = glyph reference)
-        if ((raw_idx & 0x80000000u) != 0u) {
-            continue;
-        }
-
         // raw_idx is a primitive index (0, 1, 2...), not a data offset
         // Prim staging layout: [offset_table...][prim_data...]
         // Read data offset from offset table, then compute actual position
@@ -236,10 +261,78 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let rolling_row_0 = uniforms.ypaint_scroll_ypaint_rolling_row_0;
         let y_offset = f32(i32(rolling_row) - i32(rolling_row_0)) * cell_size.y;
 
+        let prim_type = ypaint_read_prim_type(prim_offset);
+
+        // Handle glyph primitives (MSDF rendering)
+        if (prim_type == YPAINT_SDF_GLYPH) {
+            let glyph_x = glyph_read_x(prim_offset);
+            let glyph_y = glyph_read_y(prim_offset) + y_offset;
+            let packed = glyph_read_packed(prim_offset);
+            let glyph_index = packed & 0xFFFFu;
+            let color_packed = glyph_read_color(prim_offset);
+
+            // Read glyph metadata from font buffer
+            let meta_base = msdf_font_buffer_offset + glyph_index * 6u;
+            let glyph_size = vec2<f32>(
+                bitcast<f32>(storage_buffer[meta_base + 0u]),
+                bitcast<f32>(storage_buffer[meta_base + 1u])
+            );
+
+            // Empty glyph - skip
+            if (glyph_size.x <= 0.0 || glyph_size.y <= 0.0) {
+                continue;
+            }
+
+            // Compute render scale from base_size to actual font size
+            // For now use a default scale (font_size / base_size)
+            let scale = 1.0;  // TODO: get actual scale from glyph data
+
+            // Glyph bounds in screen space
+            let glyph_min = vec2<f32>(glyph_x, glyph_y);
+            let glyph_max = glyph_min + glyph_size * scale;
+
+            // Bounds check
+            if (pixel_pos.x < glyph_min.x || pixel_pos.x >= glyph_max.x ||
+                pixel_pos.y < glyph_min.y || pixel_pos.y >= glyph_max.y) {
+                continue;
+            }
+
+            // Compute UV from glyph_index using uniform cell grid
+            let font_cell_size = f32(uniforms.msdf_font_cell_size);
+            let atlas_cols = uniforms.msdf_font_atlas_cols;
+            let col = glyph_index % atlas_cols;
+            let row = glyph_index / atlas_cols;
+
+            let atlas_size = vec2<f32>(textureDimensions(atlas_rgba8_texture, 0));
+            let cell_uv_size = font_cell_size / atlas_size;
+            let uv_min = vec2<f32>(f32(col), f32(row)) * cell_uv_size;
+            let uv_max = uv_min + cell_uv_size;
+
+            // Map pixel to UV within glyph cell
+            let glyph_local = (pixel_pos - glyph_min) / (glyph_size * scale);
+            let sample_uv = mix(uv_min, uv_max, glyph_local);
+
+            // Sample MSDF
+            let msdf = textureSampleLevel(atlas_rgba8_texture, atlas_rgba8_sampler, sample_uv, 0.0);
+            let sd = median3(msdf.r, msdf.g, msdf.b);
+
+            // Anti-aliased edge
+            let screen_px_range = uniforms.msdf_font_pixel_range * scale;
+            let glyph_alpha = clamp((sd - 0.5) * screen_px_range + 0.5, 0.0, 1.0);
+
+            if (glyph_alpha > 0.0) {
+                let glyph_rgba = ypaint_unpack_color(color_packed);
+                let alpha = glyph_alpha * glyph_rgba.a;
+                result_color = mix(result_color, glyph_rgba.rgb, alpha);
+                result_alpha = max(result_alpha, alpha);
+            }
+            continue;
+        }
+
         // Adjust scene position - primitive coords are relative to its line
         let prim_scene_pos = vec2<f32>(pixel_pos.x, pixel_pos.y - y_offset);
 
-        // Evaluate SDF
+        // Evaluate SDF for non-glyph primitives
         let d = ypaint_evaluate_sdf(prim_offset, prim_scene_pos);
 
         // Render fill

@@ -2,6 +2,7 @@
 #include <string.h>
 #include <yetty/ycore/result.h>
 #include <yetty/ycore/util.h>
+#include <yetty/yfont/font.h>
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/yrender/gpu-resource-set.h>
@@ -145,7 +146,8 @@ static const struct yetty_term_terminal_layer_ops ypaint_layer_ops = {
 /* Create */
 struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
     uint32_t cols, uint32_t rows, float cell_width, float cell_height,
-    int scrolling_mode, yetty_term_request_render_fn request_render_fn,
+    int scrolling_mode, const struct yetty_context *context,
+    yetty_term_request_render_fn request_render_fn,
     void *request_render_userdata, yetty_term_scroll_fn scroll_fn,
     void *scroll_userdata, yetty_term_cursor_fn cursor_fn,
     void *cursor_userdata) {
@@ -173,9 +175,13 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
 
   layer->scrolling_mode = scrolling_mode;
 
-  /* Create canvas */
+  /* Create canvas (passes context for default font creation) */
+  if (!context) {
+    free(layer);
+    return YETTY_ERR(yetty_term_terminal_layer, "context is NULL");
+  }
   layer->canvas =
-      yetty_yetty_ypaint_canvas_create(scrolling_mode ? true : false);
+      yetty_yetty_ypaint_canvas_create(scrolling_mode ? true : false, context);
   if (!layer->canvas) {
     free(layer);
     return YETTY_ERR(yetty_term_terminal_layer,
@@ -203,6 +209,7 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
 
   /* Buffer 0: grid staging (cell-to-primitive lookup) */
   layer->rs.buffer_count = 2;
+  layer->rs.children_count = 1;  /* Reserve slot for font resource set */
   strncpy(layer->rs.buffers[0].name, "grid", YETTY_RENDER_NAME_MAX - 1);
   strncpy(layer->rs.buffers[0].wgsl_type, "array<u32>",
           YETTY_RENDER_WGSL_TYPE_MAX - 1);
@@ -406,6 +413,17 @@ ypaint_layer_get_gpu_resource_set(
            gs.rows, cs.width, cs.height, prim_count);
 
     layer->base.dirty = 0;
+  }
+
+  /* Include default font as child resource set for glyph rendering */
+  struct yetty_font_font *font =
+      yetty_yetty_ypaint_canvas_get_default_font(layer->canvas);
+  if (font && font->ops && font->ops->get_gpu_resource_set) {
+    struct yetty_render_gpu_resource_set_result font_rs =
+        font->ops->get_gpu_resource_set(font);
+    if (YETTY_IS_OK(font_rs))
+      layer->rs.children[0] =
+          (struct yetty_render_gpu_resource_set *)font_rs.value;
   }
 
   return YETTY_OK(yetty_render_gpu_resource_set, &layer->rs);

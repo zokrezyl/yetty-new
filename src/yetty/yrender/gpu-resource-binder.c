@@ -1,6 +1,7 @@
 #include <yetty/yrender/gpu-resource-binder.h>
 #include <yetty/yrender/gpu-allocator.h>
 #include <yetty/yrender/types.h>
+#include <yetty/webgpu/error.h>
 #include <yetty/ytrace.h>
 #include <stdlib.h>
 #include <string.h>
@@ -650,11 +651,14 @@ static struct yetty_core_void_result compile_and_create_pipeline(struct gpu_reso
     shader_desc.label.length = 15;
     shader_desc.nextInChain = &wgsl_src.chain;
 
+    yetty_webgpu_error_clear();
     impl->shader_module = wgpuDeviceCreateShaderModule(impl->device, &shader_desc);
     free(merged);
 
-    if (!impl->shader_module)
-        return YETTY_ERR(yetty_core_void, "failed to compile shader");
+    if (!impl->shader_module || yetty_webgpu_error_check())
+        return YETTY_ERR(yetty_core_void, yetty_webgpu_error.has_error
+                         ? yetty_webgpu_error.message
+                         : "failed to compile shader");
 
     /* Quad vertex buffer — only create once */
     if (!impl->quad_vertex_buffer) {

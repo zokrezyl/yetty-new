@@ -443,6 +443,7 @@ yetty_term_terminal_create(struct grid_size grid_size,
             cols, rows,
             text_layer->cell_size.width, text_layer->cell_size.height,
             1,  /* scrolling_mode = true */
+            yetty_context,
             terminal_request_render_callback, terminal,
             terminal_scroll_callback, terminal,
             terminal_cursor_callback, terminal);
