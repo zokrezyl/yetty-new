@@ -33,7 +33,7 @@ option(YETTY_ENABLE_LIB_MSDFGEN     "msdfgen — MSDF font generation"        OF
 option(YETTY_ENABLE_LIB_CDB         "cdb — constant database"               OFF)
 
 # Media / codecs
-option(YETTY_ENABLE_LIB_LIBJPEG_TURBO "libjpeg-turbo — JPEG support"       OFF)
+option(YETTY_ENABLE_LIB_LIBJPEG_TURBO "libjpeg-turbo — JPEG support"       ON)
 option(YETTY_ENABLE_LIB_DAV1D       "dav1d — AV1 decoder"                   OFF)
 option(YETTY_ENABLE_LIB_OPENH264    "openh264 — H.264 codec"                OFF)
 option(YETTY_ENABLE_LIB_MINIMP4     "minimp4 — MP4 container"               OFF)
@@ -82,7 +82,7 @@ option(YETTY_ENABLE_FEATURE_YTHORVG   "ythorvg — thorvg card"               OF
 option(YETTY_ENABLE_FEATURE_YVIDEO    "yvideo — video codec support"         OFF)
 
 # Network / connectivity
-option(YETTY_ENABLE_FEATURE_VNC       "vnc — VNC client/server"              OFF)
+option(YETTY_ENABLE_FEATURE_VNC       "vnc — VNC client/server"              ON)
 option(YETTY_ENABLE_FEATURE_TELNET    "telnet — telnet connectivity"         OFF)
 option(YETTY_ENABLE_FEATURE_SSH       "ssh — SSH connectivity"               OFF)
 option(YETTY_ENABLE_FEATURE_RPC       "rpc — msgpack-RPC interface"          OFF)

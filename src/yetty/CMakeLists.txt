@@ -164,9 +164,7 @@ if(YETTY_ENABLE_FEATURE_YSHADERS)
 endif()
 
 if(YETTY_ENABLE_FEATURE_VNC)
-    if(NOT YETTY_ANDROID)
-        add_subdirectory(vnc)
-    endif()
+    add_subdirectory(yvnc)
 endif()
 
 if(YETTY_ENABLE_FEATURE_TELNET)

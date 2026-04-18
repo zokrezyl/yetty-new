@@ -1,0 +1,159 @@
+#ifndef YETTY_YVNC_VNC_SERVER_H
+#define YETTY_YVNC_VNC_SERVER_H
+
+#include <stddef.h>
+#include <stdint.h>
+#include <webgpu/webgpu.h>
+#include <yetty/core/event-loop.h>
+#include <yetty/core/result.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct yetty_vnc_server;
+
+/* Result type */
+YETTY_RESULT_DECLARE(yetty_vnc_server_ptr, struct yetty_vnc_server *);
+
+/* Frame stats */
+struct yetty_vnc_server_stats {
+	uint32_t tiles_sent;
+	uint32_t tiles_jpeg;
+	uint32_t tiles_raw;
+	uint32_t avg_tile_size;
+	uint32_t full_updates;
+	uint32_t frames;
+	uint64_t bytes_per_sec;
+};
+
+/* Input callbacks */
+typedef void (*yetty_vnc_on_mouse_move_fn)(int16_t x, int16_t y, uint8_t mods,
+					   void *userdata);
+typedef void (*yetty_vnc_on_mouse_button_fn)(int16_t x, int16_t y,
+					     uint8_t button, int pressed,
+					     uint8_t mods, void *userdata);
+typedef void (*yetty_vnc_on_mouse_scroll_fn)(int16_t x, int16_t y,
+					     int16_t delta_x, int16_t delta_y,
+					     uint8_t mods, void *userdata);
+typedef void (*yetty_vnc_on_key_down_fn)(uint32_t keycode, uint32_t scancode,
+					 uint8_t mods, void *userdata);
+typedef void (*yetty_vnc_on_key_up_fn)(uint32_t keycode, uint32_t scancode,
+				       uint8_t mods, void *userdata);
+typedef void (*yetty_vnc_on_text_input_fn)(const char *text, size_t len,
+					   void *userdata);
+typedef void (*yetty_vnc_on_resize_fn)(uint16_t width, uint16_t height,
+				       void *userdata);
+typedef void (*yetty_vnc_on_cell_size_fn)(uint8_t cell_height, void *userdata);
+typedef void (*yetty_vnc_on_char_with_mods_fn)(uint32_t codepoint, uint8_t mods,
+					       void *userdata);
+typedef void (*yetty_vnc_on_input_received_fn)(void *userdata);
+
+/* Create server */
+struct yetty_vnc_server_ptr_result
+yetty_vnc_server_create(WGPUDevice device, WGPUQueue queue);
+
+/* Destroy server (handles NULL) */
+void yetty_vnc_server_destroy(struct yetty_vnc_server *server);
+
+/* Start listening on port */
+struct yetty_core_void_result
+yetty_vnc_server_start(struct yetty_vnc_server *server, uint16_t port);
+
+/* Stop server */
+struct yetty_core_void_result
+yetty_vnc_server_stop(struct yetty_vnc_server *server);
+
+/* Check server state */
+int yetty_vnc_server_is_running(const struct yetty_vnc_server *server);
+int yetty_vnc_server_has_clients(const struct yetty_vnc_server *server);
+int yetty_vnc_server_is_awaiting_ack(const struct yetty_vnc_server *server);
+int yetty_vnc_server_is_ready_for_frame(const struct yetty_vnc_server *server);
+
+/* Force full frame refresh */
+void yetty_vnc_server_force_full_frame(struct yetty_vnc_server *server);
+
+/* Rectangle merging */
+void yetty_vnc_server_set_merge_rectangles(struct yetty_vnc_server *server,
+					   int enable);
+int yetty_vnc_server_get_merge_rectangles(
+	const struct yetty_vnc_server *server);
+
+/* Compression settings */
+void yetty_vnc_server_set_force_raw(struct yetty_vnc_server *server,
+				    int enable);
+int yetty_vnc_server_get_force_raw(const struct yetty_vnc_server *server);
+void yetty_vnc_server_set_jpeg_quality(struct yetty_vnc_server *server,
+				       uint8_t quality);
+uint8_t
+yetty_vnc_server_get_jpeg_quality(const struct yetty_vnc_server *server);
+void yetty_vnc_server_set_always_full_frame(struct yetty_vnc_server *server,
+					    int enable);
+int yetty_vnc_server_get_always_full_frame(
+	const struct yetty_vnc_server *server);
+
+/* H.264 encoding */
+void yetty_vnc_server_set_use_h264(struct yetty_vnc_server *server, int enable);
+int yetty_vnc_server_get_use_h264(const struct yetty_vnc_server *server);
+void yetty_vnc_server_force_h264_idr(struct yetty_vnc_server *server);
+
+/* Send frame to all clients */
+struct yetty_core_void_result
+yetty_vnc_server_send_frame(struct yetty_vnc_server *server, WGPUTexture texture,
+			    const uint8_t *cpu_pixels, uint32_t width,
+			    uint32_t height);
+
+/* Send frame (GPU-only, will read back dirty tiles) */
+struct yetty_core_void_result
+yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
+				WGPUTexture texture, uint32_t width,
+				uint32_t height);
+
+/* Check for pending input */
+int yetty_vnc_server_has_pending_input(const struct yetty_vnc_server *server);
+
+/* Process pending input events */
+struct yetty_core_void_result
+yetty_vnc_server_process_input(struct yetty_vnc_server *server);
+
+/* Get stats */
+struct yetty_vnc_server_stats
+yetty_vnc_server_get_stats(const struct yetty_vnc_server *server);
+
+/* Set input callbacks */
+void yetty_vnc_server_set_on_mouse_move(struct yetty_vnc_server *server,
+					yetty_vnc_on_mouse_move_fn callback,
+					void *userdata);
+void yetty_vnc_server_set_on_mouse_button(struct yetty_vnc_server *server,
+					  yetty_vnc_on_mouse_button_fn callback,
+					  void *userdata);
+void yetty_vnc_server_set_on_mouse_scroll(struct yetty_vnc_server *server,
+					  yetty_vnc_on_mouse_scroll_fn callback,
+					  void *userdata);
+void yetty_vnc_server_set_on_key_down(struct yetty_vnc_server *server,
+				      yetty_vnc_on_key_down_fn callback,
+				      void *userdata);
+void yetty_vnc_server_set_on_key_up(struct yetty_vnc_server *server,
+				    yetty_vnc_on_key_up_fn callback,
+				    void *userdata);
+void yetty_vnc_server_set_on_text_input(struct yetty_vnc_server *server,
+					yetty_vnc_on_text_input_fn callback,
+					void *userdata);
+void yetty_vnc_server_set_on_resize(struct yetty_vnc_server *server,
+				    yetty_vnc_on_resize_fn callback,
+				    void *userdata);
+void yetty_vnc_server_set_on_cell_size(struct yetty_vnc_server *server,
+				       yetty_vnc_on_cell_size_fn callback,
+				       void *userdata);
+void yetty_vnc_server_set_on_char_with_mods(
+	struct yetty_vnc_server *server,
+	yetty_vnc_on_char_with_mods_fn callback, void *userdata);
+void yetty_vnc_server_set_on_input_received(
+	struct yetty_vnc_server *server,
+	yetty_vnc_on_input_received_fn callback, void *userdata);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* YETTY_YVNC_VNC_SERVER_H */
