@@ -64,9 +64,17 @@ static void layer_renderer_surface_destroy(struct yetty_render_layer_renderer *s
     free(lr);
 }
 
-static void create_intermediate_texture(struct layer_renderer_surface *lr,
-                                        struct pixel_size size)
+static struct yetty_core_void_result create_intermediate_texture(
+    struct layer_renderer_surface *lr,
+    struct pixel_size size)
 {
+    /* Validate size */
+    if (size.width <= 0 || size.height <= 0) {
+        yerror("layer_renderer_surface: invalid texture size %.0fx%.0f",
+               size.width, size.height);
+        return YETTY_ERR(yetty_core_void, "invalid texture size");
+    }
+
     /* Release old texture if any */
     if (lr->intermediate_view) {
         wgpuTextureViewRelease(lr->intermediate_view);
@@ -94,20 +102,22 @@ static void create_intermediate_texture(struct layer_renderer_surface *lr,
 
     lr->intermediate_texture = wgpuDeviceCreateTexture(lr->device, &tex_desc);
     if (!lr->intermediate_texture) {
-        yerror("layer_renderer_surface: failed to create intermediate texture");
-        return;
+        yerror("layer_renderer_surface: failed to create texture %.0fx%.0f",
+               size.width, size.height);
+        return YETTY_ERR(yetty_core_void, "failed to create intermediate texture");
     }
 
     lr->intermediate_view = wgpuTextureCreateView(lr->intermediate_texture, NULL);
     if (!lr->intermediate_view) {
-        yerror("layer_renderer_surface: failed to create intermediate view");
         wgpuTextureDestroy(lr->intermediate_texture);
         wgpuTextureRelease(lr->intermediate_texture);
         lr->intermediate_texture = NULL;
+        return YETTY_ERR(yetty_core_void, "failed to create intermediate view");
     }
 
     ydebug("layer_renderer_surface: created intermediate texture %.0fx%.0f",
            size.width, size.height);
+    return YETTY_OK_VOID();
 }
 
 static bool size_changed(struct pixel_size a, struct pixel_size b)
@@ -124,9 +134,9 @@ static struct yetty_render_rendered_layer_result layer_renderer_surface_render(
 
     /* Recreate intermediate texture if size changed */
     if (!lr->intermediate_texture || size_changed(lr->tex_size, rs->pixel_size)) {
-        create_intermediate_texture(lr, rs->pixel_size);
-        if (!lr->intermediate_texture) {
-            return YETTY_ERR(yetty_render_rendered_layer, "no intermediate texture");
+        struct yetty_core_void_result tex_res = create_intermediate_texture(lr, rs->pixel_size);
+        if (!YETTY_IS_OK(tex_res)) {
+            return YETTY_ERR(yetty_render_rendered_layer, tex_res.error.msg);
         }
         /* Invalidate cache on resize */
         if (lr->cached_layer) {

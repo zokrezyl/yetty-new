@@ -316,6 +316,10 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     set_cell_size(&text_layer->rs, text_layer->base.cell_size.width, text_layer->base.cell_size.height);
     text_layer->rs.uniforms[U_FONT_TYPE].u32 = text_layer->font_type;
 
+    /* Set pixel size for render target */
+    text_layer->rs.pixel_size.width = (float)cols * text_layer->base.cell_size.width;
+    text_layer->rs.pixel_size.height = (float)rows * text_layer->base.cell_size.height;
+
     yetty_render_shader_code_set(&text_layer->rs.shader,
         (const char *)gtext_layer_shader_data, gtext_layer_shader_size);
 
@@ -377,6 +381,11 @@ text_layer_resize_grid(struct yetty_term_terminal_layer *self,
   vterm_set_size(text_layer->vterm, (int)grid_size.rows, (int)grid_size.cols);
   self->grid_size = grid_size;
   set_grid_size(&text_layer->rs, (float)grid_size.cols, (float)grid_size.rows);
+
+  /* Update pixel size */
+  text_layer->rs.pixel_size.width = (float)grid_size.cols * self->cell_size.width;
+  text_layer->rs.pixel_size.height = (float)grid_size.rows * self->cell_size.height;
+
   self->dirty = 1;
   return YETTY_OK_VOID();
 }
