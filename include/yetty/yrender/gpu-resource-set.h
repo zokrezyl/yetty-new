@@ -3,6 +3,7 @@
 
 #include <yetty/yrender/types.h>
 #include <yetty/ycore/result.h>
+#include <yetty/ycore/types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,7 @@ extern "C" {
 /* GPU resource set - collection of resources a provider needs */
 struct yetty_render_gpu_resource_set {
     char namespace[YETTY_RENDER_NAME_MAX];
+    struct pixel_size pixel_size;
 
     struct yetty_render_texture textures[YETTY_RENDER_RS_MAX_TEXTURES];
     size_t texture_count;
