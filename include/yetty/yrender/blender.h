@@ -45,7 +45,8 @@ struct yetty_render_blender {
 struct yetty_render_blender_result yetty_render_blender_create(
     WGPUDevice device,
     WGPUQueue queue,
-    struct yetty_render_target *target);
+    struct yetty_render_target *target,
+    const char *shader_path);
 
 #ifdef __cplusplus
 }

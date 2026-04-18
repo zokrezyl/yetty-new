@@ -5,17 +5,12 @@
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/types.h>
+#include <yetty/ycore/util.h>
 #include <yetty/ytrace.h>
 #include <vterm.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define INCBIN_STYLE 1
-#include <incbin.h>
-
-/* Embedded shader code */
-INCBIN(text_layer_shader, TEXT_LAYER_SHADER_PATH);
 
 /* Uniform positions */
 #define U_GRID_SIZE       0
@@ -86,6 +81,7 @@ struct yetty_term_terminal_text_layer {
     VTermScreen *screen;
     struct yetty_font_ms_font *font;
     uint32_t font_type; /* 0=msdf, 6=raster */
+    struct yetty_core_buffer shader_code;
     struct yetty_render_gpu_resource_set rs;
     struct yetty_core_void_result pending_error; /* Error from vterm callbacks */
 };
@@ -229,10 +225,22 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
 {
     struct yetty_term_terminal_text_layer *text_layer;
 
-    text_layer = calloc(1, sizeof(struct yetty_term_terminal_text_layer));
-    if (!text_layer)
-        return YETTY_ERR(yetty_term_terminal_layer, "failed to allocate text layer");
+    /* Load text-layer shader from file */
+    struct yetty_config *config = context->app_context.config;
+    const char *shaders_dir = config->ops->get_string(config, "paths/shaders", "");
+    char shader_path[512];
+    snprintf(shader_path, sizeof(shader_path), "%s/text-layer.wgsl", shaders_dir);
+    struct yetty_core_buffer_result shader_res = yetty_core_read_file(shader_path);
+    if (YETTY_IS_ERR(shader_res))
+        return YETTY_ERR(yetty_term_terminal_layer, shader_res.error.msg);
 
+    text_layer = calloc(1, sizeof(struct yetty_term_terminal_text_layer));
+    if (!text_layer) {
+        free(shader_res.value.data);
+        return YETTY_ERR(yetty_term_terminal_layer, "failed to allocate text layer");
+    }
+
+    text_layer->shader_code = shader_res.value;
     text_layer->base.ops = &text_layer_ops;
     text_layer->base.grid_size.cols = cols;
     text_layer->base.grid_size.rows = rows;
@@ -249,23 +257,25 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     text_layer->base.cursor_userdata = cursor_userdata;
 
     /* Create font from config */
-    struct yetty_config *config = context->app_context.config;
     const char *render_method = config->ops->get_string(
         config, YETTY_CONFIG_KEY_TERMINAL_FONT_RENDER_METHOD, "raster");
     ydebug("text_layer: render_method='%s'", render_method);
     struct yetty_font_ms_font_result font_res;
     if (strcmp(render_method, "msdf") == 0) {
         const char *fonts_dir = config->ops->get_string(config, "paths/fonts", "");
+        const char *shaders_dir = config->ops->get_string(config, "paths/shaders", "");
         const char *font_family = config->ops->font_family(config);
         if (!font_family || strcmp(font_family, "default") == 0)
             font_family = "DejaVuSansMNerdFontMono";
         char cdb_path[512];
+        char shader_path[512];
         snprintf(cdb_path, sizeof(cdb_path), "%s/../msdf-fonts/%s-Regular.cdb",
                  fonts_dir, font_family);
-        ydebug("text_layer: ms-msdf cdb_path='%s'", cdb_path);
+        snprintf(shader_path, sizeof(shader_path), "%s/ms-msdf-font.wgsl", shaders_dir);
+        ydebug("text_layer: ms-msdf cdb_path='%s' shader='%s'", cdb_path, shader_path);
         float msdf_font_size = (float)config->ops->get_int(
             config, "terminal/text-layer/font/size", 14);
-        font_res = yetty_font_ms_msdf_font_create(cdb_path, msdf_font_size);
+        font_res = yetty_font_ms_msdf_font_create(cdb_path, shader_path, msdf_font_size);
     } else {
         font_res = yetty_font_ms_raster_font_create(
             config,
@@ -326,7 +336,7 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
     text_layer->rs.pixel_size.height = (float)rows * text_layer->base.cell_size.height;
 
     yetty_render_shader_code_set(&text_layer->rs.shader,
-        (const char *)gtext_layer_shader_data, gtext_layer_shader_size);
+        (const char *)text_layer->shader_code.data, text_layer->shader_code.size);
 
     if (text_layer->font)
         text_layer->rs.children_count = 1;
@@ -355,6 +365,7 @@ static void text_layer_destroy(struct yetty_term_terminal_layer *self)
     if (text_layer->vterm)
         vterm_free(text_layer->vterm);
 
+    free(text_layer->shader_code.data);
     free(text_layer);
 }
 

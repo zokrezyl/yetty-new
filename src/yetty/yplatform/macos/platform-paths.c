@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 static char cache_dir_buf[512];
+static char data_dir_buf[512];
 static char runtime_dir_buf[512];
 static char config_dir_buf[512];
 
@@ -15,6 +16,16 @@ const char *yetty_platform_get_cache_dir(void)
     if (home) {
         snprintf(cache_dir_buf, sizeof(cache_dir_buf), "%s/Library/Caches/yetty", home);
         return cache_dir_buf;
+    }
+    return "/tmp/yetty";
+}
+
+const char *yetty_platform_get_data_dir(void)
+{
+    const char *home = getenv("HOME");
+    if (home) {
+        snprintf(data_dir_buf, sizeof(data_dir_buf), "%s/Library/Application Support/yetty", home);
+        return data_dir_buf;
     }
     return "/tmp/yetty";
 }

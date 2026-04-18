@@ -9,7 +9,8 @@ extern "C" {
 
 /* Create monospace MSDF font from .cdb file at requested font size */
 struct yetty_font_ms_font_result
-yetty_font_ms_msdf_font_create(const char *cdb_path, float font_size);
+yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
+                               float font_size);
 
 #ifdef __cplusplus
 }

@@ -123,6 +123,9 @@ struct yetty_yetty_ypaint_canvas {
 
   // Default font for text spans with font_id = -1
   struct yetty_font_font *default_font;
+
+  // Shaders directory for creating fonts from buffers
+  char shaders_dir[512];
 };
 
 #define DEFAULT_MAX_PRIMS_PER_CELL 16
@@ -388,14 +391,18 @@ yetty_yetty_ypaint_canvas_create(bool scrolling_mode,
   /* Create default MSDF font for text spans (font_id = -1) */
   struct yetty_config *config = context->app_context.config;
   const char *fonts_dir = config->ops->get_string(config, "paths/fonts", "");
+  const char *shaders_dir = config->ops->get_string(config, "paths/shaders", "");
   const char *font_family = config->ops->font_family(config);
   if (!font_family || strcmp(font_family, "default") == 0)
     font_family = "DejaVuSansMNerdFontMono";
   char cdb_path[512];
+  char shader_path[512];
   snprintf(cdb_path, sizeof(cdb_path), "%s/../msdf-fonts/%s-Regular.cdb",
            fonts_dir, font_family);
-  ydebug("ypaint_canvas: default font cdb_path='%s'", cdb_path);
-  struct yetty_font_font_result font_res = yetty_font_msdf_font_create(cdb_path);
+  snprintf(shader_path, sizeof(shader_path), "%s/msdf-font.wgsl", shaders_dir);
+  strncpy(canvas->shaders_dir, shaders_dir, sizeof(canvas->shaders_dir) - 1);
+  ydebug("ypaint_canvas: default font cdb_path='%s' shader='%s'", cdb_path, shader_path);
+  struct yetty_font_font_result font_res = yetty_font_msdf_font_create(cdb_path, shader_path);
   if (YETTY_IS_OK(font_res)) {
     canvas->default_font = font_res.value;
     ydebug("ypaint_canvas: default font created");
@@ -849,8 +856,11 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
       if (!fb || !fb->named_buf.buf.data) continue;
       // For now, fonts come as pre-built CDB paths in the name field
       // TODO: support inline TTF → MSDF generation
+      char font_shader_path[512];
+      snprintf(font_shader_path, sizeof(font_shader_path), "%s/msdf-font.wgsl",
+               canvas->shaders_dir);
       struct yetty_font_font_result fr =
-          yetty_font_msdf_font_create(fb->named_buf.name);
+          yetty_font_msdf_font_create(fb->named_buf.name, font_shader_path);
       if (YETTY_IS_ERR(fr)) {
         yerror("add_buffer: font creation failed: %s", fr.error.msg);
         free(fonts);

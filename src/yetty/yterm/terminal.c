@@ -2,6 +2,7 @@
 #include <yetty/yterm/text-layer.h>
 #include <yetty/yterm/ypaint-layer.h>
 #include <yetty/yterm/pty-reader.h>
+#include <yetty/yconfig.h>
 #include <yetty/ycore/event-loop.h>
 #include <yetty/ycore/event.h>
 #include <yetty/platform/pty.h>
@@ -12,6 +13,7 @@
 #include <yetty/yrender/render-target.h>
 #include <yetty/ytrace.h>
 #include <yetty/yui/view.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -287,12 +289,12 @@ yetty_term_terminal_create(struct grid_size grid_size,
         terminal_scroll_callback, terminal,
         terminal_cursor_callback, terminal);
     if (!YETTY_IS_OK(text_layer_res)) {
-        ydebug("terminal_create: failed to create text layer");
+        yerror("terminal_create: failed to create text layer: %s", text_layer_res.error.msg);
         yetty_term_pty_reader_destroy(terminal->pty_reader);
         if (terminal->context.pty)
             terminal->context.pty->ops->destroy(terminal->context.pty);
         free(terminal);
-        return YETTY_ERR(yetty_term_terminal, "failed to create text layer");
+        return YETTY_ERR(yetty_term_terminal, text_layer_res.error.msg);
     }
     yetty_term_terminal_layer_add(terminal, text_layer_res.value);
     ydebug("terminal_create: text_layer created and added");

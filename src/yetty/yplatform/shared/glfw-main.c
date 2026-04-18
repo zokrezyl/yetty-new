@@ -19,6 +19,8 @@
 
 /* Forward declarations - implemented in other platform files */
 const char *yetty_platform_get_cache_dir(void);
+const char *yetty_platform_get_data_dir(void);
+const char *yetty_platform_get_config_dir(void);
 const char *yetty_platform_get_runtime_dir(void);
 
 GLFWwindow *yetty_platform_create_window(int width, int height, const char *title);
@@ -78,14 +80,16 @@ int main(int argc, char **argv)
 
     /* Platform paths */
     const char *cache_dir = yetty_platform_get_cache_dir();
+    const char *data_dir = yetty_platform_get_data_dir();
     const char *runtime_dir = yetty_platform_get_runtime_dir();
 
     char shaders_dir[512];
     char fonts_dir[512];
-    snprintf(shaders_dir, sizeof(shaders_dir), "%s/shaders", cache_dir);
-    snprintf(fonts_dir, sizeof(fonts_dir), "%s/fonts", cache_dir);
+    snprintf(shaders_dir, sizeof(shaders_dir), "%s/shaders", data_dir);
+    snprintf(fonts_dir, sizeof(fonts_dir), "%s/fonts", data_dir);
 
     mkdir_p(cache_dir);
+    mkdir_p(data_dir);
     mkdir_p(runtime_dir);
     mkdir_p(fonts_dir);
 

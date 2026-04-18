@@ -1,54 +1,59 @@
-/* extract-assets.c - Extract embedded assets to cache directory */
+/* extract-assets.c - Extract embedded assets to data and config directories */
 
 #include <yetty/platform/extract-assets.h>
 #include <yetty/yconfig.h>
 #include <stdlib.h>
 #include <string.h>
 
+/* Forward declarations - implemented in platform-paths.c */
+const char *yetty_platform_get_data_dir(void);
+const char *yetty_platform_get_config_dir(void);
+
 /* Forward declaration - implemented by incbin-assets.c */
 struct yetty_incbin_assets;
 struct yetty_incbin_assets *yetty_incbin_assets_create(void);
 void yetty_incbin_assets_destroy(struct yetty_incbin_assets *assets);
-int yetty_incbin_assets_needs_extraction(struct yetty_incbin_assets *assets, const char *cache_dir);
-int yetty_incbin_assets_extract_to(struct yetty_incbin_assets *assets, const char *cache_dir);
+int yetty_incbin_assets_needs_extraction(struct yetty_incbin_assets *assets, const char *dir);
+int yetty_incbin_assets_extract_data_to(struct yetty_incbin_assets *assets, const char *data_dir);
+int yetty_incbin_assets_extract_config_to(struct yetty_incbin_assets *assets, const char *config_dir);
 
 struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config *config)
 {
-    const char *shaders_path;
-    char cache_dir[512];
-    char *last_slash;
+    const char *data_dir;
+    const char *config_dir;
     struct yetty_incbin_assets *assets;
     int needs_extract;
 
-    if (!config)
-        return YETTY_OK_VOID();
+    (void)config;
 
-    shaders_path = config->ops->get_string(config, "paths/shaders", "");
-    if (!shaders_path || !shaders_path[0])
-        return YETTY_OK_VOID();
+    data_dir = yetty_platform_get_data_dir();
+    config_dir = yetty_platform_get_config_dir();
 
-    /* Get parent directory of shaders path */
-    strncpy(cache_dir, shaders_path, sizeof(cache_dir) - 1);
-    cache_dir[sizeof(cache_dir) - 1] = '\0';
-    last_slash = strrchr(cache_dir, '/');
-    if (last_slash)
-        *last_slash = '\0';
-    else
+    if (!data_dir || !data_dir[0])
         return YETTY_OK_VOID();
 
     assets = yetty_incbin_assets_create();
     if (!assets)
         return YETTY_OK_VOID(); /* No embedded assets - development build */
 
-    needs_extract = yetty_incbin_assets_needs_extraction(assets, cache_dir);
-    if (!needs_extract) {
-        yetty_incbin_assets_destroy(assets);
-        return YETTY_OK_VOID();
+    /* Check if data extraction needed */
+    needs_extract = yetty_incbin_assets_needs_extraction(assets, data_dir);
+    if (needs_extract) {
+        if (!yetty_incbin_assets_extract_data_to(assets, data_dir)) {
+            yetty_incbin_assets_destroy(assets);
+            return YETTY_ERR(yetty_core_void, "failed to extract data assets");
+        }
     }
 
-    if (!yetty_incbin_assets_extract_to(assets, cache_dir)) {
-        yetty_incbin_assets_destroy(assets);
-        return YETTY_ERR(yetty_core_void, "failed to extract assets");
+    /* Check if config extraction needed */
+    if (config_dir && config_dir[0]) {
+        needs_extract = yetty_incbin_assets_needs_extraction(assets, config_dir);
+        if (needs_extract) {
+            if (!yetty_incbin_assets_extract_config_to(assets, config_dir)) {
+                yetty_incbin_assets_destroy(assets);
+                return YETTY_ERR(yetty_core_void, "failed to extract config assets");
+            }
+        }
     }
 
     yetty_incbin_assets_destroy(assets);

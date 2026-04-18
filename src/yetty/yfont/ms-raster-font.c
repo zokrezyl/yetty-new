@@ -7,6 +7,7 @@
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/types.h>
+#include <yetty/ycore/util.h>
 #include <yetty/ytrace.h>
 #include <webgpu/webgpu.h>
 
@@ -16,10 +17,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-
-#define INCBIN_STYLE 1
-#include <incbin.h>
-INCBIN(raster_font_shader, YETTY_YFONT_SHADER_DIR "/raster-font.wgsl");
 
 /* Shorthand accessors into rs */
 #define FONT_ATLAS(f)    ((f)->rs.textures[0])
@@ -64,6 +61,9 @@ struct raster_font {
 
     FT_Library ft_library;
     FT_Face ft_faces[4];
+
+    /* Shader code (owned) */
+    struct yetty_core_buffer shader_code;
 
     /* GPU resource set — returned directly.
      * rs.textures[0] = atlas, rs.buffers[0] = glyph UVs */
@@ -452,6 +452,8 @@ static void raster_font_cleanup(struct raster_font *font)
     FONT_ATLAS(font).data = NULL;
     free(FONT_UV_BUF(font).data);
     FONT_UV_BUF(font).data = NULL;
+    free(font->shader_code.data);
+    font->shader_code.data = NULL;
     for (int i = 0; i < 4; i++) {
         free(font->codepoint_slots[i]);
         font->codepoint_slots[i] = NULL;
@@ -468,13 +470,25 @@ struct yetty_font_ms_font_result yetty_font_ms_raster_font_create(
     float cell_height)
 {
     const char *fonts_dir = config->ops->get_string(config, "paths/fonts", "");
+    const char *shaders_dir = config->ops->get_string(config, "paths/shaders", "");
     const char *font_family = config->ops->font_family(config);
     if (!font_family || strcmp(font_family, "default") == 0)
         font_family = "DejaVuSansMNerdFontMono";
 
+    /* Load shader from file */
+    char shader_path[RASTER_FONT_MAX_PATH];
+    snprintf(shader_path, sizeof(shader_path), "%s/raster-font.wgsl", shaders_dir);
+    struct yetty_core_buffer_result shader_res = yetty_core_read_file(shader_path);
+    if (YETTY_IS_ERR(shader_res))
+        return YETTY_ERR(yetty_font_ms_font, shader_res.error.msg);
+
     struct raster_font *font = calloc(1, sizeof(struct raster_font));
-    if (!font)
+    if (!font) {
+        free(shader_res.value.data);
         return YETTY_ERR(yetty_font_ms_font, "failed to allocate raster font");
+    }
+
+    font->shader_code = shader_res.value;
 
     font->base.ops = &raster_font_ops;
     strncpy(font->fonts_dir, fonts_dir, RASTER_FONT_MAX_PATH - 1);
@@ -520,7 +534,7 @@ struct yetty_font_ms_font_result yetty_font_ms_raster_font_create(
     font->next_slot_idx = 1;
 
     yetty_render_shader_code_set(&font->rs.shader,
-        (const char *)graster_font_shader_data, graster_font_shader_size);
+        (const char *)font->shader_code.data, font->shader_code.size);
 
     /* FreeType */
     if (FT_Init_FreeType(&font->ft_library)) {
