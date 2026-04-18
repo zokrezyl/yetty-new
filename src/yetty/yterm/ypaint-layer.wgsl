@@ -269,9 +269,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let prim_type = ypaint_read_prim_type(prim_offset);
 
         // Handle glyph primitives (MSDF rendering)
+        // Like SDF: transform pixel to local coords, compare in local space
         if (prim_type == YPAINT_SDF_GLYPH) {
+            // Transform pixel position to primitive-local coords (same as SDF)
+            let local_pos = vec2<f32>(pixel_pos.x, pixel_pos.y - y_offset);
+
+            // Glyph position in local coords (with bearing already applied)
             let glyph_x = glyph_read_x(prim_offset);
-            let glyph_y = glyph_read_y(prim_offset) + y_offset;
+            let glyph_y = glyph_read_y(prim_offset);
             let font_size = glyph_read_font_size(prim_offset);
             let packed = glyph_read_packed(prim_offset);
             let glyph_index = packed & 0xFFFFu;
@@ -293,13 +298,13 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 continue;
             }
 
-            // Glyph bounds in screen space (apply scale)
+            // Glyph bounds in local space (apply scale)
             let glyph_min = vec2<f32>(glyph_x, glyph_y);
             let glyph_max = glyph_min + glyph_size * scale;
 
-            // Bounds check
-            if (pixel_pos.x < glyph_min.x || pixel_pos.x >= glyph_max.x ||
-                pixel_pos.y < glyph_min.y || pixel_pos.y >= glyph_max.y) {
+            // Bounds check in local coords
+            if (local_pos.x < glyph_min.x || local_pos.x >= glyph_max.x ||
+                local_pos.y < glyph_min.y || local_pos.y >= glyph_max.y) {
                 continue;
             }
 
@@ -315,8 +320,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             let uv_min = vec2<f32>(f32(col), f32(row)) * cell_uv_size;
             let uv_max = uv_min + cell_uv_size;
 
-            // Map pixel to UV within glyph cell
-            let glyph_local = (pixel_pos - glyph_min) / (glyph_size * scale);
+            // Map local pixel to UV within glyph cell
+            let glyph_local = (local_pos - glyph_min) / (glyph_size * scale);
             let sample_uv = mix(uv_min, uv_max, glyph_local);
 
             // Sample MSDF
