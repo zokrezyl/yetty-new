@@ -115,8 +115,12 @@ on_canvas_scroll(struct yetty_core_void_result *user_data, uint16_t num_lines) {
     yerror("on_canvas_scroll: scroll_fn is NULL");
     return YETTY_ERR(yetty_core_void, "scroll_fn is NULL");
   }
-  layer->base.scroll_fn(&layer->base, (int)num_lines,
-                        layer->base.scroll_userdata);
+  struct yetty_core_void_result res = layer->base.scroll_fn(
+      &layer->base, (int)num_lines, layer->base.scroll_userdata);
+  if (YETTY_IS_ERR(res)) {
+    yerror("on_canvas_scroll: scroll_fn failed: %s", res.error.msg);
+    return res;
+  }
   ydebug("on_canvas_scroll EXIT: num_lines=%u", num_lines);
   return YETTY_OK_VOID();
 }
