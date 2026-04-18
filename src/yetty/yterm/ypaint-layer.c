@@ -91,8 +91,8 @@ static int ypaint_layer_on_key(struct yetty_term_terminal_layer *self, int key,
 static int ypaint_layer_on_char(struct yetty_term_terminal_layer *self,
                                 uint32_t codepoint, int mods);
 static int ypaint_layer_is_empty(const struct yetty_term_terminal_layer *self);
-static void ypaint_layer_scroll(struct yetty_term_terminal_layer *self,
-                                int lines);
+static struct yetty_core_void_result ypaint_layer_scroll(
+    struct yetty_term_terminal_layer *self, int lines);
 static void ypaint_layer_set_cursor(struct yetty_term_terminal_layer *self,
                                     int col, int row);
 
@@ -101,13 +101,26 @@ static struct yetty_core_void_result
 on_canvas_scroll(struct yetty_core_void_result *user_data, uint16_t num_lines) {
   struct yetty_term_ypaint_layer *layer =
       (struct yetty_term_ypaint_layer *)user_data;
-  ydebug("on_canvas_scroll ENTER: num_lines=%u", num_lines);
+  ydebug("on_canvas_scroll ENTER: num_lines=%u in_external=%d", num_lines,
+         layer->base.in_external_scroll);
+
+  /* If in_external_scroll is set, this scroll was triggered by another layer
+   * and we should NOT propagate back to avoid double-scroll loop */
+  if (layer->base.in_external_scroll) {
+    ydebug("on_canvas_scroll: skipping (in_external_scroll)");
+    return YETTY_OK_VOID();
+  }
+
   if (!layer->base.scroll_fn) {
     yerror("on_canvas_scroll: scroll_fn is NULL");
     return YETTY_ERR(yetty_core_void, "scroll_fn is NULL");
   }
-  layer->base.scroll_fn(&layer->base, (int)num_lines,
-                        layer->base.scroll_userdata);
+  struct yetty_core_void_result res = layer->base.scroll_fn(
+      &layer->base, (int)num_lines, layer->base.scroll_userdata);
+  if (YETTY_IS_ERR(res)) {
+    yerror("on_canvas_scroll: scroll_fn failed: %s", res.error.msg);
+    return res;
+  }
   ydebug("on_canvas_scroll EXIT: num_lines=%u", num_lines);
   return YETTY_OK_VOID();
 }
@@ -458,24 +471,32 @@ static int ypaint_layer_is_empty(const struct yetty_term_terminal_layer *self) {
 }
 
 /* Scroll - called when another layer scrolls */
-static void ypaint_layer_scroll(struct yetty_term_terminal_layer *self,
-                                int lines) {
+static struct yetty_core_void_result ypaint_layer_scroll(
+    struct yetty_term_terminal_layer *self, int lines) {
   struct yetty_term_ypaint_layer *layer =
       (struct yetty_term_ypaint_layer *)self;
 
   ydebug("ypaint_layer_scroll ENTER: lines=%d scrolling_mode=%d canvas=%p",
          lines, layer->scrolling_mode, (void *)layer->canvas);
 
-  if (!layer->canvas || !layer->scrolling_mode || lines <= 0)
-    return;
+  if (!layer->canvas)
+    return YETTY_ERR(yetty_core_void, "canvas is NULL");
+  if (!layer->scrolling_mode || lines <= 0)
+    return YETTY_OK_VOID();
 
-  yetty_yetty_ypaint_canvas_scroll_lines(layer->canvas, (uint16_t)lines);
+  struct yetty_core_void_result res =
+      yetty_yetty_ypaint_canvas_scroll_lines(layer->canvas, (uint16_t)lines);
+  if (YETTY_IS_ERR(res))
+    return res;
+
   layer->base.dirty = 1;
 
   ydebug("ypaint_layer_scroll EXIT: %d lines scrolled", lines);
 
   if (layer->base.request_render_fn)
     layer->base.request_render_fn(layer->base.request_render_userdata);
+
+  return YETTY_OK_VOID();
 }
 
 /* Set cursor - called when another layer moves cursor */

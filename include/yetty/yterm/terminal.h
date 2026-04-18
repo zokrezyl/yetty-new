@@ -34,8 +34,8 @@ typedef void (*yetty_term_request_render_fn)(void *userdata);
 
 /* Scroll callback - called when layer scrolls, passes source layer and line
  * count */
-typedef void (*yetty_term_scroll_fn)(struct yetty_term_terminal_layer *source,
-                                     int lines, void *userdata);
+typedef struct yetty_core_void_result (*yetty_term_scroll_fn)(
+    struct yetty_term_terminal_layer *source, int lines, void *userdata);
 
 /* Cursor callback - called when layer moves cursor, passes source layer and
  * position */
@@ -60,7 +60,7 @@ struct yetty_term_terminal_layer_ops {
   int (*on_char)(struct yetty_term_terminal_layer *self, uint32_t codepoint,
                  int mods);
   /* Scroll - called when another layer scrolls, lines > 0 = scroll down */
-  void (*scroll)(struct yetty_term_terminal_layer *self, int lines);
+  struct yetty_core_void_result (*scroll)(struct yetty_term_terminal_layer *self, int lines);
   /* Cursor - called when another layer moves cursor */
   void (*set_cursor)(struct yetty_term_terminal_layer *self, int col, int row);
 };
@@ -72,6 +72,7 @@ struct yetty_term_terminal_layer {
   struct pixel_size cell_size;
 
   int dirty;
+  int in_external_scroll; /* Set when receiving scroll from another layer */
   /* PTY write callback - set by creator */
   yetty_term_pty_write_fn pty_write_fn;
   void *pty_write_userdata;

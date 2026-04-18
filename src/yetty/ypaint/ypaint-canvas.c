@@ -720,22 +720,23 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
   uint16_t lines_scrolled = 0;
   uint32_t max_row_seen = 0;
 
+  // PASS 1: Compute max_row needed for ALL content (SDF + text spans)
+  uint32_t max_row_needed = 0;
+  float cursor_y_offset = original_cursor_row * canvas->cell_size.height;
+
+  // PASS 1a: SDF primitives
   if (has_sdf_primitives) {
-    // PASS 1: Compute max_row needed WITHOUT adding primitives
-    uint32_t max_row_needed = 0;
     struct yetty_ypaint_core_primitive_iter iter = iter_res.value;
 
     while (1) {
       uint32_t word_count = iter.size / sizeof(float);
 
-      // Compute AABB to find max row (using ORIGINAL cursor position)
       struct rectangle_result aabb_res =
           yetty_ysdf_compute_aabb(iter.data, word_count);
       if (YETTY_IS_ERR(aabb_res))
         break;
       struct rectangle aabb = aabb_res.value;
 
-      float cursor_y_offset = original_cursor_row * canvas->cell_size.height;
       float abs_max_y = aabb.max.y + cursor_y_offset;
       uint32_t prim_max_row =
           (canvas->cell_size.height > 0)
@@ -750,51 +751,70 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
         break;
       iter = iter_res.value;
     }
+  }
 
-    ydebug("add_buffer: PASS1 max_row_needed=%u (cursor-relative to row %u)",
-           max_row_needed, original_cursor_row);
+  // PASS 1b: Text spans - estimate max row from position + font size
+  uint32_t span_count = yetty_ypaint_core_buffer_text_span_count(buffer);
+  for (uint32_t si = 0; si < span_count; si++) {
+    const struct yetty_text_span *ts =
+        yetty_ypaint_core_buffer_get_text_span(buffer, si);
+    if (!ts || !ts->named_buf.buf.data || ts->named_buf.buf.size == 0)
+      continue;
 
-    // SCROLL FIRST if primitives would extend beyond visible area
-    uint32_t target_cursor_row = max_row_needed + 1;
-    if (target_cursor_row >= canvas->grid_size.rows) {
-      lines_scrolled = (uint16_t)(target_cursor_row - canvas->grid_size.rows + 1);
+    // Estimate: baseline at ts->y, glyph extends ~font_size below baseline
+    // (conservative estimate - actual depends on font metrics)
+    float estimated_max_y = ts->y + ts->font_size;
+    float abs_max_y = estimated_max_y + cursor_y_offset;
+    uint32_t text_max_row =
+        (canvas->cell_size.height > 0)
+            ? (uint32_t)floorf(abs_max_y / canvas->cell_size.height)
+            : 0;
 
-      ydebug("add_buffer: SCROLL NEEDED target=%u >= grid_rows=%u, scroll %u",
-             target_cursor_row, canvas->grid_size.rows, lines_scrolled);
+    if (text_max_row > max_row_needed)
+      max_row_needed = text_max_row;
+  }
 
-      // Notify text layer BEFORE scrolling
-      if (!canvas->scroll_callback) {
-        yerror("yetty_ypaint_canvas_add_buffer: scroll_callback is NULL");
-        return YETTY_ERR(yetty_core_void, "scroll_callback is NULL");
-      }
-      struct yetty_core_void_result scroll_res = canvas->scroll_callback(
-          canvas->scroll_callback_user_data, lines_scrolled);
-      if (YETTY_IS_ERR(scroll_res)) {
-        yerror("yetty_ypaint_canvas_add_buffer: scroll_callback failed");
-        return scroll_res;
-      }
+  ydebug("add_buffer: PASS1 max_row_needed=%u (cursor at row %u)",
+         max_row_needed, original_cursor_row);
 
-      // Scroll ypaint grid (this updates rolling_row_0 and cursor_row)
-      yetty_yetty_ypaint_canvas_scroll_lines(canvas, lines_scrolled);
+  // SCROLL if content extends beyond visible area
+  uint32_t target_cursor_row = max_row_needed + 1;
+  if (target_cursor_row >= canvas->grid_size.rows) {
+    lines_scrolled = (uint16_t)(target_cursor_row - canvas->grid_size.rows + 1);
 
-      ydebug("add_buffer: after scroll cursor_row=%u rolling_row_0=%u",
-             canvas->cursor_row, canvas->rolling_row_0);
+    ydebug("add_buffer: SCROLL NEEDED target=%u >= grid_rows=%u, scroll %u",
+           target_cursor_row, canvas->grid_size.rows, lines_scrolled);
+
+    if (!canvas->scroll_callback) {
+      yerror("yetty_ypaint_canvas_add_buffer: scroll_callback is NULL");
+      return YETTY_ERR(yetty_core_void, "scroll_callback is NULL");
+    }
+    struct yetty_core_void_result scroll_res = canvas->scroll_callback(
+        canvas->scroll_callback_user_data, lines_scrolled);
+    if (YETTY_IS_ERR(scroll_res)) {
+      yerror("yetty_ypaint_canvas_add_buffer: scroll_callback failed");
+      return scroll_res;
     }
 
-    // PASS 2: Add primitives
-    // Use ADJUSTED cursor = original - lines_scrolled (where prims should land)
-    uint16_t adjusted_cursor = (original_cursor_row >= lines_scrolled)
-                                   ? (original_cursor_row - lines_scrolled)
-                                   : 0;
-    canvas->cursor_row = adjusted_cursor;
+    yetty_yetty_ypaint_canvas_scroll_lines(canvas, lines_scrolled);
 
+    ydebug("add_buffer: after scroll cursor_row=%u rolling_row_0=%u",
+           canvas->cursor_row, canvas->rolling_row_0);
+  }
+
+  // PASS 2: Add SDF primitives with adjusted cursor
+  uint16_t adjusted_cursor = (original_cursor_row >= lines_scrolled)
+                                 ? (original_cursor_row - lines_scrolled)
+                                 : 0;
+  canvas->cursor_row = adjusted_cursor;
+
+  if (has_sdf_primitives) {
     ydebug("add_buffer: PASS2 using adjusted cursor_row=%u (original=%u - "
            "scrolled=%u)",
            adjusted_cursor, original_cursor_row, lines_scrolled);
 
-    // Restart iteration for pass 2
     iter_res = yetty_ypaint_core_buffer_prim_first(buffer);
-    iter = iter_res.value;
+    struct yetty_ypaint_core_primitive_iter iter = iter_res.value;
 
     while (1) {
       struct uint32_result prim_res = add_primitive_internal(canvas, &iter);
@@ -841,7 +861,7 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
   }
 
   // PASS 4: Process text spans → decompose into glyph primitives
-  uint32_t span_count = yetty_ypaint_core_buffer_text_span_count(buffer);
+  // (span_count already computed in PASS 1b)
   ydebug("add_buffer: PASS4 span_count=%u default_font=%p",
          span_count, (void *)canvas->default_font);
   for (uint32_t si = 0; si < span_count; si++) {

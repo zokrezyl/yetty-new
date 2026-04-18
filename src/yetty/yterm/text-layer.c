@@ -87,6 +87,7 @@ struct yetty_term_terminal_text_layer {
     struct yetty_font_ms_font *font;
     uint32_t font_type; /* 0=msdf, 6=raster */
     struct yetty_render_gpu_resource_set rs;
+    struct yetty_core_void_result pending_error; /* Error from vterm callbacks */
 };
 
 /* Forward declarations */
@@ -139,20 +140,24 @@ static int text_layer_is_empty(const struct yetty_term_terminal_layer *self)
 }
 
 /* Receive scroll from other layers (e.g., ypaint) */
-static void text_layer_scroll(struct yetty_term_terminal_layer *self, int lines)
+static struct yetty_core_void_result text_layer_scroll(
+    struct yetty_term_terminal_layer *self, int lines)
 {
     struct yetty_term_terminal_text_layer *text_layer =
         container_of(self, struct yetty_term_terminal_text_layer, base);
 
     ydebug("text_layer_scroll ENTER: lines=%d screen=%p", lines, (void*)text_layer->screen);
 
-    if (!text_layer->screen || lines <= 0)
-        return;
+    if (!text_layer->screen)
+        return YETTY_ERR(yetty_core_void, "screen is NULL");
+    if (lines <= 0)
+        return YETTY_OK_VOID();
 
     vterm_screen_scroll_lines(text_layer->screen, lines);
     text_layer->base.dirty = 1;
 
     ydebug("text_layer_scroll EXIT: lines=%d scrolled", lines);
+    return YETTY_OK_VOID();
 }
 
 /* Receive cursor position from other layers (e.g., ypaint) */
@@ -521,9 +526,16 @@ static int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
     (void)cols;
     (void)cells;
 
-    /* Notify scroll callback - 1 line scrolled down */
-    if (text_layer->base.scroll_fn) {
-        text_layer->base.scroll_fn(&text_layer->base, 1, text_layer->base.scroll_userdata);
+    /* Notify scroll callback - 1 line scrolled down
+     * BUT: if in_external_scroll is set, this scroll was triggered by another
+     * layer and we should NOT propagate back to avoid double-scroll loop */
+    if (text_layer->base.scroll_fn && !text_layer->base.in_external_scroll) {
+        struct yetty_core_void_result res = text_layer->base.scroll_fn(
+            &text_layer->base, 1, text_layer->base.scroll_userdata);
+        if (YETTY_IS_ERR(res)) {
+            yerror("on_sb_pushline: scroll_fn failed: %s", res.error.msg);
+            text_layer->pending_error = res;
+        }
     }
     return 1;
 }

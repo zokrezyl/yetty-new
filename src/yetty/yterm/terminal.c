@@ -76,7 +76,8 @@ static void terminal_request_render_callback(void *userdata)
 }
 
 /* Scroll callback - propagate scroll from source layer to all other layers */
-static void terminal_scroll_callback(struct yetty_term_terminal_layer *source, int lines, void *userdata)
+static struct yetty_core_void_result terminal_scroll_callback(
+    struct yetty_term_terminal_layer *source, int lines, void *userdata)
 {
     struct yetty_term_terminal *terminal = userdata;
     ydebug("terminal_scroll_callback ENTER: source=%p lines=%d layer_count=%zu",
@@ -84,15 +85,21 @@ static void terminal_scroll_callback(struct yetty_term_terminal_layer *source, i
 
     for (size_t i = 0; i < terminal->layer_count; i++) {
         struct yetty_term_terminal_layer *layer = terminal->layers[i];
-        if (layer != source && layer->ops && layer->ops->scroll) {
+        if (layer == source)
+            continue;
+        if (layer->ops && layer->ops->scroll) {
             ydebug("terminal_scroll_callback: calling layer[%zu]=%p scroll(%d)", i, (void*)layer, lines);
-            layer->ops->scroll(layer, lines);
-        } else {
-            ydebug("terminal_scroll_callback: skipping layer[%zu]=%p (source=%d has_scroll=%d)",
-                   i, (void*)layer, layer == source, layer->ops && layer->ops->scroll);
+            layer->in_external_scroll = 1;
+            struct yetty_core_void_result res = layer->ops->scroll(layer, lines);
+            layer->in_external_scroll = 0;
+            if (YETTY_IS_ERR(res)) {
+                yerror("terminal_scroll_callback: layer[%zu] scroll failed: %s", i, res.error.msg);
+                return res;
+            }
         }
     }
     ydebug("terminal_scroll_callback EXIT: lines=%d", lines);
+    return YETTY_OK_VOID();
 }
 
 /* Cursor callback - propagate cursor position from source layer to all other layers */
