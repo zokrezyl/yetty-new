@@ -131,7 +131,7 @@ We're developing intensively and moving fast. Contributions welcome:
 - Testing (coverage is still limited)
 - Ideas and feedback
 
-Share suggestions on [GitHub Discussions](https://github.com/anthropics/yetty/discussions).
+Share suggestions on [GitHub Discussions](https://github.com/zokrezyl/yetty/discussions).
 
 ## Dependencies
 
