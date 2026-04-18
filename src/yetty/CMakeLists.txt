@@ -33,20 +33,20 @@ set(YETTY_SOURCES
     ${YETTY_ROOT}/src/yetty/yetty.c
     ${YETTY_ROOT}/src/yetty/config.c
     ${YETTY_ROOT}/src/yetty/ytrace.c
-    ${YETTY_ROOT}/src/yetty/util.c
 )
 
+
 # Render subsystem
-add_subdirectory(render)
+add_subdirectory(yrender)
 
 # WebGPU utilities
-add_subdirectory(webgpu)
+add_subdirectory(ywebgpu)
 
 # Core sources (src/yetty/core/*.cpp)
 set(YETTY_CORE_SOURCES "")
 
 # Term subsystem
-add_subdirectory(term)
+add_subdirectory(yterm)
 
 set(YETTY_SOURCES ${YETTY_SOURCES} PARENT_SCOPE)
 set(YETTY_CORE_SOURCES ${YETTY_CORE_SOURCES} PARENT_SCOPE)
@@ -73,12 +73,16 @@ set(YETTY_RENDERER_INCLUDES "" PARENT_SCOPE)
 # Library subdirectories — guarded by YETTY_ENABLE_FEATURE_*
 #-----------------------------------------------------------------------------
 
-if(YETTY_ENABLE_FEATURE_BASE)
-    add_subdirectory(base)
+if(YETTY_ENABLE_FEATURE_YCORE)
+    add_subdirectory(ycore)
 endif()
 
-if(YETTY_ENABLE_FEATURE_FONT)
-    add_subdirectory(font)
+if(YETTY_ENABLE_FEATURE_YCDB)
+    add_subdirectory(ycdb)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YFONT)
+    add_subdirectory(yfont)
 endif()
 
 if(YETTY_ENABLE_FEATURE_YECHO)
@@ -100,6 +104,9 @@ if(YETTY_ENABLE_FEATURE_YRICH)
 endif()
 
 if(YETTY_ENABLE_FEATURE_YPAINT)
+    add_subdirectory(ypaint-core)
+    add_subdirectory(ypaint-yaml)
+    add_subdirectory(ysdf)
     add_subdirectory(ypaint)
 endif()
 
@@ -125,8 +132,8 @@ if(YETTY_ENABLE_FEATURE_CARDS)
     add_subdirectory(cards)
 endif()
 
-if(YETTY_ENABLE_FEATURE_YAST)
-    add_subdirectory(yast)
+if(YETTY_ENABLE_FEATURE_YEXPR)
+    add_subdirectory(yexpr)
 endif()
 
 if(YETTY_ENABLE_FEATURE_YFSVM)
@@ -137,12 +144,20 @@ if(YETTY_ENABLE_FEATURE_YPLOT)
     add_subdirectory(yplot)
 endif()
 
+if(YETTY_ENABLE_FEATURE_YIMAGE)
+    add_subdirectory(yimage)
+endif()
+
+if(YETTY_ENABLE_FEATURE_YMSDF_GEN)
+    add_subdirectory(ymsdf-gen)
+endif()
+
 if(YETTY_ENABLE_FEATURE_MSDF_WGSL)
     add_subdirectory(msdf-wgsl)
 endif()
 
-if(YETTY_ENABLE_FEATURE_SHADERS)
-    add_subdirectory(shaders)
+if(YETTY_ENABLE_FEATURE_YSHADERS)
+    add_subdirectory(yshaders)
 endif()
 
 if(YETTY_ENABLE_FEATURE_VNC)

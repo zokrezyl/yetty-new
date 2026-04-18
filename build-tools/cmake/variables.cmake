@@ -54,9 +54,9 @@ option(YETTY_ENABLE_LIB_LIBMAGIC    "libmagic — file type detection"         O
 #-----------------------------------------------------------------------------
 
 # Core modules
-option(YETTY_ENABLE_FEATURE_BASE      "yetty_base — core utilities"          OFF)
-option(YETTY_ENABLE_FEATURE_FONT      "yetty_font — font subsystem"          ON)
-option(YETTY_ENABLE_FEATURE_SHADERS   "shaders — WGSL shader sources"        ON)
+option(YETTY_ENABLE_FEATURE_YCORE      "yetty_core — core utilities"          ON)
+option(YETTY_ENABLE_FEATURE_YFONT      "yetty_yfont — font subsystem"          ON)
+option(YETTY_ENABLE_FEATURE_YSHADERS   "shaders — WGSL shader sources"        ON)
 option(YETTY_ENABLE_FEATURE_MSDF_WGSL "msdf-wgsl — MSDF shader lib"         OFF)
 option(YETTY_ENABLE_FEATURE_MSDF_GEN  "msdf-gen — MSDF font generator"       OFF)
 
@@ -88,13 +88,16 @@ option(YETTY_ENABLE_FEATURE_SSH       "ssh — SSH connectivity"               O
 option(YETTY_ENABLE_FEATURE_RPC       "rpc — msgpack-RPC interface"          OFF)
 
 # Misc
-option(YETTY_ENABLE_FEATURE_YAST      "yast — AST support"                   OFF)
-option(YETTY_ENABLE_FEATURE_YFSVM     "yfsvm — filesystem VM"                OFF)
+option(YETTY_ENABLE_FEATURE_YCDB      "ycdb — constant database wrapper"     ON)
+option(YETTY_ENABLE_FEATURE_YEXPR     "yexpr — expression parser"            ON)
+option(YETTY_ENABLE_FEATURE_YFSVM     "yfsvm — fragment shader VM"           ON)
+option(YETTY_ENABLE_FEATURE_YIMAGE    "yimage — image complex primitive"     ON)
+option(YETTY_ENABLE_FEATURE_YMSDF_GEN "ymsdf-gen — MSDF glyph generator"    ON)
 option(YETTY_ENABLE_FEATURE_YCAT      "ycat — file viewer"                   OFF)
 
 # Build pipeline
 option(YETTY_ENABLE_FEATURE_ASSETS    "assets — runtime asset copying"       ON)
-option(YETTY_ENABLE_FEATURE_CDB_GEN   "cdb-gen — CDB font generation"       OFF)
+option(YETTY_ENABLE_FEATURE_CDB_GEN   "cdb-gen — CDB font generation"       ON)
 option(YETTY_ENABLE_FEATURE_TESTS     "tests — unit tests"                   OFF)
 option(YETTY_ENABLE_FEATURE_TOOLS     "tools — build tools"                  OFF)
 option(YETTY_ENABLE_FEATURE_DEMO      "demo — demo programs"                 OFF)

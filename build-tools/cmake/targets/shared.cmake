@@ -253,6 +253,13 @@ if(YETTY_ENABLE_FEATURE_YVIDEO)
 endif()
 
 #-----------------------------------------------------------------------------
+# Prepare assets at configure time (generates CDB files if missing)
+#-----------------------------------------------------------------------------
+if(YETTY_ENABLE_FEATURE_CDB_GEN)
+    include(${YETTY_ROOT}/build-tools/cmake/prepare-assets.cmake)
+endif()
+
+#-----------------------------------------------------------------------------
 # yetty_embed_assets(TARGET)
 #
 # Embeds shaders, fonts, and CDB files into the target binary.

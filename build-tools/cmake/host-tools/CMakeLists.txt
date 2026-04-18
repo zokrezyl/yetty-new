@@ -109,32 +109,29 @@ if(howerj_cdb_ADDED)
     target_compile_options(cdb PRIVATE -w)
 endif()
 
-# cdb-wrapper
-add_library(cdb-wrapper STATIC ${YETTY_ROOT}/src/yetty/cdb-wrapper.cpp)
-target_include_directories(cdb-wrapper PUBLIC ${YETTY_ROOT}/include)
-target_link_libraries(cdb-wrapper PUBLIC cdb ytrace::ytrace)
-target_compile_definitions(cdb-wrapper PUBLIC YETTY_USE_HOWERJ_CDB=1)
+# ycdb (C wrapper for CDB)
+add_library(yetty_ycdb STATIC ${YETTY_ROOT}/src/yetty/ycdb/ycdb.c)
+target_include_directories(yetty_ycdb PUBLIC ${YETTY_ROOT}/include)
+target_link_libraries(yetty_ycdb PUBLIC cdb)
+target_compile_definitions(yetty_ycdb PUBLIC YETTY_USE_HOWERJ_CDB=1)
+
+# ymsdf-gen (MSDF generator library)
+add_library(yetty_ymsdf_gen STATIC ${YETTY_ROOT}/src/yetty/ymsdf-gen/ymsdf-gen.cpp)
+target_include_directories(yetty_ymsdf_gen PUBLIC ${YETTY_ROOT}/include ${FREETYPE_INCLUDE_DIR})
+target_link_libraries(yetty_ymsdf_gen PUBLIC
+    msdfgen::msdfgen-core msdfgen::msdfgen-ext ${FREETYPE_ALL_LIBS} yetty_ycdb)
+
+# ytrace (C implementation)
+add_library(ytrace_c STATIC ${YETTY_ROOT}/src/yetty/ytrace.c)
+target_include_directories(ytrace_c PUBLIC ${YETTY_ROOT}/include)
 
 # msdf-gen tool
 add_executable(yetty-msdf-gen
-    ${YETTY_ROOT}/src/yetty/msdf-gen/main.cpp
-    ${YETTY_ROOT}/src/yetty/msdf-gen/generator.cpp
+    ${YETTY_ROOT}/tools/gen-msdf/main.c
+    ${YETTY_ROOT}/src/yetty/ytrace.c
 )
-target_include_directories(yetty-msdf-gen PRIVATE
-    ${YETTY_ROOT}/include
-    ${YETTY_ROOT}/src
-    ${FREETYPE_INCLUDE_DIR}
-)
-target_link_libraries(yetty-msdf-gen PRIVATE
-    msdfgen::msdfgen-core
-    msdfgen::msdfgen-ext
-    glm::glm
-    ytrace::ytrace
-    args
-    cdb-wrapper
-    ${FREETYPE_ALL_LIBS}
-)
-target_compile_definitions(yetty-msdf-gen PRIVATE CMAKE_SOURCE_DIR="${YETTY_ROOT}")
+target_include_directories(yetty-msdf-gen PRIVATE ${YETTY_ROOT}/include)
+target_link_libraries(yetty-msdf-gen PRIVATE yetty_ymsdf_gen)
 
 # =============================================================================
 # VM tools - statically linked for x86_64 Linux (JSLinux VM)

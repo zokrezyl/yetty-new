@@ -7,7 +7,23 @@
 extern "C" {
 #endif
 
-/* Uncaptured error callback for WebGPU device - logs errors via ytrace */
+/* Error state - cleared before WebGPU call, checked after */
+struct yetty_webgpu_error_state {
+    int has_error;
+    WGPUErrorType type;
+    char message[512];
+};
+
+/* Global error state - use this with the callback */
+extern struct yetty_webgpu_error_state yetty_webgpu_error;
+
+/* Clear error state before a WebGPU call */
+void yetty_webgpu_error_clear(void);
+
+/* Check if error occurred - returns 1 if error, 0 if ok */
+int yetty_webgpu_error_check(void);
+
+/* Uncaptured error callback - stores error in yetty_webgpu_error */
 void yetty_webgpu_uncaptured_error_callback(
     WGPUDevice const *device,
     WGPUErrorType type,

@@ -3,7 +3,7 @@
  */
 
 #include <yetty/yetty.h>
-#include <yetty/term/terminal.h>
+#include <yetty/yterm/terminal.h>
 #include <yetty/webgpu/error.h>
 #include <yetty/ytrace.h>
 

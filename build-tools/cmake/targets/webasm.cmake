@@ -24,13 +24,13 @@ set(YETTY_SHADERS_DIR "/assets/shaders" CACHE STRING "Shader directory path")
 
 # Platform sources
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/webasm/main.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webasm/surface.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webasm/webasm-pty.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webasm/webasm-pty-factory.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webasm/window.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webasm/event-loop.cpp
-    ${YETTY_ROOT}/src/yetty/platform/webasm/pipe.cpp
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/main.cpp
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/surface.cpp
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/webasm-pty.cpp
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/webasm-pty-factory.cpp
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/window.cpp
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/event-loop.cpp
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/pipe.cpp
 )
 
 # Create executable with core sources + web platform

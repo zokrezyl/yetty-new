@@ -2,7 +2,7 @@
 #define YETTY_PLATFORM_CLIPBOARD_MANAGER_H
 
 #include <stddef.h>
-#include <yetty/core/result.h>
+#include <yetty/ycore/result.h>
 
 #ifdef __cplusplus
 extern "C" {

@@ -23,17 +23,17 @@ endif()
 
 # Platform sources — linux-specific + shared GLFW/Unix (C)
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-main.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-surface.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-event-loop.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-window.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/glfw-clipboard-manager.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/libuv-event-loop.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pty.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/unix-pipe.c
-    ${YETTY_ROOT}/src/yetty/platform/shared/extract-assets.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-main.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-surface.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-event-loop.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-window.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-clipboard-manager.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pty.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pipe.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
-    ${YETTY_ROOT}/src/yetty/platform/linux/platform-paths.c
+    ${YETTY_ROOT}/src/yetty/yplatform/linux/platform-paths.c
 )
 
 # Create executable with core sources + platform
@@ -110,10 +110,8 @@ if(YETTY_ENABLE_FEATURE_ASSETS)
 endif()
 
 # Tests
-if(YETTY_ENABLE_FEATURE_TESTS)
-    enable_testing()
-    add_subdirectory(${YETTY_ROOT}/test/ut ${CMAKE_BINARY_DIR}/test/ut)
-endif()
+enable_testing()
+add_subdirectory(${YETTY_ROOT}/test/ut ${CMAKE_BINARY_DIR}/test/ut)
 
 # Tools (ydraw-maze, ydraw-zoo, etc.)
 if(YETTY_ENABLE_FEATURE_TOOLS)

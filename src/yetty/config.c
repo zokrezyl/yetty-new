@@ -1,7 +1,7 @@
 /* config.c - Configuration management using libyaml */
 
-#include <yetty/config.h>
-#include <yetty/core/types.h>
+#include <yetty/yconfig.h>
+#include <yetty/ycore/types.h>
 #include <yaml.h>
 #include <stdio.h>
 #include <stdlib.h>
