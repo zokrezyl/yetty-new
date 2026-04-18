@@ -12,6 +12,8 @@ extern "C" {
 
 struct yetty_yui_tile;
 struct yetty_yui_view;
+struct yetty_config;
+struct yetty_context;
 
 /* Result types */
 YETTY_RESULT_DECLARE(yetty_yui_tile_ptr, struct yetty_yui_tile *);
@@ -38,6 +40,11 @@ struct yetty_yui_tile_ptr_result
 yetty_yui_split_create(enum yetty_yui_orientation orientation);
 
 struct yetty_yui_tile_ptr_result yetty_yui_pane_create(void);
+
+/* Create tile tree from config - recursively builds splits/panes */
+struct yetty_yui_tile_ptr_result
+yetty_yui_tile_create_from_config(const struct yetty_config *config,
+				  const struct yetty_context *yetty_ctx);
 
 void yetty_yui_tile_destroy(struct yetty_yui_tile *tile);
 

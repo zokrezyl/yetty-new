@@ -11,4 +11,8 @@ target_include_directories(yetty_yui
         ${CMAKE_SOURCE_DIR}/include
 )
 
-# No external dependencies - uses header-only yetty/core
+target_link_libraries(yetty_yui
+    PRIVATE
+        webgpu
+        yetty_term
+)

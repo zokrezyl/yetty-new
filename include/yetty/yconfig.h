@@ -41,6 +41,10 @@ struct yetty_config_ops {
     struct yetty_core_void_result (*set_string)(struct yetty_config *self,
                                                  const char *path, const char *value);
 
+    /* Get sub-config at path (returns NULL if not found, no ownership transfer) */
+    struct yetty_config *(*get_node)(const struct yetty_config *self,
+                                     const char *path);
+
     /* Legacy accessors */
     int (*use_damage_tracking)(const struct yetty_config *self);
     int (*show_fps)(const struct yetty_config *self);

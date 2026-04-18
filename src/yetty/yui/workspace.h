@@ -12,6 +12,8 @@ extern "C" {
 #endif
 
 struct yetty_yui_workspace;
+struct yetty_config;
+struct yetty_context;
 
 /* Result types */
 YETTY_RESULT_DECLARE(yetty_yui_workspace_ptr, struct yetty_yui_workspace *);
@@ -52,6 +54,12 @@ yetty_yui_workspace_split_pane(struct yetty_yui_workspace *ws,
 struct yetty_core_void_result
 yetty_yui_workspace_close_tile(struct yetty_yui_workspace *ws,
 			       yetty_core_object_id tile_id);
+
+/* Load layout from config - creates tile tree and sets as root */
+struct yetty_core_void_result
+yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
+				const struct yetty_config *config,
+				const struct yetty_context *yetty_ctx);
 
 #ifdef __cplusplus
 }

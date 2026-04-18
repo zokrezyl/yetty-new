@@ -1,5 +1,8 @@
 #include <yetty/yui/workspace.h>
 #include <yetty/yui/tile.h>
+#include <yetty/yui/view.h>
+#include <yetty/config.h>
+#include <yetty/term/terminal.h>
 #include <stdlib.h>
 
 /*=============================================================================
@@ -288,4 +291,60 @@ yetty_yui_workspace_close_tile(struct yetty_yui_workspace *ws,
 	}
 
 	return YETTY_OK_VOID();
+}
+
+/*=============================================================================
+ * Config-based layout loading
+ *===========================================================================*/
+
+struct yetty_core_void_result
+yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
+				const struct yetty_config *config,
+				const struct yetty_context *yetty_ctx)
+{
+	struct yetty_config *layout_config;
+	struct yetty_yui_tile_ptr_result tile_res;
+
+	if (!ws)
+		return YETTY_ERR(yetty_core_void, "workspace is NULL");
+	if (!yetty_ctx)
+		return YETTY_ERR(yetty_core_void, "yetty_ctx is NULL");
+
+	/* Get layout sub-config (optional) */
+	layout_config = NULL;
+	if (config)
+		layout_config = config->ops->get_node(config,
+						      "workspace/default/layout");
+
+	if (layout_config) {
+		/* Create tile tree from config */
+		tile_res = yetty_yui_tile_create_from_config(layout_config,
+							     yetty_ctx);
+	} else {
+		/* Fallback: create default single pane with terminal */
+		tile_res = yetty_yui_pane_create();
+		if (YETTY_IS_OK(tile_res)) {
+			struct yetty_term_terminal_result term_res;
+			struct grid_size grid_size = {.rows = 24, .cols = 80};
+
+			term_res = yetty_term_terminal_create(grid_size,
+							      yetty_ctx);
+			if (YETTY_IS_ERR(term_res)) {
+				yetty_yui_tile_destroy(tile_res.value);
+				return YETTY_ERR(yetty_core_void,
+						 term_res.error.msg);
+			}
+
+			yetty_yui_pane_push_view(
+			    tile_res.value,
+			    yetty_term_terminal_as_view(term_res.value));
+			yetty_yui_pane_set_focused(tile_res.value, 1);
+		}
+	}
+
+	if (YETTY_IS_ERR(tile_res))
+		return YETTY_ERR(yetty_core_void, tile_res.error.msg);
+
+	/* Set as root */
+	return yetty_yui_workspace_set_root(ws, tile_res.value);
 }

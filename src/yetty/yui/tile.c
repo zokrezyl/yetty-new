@@ -1,7 +1,11 @@
 #include <yetty/yui/tile.h>
 #include <yetty/yui/view.h>
+#include <yetty/config.h>
+#include <yetty/yetty.h>
+#include <yetty/term/terminal.h>
 #include <stdlib.h>
 #include <stdatomic.h>
+#include <string.h>
 
 /*=============================================================================
  * Object ID generation
@@ -564,4 +568,113 @@ yetty_yui_tile_find_focused_pane(struct yetty_yui_tile *root)
 		return found;
 
 	return yetty_yui_tile_find_focused_pane(split->second);
+}
+
+/*=============================================================================
+ * Config-based creation
+ *===========================================================================*/
+
+struct yetty_yui_tile_ptr_result
+yetty_yui_tile_create_from_config(const struct yetty_config *config,
+				  const struct yetty_context *yetty_ctx)
+{
+	const char *type;
+	struct yetty_yui_tile_ptr_result res;
+
+	if (!config)
+		return YETTY_ERR(yetty_yui_tile_ptr, "config is NULL");
+	if (!yetty_ctx)
+		return YETTY_ERR(yetty_yui_tile_ptr, "yetty_ctx is NULL");
+
+	type = config->ops->get_string(config, "type", "pane");
+
+	if (strcmp(type, "split") == 0) {
+		const char *orient_str;
+		enum yetty_yui_orientation orientation;
+		float ratio;
+		struct yetty_config *first_config;
+		struct yetty_config *second_config;
+		struct yetty_yui_tile_ptr_result first_res, second_res;
+
+		/* Parse orientation */
+		orient_str = config->ops->get_string(config, "orientation",
+						     "horizontal");
+		if (strcmp(orient_str, "vertical") == 0)
+			orientation = YETTY_YUI_VERTICAL;
+		else
+			orientation = YETTY_YUI_HORIZONTAL;
+
+		/* Create split */
+		res = yetty_yui_split_create(orientation);
+		if (YETTY_IS_ERR(res))
+			return res;
+
+		/* Set ratio */
+		ratio = (float)config->ops->get_int(config, "ratio", 50) / 100.0f;
+		if (ratio < 0.1f)
+			ratio = 0.1f;
+		if (ratio > 0.9f)
+			ratio = 0.9f;
+		yetty_yui_split_set_ratio(res.value, ratio);
+
+		/* Create first child */
+		first_config = config->ops->get_node(config, "first");
+		if (first_config) {
+			first_res = yetty_yui_tile_create_from_config(first_config,
+								      yetty_ctx);
+			if (YETTY_IS_ERR(first_res)) {
+				yetty_yui_tile_destroy(res.value);
+				return first_res;
+			}
+			yetty_yui_split_set_first(res.value, first_res.value);
+		}
+
+		/* Create second child */
+		second_config = config->ops->get_node(config, "second");
+		if (second_config) {
+			second_res = yetty_yui_tile_create_from_config(second_config,
+								       yetty_ctx);
+			if (YETTY_IS_ERR(second_res)) {
+				yetty_yui_tile_destroy(res.value);
+				return second_res;
+			}
+			yetty_yui_split_set_second(res.value, second_res.value);
+		}
+
+		return res;
+	}
+
+	/* Default: pane */
+	res = yetty_yui_pane_create();
+	if (YETTY_IS_ERR(res))
+		return res;
+
+	/* Create view based on config */
+	{
+		const char *view_type;
+		struct yetty_term_terminal_result term_res;
+		struct grid_size grid_size = {.rows = 24, .cols = 80};
+
+		view_type = config->ops->get_string(config, "view", "terminal");
+
+		if (strcmp(view_type, "terminal") == 0) {
+			term_res = yetty_term_terminal_create(grid_size,
+							      yetty_ctx);
+			if (YETTY_IS_ERR(term_res)) {
+				yetty_yui_tile_destroy(res.value);
+				return YETTY_ERR(yetty_yui_tile_ptr,
+						 term_res.error.msg);
+			}
+
+			yetty_yui_pane_push_view(
+			    res.value,
+			    yetty_term_terminal_as_view(term_res.value));
+		}
+		/* Future: handle other view types */
+	}
+
+	/* Mark first pane as focused */
+	yetty_yui_pane_set_focused(res.value, 1);
+
+	return res;
 }
