@@ -43,3 +43,11 @@ else()
     # Linux and other Unix
     include(${YETTY_ROOT}/build-tools/cmake/targets/linux.cmake)
 endif()
+
+# Tools
+add_subdirectory(${YETTY_ROOT}/tools ${CMAKE_BINARY_DIR}/tools)
+
+# Demos
+if(YETTY_ENABLE_FEATURE_DEMO)
+    add_subdirectory(${YETTY_ROOT}/demo ${CMAKE_BINARY_DIR}/demo)
+endif()

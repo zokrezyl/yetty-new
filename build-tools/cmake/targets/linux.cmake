@@ -108,14 +108,3 @@ if(YETTY_ENABLE_FEATURE_ASSETS)
         COMMENT "Verifying build assets..."
     )
 endif()
-
-
-# Tools (ydraw-maze, ydraw-zoo, etc.)
-if(YETTY_ENABLE_FEATURE_TOOLS)
-    add_subdirectory(${YETTY_ROOT}/tools ${CMAKE_BINARY_DIR}/tools)
-endif()
-
-# Demos
-if(YETTY_ENABLE_FEATURE_DEMO)
-    add_subdirectory(${YETTY_ROOT}/demo ${CMAKE_BINARY_DIR}/demo)
-endif()

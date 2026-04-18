@@ -49,7 +49,10 @@
           pkg-config
           git
           llvmPackages_21.clang
+          llvmPackages_21.clang-unwrapped.dev
           llvmPackages_21.lld
+          llvmPackages_21.llvm
+          llvmPackages_21.libclang
           meson  # For dav1d (AV1 decoder)
           nasm   # For dav1d assembly optimizations
         ];
