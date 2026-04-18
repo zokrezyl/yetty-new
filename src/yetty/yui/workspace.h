@@ -3,8 +3,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <yetty/core/result.h>
-#include <yetty/core/types.h>
+#include <yetty/ycore/result.h>
+#include <yetty/ycore/types.h>
 #include <yetty/yui/tile.h>
 
 #ifdef __cplusplus

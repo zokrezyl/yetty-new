@@ -1,8 +1,8 @@
 #include <yetty/yui/tile.h>
 #include <yetty/yui/view.h>
-#include <yetty/config.h>
+#include <yetty/yconfig.h>
 #include <yetty/yetty.h>
-#include <yetty/term/terminal.h>
+#include <yetty/yterm/terminal.h>
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <string.h>
