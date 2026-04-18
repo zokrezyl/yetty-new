@@ -13,13 +13,30 @@
 #include <yetty/yrender/render-target.h>
 #include <yetty/yrender/rendered-layer.h>
 #include <yetty/ytrace.h>
+#include <yetty/yui/view.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define YETTY_TERM_TERMINAL_MAX_LAYERS 256
 
+/* Forward declarations for view ops */
+static void terminal_view_destroy(struct yetty_yui_view *view);
+static struct yetty_core_void_result terminal_view_render(
+    struct yetty_yui_view *view, void *render_pass);
+static struct yetty_core_void_result terminal_view_run(struct yetty_yui_view *view);
+static void terminal_view_set_bounds(struct yetty_yui_view *view,
+                                     struct yetty_yui_rect bounds);
+
+static const struct yetty_yui_view_ops terminal_view_ops = {
+    .destroy = terminal_view_destroy,
+    .render = terminal_view_render,
+    .run = terminal_view_run,
+    .set_bounds = terminal_view_set_bounds,
+};
+
 struct yetty_term_terminal {
-    struct yetty_core_event_listener listener;  /* must be first for container_of */
+    struct yetty_yui_view view;  /* MUST be first - allows cast to view */
+    struct yetty_core_event_listener listener;
     struct yetty_term_terminal_context context;
     uint32_t cols;
     uint32_t rows;
@@ -108,7 +125,8 @@ static int terminal_event_handler(
     struct yetty_core_event_listener *listener,
     const struct yetty_core_event *event)
 {
-    struct yetty_term_terminal *terminal = (struct yetty_term_terminal *)listener;
+    struct yetty_term_terminal *terminal =
+        container_of(listener, struct yetty_term_terminal, listener);
 
     switch (event->type) {
     case YETTY_EVENT_RENDER: {
@@ -306,6 +324,10 @@ yetty_term_terminal_create(struct grid_size grid_size,
   terminal = calloc(1, sizeof(struct yetty_term_terminal));
   if (!terminal)
     return YETTY_ERR(yetty_term_terminal, "failed to allocate terminal");
+
+  /* Initialize view base */
+  terminal->view.ops = &terminal_view_ops;
+  terminal->view.id = yetty_yui_view_next_id();
 
   terminal->listener.handler = terminal_event_handler;
   terminal->cols = cols;
@@ -709,4 +731,56 @@ struct yetty_term_terminal_layer *yetty_term_terminal_layer_get(
         return NULL;
 
     return terminal->layers[index];
+}
+
+/*=============================================================================
+ * View interface implementation
+ *===========================================================================*/
+
+struct yetty_yui_view *
+yetty_term_terminal_as_view(struct yetty_term_terminal *terminal)
+{
+    return terminal ? &terminal->view : NULL;
+}
+
+static void terminal_view_destroy(struct yetty_yui_view *view)
+{
+    struct yetty_term_terminal *terminal =
+        container_of(view, struct yetty_term_terminal, view);
+    yetty_term_terminal_destroy(terminal);
+}
+
+static struct yetty_core_void_result terminal_view_render(
+    struct yetty_yui_view *view, void *render_pass)
+{
+    (void)render_pass;  /* Terminal renders via event loop, not direct call */
+    struct yetty_term_terminal *terminal =
+        container_of(view, struct yetty_term_terminal, view);
+
+    return terminal_render_frame(terminal);
+}
+
+static struct yetty_core_void_result terminal_view_run(struct yetty_yui_view *view)
+{
+    struct yetty_term_terminal *terminal =
+        container_of(view, struct yetty_term_terminal, view);
+
+    return yetty_term_terminal_run(terminal);
+}
+
+static void terminal_view_set_bounds(struct yetty_yui_view *view,
+                                     struct yetty_yui_rect bounds)
+{
+    struct yetty_term_terminal *terminal =
+        container_of(view, struct yetty_term_terminal, view);
+
+    /* Store bounds in view */
+    view->bounds = bounds;
+
+    /* Terminal handles resize via YETTY_EVENT_RESIZE from event loop */
+    /* For now, just log - the actual resize happens through the event system */
+    ydebug("terminal_view_set_bounds: %.0fx%.0f at (%.0f,%.0f)",
+           bounds.w, bounds.h, bounds.x, bounds.y);
+
+    (void)terminal;
 }

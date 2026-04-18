@@ -42,6 +42,9 @@ add_subdirectory(yrender)
 # WebGPU utilities
 add_subdirectory(ywebgpu)
 
+# UI subsystem (workspace, tile, view)
+add_subdirectory(yui)
+
 # Core sources (src/yetty/core/*.cpp)
 set(YETTY_CORE_SOURCES "")
 

@@ -3,9 +3,13 @@
  */
 
 #include <yetty/yetty.h>
+#include <yetty/yconfig.h>
 #include <yetty/yterm/terminal.h>
 #include <yetty/webgpu/error.h>
 #include <yetty/ytrace.h>
+#include <yetty/yui/workspace.h>
+#include <yetty/yui/tile.h>
+#include <yetty/yui/view.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +18,7 @@
 /* Yetty instance */
 struct yetty_yetty {
     struct yetty_context context;
-    struct yetty_term_terminal *terminal;
+    struct yetty_yui_workspace *workspace;
 
     /* WebGPU state (owned by Yetty) */
     WGPUAdapter adapter;
@@ -238,16 +242,25 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
     }
     ydebug("yetty_create: WebGPU initialized");
 
-    /* Create terminal */
-    ydebug("yetty_create: Creating terminal 80x24...");
-    struct yetty_term_terminal_result term_res = yetty_term_terminal_create(
-        (struct grid_size){.cols = 80, .rows = 24}, &yetty->context);
-    if (!YETTY_IS_OK(term_res)) {
+    /* Create workspace */
+    ydebug("yetty_create: Creating workspace...");
+    struct yetty_yui_workspace_ptr_result ws_res = yetty_yui_workspace_create();
+    if (!YETTY_IS_OK(ws_res)) {
         yetty_destroy(yetty);
-        return YETTY_ERR(yetty_yetty, "Failed to create terminal");
+        return YETTY_ERR(yetty_yetty, "Failed to create workspace");
     }
-    yetty->terminal = term_res.value;
-    ydebug("yetty_create: Terminal created");
+    yetty->workspace = ws_res.value;
+    ydebug("yetty_create: Workspace created");
+
+    /* Load layout from config */
+    ydebug("yetty_create: Loading layout from config...");
+    struct yetty_core_void_result layout_res = yetty_yui_workspace_load_layout(
+        yetty->workspace, app_context->config, &yetty->context);
+    if (!YETTY_IS_OK(layout_res)) {
+        yetty_destroy(yetty);
+        return YETTY_ERR(yetty_yetty, layout_res.error.msg);
+    }
+    ydebug("yetty_create: Layout loaded");
 
     ydebug("yetty_create: Complete");
     return YETTY_OK(yetty_yetty, yetty);
@@ -261,10 +274,12 @@ void yetty_destroy(struct yetty_yetty *yetty)
 
     ydebug("yetty_destroy: starting");
 
-    if (yetty->terminal) {
-        ydebug("yetty_destroy: destroying terminal");
-        yetty_term_terminal_destroy(yetty->terminal);
-        ydebug("yetty_destroy: terminal destroyed");
+    /* Destroy workspace (also destroys tiles and views including terminals) */
+    if (yetty->workspace) {
+        ydebug("yetty_destroy: destroying workspace");
+        yetty_yui_workspace_destroy(yetty->workspace);
+        yetty->workspace = NULL;
+        ydebug("yetty_destroy: workspace destroyed");
     }
 
     /* Surface is created by platform (glfw-main.c) but owned by yetty since we
@@ -306,13 +321,13 @@ struct yetty_core_void_result yetty_run(struct yetty_yetty *yetty)
         return YETTY_ERR(yetty_core_void, "yetty is null");
     }
 
-    if (yetty->terminal) {
-        ydebug("yetty_run: Calling terminal run...");
-        struct yetty_core_void_result res = yetty_term_terminal_run(yetty->terminal);
-        ydebug("yetty_run: Terminal run returned, ok=%d", YETTY_IS_OK(res));
+    if (yetty->workspace) {
+        ydebug("yetty_run: Calling workspace run...");
+        struct yetty_core_void_result res = yetty_yui_workspace_run(yetty->workspace);
+        ydebug("yetty_run: Workspace run returned, ok=%d", YETTY_IS_OK(res));
         return res;
     }
 
-    ydebug("yetty_run: No terminal, returning OK");
+    ydebug("yetty_run: No workspace, returning OK");
     return YETTY_OK_VOID();
 }

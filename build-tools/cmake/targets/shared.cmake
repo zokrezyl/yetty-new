@@ -203,7 +203,8 @@ if(YETTY_ENABLE_LIB_ZLIB)
 endif()
 
 # Core libraries (always linked)
-list(APPEND YETTY_LIBS yetty_term yetty_render yetty_webgpu)
+# Note: yetty_yui comes first because it depends on yetty_term
+list(APPEND YETTY_LIBS yetty_yui yetty_term yetty_render yetty_webgpu)
 
 # Feature library link targets
 if(YETTY_ENABLE_FEATURE_BASE)

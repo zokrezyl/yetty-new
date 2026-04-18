@@ -35,6 +35,16 @@ struct config_impl {
     char bin_dir[512];
 };
 
+/* Sub-config view - lightweight wrapper pointing to a sub-node */
+#define MAX_SUBCONFIGS 64
+struct config_subnode {
+    struct yetty_config base;
+    struct config_node *node;
+};
+
+static struct config_subnode g_subconfigs[MAX_SUBCONFIGS];
+static int g_subconfig_count = 0;
+
 /* Forward declarations */
 static void config_destroy(struct yetty_config *self);
 static const char *config_get_string(const struct yetty_config *self, const char *path, const char *default_value);
@@ -48,6 +58,9 @@ static int config_debug_damage_rects(const struct yetty_config *self);
 static uint32_t config_scrollback_lines(const struct yetty_config *self);
 static const char *config_font_family(const struct yetty_config *self);
 
+static struct yetty_config *config_get_node(const struct yetty_config *self,
+                                            const char *path);
+
 static const struct yetty_config_ops config_ops = {
     .destroy = config_destroy,
     .get_string = config_get_string,
@@ -55,6 +68,7 @@ static const struct yetty_config_ops config_ops = {
     .get_bool = config_get_bool,
     .has = config_has,
     .set_string = config_set_string,
+    .get_node = config_get_node,
     .use_damage_tracking = config_use_damage_tracking,
     .show_fps = config_show_fps,
     .debug_damage_rects = config_debug_damage_rects,
@@ -406,6 +420,147 @@ static uint32_t config_scrollback_lines(const struct yetty_config *self)
 static const char *config_font_family(const struct yetty_config *self)
 {
     return config_get_string(self, YETTY_CONFIG_KEY_FONT_FAMILY, "default");
+}
+
+/* Forward declaration */
+static const struct yetty_config_ops subnode_ops;
+
+/* Subnode ops - same as config ops but uses subnode's node as root */
+static void subnode_destroy(struct yetty_config *self)
+{
+    /* No-op: subnodes don't own their data */
+    (void)self;
+}
+
+static const char *subnode_get_string(const struct yetty_config *self,
+                                      const char *path,
+                                      const char *default_value)
+{
+    struct config_subnode *sub = (struct config_subnode *)self;
+    char key[MAX_KEY_LEN] = {0};
+
+    struct config_node *parent = navigate_path(sub->node, path, key);
+    if (!parent)
+        return default_value;
+
+    struct config_node *node = node_find_child(parent, key);
+    if (!node || !node->value[0])
+        return default_value;
+
+    return node->value;
+}
+
+static int subnode_get_int(const struct yetty_config *self, const char *path,
+                           int default_value)
+{
+    struct config_subnode *sub = (struct config_subnode *)self;
+    char key[MAX_KEY_LEN] = {0};
+
+    struct config_node *parent = navigate_path(sub->node, path, key);
+    if (!parent)
+        return default_value;
+
+    struct config_node *node = node_find_child(parent, key);
+    if (!node || !node->is_int)
+        return default_value;
+
+    return node->int_value;
+}
+
+static int subnode_get_bool(const struct yetty_config *self, const char *path,
+                            int default_value)
+{
+    struct config_subnode *sub = (struct config_subnode *)self;
+    char key[MAX_KEY_LEN] = {0};
+
+    struct config_node *parent = navigate_path(sub->node, path, key);
+    if (!parent)
+        return default_value;
+
+    struct config_node *node = node_find_child(parent, key);
+    if (!node || !node->is_bool)
+        return default_value;
+
+    return node->bool_value;
+}
+
+static int subnode_has(const struct yetty_config *self, const char *path)
+{
+    struct config_subnode *sub = (struct config_subnode *)self;
+    char key[MAX_KEY_LEN] = {0};
+
+    struct config_node *parent = navigate_path(sub->node, path, key);
+    if (!parent)
+        return 0;
+
+    return node_find_child(parent, key) != NULL;
+}
+
+static struct yetty_core_void_result subnode_set_string(struct yetty_config *self,
+                                                        const char *path,
+                                                        const char *value)
+{
+    (void)self;
+    (void)path;
+    (void)value;
+    return YETTY_ERR(yetty_core_void, "cannot set on subnode");
+}
+
+static struct yetty_config *subnode_get_node(const struct yetty_config *self,
+                                             const char *path);
+
+static const struct yetty_config_ops subnode_ops = {
+    .destroy = subnode_destroy,
+    .get_string = subnode_get_string,
+    .get_int = subnode_get_int,
+    .get_bool = subnode_get_bool,
+    .has = subnode_has,
+    .set_string = subnode_set_string,
+    .get_node = subnode_get_node,
+    .use_damage_tracking = NULL,
+    .show_fps = NULL,
+    .debug_damage_rects = NULL,
+    .scrollback_lines = NULL,
+    .font_family = NULL,
+};
+
+static struct yetty_config *create_subconfig(struct config_node *node)
+{
+    if (!node || g_subconfig_count >= MAX_SUBCONFIGS)
+        return NULL;
+
+    struct config_subnode *sub = &g_subconfigs[g_subconfig_count++];
+    sub->base.ops = &subnode_ops;
+    sub->node = node;
+    return &sub->base;
+}
+
+static struct yetty_config *config_get_node(const struct yetty_config *self,
+                                            const char *path)
+{
+    struct config_impl *impl = container_of(self, struct config_impl, base);
+    char key[MAX_KEY_LEN] = {0};
+
+    struct config_node *parent = navigate_path(impl->root, path, key);
+    if (!parent)
+        return NULL;
+
+    struct config_node *node = node_find_child(parent, key);
+    return create_subconfig(node);
+}
+
+static struct yetty_config *subnode_get_node(const struct yetty_config *self,
+                                             const char *path)
+{
+    struct config_subnode *sub = (struct config_subnode *)self;
+    char key[MAX_KEY_LEN] = {0};
+
+    struct config_node *parent = navigate_path(sub->node, path, key);
+    if (!parent)
+        return NULL;
+
+    struct config_node *node = node_find_child(parent, key);
+    return create_subconfig(node);
 }
 
 

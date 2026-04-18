@@ -143,6 +143,95 @@ shaders:
       # - "0xeffd-mandelbrot"  # Mandelbrot fractal
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Workspace Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# The workspace layout defines the initial tile arrangement.
+# Each tile is either:
+#   - type: pane - A leaf node containing a view (terminal)
+#   - type: split - A container with two children (first/second)
+#
+# Split tiles have:
+#   - orientation: horizontal (top/bottom) or vertical (left/right)
+#   - ratio: percentage (0-100) for first child size
+#   - first: first child tile
+#   - second: second child tile
+#
+# Pane tiles have:
+#   - view: the view type (currently only "terminal")
+workspace:
+  # Single terminal (rename to 'default' to use)
+  default:
+    layout:
+      type: pane
+      view: terminal
+
+  # Two terminals side by side (vertical split)
+  default1:
+    layout:
+      type: split
+      orientation: vertical
+      ratio: 50
+      first:
+        type: pane
+        view: terminal
+      second:
+        type: pane
+        view: terminal
+
+  # Two terminals top/bottom (horizontal split)
+  default2:
+    layout:
+      type: split
+      orientation: horizontal
+      ratio: 50
+      first:
+        type: pane
+        view: terminal
+      second:
+        type: pane
+        view: terminal
+
+  # IDE-style: left pane + right split top/bottom
+  default3:
+    layout:
+      type: split
+      orientation: vertical
+      ratio: 60
+      first:
+        type: pane
+        view: terminal
+      second:
+        type: split
+        orientation: horizontal
+        ratio: 50
+        first:
+          type: pane
+          view: terminal
+        second:
+          type: pane
+          view: terminal
+
+  # Three columns
+  default4:
+    layout:
+      type: split
+      orientation: vertical
+      ratio: 33
+      first:
+        type: pane
+        view: terminal
+      second:
+        type: split
+        orientation: vertical
+        ratio: 50
+        first:
+          type: pane
+          view: terminal
+        second:
+          type: pane
+          view: terminal
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Debug Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 debug:
