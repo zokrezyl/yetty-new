@@ -18,6 +18,7 @@ struct yetty_term_terminal_layer;
 struct yetty_term_terminal_layer_ops;
 struct yetty_core_event_loop;
 struct yetty_platform_pty;
+struct yetty_yui_view;
 
 /* Result types */
 YETTY_RESULT_DECLARE(yetty_term_terminal, struct yetty_term_terminal *);
@@ -97,6 +98,10 @@ struct yetty_term_terminal_result
 yetty_term_terminal_create(struct grid_size grid_size,
                            const struct yetty_context *yetty_context);
 void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal);
+
+/* Get terminal as yui view (for pushing into pane) */
+struct yetty_yui_view *
+yetty_term_terminal_as_view(struct yetty_term_terminal *terminal);
 
 /* Terminal run */
 struct yetty_core_void_result
