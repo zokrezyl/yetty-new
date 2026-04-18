@@ -4,8 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <webgpu/webgpu.h>
-#include <yetty/core/event-loop.h>
-#include <yetty/core/result.h>
+#include <yetty/ycore/event-loop.h>
+#include <yetty/ycore/result.h>
 
 #ifdef __cplusplus
 extern "C" {

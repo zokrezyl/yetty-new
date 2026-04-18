@@ -160,9 +160,8 @@ static void collect_resources(struct gpu_resource_binder_impl *impl,
             collect_resources(impl, rs->children[i]);
     }
 
-    /* Buffers */
+    /* Buffers - always collect even if empty (shader needs offset constants) */
     for (size_t i = 0; i < rs->buffer_count && impl->flat_buffer_count < MAX_FLAT_BUFFERS; i++) {
-        if (rs->buffers[i].size == 0) continue;
         struct flat_buffer *fb = &impl->flat_buffers[impl->flat_buffer_count++];
         fb->src = &rs->buffers[i];
         fb->ns = rs->namespace;

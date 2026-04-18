@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <yetty/core/result.h>
+#include <yetty/ycore/result.h>
 
 #ifdef __cplusplus
 extern "C" {

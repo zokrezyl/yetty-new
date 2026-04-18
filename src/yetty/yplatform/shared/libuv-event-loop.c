@@ -16,6 +16,8 @@
 #define MAX_POLLS 256
 #define MAX_TIMERS 64
 
+struct libuv_event_loop;
+
 struct poll_handle {
     uv_poll_t poll;
     int fd;
@@ -23,6 +25,7 @@ struct poll_handle {
     int active;
     struct yetty_core_event_listener *listeners[MAX_LISTENERS_PER_POLL];
     int listener_count;
+    struct libuv_event_loop *impl;
 };
 
 struct timer_handle {
@@ -32,6 +35,7 @@ struct timer_handle {
     int active;
     struct yetty_core_event_listener *listeners[MAX_LISTENERS_PER_TIMER];
     int listener_count;
+    struct libuv_event_loop *impl;
 };
 
 struct prioritized_listener {
@@ -61,6 +65,9 @@ struct libuv_event_loop {
 
     uv_signal_t sigint_handle;
     uv_signal_t sigterm_handle;
+
+    /* Fatal error that caused loop to stop - pointer to error msg, not owned */
+    const char *fatal_error;
 };
 
 /* Forward declarations */
@@ -147,7 +154,11 @@ static void on_render_async(uv_async_t *handle)
     if (impl->render_pending) {
         impl->render_pending = 0;
         event.type = YETTY_EVENT_RENDER;
-        libuv_dispatch(&impl->base, &event);
+        struct yetty_core_int_result res = libuv_dispatch(&impl->base, &event);
+        if (!YETTY_IS_OK(res)) {
+            impl->fatal_error = res.error.msg;
+            uv_stop(impl->loop);
+        }
     }
 }
 
@@ -164,7 +175,12 @@ static void on_pipe_poll(uv_poll_t *handle, int status, int events)
         while ((read_res = impl->platform_input_pipe->ops->read(
                    impl->platform_input_pipe, &event, sizeof(event))),
                YETTY_IS_OK(read_res) && read_res.value == sizeof(event)) {
-            libuv_dispatch(&impl->base, &event);
+            struct yetty_core_int_result res = libuv_dispatch(&impl->base, &event);
+            if (!YETTY_IS_OK(res)) {
+                impl->fatal_error = res.error.msg;
+                uv_stop(impl->loop);
+                return;
+            }
         }
     }
 }
@@ -181,15 +197,27 @@ static void on_poll(uv_poll_t *handle, int status, int events)
     if (events & UV_READABLE) {
         event.type = YETTY_EVENT_POLL_READABLE;
         event.poll.fd = ph->fd;
-        for (i = 0; i < ph->listener_count; i++)
-            ph->listeners[i]->handler(ph->listeners[i], &event);
+        for (i = 0; i < ph->listener_count; i++) {
+            struct yetty_core_int_result res = ph->listeners[i]->handler(ph->listeners[i], &event);
+            if (!YETTY_IS_OK(res)) {
+                ph->impl->fatal_error = res.error.msg;
+                uv_stop(ph->impl->loop);
+                return;
+            }
+        }
     }
 
     if (events & UV_WRITABLE) {
         event.type = YETTY_EVENT_POLL_WRITABLE;
         event.poll.fd = ph->fd;
-        for (i = 0; i < ph->listener_count; i++)
-            ph->listeners[i]->handler(ph->listeners[i], &event);
+        for (i = 0; i < ph->listener_count; i++) {
+            struct yetty_core_int_result res = ph->listeners[i]->handler(ph->listeners[i], &event);
+            if (!YETTY_IS_OK(res)) {
+                ph->impl->fatal_error = res.error.msg;
+                uv_stop(ph->impl->loop);
+                return;
+            }
+        }
     }
 }
 
@@ -202,8 +230,14 @@ static void on_timer(uv_timer_t *handle)
     event.type = YETTY_EVENT_TIMER;
     event.timer.timer_id = th->id;
 
-    for (i = 0; i < th->listener_count; i++)
-        th->listeners[i]->handler(th->listeners[i], &event);
+    for (i = 0; i < th->listener_count; i++) {
+        struct yetty_core_int_result res = th->listeners[i]->handler(th->listeners[i], &event);
+        if (!YETTY_IS_OK(res)) {
+            th->impl->fatal_error = res.error.msg;
+            uv_stop(th->impl->loop);
+            return;
+        }
+    }
 }
 
 /* Implementation */
@@ -229,6 +263,10 @@ static struct yetty_core_void_result libuv_start(struct yetty_core_event_loop *s
     if (r < 0)
         return YETTY_ERR(yetty_core_void, "uv_run failed");
 
+    /* Return fatal error if one was set during event processing */
+    if (impl->fatal_error)
+        return YETTY_ERR(yetty_core_void, impl->fatal_error);
+
     return YETTY_OK_VOID();
 }
 
@@ -237,6 +275,12 @@ static struct yetty_core_void_result libuv_stop(struct yetty_core_event_loop *se
     struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
     uv_stop(impl->loop);
     return YETTY_OK_VOID();
+}
+
+static void libuv_set_error(struct yetty_core_event_loop *self, const char *msg)
+{
+    struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
+    impl->fatal_error = msg;
 }
 
 static struct yetty_core_void_result libuv_register_listener(
@@ -308,7 +352,13 @@ static struct yetty_core_int_result libuv_dispatch(
     count = impl->listener_counts[event->type];
     for (i = 0; i < count; i++) {
         struct yetty_core_event_listener *listener = impl->listeners[event->type][i].listener;
-        if (listener->handler(listener, event))
+        struct yetty_core_int_result res = listener->handler(listener, event);
+        if (!YETTY_IS_OK(res)) {
+            impl->fatal_error = res.error.msg;
+            uv_stop(impl->loop);
+            return YETTY_ERR(yetty_core_int, res.error.msg);
+        }
+        if (res.value)
             return YETTY_OK(yetty_core_int, 1);
     }
 
@@ -325,7 +375,12 @@ static struct yetty_core_void_result libuv_broadcast(
         count = impl->listener_counts[t];
         for (i = 0; i < count; i++) {
             struct yetty_core_event_listener *listener = impl->listeners[t][i].listener;
-            listener->handler(listener, event);
+            struct yetty_core_int_result res = listener->handler(listener, event);
+            if (!YETTY_IS_OK(res)) {
+                impl->fatal_error = res.error.msg;
+                uv_stop(impl->loop);
+                return YETTY_ERR(yetty_core_void, res.error.msg);
+            }
         }
     }
 
@@ -342,6 +397,7 @@ static struct yetty_core_poll_id_result libuv_create_poll(struct yetty_core_even
 
     memset(&impl->polls[id], 0, sizeof(impl->polls[id]));
     impl->polls[id].fd = -1;
+    impl->polls[id].impl = impl;
 
     return YETTY_OK(yetty_core_poll_id, id);
 }
@@ -369,6 +425,7 @@ static struct yetty_core_poll_id_result libuv_create_pty_poll(
         return YETTY_ERR(yetty_core_poll_id, "uv_poll_init failed");
 
     ph->poll.data = ph;
+    ph->impl = impl;
     return YETTY_OK(yetty_core_poll_id, id);
 }
 
@@ -389,6 +446,7 @@ static struct yetty_core_void_result libuv_config_poll(
         return YETTY_ERR(yetty_core_void, "uv_poll_init failed");
 
     ph->poll.data = ph;
+    ph->impl = impl;
     return YETTY_OK_VOID();
 }
 
@@ -476,6 +534,7 @@ static struct yetty_core_timer_id_result libuv_create_timer(struct yetty_core_ev
     th = &impl->timers[id];
     memset(th, 0, sizeof(*th));
     th->id = id;
+    th->impl = impl;
     uv_timer_init(impl->loop, &th->timer);
     th->timer.data = th;
 

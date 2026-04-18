@@ -117,7 +117,7 @@ static void terminal_cursor_callback(struct yetty_term_terminal_layer *source,
 }
 
 /* Event handler */
-static int terminal_event_handler(
+static struct yetty_core_int_result terminal_event_handler(
     struct yetty_core_event_listener *listener,
     const struct yetty_core_event *event)
 {
@@ -127,15 +127,17 @@ static int terminal_event_handler(
     switch (event->type) {
     case YETTY_EVENT_RENDER: {
         struct yetty_core_void_result res = terminal_render_frame(terminal);
-        if (!YETTY_IS_OK(res))
+        if (!YETTY_IS_OK(res)) {
             yerror("terminal: render_frame failed: %s", res.error.msg);
-        return 1;
+            return YETTY_ERR(yetty_core_int, res.error.msg);
+        }
+        return YETTY_OK(yetty_core_int, 1);
     }
 
     case YETTY_EVENT_POLL_READABLE:
         ydebug("terminal: POLL_READABLE event fd=%d", event->poll.fd);
         terminal_read_pty(terminal);
-        return 1;
+        return YETTY_OK(yetty_core_int, 1);
 
     case YETTY_EVENT_KEY_DOWN:
         ydebug("terminal: KEY_DOWN key=%d mods=%d", event->key.key, event->key.mods);
@@ -147,7 +149,7 @@ static int terminal_event_handler(
                     break;  /* Event consumed */
             }
         }
-        return 1;
+        return YETTY_OK(yetty_core_int, 1);
 
     case YETTY_EVENT_CHAR:
         ydebug("terminal: CHAR codepoint=U+%04X mods=%d", event->chr.codepoint, event->chr.mods);
@@ -159,7 +161,7 @@ static int terminal_event_handler(
                     break;  /* Event consumed */
             }
         }
-        return 1;
+        return YETTY_OK(yetty_core_int, 1);
 
     case YETTY_EVENT_SHUTDOWN:
         ydebug("terminal: SHUTDOWN received");
@@ -168,7 +170,7 @@ static int terminal_event_handler(
             terminal->context.event_loop->ops->stop) {
             terminal->context.event_loop->ops->stop(terminal->context.event_loop);
         }
-        return 1;
+        return YETTY_OK(yetty_core_int, 1);
 
     case YETTY_EVENT_RESIZE: {
         float width = event->resize.width;
@@ -176,7 +178,7 @@ static int terminal_event_handler(
         ydebug("terminal: RESIZE %.0fx%.0f", width, height);
 
         if (width <= 0 || height <= 0)
-            return 1;
+            return YETTY_OK(yetty_core_int, 1);
 
         /* Reconfigure WebGPU surface */
         struct yetty_gpu_context *gpu = &terminal->context.yetty_context.gpu_context;
@@ -223,11 +225,11 @@ static int terminal_event_handler(
                 }
             }
         }
-        return 1;
+        return YETTY_OK(yetty_core_int, 1);
     }
 
     default:
-        return 0;
+        return YETTY_OK(yetty_core_int, 0);
     }
 }
 
