@@ -117,10 +117,11 @@ fn ypaint_read_geom_f32(prim_offset: u32, idx: u32) -> f32 {
 //   [0] rolling_row
 //   [1] type (200 = GLYPH)
 //   [2] z_order
-//   [3] x           - glyph position
-//   [4] y           - glyph position
-//   [5] packed      - glyph_index (low 16) | font_id (high 16)
-//   [6] color       - packed RGBA
+//   [3] x           - glyph position (with bearing applied)
+//   [4] y           - glyph position (with bearing applied)
+//   [5] font_size   - target render size (scale = font_size / base_size)
+//   [6] packed      - glyph_index (low 16) | font_id (high 16)
+//   [7] color       - packed RGBA
 // =============================================================================
 
 fn glyph_read_x(prim_offset: u32) -> f32 {
@@ -131,12 +132,16 @@ fn glyph_read_y(prim_offset: u32) -> f32 {
     return bitcast<f32>(storage_buffer[prim_offset + 4u]);
 }
 
+fn glyph_read_font_size(prim_offset: u32) -> f32 {
+    return bitcast<f32>(storage_buffer[prim_offset + 5u]);
+}
+
 fn glyph_read_packed(prim_offset: u32) -> u32 {
-    return storage_buffer[prim_offset + 5u];
+    return storage_buffer[prim_offset + 6u];
 }
 
 fn glyph_read_color(prim_offset: u32) -> u32 {
-    return storage_buffer[prim_offset + 6u];
+    return storage_buffer[prim_offset + 7u];
 }
 
 // median3 is defined in msdf-font.wgsl (merged by binder)
@@ -267,11 +272,16 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         if (prim_type == YPAINT_SDF_GLYPH) {
             let glyph_x = glyph_read_x(prim_offset);
             let glyph_y = glyph_read_y(prim_offset) + y_offset;
+            let font_size = glyph_read_font_size(prim_offset);
             let packed = glyph_read_packed(prim_offset);
             let glyph_index = packed & 0xFFFFu;
             let color_packed = glyph_read_color(prim_offset);
 
-            // Read glyph metadata from font buffer
+            // Compute scale from font_size and base_size
+            let base_size = uniforms.msdf_font_base_size;
+            let scale = select(1.0, font_size / base_size, base_size > 0.0);
+
+            // Read glyph metrics from font metadata buffer
             let meta_base = msdf_font_buffer_offset + glyph_index * 6u;
             let glyph_size = vec2<f32>(
                 bitcast<f32>(storage_buffer[meta_base + 0u]),
@@ -283,11 +293,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 continue;
             }
 
-            // Compute render scale from base_size to actual font size
-            // For now use a default scale (font_size / base_size)
-            let scale = 1.0;  // TODO: get actual scale from glyph data
-
-            // Glyph bounds in screen space
+            // Glyph bounds in screen space (apply scale)
             let glyph_min = vec2<f32>(glyph_x, glyph_y);
             let glyph_max = glyph_min + glyph_size * scale;
 
@@ -297,11 +303,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 continue;
             }
 
-            // Compute UV from glyph_index using uniform cell grid
+            // Read cell_idx from metadata (slot != cell_idx due to empty glyphs)
+            let cell_idx = u32(bitcast<f32>(storage_buffer[meta_base + 5u]));
             let font_cell_size = f32(uniforms.msdf_font_cell_size);
             let atlas_cols = uniforms.msdf_font_atlas_cols;
-            let col = glyph_index % atlas_cols;
-            let row = glyph_index / atlas_cols;
+            let col = cell_idx % atlas_cols;
+            let row = cell_idx / atlas_cols;
 
             let atlas_size = vec2<f32>(textureDimensions(atlas_rgba8_texture, 0));
             let cell_uv_size = font_cell_size / atlas_size;

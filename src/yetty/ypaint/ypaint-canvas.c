@@ -19,8 +19,8 @@
 /* Glyph primitive type (not in ysdf types.gen.h since not SDF) */
 #define YETTY_YSDF_GLYPH 200
 
-/* Glyph primitive: type, z_order, x, y, packed(glyph_idx|font_id), color */
-#define YPAINT_GLYPH_WORDS 6
+/* Glyph primitive: type, z_order, x, y, font_size, packed(glyph_idx|font_id), color */
+#define YPAINT_GLYPH_WORDS 7
 
 //=============================================================================
 // Internal data structures
@@ -930,12 +930,18 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
       float bearing_x = gm[2], bearing_y = gm[3];
       float advance = gm[4];
 
+      /* Skip empty glyphs (space, etc.) - just advance cursor */
+      if (size_x <= 0.0f || size_y <= 0.0f) {
+        cursor_x += advance * scale;
+        continue;
+      }
+
       float gx = cursor_x + bearing_x * scale;
       float gy = ts->y - bearing_y * scale;
       float gw = size_x * scale;
       float gh = size_y * scale;
 
-      /* Pack glyph primitive (6 words): type, z_order, x, y, packed(glyph_idx|font_id), color */
+      /* Pack glyph primitive (7 words): type, z_order, x, y, font_size, packed, color */
       static uint32_t glyph_z_order = 0;
       float glyph_data[YPAINT_GLYPH_WORDS];
       uint32_t tmp;
@@ -945,14 +951,15 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
       memcpy(&glyph_data[1], &tmp, sizeof(float));
       glyph_data[2] = gx;
       glyph_data[3] = gy;
+      glyph_data[4] = ts->font_size;  /* target render size */
       /* Pack glyph_index (16 bits) | font_id (16 bits) */
       uint32_t packed_gf = (glyph_index & 0xFFFF) |
                            (((uint32_t)(ts->font_id + 1) & 0xFFFF) << 16);
-      memcpy(&glyph_data[4], &packed_gf, sizeof(float));
+      memcpy(&glyph_data[5], &packed_gf, sizeof(float));
       /* Color */
       uint32_t color = ts->color.r | (ts->color.g << 8) |
                        (ts->color.b << 16) | (ts->color.a << 24);
-      memcpy(&glyph_data[5], &color, sizeof(float));
+      memcpy(&glyph_data[6], &color, sizeof(float));
 
       /* Compute glyph AABB in absolute coords */
       float abs_y = gy + canvas->cursor_row * canvas->cell_size.height;

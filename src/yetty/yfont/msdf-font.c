@@ -31,13 +31,13 @@ INCBIN(msdf_font_shader, YETTY_YFONT_SHADER_DIR "/msdf-font.wgsl");
 #define MAP_CAPACITY 8192
 
 /* Per-glyph GPU metadata (24 bytes, 6 floats)
- * UV is computed from slot index using uniform cell grid.
+ * cell_idx stores the actual atlas cell (may differ from slot due to empty glyphs).
  */
 struct glyph_meta_gpu {
 	float size_x, size_y;       /* logical glyph size */
 	float bearing_x, bearing_y; /* offset from pen position */
 	float advance;              /* horizontal advance */
-	float _pad;
+	float cell_idx;             /* atlas cell index for UV computation */
 };
 
 struct msdf_font {
@@ -139,6 +139,7 @@ static struct uint32_result load_one(struct msdf_font *f, uint32_t cp)
 		struct glyph_meta_gpu *m = &f->meta[slot];
 		memset(m, 0, sizeof(*m));
 		m->advance = hdr.advance;
+		m->cell_idx = -1.0f;  /* No atlas cell for empty glyphs */
 		f->next_slot++;
 		yetty_core_map_put(&f->glyph_map, cp, slot);
 		f->dirty = 1;
@@ -173,14 +174,14 @@ static struct uint32_result load_one(struct msdf_font *f, uint32_t cp)
 
 	f->next_cell++;
 
-	/* Fill metadata (no UV — computed from slot index in shader) */
+	/* Fill metadata — cell_idx used by shader for UV computation */
 	struct glyph_meta_gpu *m = &f->meta[slot];
 	m->size_x = hdr.size_x;
 	m->size_y = hdr.size_y;
 	m->bearing_x = hdr.bearing_x;
 	m->bearing_y = hdr.bearing_y;
 	m->advance = hdr.advance;
-	m->_pad = 0;
+	m->cell_idx = (float)cell_idx;
 
 	f->next_slot++;
 	yetty_core_map_put(&f->glyph_map, cp, slot);
