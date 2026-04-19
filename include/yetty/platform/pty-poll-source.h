@@ -14,7 +14,10 @@ extern "C" {
  * Platform implementations embed this as first member for structural inheritance.
  */
 struct yetty_platform_pty_poll_source {
-    int fd;  /* file descriptor for Unix, -1 for non-fd-based (e.g., webasm) */
+    int fd;      /* file descriptor for Unix, -1 for non-fd-based */
+#ifdef _WIN32
+    void *handle; /* HANDLE for Windows pipes (used with uv_pipe_t) */
+#endif
 };
 
 #ifdef __cplusplus

@@ -18,6 +18,21 @@ else()
     set(YETTY_PLATFORM "linux")
 endif()
 
+# Platform abstraction sources (thread, term, fs)
+if(WIN32)
+    set(YETTY_PLATFORM_THREAD_SOURCES
+        ${YETTY_ROOT}/src/yetty/yplatform/windows/thread.c
+        ${YETTY_ROOT}/src/yetty/yplatform/windows/term.c
+        ${YETTY_ROOT}/src/yetty/yplatform/windows/fs.c
+    )
+else()
+    set(YETTY_PLATFORM_THREAD_SOURCES
+        ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c
+        ${YETTY_ROOT}/src/yetty/yplatform/shared/term.c
+        ${YETTY_ROOT}/src/yetty/yplatform/shared/fs.c
+    )
+endif()
+
 # Auto-generate MSDF CDB fonts if not present (must run before incbin)
 if(YETTY_ENABLE_FEATURE_MSDF_GEN)
     include(${YETTY_ROOT}/build-tools/cmake/prepare-assets.cmake)
@@ -284,6 +299,7 @@ function(yetty_embed_assets TARGET)
 
     # Collect shaders from module locations
     file(COPY "${YETTY_ROOT}/src/yetty/yterm/text-layer.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
+    file(COPY "${YETTY_ROOT}/src/yetty/yterm/ypaint-layer.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
     file(COPY "${YETTY_ROOT}/src/yetty/yrender/blend.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
     file(RENAME "${INCBIN_DATA_DIR}/shaders/blend.wgsl" "${INCBIN_DATA_DIR}/shaders/blender.wgsl")
     file(COPY "${YETTY_ROOT}/src/yetty/yfont/ms-msdf-font.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")

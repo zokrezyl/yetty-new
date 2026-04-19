@@ -7,6 +7,8 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <stdlib.h>
+#include <string.h>
 
 /* Windows PTY poll source */
 struct win_pty_poll_source {
@@ -199,6 +201,7 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
     pty->rows = 24;
     pty->running = 0;
     pty->poll_source.base.fd = -1;
+    pty->poll_source.base.handle = INVALID_HANDLE_VALUE;
     pty->poll_source.handle = INVALID_HANDLE_VALUE;
 
     /* Create pipes for PTY */
@@ -285,6 +288,7 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
     CloseHandle(pi.hThread);
     pty->process = pi.hProcess;
     pty->poll_source.handle = pty->pipe_out;
+    pty->poll_source.base.handle = pty->pipe_out;
     pty->running = 1;
 
     return YETTY_OK(yetty_platform_pty, &pty->base);

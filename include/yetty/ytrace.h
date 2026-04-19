@@ -85,9 +85,13 @@ bool ytrace_register(bool* enabled, const char* file, int line,
                      const char* func, const char* level, const char* message);
 
 /* Output a trace message (called when trace point is enabled) */
+// TODO: WE DO NOT WANT TO SEE ANY PLATFORM SPECIFIC CODE! ADD THEN WITH IFDEF!
 void ytrace_output(const char* level, const char* file, int line,
                    const char* func, const char* fmt, ...)
-    __attribute__((format(printf, 5, 6)));
+#ifndef _MSC_VER
+    __attribute__((format(printf, 5, 6)))
+#endif
+    ;
 
 /* Control functions */
 void ytrace_set_all_enabled(bool enabled);

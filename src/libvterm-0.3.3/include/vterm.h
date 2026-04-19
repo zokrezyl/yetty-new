@@ -357,7 +357,8 @@ void vterm_state_send_selection(VTermState *state, VTermSelectionMask mask, VTer
 // ------------
 
 /* yetty: removed reverse, font, dwl, dhl; added default_fg, default_bg, font_type */
-typedef struct __attribute__((packed)) {
+#pragma pack(push, 1)
+typedef struct {
     uint16_t bold       : 1;
     uint16_t underline  : 2;
     uint16_t italic     : 1;
@@ -370,6 +371,7 @@ typedef struct __attribute__((packed)) {
     uint16_t default_bg : 1;
     uint16_t font_type  : 4;
 } VTermScreenCellAttrs;
+#pragma pack(pop)
 
 enum {
   VTERM_UNDERLINE_OFF,
@@ -385,12 +387,14 @@ enum {
 };
 
 /* yetty: modified for direct buffer upload - 12 bytes */
-typedef struct __attribute__((packed)) {
+#pragma pack(push, 1)
+typedef struct {
   uint32_t glyph_index;      /* 4 bytes: glyph index from resolver */
   VTermColor fg;             /* 3 bytes: RGB */
   VTermColor bg;             /* 3 bytes: RGB */
   VTermScreenCellAttrs attrs; /* 2 bytes: packed attributes */
 } VTermScreenCell;
+#pragma pack(pop)
 
 /* Resolved glyph from callback */
 typedef struct {

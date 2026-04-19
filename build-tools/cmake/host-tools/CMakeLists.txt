@@ -125,10 +125,26 @@ target_link_libraries(yetty_ymsdf_gen PUBLIC
 add_library(ytrace_c STATIC ${YETTY_ROOT}/src/yetty/ytrace.c)
 target_include_directories(ytrace_c PUBLIC ${YETTY_ROOT}/include)
 
+# Platform thread/term/fs implementations for ytrace
+if(WIN32)
+    set(YETTY_HOST_PLATFORM_SOURCES
+        ${YETTY_ROOT}/src/yetty/yplatform/windows/thread.c
+        ${YETTY_ROOT}/src/yetty/yplatform/windows/term.c
+        ${YETTY_ROOT}/src/yetty/yplatform/windows/fs.c
+    )
+else()
+    set(YETTY_HOST_PLATFORM_SOURCES
+        ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c
+        ${YETTY_ROOT}/src/yetty/yplatform/shared/term.c
+        ${YETTY_ROOT}/src/yetty/yplatform/shared/fs.c
+    )
+endif()
+
 # msdf-gen tool
 add_executable(yetty-msdf-gen
     ${YETTY_ROOT}/tools/gen-msdf/main.c
     ${YETTY_ROOT}/src/yetty/ytrace.c
+    ${YETTY_HOST_PLATFORM_SOURCES}
 )
 target_include_directories(yetty-msdf-gen PRIVATE ${YETTY_ROOT}/include)
 target_link_libraries(yetty-msdf-gen PRIVATE yetty_ymsdf_gen)

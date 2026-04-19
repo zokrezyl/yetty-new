@@ -1,17 +1,16 @@
 #include <yetty/yui/view.h>
 #include <yetty/yrender/render-target.h>
 #include <stdlib.h>
-#include <stdatomic.h>
 
 /*=============================================================================
  * Object ID generation
  *===========================================================================*/
 
-static atomic_uint_fast64_t g_next_view_id = 1;
+static uint64_t g_next_view_id = 1;
 
 static yetty_core_object_id next_view_id(void)
 {
-	return atomic_fetch_add(&g_next_view_id, 1);
+	return g_next_view_id++;
 }
 
 /*=============================================================================

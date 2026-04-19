@@ -47,6 +47,14 @@ YETTY_RESULT_DECLARE(yetty_core_size, size_t);
 
 #ifdef __cplusplus
 }
+
+/* C++ helper — compound literals are a C-only feature */
+inline struct yetty_core_void_result yetty_cpp_err(const char *msg) {
+    struct yetty_core_void_result r = {};
+    r.ok = 0;
+    r.error.msg = msg;
+    return r;
+}
 #endif
 
 #endif /* YETTY_CORE_RESULT_H */

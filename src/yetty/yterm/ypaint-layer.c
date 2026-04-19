@@ -10,13 +10,10 @@
 #include <yetty/ysdf/types.gen.h>
 #include <yetty/yterm/osc-args.h>
 #include <yetty/yterm/ypaint-layer.h>
+#include <yetty/yconfig.h>
+#include <yetty/yetty.h>
 #include <yetty/ytrace.h>
 
-#define INCBIN_STYLE 1
-#include <incbin.h>
-
-/* Embedded shader code */
-INCBIN(ypaint_layer_shader, YPAINT_LAYER_SHADER_PATH);
 
 /* Uniform positions */
 #define U_GRID_SIZE 0
@@ -68,6 +65,7 @@ struct yetty_term_ypaint_layer {
   struct yetty_yetty_ypaint_canvas *canvas;
   int scrolling_mode;
   struct yetty_render_gpu_resource_set rs;
+  struct yetty_core_buffer shader_code;
 
   /* Staging buffers - point to canvas data */
   uint8_t *grid_staging;
@@ -166,10 +164,22 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
     void *cursor_userdata) {
   struct yetty_term_ypaint_layer *layer;
 
+  /* Load ypaint-layer shader from file */
+  struct yetty_config *config = context->app_context.config;
+  const char *shaders_dir = config->ops->get_string(config, "paths/shaders", "");
+  char shader_path[512];
+  snprintf(shader_path, sizeof(shader_path), "%s/ypaint-layer.wgsl", shaders_dir);
+  struct yetty_core_buffer_result shader_res = yetty_core_read_file(shader_path);
+  if (YETTY_IS_ERR(shader_res))
+    return YETTY_ERR(yetty_term_terminal_layer, shader_res.error.msg);
+
   layer = calloc(1, sizeof(struct yetty_term_ypaint_layer));
-  if (!layer)
+  if (!layer) {
+    free(shader_res.value.data);
     return YETTY_ERR(yetty_term_terminal_layer,
                      "failed to allocate ypaint layer");
+  }
+  layer->shader_code = shader_res.value;
 
   layer->base.ops = &ypaint_layer_ops;
   layer->base.grid_size.cols = cols;
@@ -243,8 +253,8 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
   layer->rs.pixel_size.height = (float)rows * cell_height;
 
   yetty_render_shader_code_set(&layer->rs.shader,
-                               (const char *)gypaint_layer_shader_data,
-                               gypaint_layer_shader_size);
+                               (const char *)layer->shader_code.data,
+                               layer->shader_code.size);
 
   ydebug("ypaint_layer_create: %s mode, %ux%u grid, %.1fx%.1f cells",
          scrolling_mode ? "scrolling" : "overlay", cols, rows, cell_width,
@@ -261,6 +271,7 @@ static void ypaint_layer_destroy(struct yetty_term_terminal_layer *self) {
   if (layer->canvas)
     yetty_yetty_ypaint_canvas_destroy(layer->canvas);
 
+  free(layer->shader_code.data);
   free(layer);
 }
 

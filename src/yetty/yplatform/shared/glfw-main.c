@@ -2,11 +2,11 @@
 
 #include <GLFW/glfw3.h>
 #include <webgpu/webgpu.h>
-#include <pthread.h>
+#include <yetty/yplatform/thread.h>
+#include <yetty/yplatform/fs.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 #include <yetty/yetty.h>
 #include <yetty/yconfig.h>
@@ -38,7 +38,7 @@ struct render_thread_args {
     int result;
 };
 
-static void *render_thread_func(void *arg)
+static int render_thread_func(void *arg)
 {
     struct render_thread_args *args = arg;
     struct yetty_core_void_result res = yetty_run(args->yetty);
@@ -49,26 +49,7 @@ static void *render_thread_func(void *arg)
     if (args->window)
         glfwPostEmptyEvent();
 
-    return NULL;
-}
-
-static void mkdir_p(const char *path)
-{
-    char tmp[512];
-    snprintf(tmp, sizeof(tmp), "%s", path);
-
-    size_t len = strlen(tmp);
-    if (tmp[len - 1] == '/')
-        tmp[len - 1] = '\0';
-
-    for (char *p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = '\0';
-            mkdir(tmp, 0755);
-            *p = '/';
-        }
-    }
-    mkdir(tmp, 0755);
+    return 0;
 }
 
 int main(int argc, char **argv)
@@ -88,10 +69,10 @@ int main(int argc, char **argv)
     snprintf(shaders_dir, sizeof(shaders_dir), "%s/shaders", data_dir);
     snprintf(fonts_dir, sizeof(fonts_dir), "%s/fonts", data_dir);
 
-    mkdir_p(cache_dir);
-    mkdir_p(data_dir);
-    mkdir_p(runtime_dir);
-    mkdir_p(fonts_dir);
+    yplatform_mkdir_p(cache_dir);
+    yplatform_mkdir_p(data_dir);
+    yplatform_mkdir_p(runtime_dir);
+    yplatform_mkdir_p(fonts_dir);
 
     struct yetty_platform_paths paths = {
         .shaders_dir = shaders_dir,
@@ -111,10 +92,12 @@ int main(int argc, char **argv)
 
     /* Extract assets */
     yetty_platform_extract_assets(config);
+    ydebug("main: assets extracted");
 
     /* Window */
     int width = config->ops->get_int(config, "window/width", 1280);
     int height = config->ops->get_int(config, "window/height", 720);
+    ydebug("main: creating window %dx%d", width, height);
     GLFWwindow *window = yetty_platform_create_window(width, height, "yetty");
     if (!window) {
         fprintf(stderr, "Failed to create window\n");
@@ -122,11 +105,16 @@ int main(int argc, char **argv)
         glfwTerminate();
         return 1;
     }
+    ydebug("main: window created");
 
     yetty_platform_setup_window_callbacks(window);
+    ydebug("main: window callbacks set up");
 
     /* Platform input pipe */
+    ydebug("main: creating platform input pipe");
+    fflush(stderr);
     struct yetty_platform_input_pipe_result pipe_result = yetty_platform_input_pipe_create();
+    ydebug("main: platform input pipe created, ok=%d", pipe_result.ok);
     if (!YETTY_IS_OK(pipe_result)) {
         fprintf(stderr, "Failed to create platform input pipe\n");
         yetty_platform_destroy_window(window);
@@ -138,6 +126,7 @@ int main(int argc, char **argv)
     glfwSetWindowUserPointer(window, platform_input_pipe);
 
     /* PTY factory */
+    ydebug("main: creating PTY factory");
     struct yetty_platform_pty_factory_result pty_factory_result = yetty_platform_pty_factory_create(config, NULL);
     if (!YETTY_IS_OK(pty_factory_result)) {
         fprintf(stderr, "Failed to create PTY factory\n");
@@ -213,8 +202,7 @@ int main(int argc, char **argv)
         .result = 0
     };
 
-    pthread_t render_thread;
-    pthread_create(&render_thread, NULL, render_thread_func, &thread_args);
+    ythread_t *render_thread = ythread_create(render_thread_func, &thread_args);
 
     /* Initial resize event */
     yetty_platform_get_framebuffer_size(window, &fb_width, &fb_height);
@@ -229,7 +217,7 @@ int main(int argc, char **argv)
 
     /* OS event loop */
     yetty_platform_run_os_event_loop(window, &running);
-    pthread_join(render_thread, NULL);
+    ythread_join(render_thread);
 
     /* Cleanup - surface is released by yetty_destroy (yetty owns it after configure) */
     ydebug("main: cleanup starting");

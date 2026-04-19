@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <yetty/yplatform/compat.h>
 
 #define MAX_KEY_LEN 64
 #define MAX_VALUE_LEN 512

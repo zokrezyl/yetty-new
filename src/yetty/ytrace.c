@@ -6,24 +6,27 @@
 
 #if YTRACE_C_ENABLED
 
+#include <yetty/yplatform/thread.h>
+#include <yetty/yplatform/term.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
-#include <time.h>
-#include <pthread.h>
-#include <unistd.h>
-
-#if defined(__linux__) || defined(__APPLE__)
-#include <sys/time.h>
-#endif
 
 /* Global state */
 static ytrace_point_t g_points[YTRACE_C_MAX_POINTS];
 static size_t g_point_count = 0;
-static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
+static ymutex_t *g_mutex = NULL;
 static bool g_initialized = false;
 static bool g_default_enabled = false;
+
+static void ensure_mutex(void) {
+    if (!g_mutex)
+        g_mutex = ymutex_create();
+}
+
+#define YTRACE_LOCK()   do { ensure_mutex(); ymutex_lock(g_mutex); } while(0)
+#define YTRACE_UNLOCK() ymutex_unlock(g_mutex)
 
 /* ANSI color codes */
 #define ANSI_RESET   "\033[0m"
@@ -38,18 +41,14 @@ static bool g_default_enabled = false;
 static bool g_use_colors = false;
 
 static void check_color_support(void) {
-    const char* term = getenv("TERM");
     const char* no_color = getenv("NO_COLOR");
 
     if (no_color != NULL) {
         g_use_colors = false;
-    } else if (term != NULL && isatty(fileno(stderr))) {
-        g_use_colors = (strstr(term, "color") != NULL ||
-                       strstr(term, "xterm") != NULL ||
-                       strstr(term, "screen") != NULL ||
-                       strstr(term, "tmux") != NULL ||
-                       strcmp(term, "linux") == 0);
+        return;
     }
+
+    g_use_colors = yplatform_stderr_supports_color();
 }
 
 static const char* level_color(const char* level) {
@@ -68,10 +67,10 @@ static const char* color_reset(void) {
 }
 
 void ytrace_init(void) {
-    pthread_mutex_lock(&g_mutex);
+    YTRACE_LOCK();
 
     if (g_initialized) {
-        pthread_mutex_unlock(&g_mutex);
+        YTRACE_UNLOCK();
         return;
     }
 
@@ -86,25 +85,25 @@ void ytrace_init(void) {
     check_color_support();
     g_initialized = true;
 
-    pthread_mutex_unlock(&g_mutex);
+    YTRACE_UNLOCK();
 }
 
 void ytrace_shutdown(void) {
-    pthread_mutex_lock(&g_mutex);
+    YTRACE_LOCK();
     g_point_count = 0;
     g_initialized = false;
-    pthread_mutex_unlock(&g_mutex);
+    YTRACE_UNLOCK();
 }
 
 bool ytrace_register(bool* enabled, const char* file, int line,
                      const char* func, const char* level, const char* message) {
-    pthread_mutex_lock(&g_mutex);
+    YTRACE_LOCK();
 
     /* Auto-initialize on first registration */
     if (!g_initialized) {
-        pthread_mutex_unlock(&g_mutex);
+        YTRACE_UNLOCK();
         ytrace_init();
-        pthread_mutex_lock(&g_mutex);
+        YTRACE_LOCK();
     }
 
     /* Set initial state */
@@ -131,7 +130,7 @@ bool ytrace_register(bool* enabled, const char* file, int line,
         }
     }
 
-    pthread_mutex_unlock(&g_mutex);
+    YTRACE_UNLOCK();
     return *enabled;
 }
 
@@ -147,57 +146,48 @@ void ytrace_output(const char* level, const char* file, int line,
     va_end(args);
 
     /* Get timestamp with milliseconds */
-#if defined(__linux__) || defined(__APPLE__)
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    struct tm* tm = localtime(&tv.tv_sec);
-    snprintf(time_buf, sizeof(time_buf), "%02d:%02d:%02d.%03ld",
-             tm->tm_hour, tm->tm_min, tm->tm_sec, tv.tv_usec / 1000);
-#else
-    time_t now = time(NULL);
-    struct tm* tm = localtime(&now);
-    snprintf(time_buf, sizeof(time_buf), "%02d:%02d:%02d",
-             tm->tm_hour, tm->tm_min, tm->tm_sec);
-#endif
+    yplatform_format_timestamp(time_buf, sizeof(time_buf));
 
     /* Extract basename from file path */
-    const char* basename = strrchr(file, '/');
-    if (basename) {
-        basename++;
+    const char* bname = strrchr(file, '/');
+    if (!bname) bname = strrchr(file, '\\');
+    if (bname) {
+        bname++;
     } else {
-        basename = file;
+        bname = file;
     }
 
     /* Output format: [HH:MM:SS.mmm] [level] file:line (func): message */
     fprintf(stderr, "[%s] %s[%-5s]%s %s:%d (%s): %s\n",
             time_buf,
             level_color(level), level, color_reset(),
-            basename, line, func, msg_buf);
+            bname, line, func, msg_buf);
 }
 
 void ytrace_set_all_enabled(bool enabled) {
-    pthread_mutex_lock(&g_mutex);
+    YTRACE_LOCK();
     for (size_t i = 0; i < g_point_count; i++) {
         *g_points[i].enabled = enabled;
     }
-    pthread_mutex_unlock(&g_mutex);
+    YTRACE_UNLOCK();
 }
 
 void ytrace_set_level_enabled(const char* level, bool enabled) {
-    pthread_mutex_lock(&g_mutex);
+    YTRACE_LOCK();
     for (size_t i = 0; i < g_point_count; i++) {
         if (strcmp(g_points[i].level, level) == 0) {
             *g_points[i].enabled = enabled;
         }
     }
-    pthread_mutex_unlock(&g_mutex);
+    YTRACE_UNLOCK();
 }
 
 void ytrace_set_file_enabled(const char* file, bool enabled) {
-    pthread_mutex_lock(&g_mutex);
+    YTRACE_LOCK();
     for (size_t i = 0; i < g_point_count; i++) {
         /* Match full path or basename */
         const char* point_basename = strrchr(g_points[i].file, '/');
+        if (!point_basename) point_basename = strrchr(g_points[i].file, '\\');
         point_basename = point_basename ? point_basename + 1 : g_points[i].file;
 
         if (strcmp(g_points[i].file, file) == 0 ||
@@ -205,23 +195,23 @@ void ytrace_set_file_enabled(const char* file, bool enabled) {
             *g_points[i].enabled = enabled;
         }
     }
-    pthread_mutex_unlock(&g_mutex);
+    YTRACE_UNLOCK();
 }
 
 void ytrace_set_function_enabled(const char* function, bool enabled) {
-    pthread_mutex_lock(&g_mutex);
+    YTRACE_LOCK();
     for (size_t i = 0; i < g_point_count; i++) {
         if (strcmp(g_points[i].function, function) == 0) {
             *g_points[i].enabled = enabled;
         }
     }
-    pthread_mutex_unlock(&g_mutex);
+    YTRACE_UNLOCK();
 }
 
 size_t ytrace_get_point_count(void) {
-    pthread_mutex_lock(&g_mutex);
+    YTRACE_LOCK();
     size_t count = g_point_count;
-    pthread_mutex_unlock(&g_mutex);
+    YTRACE_UNLOCK();
     return count;
 }
 
@@ -230,7 +220,7 @@ const ytrace_point_t* ytrace_get_points(void) {
 }
 
 void ytrace_list(void) {
-    pthread_mutex_lock(&g_mutex);
+    YTRACE_LOCK();
 
     fprintf(stderr, "\n[ytrace-c] Registered trace points: %zu\n", g_point_count);
     fprintf(stderr, "%-4s %-7s %-6s %-30s %-20s %s\n",
@@ -243,11 +233,12 @@ void ytrace_list(void) {
         const ytrace_point_t* p = &g_points[i];
 
         /* Extract basename */
-        const char* basename = strrchr(p->file, '/');
-        basename = basename ? basename + 1 : p->file;
+        const char* bname = strrchr(p->file, '/');
+        if (!bname) bname = strrchr(p->file, '\\');
+        bname = bname ? bname + 1 : p->file;
 
         char loc_buf[32];
-        snprintf(loc_buf, sizeof(loc_buf), "%s:%d", basename, p->line);
+        snprintf(loc_buf, sizeof(loc_buf), "%s:%d", bname, p->line);
 
         /* Truncate message for display */
         char msg_buf[32];
@@ -268,7 +259,7 @@ void ytrace_list(void) {
     }
 
     fprintf(stderr, "\n");
-    pthread_mutex_unlock(&g_mutex);
+    YTRACE_UNLOCK();
 }
 
 #endif /* YTRACE_C_ENABLED */

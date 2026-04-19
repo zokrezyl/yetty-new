@@ -7,18 +7,17 @@
 #include <yetty/yterm/terminal.h>
 #include <yetty/ytrace.h>
 #include <stdlib.h>
-#include <stdatomic.h>
 #include <string.h>
 
 /*=============================================================================
  * Object ID generation
  *===========================================================================*/
 
-static atomic_uint_fast64_t g_next_id = 1;
+static uint64_t g_next_id = 1;
 
 static yetty_core_object_id next_object_id(void)
 {
-	return atomic_fetch_add(&g_next_id, 1);
+	return g_next_id++;
 }
 
 /*=============================================================================

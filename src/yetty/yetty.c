@@ -326,6 +326,7 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     wgpuAdapterRequestDevice(yetty->adapter, &device_desc, device_cb);
 
     if (!yetty->device) {
+        yerror("initWebGPU: device request failed: %s", device_error[0] ? device_error : "(no message)");
         return YETTY_ERR(yetty_core_void, "Failed to get WebGPU device");
     }
     ydebug("initWebGPU: Device obtained");
