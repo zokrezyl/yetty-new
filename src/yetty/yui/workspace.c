@@ -5,6 +5,7 @@
 #include <yetty/ycore/event.h>
 #include <yetty/yrender/render-target.h>
 #include <yetty/yterm/terminal.h>
+#include <yetty/ytrace.h>
 #include <stdlib.h>
 
 /*=============================================================================
@@ -337,7 +338,16 @@ yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
 		return YETTY_ERR(yetty_core_void, tile_res.error.msg);
 
 	/* Set as root */
-	return yetty_yui_workspace_set_root(ws, tile_res.value);
+	struct yetty_core_void_result res = yetty_yui_workspace_set_root(ws, tile_res.value);
+	if (YETTY_IS_ERR(res))
+		return res;
+
+	/* Focus the first pane in the tree */
+	struct yetty_yui_tile *first_pane = yetty_yui_tile_find_first_pane(ws->root);
+	if (first_pane)
+		yetty_yui_pane_set_focused(first_pane, 1);
+
+	return YETTY_OK_VOID();
 }
 
 /*=============================================================================
@@ -348,13 +358,50 @@ struct yetty_core_int_result
 yetty_yui_workspace_on_event(struct yetty_yui_workspace *ws,
 			     const struct yetty_core_event *event)
 {
+	struct yetty_yui_tile *focused_pane;
+	struct yetty_yui_tile *clicked_pane;
+
 	if (!ws)
 		return YETTY_ERR(yetty_core_int, "workspace is NULL");
+	if (!ws->root)
+		return YETTY_OK(yetty_core_int, 0);
 
-	/* TODO: workspace can filter/intercept events here before passing
-	 * to focused tile. For now, pass through to tile tree. */
-	if (ws->root)
-		return yetty_yui_tile_on_event(ws->root, event);
+	/* Handle mouse down - update focus */
+	if (event->type == YETTY_EVENT_MOUSE_DOWN) {
+		ydebug("workspace: MOUSE_DOWN at (%.1f, %.1f)",
+		       event->mouse.x, event->mouse.y);
+		clicked_pane = yetty_yui_tile_find_pane_at(
+			ws->root, event->mouse.x, event->mouse.y);
+		ydebug("workspace: clicked_pane=%p", (void*)clicked_pane);
+		if (clicked_pane) {
+			struct yetty_yui_rect b = yetty_yui_tile_bounds(clicked_pane);
+			ydebug("workspace: pane bounds=(%.1f,%.1f,%.1f,%.1f) focused=%d",
+			       b.x, b.y, b.w, b.h, yetty_yui_pane_focused(clicked_pane));
+		}
+		if (clicked_pane && !yetty_yui_pane_focused(clicked_pane)) {
+			ydebug("workspace: switching focus to pane %p", (void*)clicked_pane);
+			/* Clear focus from all panes, set on clicked */
+			yetty_yui_tile_clear_focus(ws->root);
+			yetty_yui_pane_set_focused(clicked_pane, 1);
+		}
+		/* Pass event to clicked pane */
+		if (clicked_pane)
+			return yetty_yui_tile_on_event(clicked_pane, event);
+		return YETTY_OK(yetty_core_int, 0);
+	}
 
-	return YETTY_OK(yetty_core_int, 0);
+	/* Keyboard events go only to focused pane */
+	if (event->type == YETTY_EVENT_KEY_DOWN ||
+	    event->type == YETTY_EVENT_KEY_UP ||
+	    event->type == YETTY_EVENT_CHAR) {
+		focused_pane = yetty_yui_tile_find_focused_pane(ws->root);
+		ydebug("workspace: keyboard event type=%d focused_pane=%p",
+		       event->type, (void*)focused_pane);
+		if (focused_pane)
+			return yetty_yui_tile_on_event(focused_pane, event);
+		return YETTY_OK(yetty_core_int, 0);
+	}
+
+	/* Other events (resize, etc.) pass through to tile tree */
+	return yetty_yui_tile_on_event(ws->root, event);
 }

@@ -126,6 +126,10 @@ static struct yetty_core_int_result yetty_event_handler(
         if (yetty->workspace)
             yetty_yui_workspace_on_event(yetty->workspace, event);
 
+        /* Request re-render after resize */
+        if (yetty->event_loop && yetty->event_loop->ops->request_render)
+            yetty->event_loop->ops->request_render(yetty->event_loop);
+
         return YETTY_OK(yetty_core_int, 1);
     }
 

@@ -5,6 +5,7 @@
 #include <yetty/yrender/render-target.h>
 #include <yetty/yetty.h>
 #include <yetty/yterm/terminal.h>
+#include <yetty/ytrace.h>
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <string.h>
@@ -605,6 +606,81 @@ yetty_yui_tile_find_focused_pane(struct yetty_yui_tile *root)
 	return yetty_yui_tile_find_focused_pane(split->second);
 }
 
+static int point_in_rect(float x, float y, struct yetty_yui_rect r)
+{
+	return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+}
+
+struct yetty_yui_tile *
+yetty_yui_tile_find_pane_at(struct yetty_yui_tile *root, float x, float y)
+{
+	struct yetty_yui_split *split;
+	struct yetty_yui_tile *found;
+
+	if (!root)
+		return NULL;
+
+	ydebug("find_pane_at: tile type=%d bounds=(%.1f,%.1f,%.1f,%.1f) point=(%.1f,%.1f)",
+	       root->type, root->bounds.x, root->bounds.y,
+	       root->bounds.w, root->bounds.h, x, y);
+
+	/* Check if point is in this tile's bounds */
+	if (!point_in_rect(x, y, root->bounds)) {
+		ydebug("find_pane_at: point NOT in bounds");
+		return NULL;
+	}
+
+	if (root->type == YETTY_YUI_TILE_PANE) {
+		ydebug("find_pane_at: found pane at (%.1f,%.1f)", x, y);
+		return root;
+	}
+
+	/* Split - recurse into children */
+	split = (struct yetty_yui_split *)root;
+	found = yetty_yui_tile_find_pane_at(split->first, x, y);
+	if (found)
+		return found;
+
+	return yetty_yui_tile_find_pane_at(split->second, x, y);
+}
+
+struct yetty_yui_tile *
+yetty_yui_tile_find_first_pane(struct yetty_yui_tile *root)
+{
+	struct yetty_yui_split *split;
+	struct yetty_yui_tile *found;
+
+	if (!root)
+		return NULL;
+
+	if (root->type == YETTY_YUI_TILE_PANE)
+		return root;
+
+	split = (struct yetty_yui_split *)root;
+	found = yetty_yui_tile_find_first_pane(split->first);
+	if (found)
+		return found;
+
+	return yetty_yui_tile_find_first_pane(split->second);
+}
+
+void yetty_yui_tile_clear_focus(struct yetty_yui_tile *root)
+{
+	struct yetty_yui_split *split;
+
+	if (!root)
+		return;
+
+	if (root->type == YETTY_YUI_TILE_PANE) {
+		yetty_yui_pane_set_focused(root, 0);
+		return;
+	}
+
+	split = (struct yetty_yui_split *)root;
+	yetty_yui_tile_clear_focus(split->first);
+	yetty_yui_tile_clear_focus(split->second);
+}
+
 /*=============================================================================
  * Config-based creation
  *===========================================================================*/
@@ -708,8 +784,6 @@ yetty_yui_tile_create_from_config(const struct yetty_config *config,
 		/* Future: handle other view types */
 	}
 
-	/* Mark first pane as focused */
-	yetty_yui_pane_set_focused(res.value, 1);
-
+	/* Focus is set by workspace after layout is fully built */
 	return res;
 }

@@ -116,6 +116,17 @@ yetty_yui_tile_find_parent_split(struct yetty_yui_tile *root,
 struct yetty_yui_tile *
 yetty_yui_tile_find_focused_pane(struct yetty_yui_tile *root);
 
+/* Find pane at coordinates (hit test) */
+struct yetty_yui_tile *
+yetty_yui_tile_find_pane_at(struct yetty_yui_tile *root, float x, float y);
+
+/* Find first pane in tree (depth-first) */
+struct yetty_yui_tile *
+yetty_yui_tile_find_first_pane(struct yetty_yui_tile *root);
+
+/* Clear focus from all panes in tree */
+void yetty_yui_tile_clear_focus(struct yetty_yui_tile *root);
+
 #ifdef __cplusplus
 }
 #endif
