@@ -26,8 +26,8 @@ file(MAKE_DIRECTORY ${ANDROID_ASSETS_DIR})
 # Note: src/yetty is already added by shared.cmake
 
 # VNC server/client support
-if(YETTY_ENABLE_FEATURE_VNC)
-    add_subdirectory(${YETTY_ROOT}/src/yetty/vnc ${CMAKE_BINARY_DIR}/src/yetty/vnc)
+if(YETTY_ENABLE_FEATURE_YVNC)
+    add_subdirectory(${YETTY_ROOT}/src/yetty/yvnc ${CMAKE_BINARY_DIR}/src/yetty/yvnc)
 endif()
 
 # Platform sources — Android-specific + shared Unix components (all C)

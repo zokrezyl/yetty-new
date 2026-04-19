@@ -19,6 +19,10 @@
 #include <string.h>
 #include <stdint.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#endif
+
 /* Yetty instance */
 struct yetty_yetty {
     struct yetty_context context;
@@ -201,24 +205,26 @@ static void adapter_callback(WGPURequestAdapterStatus status, WGPUAdapter adapte
 
 /* Device callback data */
 struct device_callback_data {
-    WGPUDevice *device_out;
-    char *error_msg;
-    size_t error_msg_size;
+    char error_msg[256];
+    int ready;
 };
 
 static void device_callback(WGPURequestDeviceStatus status, WGPUDevice device,
                             WGPUStringView message, void *userdata1, void *userdata2)
 {
+    struct device_callback_data *data = (struct device_callback_data *)userdata2;
+
     if (status == WGPURequestDeviceStatus_Success) {
         *((WGPUDevice *)userdata1) = device;
-    } else {
-        char *error_msg = (char *)userdata2;
-        if (message.data && message.length > 0 && error_msg) {
+    } else if (data) {
+        if (message.data && message.length > 0) {
             size_t len = message.length < 255 ? message.length : 255;
-            memcpy(error_msg, message.data, len);
-            error_msg[len] = '\0';
+            memcpy(data->error_msg, message.data, len);
+            data->error_msg[len] = '\0';
         }
     }
+    if (data)
+        data->ready = 1;
 }
 
 static uint32_t min_u32(uint32_t a, uint32_t b) { return a < b ? a : b; }
@@ -254,6 +260,13 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
 
     ydebug("initWebGPU: Requesting adapter...");
     wgpuInstanceRequestAdapter(instance, &adapter_opts, adapter_cb);
+
+#ifdef __EMSCRIPTEN__
+    /* On WebASM, adapter request is async - yield to JS event loop */
+    while (!adapter_ready) {
+        emscripten_sleep(0);
+    }
+#endif
 
     if (!yetty->adapter) {
         return YETTY_ERR(yetty_core_void, "Failed to get WebGPU adapter");
@@ -315,15 +328,22 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     device_desc.defaultQueue.label = queue_label;
     device_desc.uncapturedErrorCallbackInfo = yetty_webgpu_get_error_callback_info();
 
-    char device_error[256] = {0};
+    struct device_callback_data device_cb_data = {{0}, 0};
     WGPURequestDeviceCallbackInfo device_cb = {0};
     device_cb.mode = WGPUCallbackMode_AllowSpontaneous;
     device_cb.callback = device_callback;
     device_cb.userdata1 = &yetty->device;
-    device_cb.userdata2 = device_error;
+    device_cb.userdata2 = &device_cb_data;
 
     ydebug("initWebGPU: Requesting device...");
     wgpuAdapterRequestDevice(yetty->adapter, &device_desc, device_cb);
+
+#ifdef __EMSCRIPTEN__
+    /* On WebASM, device request is async - yield to JS event loop */
+    while (!device_cb_data.ready) {
+        emscripten_sleep(0);
+    }
+#endif
 
     if (!yetty->device) {
         yerror("initWebGPU: device request failed: %s", device_error[0] ? device_error : "(no message)");
@@ -513,7 +533,9 @@ void yetty_destroy(struct yetty_yetty *yetty)
     if (surface && yetty->device) {
         ydebug("yetty_destroy: unconfiguring surface");
         wgpuSurfaceUnconfigure(surface);
+#ifndef __EMSCRIPTEN__
         wgpuDeviceTick(yetty->device);
+#endif
         ydebug("yetty_destroy: releasing surface");
         wgpuSurfaceRelease(surface);
         yetty->context.app_context.app_gpu_context.surface = NULL;

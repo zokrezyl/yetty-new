@@ -14,10 +14,9 @@
 #include <yetty/ytrace.h>
 #include <stdlib.h>
 
-#define INCBIN_STYLE 1
-#include <incbin.h>
-
-INCBIN(blend_shader, BLEND_SHADER_PATH);
+/* Shader embedded via incbin_add_resources (stubs on Emscripten) */
+extern const unsigned char gblend_shaderData[];
+extern const unsigned int gblend_shaderSize;
 
 #define MAX_BLEND_SOURCES 4
 
@@ -337,10 +336,19 @@ static struct yetty_core_void_result create_blend_pipeline(struct render_target_
 	/* Shader module */
 	WGPUShaderSourceWGSL wgsl_src = {0};
 	wgsl_src.chain.sType = WGPUSType_ShaderSourceWGSL;
+#ifdef __EMSCRIPTEN__
+	struct yetty_render_shader_code blend_code = {0};
+	yetty_render_shader_code_load_file(&blend_code, "/assets/shaders/blend.wgsl");
 	wgsl_src.code = (WGPUStringView){
-		.data = (const char *)gblend_shader_data,
-		.length = gblend_shader_size
+		.data = blend_code.data,
+		.length = blend_code.size
 	};
+#else
+	wgsl_src.code = (WGPUStringView){
+		.data = (const char *)gblend_shaderData,
+		.length = gblend_shaderSize
+	};
+#endif
 
 	WGPUShaderModuleDescriptor shader_desc = {0};
 	shader_desc.nextInChain = (WGPUChainedStruct *)&wgsl_src;
@@ -676,7 +684,9 @@ render_target_texture_present(struct yetty_render_target *self)
 	wgpuBindGroupRelease(bind_group);
 
 	/* Present */
+#ifndef __EMSCRIPTEN__
 	wgpuSurfacePresent(rt->surface);
+#endif
 	wgpuTextureViewRelease(surface_view);
 
 	ydebug("render_target_texture: presented to surface");

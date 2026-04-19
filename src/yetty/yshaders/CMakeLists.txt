@@ -7,6 +7,16 @@ file(GLOB_RECURSE SHADER_FILES
     ${SHADER_SRC_DIR}/*.wgsl
 )
 
+# Module shaders (embedded via incbin on native, loaded from assets on webasm)
+set(MODULE_SHADERS
+    ${CMAKE_SOURCE_DIR}/src/yetty/yfont/raster-font.wgsl
+    ${CMAKE_SOURCE_DIR}/src/yetty/yfont/ms-msdf-font.wgsl
+    ${CMAKE_SOURCE_DIR}/src/yetty/yfont/msdf-font.wgsl
+    ${CMAKE_SOURCE_DIR}/src/yetty/yterm/text-layer.wgsl
+    ${CMAKE_SOURCE_DIR}/src/yetty/yterm/ypaint-layer.wgsl
+    ${CMAKE_SOURCE_DIR}/src/yetty/yrender/blend.wgsl
+)
+
 # For Android: copy shaders at configure time to ANDROID_ASSETS_DIR
 # This ensures shaders are in place BEFORE gradle packages the APK
 if(ANDROID_ASSETS_DIR)
@@ -18,6 +28,10 @@ if(ANDROID_ASSETS_DIR)
             file(MAKE_DIRECTORY ${ANDROID_ASSETS_DIR}/shaders/${REL_DIR})
         endif()
         file(COPY ${SHADER_FILE} DESTINATION ${ANDROID_ASSETS_DIR}/shaders/${REL_DIR})
+    endforeach()
+    # Copy module shaders
+    foreach(SHADER_FILE ${MODULE_SHADERS})
+        file(COPY ${SHADER_FILE} DESTINATION ${ANDROID_ASSETS_DIR}/shaders)
     endforeach()
     # Also copy gpu-screen.wgsl to root for backward compat
     file(COPY ${SHADER_SRC_DIR}/gpu-screen.wgsl DESTINATION ${ANDROID_ASSETS_DIR})
@@ -45,3 +59,11 @@ endforeach()
 add_custom_command(TARGET copy-shaders POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SHADER_SRC_DIR}/gpu-screen.wgsl ${CMAKE_BINARY_DIR}/assets/gpu-screen.wgsl
 )
+
+# Copy module shaders to assets/shaders (needed for webasm)
+foreach(SHADER_FILE ${MODULE_SHADERS})
+    get_filename_component(SHADER_NAME ${SHADER_FILE} NAME)
+    add_custom_command(TARGET copy-shaders POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SHADER_FILE} ${SHADER_DST_DIR}/${SHADER_NAME}
+    )
+endforeach()

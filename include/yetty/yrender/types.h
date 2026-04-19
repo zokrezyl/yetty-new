@@ -72,6 +72,10 @@ struct yetty_render_shader_code {
 void yetty_render_shader_code_set(struct yetty_render_shader_code *sc,
                                    const char *data, size_t size);
 
+/* Load shader code from file (allocates memory, caller must free sc->data) */
+int yetty_render_shader_code_load_file(struct yetty_render_shader_code *sc,
+                                        const char *path);
+
 /* Compute FNV-1a hash */
 uint64_t yetty_render_hash(const void *data, size_t size);
 
