@@ -1,6 +1,7 @@
 #include <yetty/yui/tile.h>
 #include <yetty/yui/view.h>
 #include <yetty/yconfig.h>
+#include <yetty/ycore/event.h>
 #include <yetty/yetty.h>
 #include <yetty/yterm/terminal.h>
 #include <stdlib.h>
@@ -36,7 +37,8 @@ struct yetty_yui_tile_ops {
 						void *render_pass);
 	struct yetty_core_void_result (*set_bounds)(struct yetty_yui_tile *self,
 						    struct yetty_yui_rect bounds);
-	struct yetty_core_void_result (*run)(struct yetty_yui_tile *self);
+	struct yetty_core_int_result (*on_event)(struct yetty_yui_tile *self,
+						 const struct yetty_core_event *event);
 };
 
 struct yetty_yui_split {
@@ -123,30 +125,57 @@ static struct yetty_core_void_result split_set_bounds(struct yetty_yui_tile *sel
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result split_run(struct yetty_yui_tile *self)
+static struct yetty_core_int_result split_on_event(struct yetty_yui_tile *self,
+						   const struct yetty_core_event *event)
 {
 	struct yetty_yui_split *split = (struct yetty_yui_split *)self;
-	struct yetty_core_void_result res;
 
+	if (event->type == YETTY_EVENT_RESIZE) {
+		/* Calculate child bounds based on orientation and ratio */
+		float w = event->resize.width;
+		float h = event->resize.height;
+		struct yetty_core_event first_event = *event;
+		struct yetty_core_event second_event = *event;
+
+		if (split->orientation == YETTY_YUI_HORIZONTAL) {
+			float first_h = h * split->ratio;
+			first_event.resize.height = first_h;
+			second_event.resize.height = h - first_h;
+		} else {
+			float first_w = w * split->ratio;
+			first_event.resize.width = first_w;
+			second_event.resize.width = w - first_w;
+		}
+
+		/* Pass to both children with their respective sizes */
+		if (split->first)
+			yetty_yui_tile_on_event(split->first, &first_event);
+		if (split->second)
+			yetty_yui_tile_on_event(split->second, &second_event);
+
+		return YETTY_OK(yetty_core_int, 1);
+	}
+
+	/* For other events, pass to focused child */
 	if (split->first) {
-		res = yetty_yui_tile_run(split->first);
-		if (YETTY_IS_ERR(res))
+		struct yetty_core_int_result res = yetty_yui_tile_on_event(split->first, event);
+		if (YETTY_IS_OK(res) && res.value)
 			return res;
 	}
 	if (split->second) {
-		res = yetty_yui_tile_run(split->second);
-		if (YETTY_IS_ERR(res))
+		struct yetty_core_int_result res = yetty_yui_tile_on_event(split->second, event);
+		if (YETTY_IS_OK(res) && res.value)
 			return res;
 	}
 
-	return YETTY_OK_VOID();
+	return YETTY_OK(yetty_core_int, 0);
 }
 
 static const struct yetty_yui_tile_ops split_ops = {
     .destroy = split_destroy,
     .render = split_render,
     .set_bounds = split_set_bounds,
-    .run = split_run,
+    .on_event = split_on_event,
 };
 
 struct yetty_yui_tile_ptr_result
@@ -211,27 +240,23 @@ static struct yetty_core_void_result pane_set_bounds(struct yetty_yui_tile *self
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result pane_run(struct yetty_yui_tile *self)
+static struct yetty_core_int_result pane_on_event(struct yetty_yui_tile *self,
+						  const struct yetty_core_event *event)
 {
 	struct yetty_yui_pane *pane = (struct yetty_yui_pane *)self;
-	struct yetty_core_void_result res;
 
-	for (size_t i = 0; i < pane->view_count; i++) {
-		if (pane->views[i]) {
-			res = yetty_yui_view_run(pane->views[i]);
-			if (YETTY_IS_ERR(res))
-				return res;
-		}
-	}
+	/* Pass to active view */
+	if (pane->view_count > 0 && pane->views[pane->view_count - 1])
+		return yetty_yui_view_on_event(pane->views[pane->view_count - 1], event);
 
-	return YETTY_OK_VOID();
+	return YETTY_OK(yetty_core_int, 0);
 }
 
 static const struct yetty_yui_tile_ops pane_ops = {
     .destroy = pane_destroy,
     .render = pane_render,
     .set_bounds = pane_set_bounds,
-    .run = pane_run,
+    .on_event = pane_on_event,
 };
 
 struct yetty_yui_tile_ptr_result yetty_yui_pane_create(void)
@@ -282,13 +307,15 @@ yetty_yui_tile_set_bounds(struct yetty_yui_tile *tile,
 	return tile->ops->set_bounds(tile, bounds);
 }
 
-struct yetty_core_void_result yetty_yui_tile_run(struct yetty_yui_tile *tile)
+struct yetty_core_int_result
+yetty_yui_tile_on_event(struct yetty_yui_tile *tile,
+			const struct yetty_core_event *event)
 {
 	if (!tile)
-		return YETTY_ERR(yetty_core_void, "tile is NULL");
-	if (!tile->ops || !tile->ops->run)
-		return YETTY_OK_VOID();
-	return tile->ops->run(tile);
+		return YETTY_ERR(yetty_core_int, "tile is NULL");
+	if (!tile->ops || !tile->ops->on_event)
+		return YETTY_OK(yetty_core_int, 0);
+	return tile->ops->on_event(tile, event);
 }
 
 yetty_core_object_id yetty_yui_tile_id(const struct yetty_yui_tile *tile)

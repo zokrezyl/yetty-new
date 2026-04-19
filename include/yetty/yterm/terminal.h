@@ -90,7 +90,6 @@ struct yetty_term_terminal_layer {
 /* Terminal context - contains yetty context plus terminal-owned objects */
 struct yetty_term_terminal_context {
   struct yetty_context yetty_context;
-  struct yetty_core_event_loop *event_loop;
   struct yetty_platform_pty *pty;
 };
 
@@ -103,10 +102,6 @@ void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal);
 /* Get terminal as yui view (for pushing into pane) */
 struct yetty_yui_view *
 yetty_term_terminal_as_view(struct yetty_term_terminal *terminal);
-
-/* Terminal run */
-struct yetty_core_void_result
-yetty_term_terminal_run(struct yetty_term_terminal *terminal);
 
 /* Terminal input */
 void yetty_term_terminal_write(struct yetty_term_terminal *terminal,

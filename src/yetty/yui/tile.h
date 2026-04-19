@@ -14,6 +14,7 @@ struct yetty_yui_tile;
 struct yetty_yui_view;
 struct yetty_config;
 struct yetty_context;
+struct yetty_core_event;
 
 /* Result types */
 YETTY_RESULT_DECLARE(yetty_yui_tile_ptr, struct yetty_yui_tile *);
@@ -56,7 +57,10 @@ struct yetty_core_void_result
 yetty_yui_tile_set_bounds(struct yetty_yui_tile *tile,
 			  struct yetty_yui_rect bounds);
 
-struct yetty_core_void_result yetty_yui_tile_run(struct yetty_yui_tile *tile);
+/* Event handling - returns 1 if handled, 0 if not */
+struct yetty_core_int_result
+yetty_yui_tile_on_event(struct yetty_yui_tile *tile,
+			const struct yetty_core_event *event);
 
 /* Accessors */
 yetty_core_object_id yetty_yui_tile_id(const struct yetty_yui_tile *tile);

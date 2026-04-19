@@ -2,6 +2,7 @@
 #include <yetty/yui/tile.h>
 #include <yetty/yui/view.h>
 #include <yetty/yconfig.h>
+#include <yetty/ycore/event.h>
 #include <yetty/yterm/terminal.h>
 #include <stdlib.h>
 
@@ -73,18 +74,6 @@ yetty_yui_workspace_resize(struct yetty_yui_workspace *ws, float width,
 		bounds = (struct yetty_yui_rect){0, 0, width, height};
 		return yetty_yui_tile_set_bounds(ws->root, bounds);
 	}
-
-	return YETTY_OK_VOID();
-}
-
-struct yetty_core_void_result
-yetty_yui_workspace_run(struct yetty_yui_workspace *ws)
-{
-	if (!ws)
-		return YETTY_ERR(yetty_core_void, "workspace is NULL");
-
-	if (ws->root)
-		return yetty_yui_tile_run(ws->root);
 
 	return YETTY_OK_VOID();
 }
@@ -347,4 +336,23 @@ yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
 
 	/* Set as root */
 	return yetty_yui_workspace_set_root(ws, tile_res.value);
+}
+
+/*=============================================================================
+ * Event handling
+ *===========================================================================*/
+
+struct yetty_core_int_result
+yetty_yui_workspace_on_event(struct yetty_yui_workspace *ws,
+			     const struct yetty_core_event *event)
+{
+	if (!ws)
+		return YETTY_ERR(yetty_core_int, "workspace is NULL");
+
+	/* TODO: workspace can filter/intercept events here before passing
+	 * to focused tile. For now, pass through to tile tree. */
+	if (ws->root)
+		return yetty_yui_tile_on_event(ws->root, event);
+
+	return YETTY_OK(yetty_core_int, 0);
 }

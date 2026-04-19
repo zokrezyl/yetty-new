@@ -44,15 +44,6 @@ struct yetty_core_void_result yetty_yui_view_render(struct yetty_yui_view *view,
 	return view->ops->render(view, render_pass);
 }
 
-struct yetty_core_void_result yetty_yui_view_run(struct yetty_yui_view *view)
-{
-	if (!view)
-		return YETTY_ERR(yetty_core_void, "view is NULL");
-	if (!view->ops || !view->ops->run)
-		return YETTY_OK_VOID();
-	return view->ops->run(view);
-}
-
 void yetty_yui_view_set_bounds(struct yetty_yui_view *view,
 			       struct yetty_yui_rect bounds)
 {
@@ -61,6 +52,16 @@ void yetty_yui_view_set_bounds(struct yetty_yui_view *view,
 	view->bounds = bounds;
 	if (view->ops && view->ops->set_bounds)
 		view->ops->set_bounds(view, bounds);
+}
+
+struct yetty_core_int_result yetty_yui_view_on_event(struct yetty_yui_view *view,
+						     const struct yetty_core_event *event)
+{
+	if (!view)
+		return YETTY_ERR(yetty_core_int, "view is NULL");
+	if (!view->ops || !view->ops->on_event)
+		return YETTY_ERR(yetty_core_int, "on_event not implemented");
+	return view->ops->on_event(view, event);
 }
 
 yetty_core_object_id yetty_yui_view_id(const struct yetty_yui_view *view)
