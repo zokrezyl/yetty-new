@@ -18,6 +18,11 @@ struct yetty_gpu_context;
 /* Result type */
 YETTY_RESULT_DECLARE(yetty_render_target_ptr, struct yetty_render_target *);
 
+/* Viewport - position and size */
+struct yetty_render_viewport {
+	float x, y, w, h;
+};
+
 /*=============================================================================
  * Render target - unified abstraction for rendering
  *
@@ -30,6 +35,10 @@ YETTY_RESULT_DECLARE(yetty_render_target_ptr, struct yetty_render_target *);
 
 struct yetty_render_target_ops {
 	void (*destroy)(struct yetty_render_target *self);
+
+	/* Clear the target to a solid color */
+	struct yetty_core_void_result (*clear)(
+		struct yetty_render_target *self);
 
 	/* Render single terminal layer to this target */
 	struct yetty_core_void_result (*render_layer)(
@@ -49,19 +58,16 @@ struct yetty_render_target_ops {
 	/* Get texture view for blending */
 	WGPUTextureView (*get_view)(const struct yetty_render_target *self);
 
-	/* Get dimensions */
-	uint32_t (*get_width)(const struct yetty_render_target *self);
-	uint32_t (*get_height)(const struct yetty_render_target *self);
-
-	/* Resize the target */
+	/* Resize/reposition the target */
 	struct yetty_core_void_result (*resize)(
 		struct yetty_render_target *self,
-		uint32_t width, uint32_t height);
+		struct yetty_render_viewport viewport);
 };
 
 /* Render target base - embed as first member in subclasses */
 struct yetty_render_target {
 	const struct yetty_render_target_ops *ops;
+	struct yetty_render_viewport viewport;
 };
 
 /*=============================================================================
@@ -82,8 +88,7 @@ struct yetty_render_target_ptr_result yetty_render_target_texture_create(
 	WGPUTextureFormat format,
 	struct yetty_render_gpu_allocator *allocator,
 	WGPUSurface surface,  /* NULL for layer/terminal targets */
-	uint32_t width,
-	uint32_t height);
+	struct yetty_render_viewport viewport);
 
 #ifdef __cplusplus
 }

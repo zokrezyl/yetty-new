@@ -332,6 +332,11 @@ yetty_term_terminal_create(struct grid_size grid_size,
 
     /* Create render targets for each layer */
     const struct yetty_app_gpu_context *app_gpu = &yetty_context->gpu_context.app_gpu_context;
+    struct yetty_render_viewport layer_vp = {
+        .x = 0, .y = 0,
+        .w = (float)app_gpu->surface_width,
+        .h = (float)app_gpu->surface_height
+    };
     for (size_t i = 0; i < terminal->layer_count; i++) {
         struct yetty_render_target_ptr_result target_res = yetty_render_target_texture_create(
             yetty_context->gpu_context.device,
@@ -339,8 +344,7 @@ yetty_term_terminal_create(struct grid_size grid_size,
             yetty_context->gpu_context.surface_format,
             yetty_context->gpu_context.allocator,
             NULL,  /* no surface for layer targets */
-            app_gpu->surface_width,
-            app_gpu->surface_height);
+            layer_vp);
         if (!YETTY_IS_OK(target_res)) {
             ydebug("terminal_create: failed to create layer target %zu", i);
             /* Clean up already created targets */
@@ -579,10 +583,13 @@ static struct yetty_core_int_result terminal_view_on_event(
             return YETTY_OK(yetty_core_int, 1);
 
         /* Resize layer targets - yetty handles surface reconfiguration */
+        struct yetty_render_viewport vp = {
+            .x = 0, .y = 0,
+            .w = width, .h = height
+        };
         for (size_t i = 0; i < terminal->layer_count; i++) {
             if (terminal->layer_targets[i] && terminal->layer_targets[i]->ops->resize) {
-                terminal->layer_targets[i]->ops->resize(terminal->layer_targets[i],
-                    (uint32_t)width, (uint32_t)height);
+                terminal->layer_targets[i]->ops->resize(terminal->layer_targets[i], vp);
             }
         }
 

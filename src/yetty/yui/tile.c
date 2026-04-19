@@ -219,9 +219,16 @@ static struct yetty_core_void_result pane_render(struct yetty_yui_tile *self,
 {
 	struct yetty_yui_pane *pane = (struct yetty_yui_pane *)self;
 
-	if (pane->view_count > 0 && pane->views[pane->view_count - 1])
+	if (pane->view_count > 0 && pane->views[pane->view_count - 1]) {
+		/* Set viewport on render_target based on our bounds for scissored rendering */
+		struct yetty_yui_rect bounds = pane->base.bounds;
+		render_target->viewport = (struct yetty_render_viewport){
+			.x = bounds.x, .y = bounds.y,
+			.w = bounds.w, .h = bounds.h
+		};
 		return yetty_yui_view_render(pane->views[pane->view_count - 1],
 					     render_target);
+	}
 
 	return YETTY_OK_VOID();
 }

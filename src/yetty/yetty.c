@@ -56,6 +56,13 @@ static struct yetty_core_int_result yetty_event_handler(
 
         ydebug("yetty: RENDER event - calling workspace render");
 
+        /* Clear the big target once before rendering all panes */
+        struct yetty_core_void_result clr_res =
+            yetty->render_target->ops->clear(yetty->render_target);
+        if (!YETTY_IS_OK(clr_res)) {
+            yerror("yetty: clear failed: %s", clr_res.error.msg);
+        }
+
         /* Render workspace tree - pass render_target down */
         if (yetty->workspace) {
             struct yetty_core_void_result res =
@@ -105,7 +112,8 @@ static struct yetty_core_int_result yetty_event_handler(
 
         /* Resize render target */
         if (yetty->render_target && yetty->render_target->ops->resize) {
-            yetty->render_target->ops->resize(yetty->render_target, width, height);
+            struct yetty_render_viewport vp = {0, 0, (float)width, (float)height};
+            yetty->render_target->ops->resize(yetty->render_target, vp);
         }
 
         /* Resize workspace */
@@ -362,21 +370,23 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     yetty->context.gpu_context.allocator = alloc_res.value;
 
     /* Create big render target (window-sized texture with surface for presentation) */
+    struct yetty_render_viewport vp = {
+        .x = 0, .y = 0,
+        .w = (float)yetty->context.app_context.app_gpu_context.surface_width,
+        .h = (float)yetty->context.app_context.app_gpu_context.surface_height
+    };
     struct yetty_render_target_ptr_result target_res = yetty_render_target_texture_create(
         yetty->device,
         yetty->queue,
         yetty->surface_format,
         alloc_res.value,
         surface,  /* surface for presentation */
-        yetty->context.app_context.app_gpu_context.surface_width,
-        yetty->context.app_context.app_gpu_context.surface_height);
+        vp);
     if (!YETTY_IS_OK(target_res)) {
         return YETTY_ERR(yetty_core_void, "failed to create render target");
     }
     yetty->render_target = target_res.value;
-    ydebug("initWebGPU: render target created %ux%u",
-        yetty->context.app_context.app_gpu_context.surface_width,
-        yetty->context.app_context.app_gpu_context.surface_height);
+    ydebug("initWebGPU: render target created %.0fx%.0f", vp.w, vp.h);
 
     ydebug("initWebGPU: Complete");
     return YETTY_OK_VOID();
