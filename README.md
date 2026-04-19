@@ -1,3 +1,6 @@
+> **Note:** This is the repo of the new rewrite of yetty code. The old yetty code, is at https://github.com/zokrezyl/yetty-poc
+
+
 <p align="center">
   <img src="docs/logo.jpeg" alt="Yetty Logo" width="200">
 </p>
