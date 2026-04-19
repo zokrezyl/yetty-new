@@ -7,6 +7,7 @@
 #include <yetty/platform/pty.h>
 #include <yetty/platform/pty-factory.h>
 #include <yetty/platform/pty-poll-source.h>
+#include <yetty/yrender/gpu-allocator.h>
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/yrender/render-target.h>
 #include <yetty/ytrace.h>
@@ -19,16 +20,17 @@
 /* Forward declarations for view ops */
 static void terminal_view_destroy(struct yetty_yui_view *view);
 static struct yetty_core_void_result terminal_view_render(
-    struct yetty_yui_view *view, void *render_pass);
-static struct yetty_core_void_result terminal_view_run(struct yetty_yui_view *view);
+    struct yetty_yui_view *view, struct yetty_render_target *render_target);
 static void terminal_view_set_bounds(struct yetty_yui_view *view,
                                      struct yetty_yui_rect bounds);
+static struct yetty_core_int_result terminal_view_on_event(
+    struct yetty_yui_view *view, const struct yetty_core_event *event);
 
 static const struct yetty_yui_view_ops terminal_view_ops = {
     .destroy = terminal_view_destroy,
     .render = terminal_view_render,
-    .run = terminal_view_run,
     .set_bounds = terminal_view_set_bounds,
+    .on_event = terminal_view_on_event,
 };
 
 struct yetty_term_terminal {
@@ -40,14 +42,17 @@ struct yetty_term_terminal {
     struct yetty_term_terminal_layer *layers[YETTY_TERM_TERMINAL_MAX_LAYERS];
     size_t layer_count;
     yetty_core_poll_id pty_poll_id;
-    struct yetty_render_target *render_target;
+    /* Render targets - one per layer for render_layer */
+    struct yetty_render_target *layer_targets[YETTY_TERM_TERMINAL_MAX_LAYERS];
     int shutting_down;
     struct yetty_term_pty_reader *pty_reader;
 };
 
 /* Forward declarations */
 static void terminal_read_pty(struct yetty_term_terminal *terminal);
-static struct yetty_core_void_result terminal_render_frame(struct yetty_term_terminal *terminal);
+static struct yetty_core_void_result terminal_render_frame(
+    struct yetty_term_terminal *terminal,
+    struct yetty_render_target *target);
 
 /* PTY write callback for layers */
 static void terminal_pty_write_callback(const char *data, size_t len, void *userdata)
@@ -63,11 +68,11 @@ static void terminal_pty_write_callback(const char *data, size_t len, void *user
 static void terminal_request_render_callback(void *userdata)
 {
     struct yetty_term_terminal *terminal = userdata;
-    ydebug("terminal_request_render_callback: event_loop=%p", (void*)terminal->context.event_loop);
-    if (terminal->context.event_loop && terminal->context.event_loop->ops &&
-        terminal->context.event_loop->ops->request_render) {
+    ydebug("terminal_request_render_callback: event_loop=%p", (void*)terminal->context.yetty_context.event_loop);
+    if (terminal->context.yetty_context.event_loop && terminal->context.yetty_context.event_loop->ops &&
+        terminal->context.yetty_context.event_loop->ops->request_render) {
         ydebug("terminal_request_render_callback: calling request_render");
-        terminal->context.event_loop->ops->request_render(terminal->context.event_loop);
+        terminal->context.yetty_context.event_loop->ops->request_render(terminal->context.yetty_context.event_loop);
     }
 }
 
@@ -123,7 +128,7 @@ static void terminal_cursor_callback(struct yetty_term_terminal_layer *source,
          cursor_pos.rows);
 }
 
-/* Event handler */
+/* Event handler - only for PTY poll events registered directly with event loop */
 static struct yetty_core_int_result terminal_event_handler(
     struct yetty_core_event_listener *listener,
     const struct yetty_core_event *event)
@@ -131,160 +136,60 @@ static struct yetty_core_int_result terminal_event_handler(
     struct yetty_term_terminal *terminal =
         container_of(listener, struct yetty_term_terminal, listener);
 
-    switch (event->type) {
-    case YETTY_EVENT_RENDER: {
-        struct yetty_core_void_result res = terminal_render_frame(terminal);
-        if (!YETTY_IS_OK(res)) {
-            yerror("terminal: render_frame failed: %s", res.error.msg);
-            return YETTY_ERR(yetty_core_int, res.error.msg);
-        }
-        return YETTY_OK(yetty_core_int, 1);
-    }
-
-    case YETTY_EVENT_POLL_READABLE:
+    if (event->type == YETTY_EVENT_POLL_READABLE) {
         ydebug("terminal: POLL_READABLE event fd=%d", event->poll.fd);
         terminal_read_pty(terminal);
         return YETTY_OK(yetty_core_int, 1);
-
-    case YETTY_EVENT_KEY_DOWN:
-        ydebug("terminal: KEY_DOWN key=%d mods=%d", event->key.key, event->key.mods);
-        /* Dispatch to layers */
-        for (size_t i = 0; i < terminal->layer_count; i++) {
-            struct yetty_term_terminal_layer *layer = terminal->layers[i];
-            if (layer && layer->ops && layer->ops->on_key) {
-                if (layer->ops->on_key(layer, event->key.key, event->key.mods))
-                    break;  /* Event consumed */
-            }
-        }
-        return YETTY_OK(yetty_core_int, 1);
-
-    case YETTY_EVENT_CHAR:
-        ydebug("terminal: CHAR codepoint=U+%04X mods=%d", event->chr.codepoint, event->chr.mods);
-        /* Dispatch to layers */
-        for (size_t i = 0; i < terminal->layer_count; i++) {
-            struct yetty_term_terminal_layer *layer = terminal->layers[i];
-            if (layer && layer->ops && layer->ops->on_char) {
-                if (layer->ops->on_char(layer, event->chr.codepoint, event->chr.mods))
-                    break;  /* Event consumed */
-            }
-        }
-        return YETTY_OK(yetty_core_int, 1);
-
-    case YETTY_EVENT_SHUTDOWN:
-        ydebug("terminal: SHUTDOWN received");
-        terminal->shutting_down = 1;
-        if (terminal->context.event_loop && terminal->context.event_loop->ops &&
-            terminal->context.event_loop->ops->stop) {
-            terminal->context.event_loop->ops->stop(terminal->context.event_loop);
-        }
-        return YETTY_OK(yetty_core_int, 1);
-
-    case YETTY_EVENT_RESIZE: {
-        float width = event->resize.width;
-        float height = event->resize.height;
-        ydebug("terminal: RESIZE %.0fx%.0f", width, height);
-
-        if (width <= 0 || height <= 0)
-            return YETTY_OK(yetty_core_int, 1);
-
-        /* Reconfigure WebGPU surface */
-        struct yetty_gpu_context *gpu = &terminal->context.yetty_context.gpu_context;
-        struct yetty_app_gpu_context *app_gpu = &gpu->app_gpu_context;
-        if (app_gpu->surface && gpu->device) {
-            WGPUSurfaceConfiguration surface_config = {0};
-            surface_config.device = gpu->device;
-            surface_config.format = gpu->surface_format;
-            surface_config.usage = WGPUTextureUsage_RenderAttachment;
-            surface_config.width = (uint32_t)width;
-            surface_config.height = (uint32_t)height;
-            surface_config.presentMode = WGPUPresentMode_Fifo;
-            wgpuSurfaceConfigure(app_gpu->surface, &surface_config);
-            app_gpu->surface_width = (uint32_t)width;
-            app_gpu->surface_height = (uint32_t)height;
-            ydebug("terminal: surface reconfigured to %ux%u", (uint32_t)width, (uint32_t)height);
-
-            /* Resize render target */
-            if (terminal->render_target && terminal->render_target->ops->resize) {
-                terminal->render_target->ops->resize(terminal->render_target,
-                    (uint32_t)width, (uint32_t)height);
-            }
-        }
-
-        /* Calculate grid dimensions from first layer's cell size */
-        if (terminal->layer_count > 0) {
-            struct yetty_term_terminal_layer *layer = terminal->layers[0];
-            float cell_w = layer->cell_size.width > 0 ? layer->cell_size.width : 10.0f;
-            float cell_h = layer->cell_size.height > 0 ? layer->cell_size.height : 20.0f;
-            uint32_t new_cols = (uint32_t)(width / cell_w);
-            uint32_t new_rows = (uint32_t)(height / cell_h);
-
-            if (new_cols > 0 && new_rows > 0 &&
-                (new_cols != terminal->cols || new_rows != terminal->rows)) {
-                ydebug("terminal: resizing grid from %ux%u to %ux%u",
-                       terminal->cols, terminal->rows, new_cols, new_rows);
-                yetty_term_terminal_resize_grid(terminal,
-                    (struct grid_size){.cols = new_cols, .rows = new_rows});
-
-                /* Also resize PTY */
-                if (terminal->context.pty && terminal->context.pty->ops &&
-                    terminal->context.pty->ops->resize) {
-                    terminal->context.pty->ops->resize(terminal->context.pty, new_cols, new_rows);
-                }
-            }
-        }
-        return YETTY_OK(yetty_core_int, 1);
     }
 
-    default:
-        return YETTY_OK(yetty_core_int, 0);
-    }
+    return YETTY_OK(yetty_core_int, 0);
 }
 
 /* Render a frame using layered rendering */
-static struct yetty_core_void_result terminal_render_frame(struct yetty_term_terminal *terminal)
+static struct yetty_core_void_result terminal_render_frame(
+    struct yetty_term_terminal *terminal,
+    struct yetty_render_target *target)
 {
     if (terminal->shutting_down) {
         ydebug("terminal_render_frame: shutting down, skipping render");
         return YETTY_OK_VOID();
     }
 
-    if (!terminal->render_target) {
-        yerror("terminal_render_frame: no render_target");
-        return YETTY_ERR(yetty_core_void, "no render_target");
+    if (!target) {
+        yerror("terminal_render_frame: no target provided");
+        return YETTY_ERR(yetty_core_void, "no target provided");
     }
 
     ydebug("terminal_render_frame: starting");
 
-    /* Collect gpu_resource_sets from each layer */
-    const struct yetty_render_gpu_resource_set *resource_sets[YETTY_TERM_TERMINAL_MAX_LAYERS];
-    size_t rs_count = 0;
-
+    /* Render each layer to its target */
     for (size_t i = 0; i < terminal->layer_count; i++) {
         struct yetty_term_terminal_layer *layer = terminal->layers[i];
-        if (!layer)
+        struct yetty_render_target *layer_target = terminal->layer_targets[i];
+
+        if (!layer || !layer_target)
             continue;
 
-        struct yetty_render_gpu_resource_set_result rs_res =
-            layer->ops->get_gpu_resource_set(layer);
+        struct yetty_core_void_result res =
+            layer_target->ops->render_layer(layer_target, layer);
 
-        if (YETTY_IS_OK(rs_res)) {
-            resource_sets[rs_count++] = rs_res.value;
-        } else {
-            yerror("terminal_render_frame: layer %zu get_gpu_resource_set failed: %s",
-                   i, rs_res.error.msg);
+        if (!YETTY_IS_OK(res)) {
+            yerror("terminal_render_frame: layer %zu render failed: %s",
+                   i, res.error.msg);
+            return res;
         }
     }
 
-    /* Render all resource sets to target */
+    /* Blend all layer targets into the provided target (big_target from yetty) */
     struct yetty_core_void_result res =
-        terminal->render_target->ops->render(terminal->render_target, resource_sets, rs_count);
+        target->ops->blend(target, terminal->layer_targets, terminal->layer_count);
 
     if (!YETTY_IS_OK(res)) {
-        yerror("terminal_render_frame: render failed: %s", res.error.msg);
+        yerror("terminal_render_frame: blend failed: %s", res.error.msg);
         return res;
     }
 
-    ydebug("terminal_render_frame: done, rendered %zu layers", rs_count);
+    ydebug("terminal_render_frame: done, rendered %zu layers", terminal->layer_count);
     return YETTY_OK_VOID();
 }
 
@@ -298,7 +203,7 @@ static void terminal_read_pty(struct yetty_term_terminal *terminal)
     if (bytes_read > 0 && terminal->layer_count > 0) {
         struct yetty_term_terminal_layer *layer = terminal->layers[0];
         if (layer && layer->dirty) {
-            terminal->context.event_loop->ops->request_render(terminal->context.event_loop);
+            terminal->context.yetty_context.event_loop->ops->request_render(terminal->context.yetty_context.event_loop);
         }
     }
 }
@@ -309,7 +214,6 @@ struct yetty_term_terminal_result
 yetty_term_terminal_create(struct grid_size grid_size,
                            const struct yetty_context *yetty_context) {
   struct yetty_term_terminal *terminal;
-  struct yetty_core_void_result res;
   uint32_t cols = grid_size.cols;
   uint32_t rows = grid_size.rows;
 
@@ -323,74 +227,22 @@ yetty_term_terminal_create(struct grid_size grid_size,
   terminal->view.ops = &terminal_view_ops;
   terminal->view.id = yetty_yui_view_next_id();
 
-  terminal->listener.handler = terminal_event_handler;
   terminal->cols = cols;
   terminal->rows = rows;
     terminal->layer_count = 0;
     terminal->context.yetty_context = *yetty_context;
 
-    /* Create event loop */
-    struct yetty_platform_input_pipe *pipe = yetty_context->app_context.platform_input_pipe;
-    struct yetty_core_event_loop_result event_loop_res = yetty_core_event_loop_create(pipe);
-    if (!YETTY_IS_OK(event_loop_res)) {
-        ydebug("terminal_create: failed to create event loop");
+    /* Validate event loop from context */
+    if (!yetty_context->event_loop) {
+        ydebug("terminal_create: no event_loop in context");
         free(terminal);
-        return YETTY_ERR(yetty_term_terminal, "failed to create event loop");
+        return YETTY_ERR(yetty_term_terminal, "no event_loop in context");
     }
-    terminal->context.event_loop = event_loop_res.value;
-    ydebug("terminal_create: event_loop created at %p", (void *)terminal->context.event_loop);
+    ydebug("terminal_create: using event_loop at %p",
+           (void *)terminal->context.yetty_context.event_loop);
 
-    /* Register for render events */
-    res = terminal->context.event_loop->ops->register_listener(
-        terminal->context.event_loop, YETTY_EVENT_RENDER, &terminal->listener, 0);
-    if (!YETTY_IS_OK(res)) {
-        ydebug("terminal_create: failed to register render listener");
-        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
-        free(terminal);
-        return YETTY_ERR(yetty_term_terminal, "failed to register render listener");
-    }
-    ydebug("terminal_create: registered for RENDER events");
-
-    /* Register for keyboard events */
-    res = terminal->context.event_loop->ops->register_listener(
-        terminal->context.event_loop, YETTY_EVENT_KEY_DOWN, &terminal->listener, 0);
-    if (!YETTY_IS_OK(res)) {
-        ydebug("terminal_create: failed to register KEY_DOWN listener");
-        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
-        free(terminal);
-        return YETTY_ERR(yetty_term_terminal, "failed to register KEY_DOWN listener");
-    }
-    res = terminal->context.event_loop->ops->register_listener(
-        terminal->context.event_loop, YETTY_EVENT_CHAR, &terminal->listener, 0);
-    if (!YETTY_IS_OK(res)) {
-        ydebug("terminal_create: failed to register CHAR listener");
-        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
-        free(terminal);
-        return YETTY_ERR(yetty_term_terminal, "failed to register CHAR listener");
-    }
-    ydebug("terminal_create: registered for keyboard events");
-
-    /* Register for resize events */
-    res = terminal->context.event_loop->ops->register_listener(
-        terminal->context.event_loop, YETTY_EVENT_RESIZE, &terminal->listener, 0);
-    if (!YETTY_IS_OK(res)) {
-        ydebug("terminal_create: failed to register RESIZE listener");
-        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
-        free(terminal);
-        return YETTY_ERR(yetty_term_terminal, "failed to register RESIZE listener");
-    }
-    ydebug("terminal_create: registered for RESIZE events");
-
-    /* Register for shutdown events */
-    res = terminal->context.event_loop->ops->register_listener(
-        terminal->context.event_loop, YETTY_EVENT_SHUTDOWN, &terminal->listener, 0);
-    if (!YETTY_IS_OK(res)) {
-        ydebug("terminal_create: failed to register SHUTDOWN listener");
-        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
-        free(terminal);
-        return YETTY_ERR(yetty_term_terminal, "failed to register SHUTDOWN listener");
-    }
-    ydebug("terminal_create: registered for SHUTDOWN events");
+    /* Set up listener for PTY poll events */
+    terminal->listener.handler = terminal_event_handler;
 
     /* Create PTY */
     struct yetty_platform_pty_factory *pty_factory = yetty_context->app_context.pty_factory;
@@ -411,14 +263,14 @@ yetty_term_terminal_create(struct grid_size grid_size,
             /* Set up PTY poll */
             struct yetty_platform_pty_poll_source *poll_source = terminal->context.pty->ops->poll_source(terminal->context.pty);
             if (poll_source) {
-                struct yetty_core_poll_id_result poll_res = terminal->context.event_loop->ops->create_pty_poll(
-                    terminal->context.event_loop, poll_source);
+                struct yetty_core_poll_id_result poll_res = terminal->context.yetty_context.event_loop->ops->create_pty_poll(
+                    terminal->context.yetty_context.event_loop, poll_source);
                 if (YETTY_IS_OK(poll_res)) {
                     terminal->pty_poll_id = poll_res.value;
-                    terminal->context.event_loop->ops->register_poll_listener(
-                        terminal->context.event_loop, terminal->pty_poll_id, &terminal->listener);
-                    terminal->context.event_loop->ops->start_poll(
-                        terminal->context.event_loop, terminal->pty_poll_id, YETTY_CORE_POLL_READABLE);
+                    terminal->context.yetty_context.event_loop->ops->register_poll_listener(
+                        terminal->context.yetty_context.event_loop, terminal->pty_poll_id, &terminal->listener);
+                    terminal->context.yetty_context.event_loop->ops->start_poll(
+                        terminal->context.yetty_context.event_loop, terminal->pty_poll_id, YETTY_CORE_POLL_READABLE);
                     ydebug("terminal_create: PTY poll started");
                 }
             }
@@ -439,7 +291,6 @@ yetty_term_terminal_create(struct grid_size grid_size,
         yetty_term_pty_reader_destroy(terminal->pty_reader);
         if (terminal->context.pty)
             terminal->context.pty->ops->destroy(terminal->context.pty);
-        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
         free(terminal);
         return YETTY_ERR(yetty_term_terminal, "failed to create text layer");
     }
@@ -479,25 +330,36 @@ yetty_term_terminal_create(struct grid_size grid_size,
         }
     }
 
-    /* Create render target (surface target with internal layer rendering + blending) */
+    /* Create render targets for each layer */
     const struct yetty_app_gpu_context *app_gpu = &yetty_context->gpu_context.app_gpu_context;
-    struct yetty_render_target_result target_res = yetty_render_target_surface_create(
-        yetty_context->gpu_context.device,
-        yetty_context->gpu_context.queue,
-        app_gpu->surface,
-        yetty_context->gpu_context.surface_format,
-        app_gpu->surface_width,
-        app_gpu->surface_height);
-    if (!YETTY_IS_OK(target_res)) {
-        ydebug("terminal_create: failed to create render target");
-        if (terminal->context.pty)
-            terminal->context.pty->ops->destroy(terminal->context.pty);
-        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
-        free(terminal);
-        return YETTY_ERR(yetty_term_terminal, "failed to create render target");
+    struct yetty_render_viewport layer_vp = {
+        .x = 0, .y = 0,
+        .w = (float)app_gpu->surface_width,
+        .h = (float)app_gpu->surface_height
+    };
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+        struct yetty_render_target_ptr_result target_res = yetty_render_target_texture_create(
+            yetty_context->gpu_context.device,
+            yetty_context->gpu_context.queue,
+            yetty_context->gpu_context.surface_format,
+            yetty_context->gpu_context.allocator,
+            NULL,  /* no surface for layer targets */
+            layer_vp);
+        if (!YETTY_IS_OK(target_res)) {
+            ydebug("terminal_create: failed to create layer target %zu", i);
+            /* Clean up already created targets */
+            for (size_t j = 0; j < i; j++) {
+                if (terminal->layer_targets[j])
+                    terminal->layer_targets[j]->ops->destroy(terminal->layer_targets[j]);
+            }
+            if (terminal->context.pty)
+                terminal->context.pty->ops->destroy(terminal->context.pty);
+            free(terminal);
+            return YETTY_ERR(yetty_term_terminal, "failed to create layer target");
+        }
+        terminal->layer_targets[i] = target_res.value;
     }
-    terminal->render_target = target_res.value;
-    ydebug("terminal_create: render target created");
+    ydebug("terminal_create: layer targets created");
 
     return YETTY_OK(yetty_term_terminal, terminal);
 }
@@ -511,13 +373,15 @@ void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal)
 
     ydebug("terminal_destroy: starting");
 
-    /* Destroy render target (owns layer_renderers internally) */
-    if (terminal->render_target && terminal->render_target->ops &&
-        terminal->render_target->ops->destroy) {
-        ydebug("terminal_destroy: destroying render_target");
-        terminal->render_target->ops->destroy(terminal->render_target);
-        ydebug("terminal_destroy: render_target destroyed");
+    /* Destroy layer targets */
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+        if (terminal->layer_targets[i] && terminal->layer_targets[i]->ops &&
+            terminal->layer_targets[i]->ops->destroy) {
+            ydebug("terminal_destroy: destroying layer_target %zu", i);
+            terminal->layer_targets[i]->ops->destroy(terminal->layer_targets[i]);
+        }
     }
+    ydebug("terminal_destroy: layer_targets destroyed");
 
     /* Destroy layers */
     for (i = 0; i < terminal->layer_count; i++) {
@@ -534,10 +398,7 @@ void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal)
         terminal->context.pty->ops->destroy(terminal->context.pty);
     }
 
-    if (terminal->context.event_loop && terminal->context.event_loop->ops && terminal->context.event_loop->ops->destroy) {
-        ydebug("terminal_destroy: destroying event_loop");
-        terminal->context.event_loop->ops->destroy(terminal->context.event_loop);
-    }
+    /* event_loop is owned by yetty, not terminal - do not destroy */
 
     /* Destroy PTY reader */
     if (terminal->pty_reader) {
@@ -548,41 +409,6 @@ void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal)
     ydebug("terminal_destroy: freeing terminal struct");
     free(terminal);
     ydebug("terminal_destroy: done");
-}
-
-struct yetty_core_void_result yetty_term_terminal_run(struct yetty_term_terminal *terminal)
-{
-    ydebug("terminal_run: Starting...");
-
-    if (!terminal) {
-        ydebug("terminal_run: terminal is null!");
-        return YETTY_ERR(yetty_core_void, "terminal is null");
-    }
-
-    if (!terminal->context.event_loop) {
-        ydebug("terminal_run: terminal has no event_loop!");
-        return YETTY_ERR(yetty_core_void, "terminal has no event_loop");
-    }
-
-    if (!terminal->context.event_loop->ops) {
-        ydebug("terminal_run: event_loop has no ops!");
-        return YETTY_ERR(yetty_core_void, "event_loop has no ops");
-    }
-
-    if (!terminal->context.event_loop->ops->start) {
-        ydebug("terminal_run: event_loop has no start op!");
-        return YETTY_ERR(yetty_core_void, "event_loop has no start op");
-    }
-
-    ydebug("terminal_run: Calling event_loop start...");
-    struct yetty_core_void_result res = terminal->context.event_loop->ops->start(terminal->context.event_loop);
-    ydebug("terminal_run: event_loop start returned, ok=%d", YETTY_IS_OK(res));
-
-    if (!YETTY_IS_OK(res)) {
-        return res;
-    }
-
-    return YETTY_OK_VOID();
 }
 
 /* Terminal input */
@@ -694,21 +520,12 @@ static void terminal_view_destroy(struct yetty_yui_view *view)
 }
 
 static struct yetty_core_void_result terminal_view_render(
-    struct yetty_yui_view *view, void *render_pass)
-{
-    (void)render_pass;  /* Terminal renders via event loop, not direct call */
-    struct yetty_term_terminal *terminal =
-        container_of(view, struct yetty_term_terminal, view);
-
-    return terminal_render_frame(terminal);
-}
-
-static struct yetty_core_void_result terminal_view_run(struct yetty_yui_view *view)
+    struct yetty_yui_view *view, struct yetty_render_target *render_target)
 {
     struct yetty_term_terminal *terminal =
         container_of(view, struct yetty_term_terminal, view);
 
-    return yetty_term_terminal_run(terminal);
+    return terminal_render_frame(terminal, render_target);
 }
 
 static void terminal_view_set_bounds(struct yetty_yui_view *view,
@@ -726,4 +543,88 @@ static void terminal_view_set_bounds(struct yetty_yui_view *view,
            bounds.w, bounds.h, bounds.x, bounds.y);
 
     (void)terminal;
+}
+
+static struct yetty_core_int_result terminal_view_on_event(
+    struct yetty_yui_view *view, const struct yetty_core_event *event)
+{
+    struct yetty_term_terminal *terminal =
+        container_of(view, struct yetty_term_terminal, view);
+
+    switch (event->type) {
+    case YETTY_EVENT_KEY_DOWN:
+        ydebug("terminal: KEY_DOWN key=%d mods=%d", event->key.key, event->key.mods);
+        for (size_t i = 0; i < terminal->layer_count; i++) {
+            struct yetty_term_terminal_layer *layer = terminal->layers[i];
+            if (layer && layer->ops && layer->ops->on_key) {
+                if (layer->ops->on_key(layer, event->key.key, event->key.mods))
+                    return YETTY_OK(yetty_core_int, 1);
+            }
+        }
+        return YETTY_OK(yetty_core_int, 1);
+
+    case YETTY_EVENT_CHAR:
+        ydebug("terminal: CHAR codepoint=U+%04X mods=%d", event->chr.codepoint, event->chr.mods);
+        for (size_t i = 0; i < terminal->layer_count; i++) {
+            struct yetty_term_terminal_layer *layer = terminal->layers[i];
+            if (layer && layer->ops && layer->ops->on_char) {
+                if (layer->ops->on_char(layer, event->chr.codepoint, event->chr.mods))
+                    return YETTY_OK(yetty_core_int, 1);
+            }
+        }
+        return YETTY_OK(yetty_core_int, 1);
+
+    case YETTY_EVENT_RESIZE: {
+        float width = event->resize.width;
+        float height = event->resize.height;
+        ydebug("terminal: RESIZE %.0fx%.0f", width, height);
+
+        if (width <= 0 || height <= 0)
+            return YETTY_OK(yetty_core_int, 1);
+
+        /* Resize layer targets - yetty handles surface reconfiguration */
+        struct yetty_render_viewport vp = {
+            .x = 0, .y = 0,
+            .w = width, .h = height
+        };
+        for (size_t i = 0; i < terminal->layer_count; i++) {
+            if (terminal->layer_targets[i] && terminal->layer_targets[i]->ops->resize) {
+                terminal->layer_targets[i]->ops->resize(terminal->layer_targets[i], vp);
+            }
+        }
+
+        /* Calculate grid dimensions from first layer's cell size */
+        if (terminal->layer_count > 0) {
+            struct yetty_term_terminal_layer *layer = terminal->layers[0];
+            float cell_w = layer->cell_size.width > 0 ? layer->cell_size.width : 10.0f;
+            float cell_h = layer->cell_size.height > 0 ? layer->cell_size.height : 20.0f;
+            uint32_t new_cols = (uint32_t)(width / cell_w);
+            uint32_t new_rows = (uint32_t)(height / cell_h);
+
+            if (new_cols > 0 && new_rows > 0 &&
+                (new_cols != terminal->cols || new_rows != terminal->rows)) {
+                yetty_term_terminal_resize_grid(terminal,
+                    (struct grid_size){.cols = new_cols, .rows = new_rows});
+                if (terminal->context.pty && terminal->context.pty->ops &&
+                    terminal->context.pty->ops->resize) {
+                    terminal->context.pty->ops->resize(terminal->context.pty, new_cols, new_rows);
+                }
+            }
+        }
+        return YETTY_OK(yetty_core_int, 1);
+    }
+
+    case YETTY_EVENT_SHUTDOWN:
+        ydebug("terminal: SHUTDOWN received");
+        terminal->shutting_down = 1;
+        return YETTY_OK(yetty_core_int, 1);
+
+    case YETTY_EVENT_POLL_READABLE:
+        ydebug("terminal: POLL_READABLE");
+        terminal_read_pty(terminal);
+        return YETTY_OK(yetty_core_int, 1);
+
+    default:
+        return YETTY_OK(yetty_core_int, 0);
+    }
 }

@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <webgpu/webgpu.h>
 #include <yetty/ycore/result.h>
 #include <yetty/ycore/types.h>
 #include <yetty/yrender/gpu-resource-set.h>
@@ -19,6 +20,15 @@ struct yetty_term_terminal_layer_ops;
 struct yetty_core_event_loop;
 struct yetty_platform_pty;
 struct yetty_yui_view;
+struct yetty_render_gpu_resource_binder;
+
+/* Render layer function - stateless, renders layer to target texture.
+ * Returns early with OK if layer is not dirty. */
+typedef struct yetty_core_void_result (*yetty_render_layer_fn)(
+    struct yetty_term_terminal_layer *layer,
+    WGPUTextureView target,
+    struct yetty_render_gpu_resource_binder *binder,
+    struct yetty_gpu_context *gpu);
 
 /* Result types */
 YETTY_RESULT_DECLARE(yetty_term_terminal, struct yetty_term_terminal *);
@@ -90,7 +100,6 @@ struct yetty_term_terminal_layer {
 /* Terminal context - contains yetty context plus terminal-owned objects */
 struct yetty_term_terminal_context {
   struct yetty_context yetty_context;
-  struct yetty_core_event_loop *event_loop;
   struct yetty_platform_pty *pty;
 };
 
@@ -103,10 +112,6 @@ void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal);
 /* Get terminal as yui view (for pushing into pane) */
 struct yetty_yui_view *
 yetty_term_terminal_as_view(struct yetty_term_terminal *terminal);
-
-/* Terminal run */
-struct yetty_core_void_result
-yetty_term_terminal_run(struct yetty_term_terminal *terminal);
 
 /* Terminal input */
 void yetty_term_terminal_write(struct yetty_term_terminal *terminal,

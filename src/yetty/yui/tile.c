@@ -1,8 +1,11 @@
 #include <yetty/yui/tile.h>
 #include <yetty/yui/view.h>
 #include <yetty/yconfig.h>
+#include <yetty/ycore/event.h>
+#include <yetty/yrender/render-target.h>
 #include <yetty/yetty.h>
 #include <yetty/yterm/terminal.h>
+#include <yetty/ytrace.h>
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <string.h>
@@ -33,10 +36,11 @@ struct yetty_yui_tile {
 struct yetty_yui_tile_ops {
 	void (*destroy)(struct yetty_yui_tile *self);
 	struct yetty_core_void_result (*render)(struct yetty_yui_tile *self,
-						void *render_pass);
+						struct yetty_render_target *render_target);
 	struct yetty_core_void_result (*set_bounds)(struct yetty_yui_tile *self,
 						    struct yetty_yui_rect bounds);
-	struct yetty_core_void_result (*run)(struct yetty_yui_tile *self);
+	struct yetty_core_int_result (*on_event)(struct yetty_yui_tile *self,
+						 const struct yetty_core_event *event);
 };
 
 struct yetty_yui_split {
@@ -72,18 +76,18 @@ static void split_destroy(struct yetty_yui_tile *self)
 }
 
 static struct yetty_core_void_result split_render(struct yetty_yui_tile *self,
-						  void *render_pass)
+						  struct yetty_render_target *render_target)
 {
 	struct yetty_yui_split *split = (struct yetty_yui_split *)self;
 	struct yetty_core_void_result res;
 
 	if (split->first) {
-		res = yetty_yui_tile_render(split->first, render_pass);
+		res = yetty_yui_tile_render(split->first, render_target);
 		if (YETTY_IS_ERR(res))
 			return res;
 	}
 	if (split->second) {
-		res = yetty_yui_tile_render(split->second, render_pass);
+		res = yetty_yui_tile_render(split->second, render_target);
 		if (YETTY_IS_ERR(res))
 			return res;
 	}
@@ -123,30 +127,57 @@ static struct yetty_core_void_result split_set_bounds(struct yetty_yui_tile *sel
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result split_run(struct yetty_yui_tile *self)
+static struct yetty_core_int_result split_on_event(struct yetty_yui_tile *self,
+						   const struct yetty_core_event *event)
 {
 	struct yetty_yui_split *split = (struct yetty_yui_split *)self;
-	struct yetty_core_void_result res;
 
+	if (event->type == YETTY_EVENT_RESIZE) {
+		/* Calculate child bounds based on orientation and ratio */
+		float w = event->resize.width;
+		float h = event->resize.height;
+		struct yetty_core_event first_event = *event;
+		struct yetty_core_event second_event = *event;
+
+		if (split->orientation == YETTY_YUI_HORIZONTAL) {
+			float first_h = h * split->ratio;
+			first_event.resize.height = first_h;
+			second_event.resize.height = h - first_h;
+		} else {
+			float first_w = w * split->ratio;
+			first_event.resize.width = first_w;
+			second_event.resize.width = w - first_w;
+		}
+
+		/* Pass to both children with their respective sizes */
+		if (split->first)
+			yetty_yui_tile_on_event(split->first, &first_event);
+		if (split->second)
+			yetty_yui_tile_on_event(split->second, &second_event);
+
+		return YETTY_OK(yetty_core_int, 1);
+	}
+
+	/* For other events, pass to focused child */
 	if (split->first) {
-		res = yetty_yui_tile_run(split->first);
-		if (YETTY_IS_ERR(res))
+		struct yetty_core_int_result res = yetty_yui_tile_on_event(split->first, event);
+		if (YETTY_IS_OK(res) && res.value)
 			return res;
 	}
 	if (split->second) {
-		res = yetty_yui_tile_run(split->second);
-		if (YETTY_IS_ERR(res))
+		struct yetty_core_int_result res = yetty_yui_tile_on_event(split->second, event);
+		if (YETTY_IS_OK(res) && res.value)
 			return res;
 	}
 
-	return YETTY_OK_VOID();
+	return YETTY_OK(yetty_core_int, 0);
 }
 
 static const struct yetty_yui_tile_ops split_ops = {
     .destroy = split_destroy,
     .render = split_render,
     .set_bounds = split_set_bounds,
-    .run = split_run,
+    .on_event = split_on_event,
 };
 
 struct yetty_yui_tile_ptr_result
@@ -185,13 +216,20 @@ static void pane_destroy(struct yetty_yui_tile *self)
 }
 
 static struct yetty_core_void_result pane_render(struct yetty_yui_tile *self,
-						 void *render_pass)
+						 struct yetty_render_target *render_target)
 {
 	struct yetty_yui_pane *pane = (struct yetty_yui_pane *)self;
 
-	if (pane->view_count > 0 && pane->views[pane->view_count - 1])
+	if (pane->view_count > 0 && pane->views[pane->view_count - 1]) {
+		/* Set viewport on render_target based on our bounds for scissored rendering */
+		struct yetty_yui_rect bounds = pane->base.bounds;
+		render_target->viewport = (struct yetty_render_viewport){
+			.x = bounds.x, .y = bounds.y,
+			.w = bounds.w, .h = bounds.h
+		};
 		return yetty_yui_view_render(pane->views[pane->view_count - 1],
-					     render_pass);
+					     render_target);
+	}
 
 	return YETTY_OK_VOID();
 }
@@ -211,27 +249,23 @@ static struct yetty_core_void_result pane_set_bounds(struct yetty_yui_tile *self
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result pane_run(struct yetty_yui_tile *self)
+static struct yetty_core_int_result pane_on_event(struct yetty_yui_tile *self,
+						  const struct yetty_core_event *event)
 {
 	struct yetty_yui_pane *pane = (struct yetty_yui_pane *)self;
-	struct yetty_core_void_result res;
 
-	for (size_t i = 0; i < pane->view_count; i++) {
-		if (pane->views[i]) {
-			res = yetty_yui_view_run(pane->views[i]);
-			if (YETTY_IS_ERR(res))
-				return res;
-		}
-	}
+	/* Pass to active view */
+	if (pane->view_count > 0 && pane->views[pane->view_count - 1])
+		return yetty_yui_view_on_event(pane->views[pane->view_count - 1], event);
 
-	return YETTY_OK_VOID();
+	return YETTY_OK(yetty_core_int, 0);
 }
 
 static const struct yetty_yui_tile_ops pane_ops = {
     .destroy = pane_destroy,
     .render = pane_render,
     .set_bounds = pane_set_bounds,
-    .run = pane_run,
+    .on_event = pane_on_event,
 };
 
 struct yetty_yui_tile_ptr_result yetty_yui_pane_create(void)
@@ -262,13 +296,13 @@ void yetty_yui_tile_destroy(struct yetty_yui_tile *tile)
 }
 
 struct yetty_core_void_result yetty_yui_tile_render(struct yetty_yui_tile *tile,
-						    void *render_pass)
+						    struct yetty_render_target *render_target)
 {
 	if (!tile)
 		return YETTY_ERR(yetty_core_void, "tile is NULL");
 	if (!tile->ops || !tile->ops->render)
 		return YETTY_ERR(yetty_core_void, "render not implemented");
-	return tile->ops->render(tile, render_pass);
+	return tile->ops->render(tile, render_target);
 }
 
 struct yetty_core_void_result
@@ -282,13 +316,15 @@ yetty_yui_tile_set_bounds(struct yetty_yui_tile *tile,
 	return tile->ops->set_bounds(tile, bounds);
 }
 
-struct yetty_core_void_result yetty_yui_tile_run(struct yetty_yui_tile *tile)
+struct yetty_core_int_result
+yetty_yui_tile_on_event(struct yetty_yui_tile *tile,
+			const struct yetty_core_event *event)
 {
 	if (!tile)
-		return YETTY_ERR(yetty_core_void, "tile is NULL");
-	if (!tile->ops || !tile->ops->run)
-		return YETTY_OK_VOID();
-	return tile->ops->run(tile);
+		return YETTY_ERR(yetty_core_int, "tile is NULL");
+	if (!tile->ops || !tile->ops->on_event)
+		return YETTY_OK(yetty_core_int, 0);
+	return tile->ops->on_event(tile, event);
 }
 
 yetty_core_object_id yetty_yui_tile_id(const struct yetty_yui_tile *tile)
@@ -570,6 +606,81 @@ yetty_yui_tile_find_focused_pane(struct yetty_yui_tile *root)
 	return yetty_yui_tile_find_focused_pane(split->second);
 }
 
+static int point_in_rect(float x, float y, struct yetty_yui_rect r)
+{
+	return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+}
+
+struct yetty_yui_tile *
+yetty_yui_tile_find_pane_at(struct yetty_yui_tile *root, float x, float y)
+{
+	struct yetty_yui_split *split;
+	struct yetty_yui_tile *found;
+
+	if (!root)
+		return NULL;
+
+	ydebug("find_pane_at: tile type=%d bounds=(%.1f,%.1f,%.1f,%.1f) point=(%.1f,%.1f)",
+	       root->type, root->bounds.x, root->bounds.y,
+	       root->bounds.w, root->bounds.h, x, y);
+
+	/* Check if point is in this tile's bounds */
+	if (!point_in_rect(x, y, root->bounds)) {
+		ydebug("find_pane_at: point NOT in bounds");
+		return NULL;
+	}
+
+	if (root->type == YETTY_YUI_TILE_PANE) {
+		ydebug("find_pane_at: found pane at (%.1f,%.1f)", x, y);
+		return root;
+	}
+
+	/* Split - recurse into children */
+	split = (struct yetty_yui_split *)root;
+	found = yetty_yui_tile_find_pane_at(split->first, x, y);
+	if (found)
+		return found;
+
+	return yetty_yui_tile_find_pane_at(split->second, x, y);
+}
+
+struct yetty_yui_tile *
+yetty_yui_tile_find_first_pane(struct yetty_yui_tile *root)
+{
+	struct yetty_yui_split *split;
+	struct yetty_yui_tile *found;
+
+	if (!root)
+		return NULL;
+
+	if (root->type == YETTY_YUI_TILE_PANE)
+		return root;
+
+	split = (struct yetty_yui_split *)root;
+	found = yetty_yui_tile_find_first_pane(split->first);
+	if (found)
+		return found;
+
+	return yetty_yui_tile_find_first_pane(split->second);
+}
+
+void yetty_yui_tile_clear_focus(struct yetty_yui_tile *root)
+{
+	struct yetty_yui_split *split;
+
+	if (!root)
+		return;
+
+	if (root->type == YETTY_YUI_TILE_PANE) {
+		yetty_yui_pane_set_focused(root, 0);
+		return;
+	}
+
+	split = (struct yetty_yui_split *)root;
+	yetty_yui_tile_clear_focus(split->first);
+	yetty_yui_tile_clear_focus(split->second);
+}
+
 /*=============================================================================
  * Config-based creation
  *===========================================================================*/
@@ -673,8 +784,6 @@ yetty_yui_tile_create_from_config(const struct yetty_config *config,
 		/* Future: handle other view types */
 	}
 
-	/* Mark first pane as focused */
-	yetty_yui_pane_set_focused(res.value, 1);
-
+	/* Focus is set by workspace after layout is fully built */
 	return res;
 }

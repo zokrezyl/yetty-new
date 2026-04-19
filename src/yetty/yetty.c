@@ -4,6 +4,10 @@
 
 #include <yetty/yetty.h>
 #include <yetty/yconfig.h>
+#include <yetty/ycore/event-loop.h>
+#include <yetty/ycore/event.h>
+#include <yetty/yrender/gpu-allocator.h>
+#include <yetty/yrender/render-target.h>
 #include <yetty/yterm/terminal.h>
 #include <yetty/webgpu/error.h>
 #include <yetty/ytrace.h>
@@ -19,13 +23,161 @@
 struct yetty_yetty {
     struct yetty_context context;
     struct yetty_yui_workspace *workspace;
+    struct yetty_core_event_loop *event_loop;
+    struct yetty_core_event_listener listener;
 
     /* WebGPU state (owned by Yetty) */
     WGPUAdapter adapter;
     WGPUDevice device;
     WGPUQueue queue;
     WGPUTextureFormat surface_format;
+
+    /* Big render target - window-sized texture with surface for presentation */
+    struct yetty_render_target *render_target;
 };
+
+/*===========================================================================
+ * Event handling
+ *===========================================================================*/
+
+static struct yetty_core_int_result yetty_event_handler(
+    struct yetty_core_event_listener *listener,
+    const struct yetty_core_event *event)
+{
+    struct yetty_yetty *yetty =
+        container_of(listener, struct yetty_yetty, listener);
+
+    /* Handle RENDER event directly - yetty owns the render cycle */
+    if (event->type == YETTY_EVENT_RENDER) {
+        if (!yetty->render_target) {
+            yerror("yetty: RENDER but no render_target");
+            return YETTY_OK(yetty_core_int, 0);
+        }
+
+        ydebug("yetty: RENDER event - calling workspace render");
+
+        /* Clear the big target once before rendering all panes */
+        struct yetty_core_void_result clr_res =
+            yetty->render_target->ops->clear(yetty->render_target);
+        if (!YETTY_IS_OK(clr_res)) {
+            yerror("yetty: clear failed: %s", clr_res.error.msg);
+        }
+
+        /* Render workspace tree - pass render_target down */
+        if (yetty->workspace) {
+            struct yetty_core_void_result res =
+                yetty_yui_workspace_render(yetty->workspace, yetty->render_target);
+            if (!YETTY_IS_OK(res)) {
+                yerror("yetty: workspace render failed: %s", res.error.msg);
+            }
+        }
+
+        /* Present the big target to surface */
+        struct yetty_core_void_result res =
+            yetty->render_target->ops->present(yetty->render_target);
+        if (!YETTY_IS_OK(res)) {
+            yerror("yetty: present failed: %s", res.error.msg);
+        }
+
+        return YETTY_OK(yetty_core_int, 1);
+    }
+
+    /* Handle RESIZE event - reconfigure surface and resize render target */
+    if (event->type == YETTY_EVENT_RESIZE) {
+        uint32_t width = (uint32_t)event->resize.width;
+        uint32_t height = (uint32_t)event->resize.height;
+
+        ydebug("yetty: RESIZE %ux%u", width, height);
+
+        if (width == 0 || height == 0)
+            return YETTY_OK(yetty_core_int, 1);
+
+        /* Reconfigure surface */
+        WGPUSurface surface = yetty->context.app_context.app_gpu_context.surface;
+        if (surface && yetty->device) {
+            WGPUSurfaceConfiguration config = {0};
+            config.device = yetty->device;
+            config.format = yetty->surface_format;
+            config.usage = WGPUTextureUsage_RenderAttachment;
+            config.width = width;
+            config.height = height;
+            config.presentMode = WGPUPresentMode_Fifo;
+            wgpuSurfaceConfigure(surface, &config);
+
+            yetty->context.app_context.app_gpu_context.surface_width = width;
+            yetty->context.app_context.app_gpu_context.surface_height = height;
+            yetty->context.gpu_context.app_gpu_context.surface_width = width;
+            yetty->context.gpu_context.app_gpu_context.surface_height = height;
+        }
+
+        /* Resize render target */
+        if (yetty->render_target && yetty->render_target->ops->resize) {
+            struct yetty_render_viewport vp = {0, 0, (float)width, (float)height};
+            yetty->render_target->ops->resize(yetty->render_target, vp);
+        }
+
+        /* Resize workspace */
+        if (yetty->workspace) {
+            yetty_yui_workspace_resize(yetty->workspace,
+                (float)width, (float)height);
+        }
+
+        /* Forward to workspace for tile/view resize handling */
+        if (yetty->workspace)
+            yetty_yui_workspace_on_event(yetty->workspace, event);
+
+        /* Request re-render after resize */
+        if (yetty->event_loop && yetty->event_loop->ops->request_render)
+            yetty->event_loop->ops->request_render(yetty->event_loop);
+
+        return YETTY_OK(yetty_core_int, 1);
+    }
+
+    /* Forward other events to workspace */
+    if (yetty->workspace)
+        return yetty_yui_workspace_on_event(yetty->workspace, event);
+
+    return YETTY_OK(yetty_core_int, 0);
+}
+
+static struct yetty_core_void_result register_event_listeners(struct yetty_yetty *yetty)
+{
+    struct yetty_core_event_loop *el = yetty->event_loop;
+    struct yetty_core_void_result res;
+
+    yetty->listener.handler = yetty_event_handler;
+
+    /* Keyboard events */
+    res = el->ops->register_listener(el, YETTY_EVENT_KEY_DOWN, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_KEY_UP, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_CHAR, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+
+    /* Mouse events */
+    res = el->ops->register_listener(el, YETTY_EVENT_MOUSE_DOWN, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_MOUSE_UP, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_MOUSE_MOVE, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_MOUSE_DRAG, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_SCROLL, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+
+    /* Other events */
+    res = el->ops->register_listener(el, YETTY_EVENT_RESIZE, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_RENDER, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_SHUTDOWN, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+
+    ydebug("yetty: registered for all events");
+    return YETTY_OK_VOID();
+}
 
 /*===========================================================================
  * WebGPU initialization
@@ -205,12 +357,40 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     wgpuSurfaceConfigure(surface, &surface_config);
     ydebug("initWebGPU: Surface configured %ux%u", surface_config.width, surface_config.height);
 
+    /* Create GPU allocator */
+    struct yetty_render_gpu_allocator_result alloc_res =
+        yetty_render_gpu_allocator_create(yetty->device);
+    if (!YETTY_IS_OK(alloc_res)) {
+        return YETTY_ERR(yetty_core_void, "failed to create GPU allocator");
+    }
+    ydebug("initWebGPU: GPU allocator created");
+
     /* Complete context with owned GPU objects */
     yetty->context.gpu_context.app_gpu_context = yetty->context.app_context.app_gpu_context;
     yetty->context.gpu_context.adapter = yetty->adapter;
     yetty->context.gpu_context.device = yetty->device;
     yetty->context.gpu_context.queue = yetty->queue;
     yetty->context.gpu_context.surface_format = yetty->surface_format;
+    yetty->context.gpu_context.allocator = alloc_res.value;
+
+    /* Create big render target (window-sized texture with surface for presentation) */
+    struct yetty_render_viewport vp = {
+        .x = 0, .y = 0,
+        .w = (float)yetty->context.app_context.app_gpu_context.surface_width,
+        .h = (float)yetty->context.app_context.app_gpu_context.surface_height
+    };
+    struct yetty_render_target_ptr_result target_res = yetty_render_target_texture_create(
+        yetty->device,
+        yetty->queue,
+        yetty->surface_format,
+        alloc_res.value,
+        surface,  /* surface for presentation */
+        vp);
+    if (!YETTY_IS_OK(target_res)) {
+        return YETTY_ERR(yetty_core_void, "failed to create render target");
+    }
+    yetty->render_target = target_res.value;
+    ydebug("initWebGPU: render target created %.0fx%.0f", vp.w, vp.h);
 
     ydebug("initWebGPU: Complete");
     return YETTY_OK_VOID();
@@ -241,6 +421,24 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
         return YETTY_ERR(yetty_yetty, "WebGPU init failed");
     }
     ydebug("yetty_create: WebGPU initialized");
+
+    /* Create event loop */
+    struct yetty_platform_input_pipe *pipe = app_context->platform_input_pipe;
+    struct yetty_core_event_loop_result event_loop_res = yetty_core_event_loop_create(pipe);
+    if (!YETTY_IS_OK(event_loop_res)) {
+        yetty_destroy(yetty);
+        return YETTY_ERR(yetty_yetty, "failed to create event loop");
+    }
+    yetty->event_loop = event_loop_res.value;
+    yetty->context.event_loop = yetty->event_loop;
+    ydebug("yetty_create: event loop created at %p", (void *)yetty->event_loop);
+
+    /* Register event listeners */
+    res = register_event_listeners(yetty);
+    if (!YETTY_IS_OK(res)) {
+        yetty_destroy(yetty);
+        return YETTY_ERR(yetty_yetty, "failed to register event listeners");
+    }
 
     /* Create workspace */
     ydebug("yetty_create: Creating workspace...");
@@ -282,6 +480,32 @@ void yetty_destroy(struct yetty_yetty *yetty)
         ydebug("yetty_destroy: workspace destroyed");
     }
 
+    /* Destroy event loop */
+    if (yetty->event_loop && yetty->event_loop->ops &&
+        yetty->event_loop->ops->destroy) {
+        ydebug("yetty_destroy: destroying event_loop");
+        yetty->event_loop->ops->destroy(yetty->event_loop);
+        yetty->event_loop = NULL;
+        yetty->context.event_loop = NULL;
+        ydebug("yetty_destroy: event_loop destroyed");
+    }
+
+    /* Destroy render target before allocator */
+    if (yetty->render_target && yetty->render_target->ops &&
+        yetty->render_target->ops->destroy) {
+        ydebug("yetty_destroy: destroying render_target");
+        yetty->render_target->ops->destroy(yetty->render_target);
+        yetty->render_target = NULL;
+    }
+
+    /* Destroy GPU allocator before device */
+    if (yetty->context.gpu_context.allocator) {
+        ydebug("yetty_destroy: destroying GPU allocator");
+        yetty->context.gpu_context.allocator->ops->destroy(
+            yetty->context.gpu_context.allocator);
+        yetty->context.gpu_context.allocator = NULL;
+    }
+
     /* Surface is created by platform (glfw-main.c) but owned by yetty since we
      * configured it with our device. Must release before device. */
     WGPUSurface surface = yetty->context.app_context.app_gpu_context.surface;
@@ -321,13 +545,19 @@ struct yetty_core_void_result yetty_run(struct yetty_yetty *yetty)
         return YETTY_ERR(yetty_core_void, "yetty is null");
     }
 
-    if (yetty->workspace) {
-        ydebug("yetty_run: Calling workspace run...");
-        struct yetty_core_void_result res = yetty_yui_workspace_run(yetty->workspace);
-        ydebug("yetty_run: Workspace run returned, ok=%d", YETTY_IS_OK(res));
-        return res;
+    if (!yetty->event_loop) {
+        ydebug("yetty_run: no event_loop!");
+        return YETTY_ERR(yetty_core_void, "no event_loop");
     }
 
-    ydebug("yetty_run: No workspace, returning OK");
-    return YETTY_OK_VOID();
+    if (!yetty->event_loop->ops || !yetty->event_loop->ops->start) {
+        ydebug("yetty_run: event_loop has no start op!");
+        return YETTY_ERR(yetty_core_void, "event_loop has no start op");
+    }
+
+    ydebug("yetty_run: Starting event loop...");
+    struct yetty_core_void_result res = yetty->event_loop->ops->start(yetty->event_loop);
+    ydebug("yetty_run: event_loop start returned, ok=%d", YETTY_IS_OK(res));
+
+    return res;
 }

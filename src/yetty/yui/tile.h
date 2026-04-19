@@ -14,6 +14,8 @@ struct yetty_yui_tile;
 struct yetty_yui_view;
 struct yetty_config;
 struct yetty_context;
+struct yetty_core_event;
+struct yetty_render_target;
 
 /* Result types */
 YETTY_RESULT_DECLARE(yetty_yui_tile_ptr, struct yetty_yui_tile *);
@@ -50,13 +52,16 @@ void yetty_yui_tile_destroy(struct yetty_yui_tile *tile);
 
 /* Tile operations */
 struct yetty_core_void_result yetty_yui_tile_render(struct yetty_yui_tile *tile,
-						    void *render_pass);
+						    struct yetty_render_target *render_target);
 
 struct yetty_core_void_result
 yetty_yui_tile_set_bounds(struct yetty_yui_tile *tile,
 			  struct yetty_yui_rect bounds);
 
-struct yetty_core_void_result yetty_yui_tile_run(struct yetty_yui_tile *tile);
+/* Event handling - returns 1 if handled, 0 if not */
+struct yetty_core_int_result
+yetty_yui_tile_on_event(struct yetty_yui_tile *tile,
+			const struct yetty_core_event *event);
 
 /* Accessors */
 yetty_core_object_id yetty_yui_tile_id(const struct yetty_yui_tile *tile);
@@ -110,6 +115,17 @@ yetty_yui_tile_find_parent_split(struct yetty_yui_tile *root,
 
 struct yetty_yui_tile *
 yetty_yui_tile_find_focused_pane(struct yetty_yui_tile *root);
+
+/* Find pane at coordinates (hit test) */
+struct yetty_yui_tile *
+yetty_yui_tile_find_pane_at(struct yetty_yui_tile *root, float x, float y);
+
+/* Find first pane in tree (depth-first) */
+struct yetty_yui_tile *
+yetty_yui_tile_find_first_pane(struct yetty_yui_tile *root);
+
+/* Clear focus from all panes in tree */
+void yetty_yui_tile_clear_focus(struct yetty_yui_tile *root);
 
 #ifdef __cplusplus
 }
