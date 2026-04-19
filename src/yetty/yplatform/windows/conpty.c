@@ -9,17 +9,20 @@
 #include <windows.h>
 #include <stdlib.h>
 #include <string.h>
+#include <io.h>
+#include <fcntl.h>
 
-/* Windows PTY poll source */
-struct win_pty_poll_source {
-    struct yetty_platform_pty_poll_source base;
+/* Windows PTY pipe source */
+struct win_pty_pipe_source {
+    struct yetty_platform_pty_pipe_source base;
     HANDLE handle;
+    int crt_fd;  /* CRT fd from _open_osfhandle for libuv */
 };
 
 /* Windows ConPTY implementation - embeds base as first member */
 struct win_conpty {
     struct yetty_platform_pty base;
-    struct win_pty_poll_source poll_source;
+    struct win_pty_pipe_source pipe_source;
     HPCON hpc;
     HANDLE pipe_in;
     HANDLE pipe_out;
@@ -35,7 +38,7 @@ static struct yetty_core_size_result win_conpty_read(struct yetty_platform_pty *
 static struct yetty_core_size_result win_conpty_write(struct yetty_platform_pty *self, const char *data, size_t len);
 static struct yetty_core_void_result win_conpty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
 static struct yetty_core_void_result win_conpty_stop(struct yetty_platform_pty *self);
-static struct yetty_platform_pty_poll_source *win_conpty_poll_source(struct yetty_platform_pty *self);
+static struct yetty_platform_pty_pipe_source *win_conpty_pipe_source(struct yetty_platform_pty *self);
 
 /* Ops table */
 static const struct yetty_platform_pty_ops win_conpty_ops = {
@@ -44,7 +47,7 @@ static const struct yetty_platform_pty_ops win_conpty_ops = {
     .write = win_conpty_write,
     .resize = win_conpty_resize,
     .stop = win_conpty_stop,
-    .poll_source = win_conpty_poll_source,
+    .pipe_source = win_conpty_pipe_source,
 };
 
 /* Windows PTY factory - embeds base as first member */
@@ -157,7 +160,12 @@ static struct yetty_core_void_result win_conpty_stop(struct yetty_platform_pty *
         pty->pipe_in = INVALID_HANDLE_VALUE;
     }
 
-    if (pty->pipe_out != INVALID_HANDLE_VALUE) {
+    /* crt_fd owns pipe_out via _open_osfhandle — _close closes both */
+    if (pty->pipe_source.crt_fd >= 0) {
+        _close(pty->pipe_source.crt_fd);
+        pty->pipe_source.crt_fd = -1;
+        pty->pipe_out = INVALID_HANDLE_VALUE;
+    } else if (pty->pipe_out != INVALID_HANDLE_VALUE) {
         CloseHandle(pty->pipe_out);
         pty->pipe_out = INVALID_HANDLE_VALUE;
     }
@@ -165,10 +173,10 @@ static struct yetty_core_void_result win_conpty_stop(struct yetty_platform_pty *
     return YETTY_OK_VOID();
 }
 
-static struct yetty_platform_pty_poll_source *win_conpty_poll_source(struct yetty_platform_pty *self)
+static struct yetty_platform_pty_pipe_source *win_conpty_pipe_source(struct yetty_platform_pty *self)
 {
     struct win_conpty *pty = container_of(self, struct win_conpty, base);
-    return &pty->poll_source.base;
+    return &pty->pipe_source.base;
 }
 
 /* Create ConPTY with shell */
@@ -200,21 +208,48 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
     pty->cols = 80;
     pty->rows = 24;
     pty->running = 0;
-    pty->poll_source.base.fd = -1;
-    pty->poll_source.base.handle = INVALID_HANDLE_VALUE;
-    pty->poll_source.handle = INVALID_HANDLE_VALUE;
+    pty->pipe_source.base.abstract = (uintptr_t)-1;
+    pty->pipe_source.handle = INVALID_HANDLE_VALUE;
+    pty->pipe_source.crt_fd = -1;
 
-    /* Create pipes for PTY */
+    /* Create input pipe (we write, ConPTY reads) — regular pipe is fine */
     if (!CreatePipe(&pipe_pty_in, &pty->pipe_in, NULL, 0)) {
         free(pty);
         return YETTY_ERR(yetty_platform_pty, "CreatePipe for input failed");
     }
 
-    if (!CreatePipe(&pty->pipe_out, &pipe_pty_out, NULL, 0)) {
-        CloseHandle(pipe_pty_in);
-        CloseHandle(pty->pipe_in);
-        free(pty);
-        return YETTY_ERR(yetty_platform_pty, "CreatePipe for output failed");
+    /* Create output pipe (ConPTY writes, we read via libuv uv_pipe_t)
+     * Must use CreateNamedPipeW with FILE_FLAG_OVERLAPPED for IOCP */
+    {
+        static volatile LONG pipe_counter = 0;
+        char pipe_name[256];
+        LONG id = InterlockedIncrement(&pipe_counter);
+        snprintf(pipe_name, sizeof(pipe_name),
+                 "\\\\.\\pipe\\yetty-pty-%lu-%ld",
+                 (unsigned long)GetCurrentProcessId(), (long)id);
+
+        pty->pipe_out = CreateNamedPipeA(
+            pipe_name,
+            PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
+            PIPE_TYPE_BYTE | PIPE_WAIT,
+            1, 4096, 4096, 0, NULL);
+        if (pty->pipe_out == INVALID_HANDLE_VALUE) {
+            CloseHandle(pipe_pty_in);
+            CloseHandle(pty->pipe_in);
+            free(pty);
+            return YETTY_ERR(yetty_platform_pty, "CreateNamedPipe for output failed");
+        }
+
+        pipe_pty_out = CreateFileA(
+            pipe_name, GENERIC_WRITE, 0, NULL,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (pipe_pty_out == INVALID_HANDLE_VALUE) {
+            CloseHandle(pty->pipe_out);
+            CloseHandle(pipe_pty_in);
+            CloseHandle(pty->pipe_in);
+            free(pty);
+            return YETTY_ERR(yetty_platform_pty, "CreateFile for output pipe failed");
+        }
     }
 
     /* Create pseudo console */
@@ -287,8 +322,20 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
 
     CloseHandle(pi.hThread);
     pty->process = pi.hProcess;
-    pty->poll_source.handle = pty->pipe_out;
-    pty->poll_source.base.handle = pty->pipe_out;
+    pty->pipe_source.handle = pty->pipe_out;
+
+    /* Create CRT fd for libuv's uv_pipe_open */
+    pty->pipe_source.crt_fd = _open_osfhandle((intptr_t)pty->pipe_out, _O_RDONLY);
+    if (pty->pipe_source.crt_fd < 0) {
+        TerminateProcess(pty->process, 0);
+        CloseHandle(pty->process);
+        ClosePseudoConsole(pty->hpc);
+        CloseHandle(pty->pipe_in);
+        CloseHandle(pty->pipe_out);
+        free(pty);
+        return YETTY_ERR(yetty_platform_pty, "_open_osfhandle failed for pty output");
+    }
+    pty->pipe_source.base.abstract = (uintptr_t)pty->pipe_source.crt_fd;
     pty->running = 1;
 
     return YETTY_OK(yetty_platform_pty, &pty->base);

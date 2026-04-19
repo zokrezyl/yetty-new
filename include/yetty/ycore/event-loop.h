@@ -8,19 +8,24 @@
 extern "C" {
 #endif
 
-typedef int yetty_core_poll_id;
+typedef int yetty_core_pipe_id;
 typedef int yetty_core_timer_id;
 
 /* Result types for this module */
-YETTY_RESULT_DECLARE(yetty_core_poll_id, yetty_core_poll_id);
+YETTY_RESULT_DECLARE(yetty_core_pipe_id, yetty_core_pipe_id);
 YETTY_RESULT_DECLARE(yetty_core_timer_id, yetty_core_timer_id);
-
-#define YETTY_CORE_POLL_READABLE 1
-#define YETTY_CORE_POLL_WRITABLE 2
 
 struct yetty_core_event_loop;
 struct yetty_core_event_listener;
-struct yetty_platform_pty_poll_source;
+struct yetty_platform_pty_pipe_source;
+
+/* Pipe alloc callback — called by event loop to get a buffer for reading */
+typedef void (*yetty_pipe_alloc_cb)(void *ctx, size_t suggested_size, char **buf, size_t *buflen);
+
+/* Pipe read callback — called by event loop when data arrives.
+ * nread > 0: data available in buf/nread.
+ * nread < 0: error or EOF. */
+typedef void (*yetty_pipe_read_cb)(void *ctx, const char *buf, long nread);
 
 /* Event listener callback - returns int (1=handled, 0=not) or error */
 typedef struct yetty_core_int_result (*yetty_core_event_handler)(
@@ -57,30 +62,16 @@ struct yetty_core_event_loop_ops {
         struct yetty_core_event_loop *self,
         const struct yetty_core_event *event);
 
-    /* Poll management */
-    struct yetty_core_poll_id_result (*create_poll)(
-        struct yetty_core_event_loop *self);
-    struct yetty_core_poll_id_result (*create_pty_poll)(
+    /* PTY pipe — uv_pipe_t with uv_read_start, caller provides callbacks */
+    struct yetty_core_pipe_id_result (*register_pty_pipe)(
         struct yetty_core_event_loop *self,
-        struct yetty_platform_pty_poll_source *source);
-    struct yetty_core_void_result (*config_poll)(
+        struct yetty_platform_pty_pipe_source *source,
+        yetty_pipe_alloc_cb alloc_cb,
+        yetty_pipe_read_cb read_cb,
+        void *cb_ctx);
+    struct yetty_core_void_result (*unregister_pty_pipe)(
         struct yetty_core_event_loop *self,
-        yetty_core_poll_id id,
-        int fd);
-    struct yetty_core_void_result (*start_poll)(
-        struct yetty_core_event_loop *self,
-        yetty_core_poll_id id,
-        int events);
-    struct yetty_core_void_result (*stop_poll)(
-        struct yetty_core_event_loop *self,
-        yetty_core_poll_id id);
-    struct yetty_core_void_result (*destroy_poll)(
-        struct yetty_core_event_loop *self,
-        yetty_core_poll_id id);
-    struct yetty_core_void_result (*register_poll_listener)(
-        struct yetty_core_event_loop *self,
-        yetty_core_poll_id id,
-        struct yetty_core_event_listener *listener);
+        yetty_core_pipe_id id);
 
     /* Timer management */
     struct yetty_core_timer_id_result (*create_timer)(

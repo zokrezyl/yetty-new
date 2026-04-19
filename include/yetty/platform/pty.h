@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <yetty/ycore/result.h>
-#include <yetty/platform/pty-poll-source.h>
+#include <yetty/platform/pty-pipe-source.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,7 +19,7 @@ struct yetty_platform_pty_ops {
     struct yetty_core_size_result (*write)(struct yetty_platform_pty *self, const char *data, size_t len);
     struct yetty_core_void_result (*resize)(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
     struct yetty_core_void_result (*stop)(struct yetty_platform_pty *self);
-    struct yetty_platform_pty_poll_source *(*poll_source)(struct yetty_platform_pty *self);
+    struct yetty_platform_pty_pipe_source *(*pipe_source)(struct yetty_platform_pty *self);
 };
 
 /* Pty base */

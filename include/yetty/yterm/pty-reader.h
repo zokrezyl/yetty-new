@@ -31,6 +31,10 @@ void yetty_term_pty_reader_register_osc_sink(
 
 int yetty_term_pty_reader_read(struct yetty_term_pty_reader *reader);
 
+/* Feed data directly to the pty reader (used by uv_pipe_t read callback) */
+void yetty_term_pty_reader_feed(struct yetty_term_pty_reader *reader,
+                                const char *data, size_t len);
+
 YETTY_RESULT_DECLARE(yetty_term_pty_reader, struct yetty_term_pty_reader *);
 
 #ifdef __cplusplus

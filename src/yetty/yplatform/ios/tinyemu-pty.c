@@ -25,7 +25,7 @@
 /* TinyEMU PTY implementation */
 struct tinyemu_pty {
     struct yetty_platform_pty base;
-    struct yetty_platform_pty_poll_source poll_source;
+    struct yetty_platform_pty_pipe_source pipe_source;
 
     /* os_input_pipe: terminal writes [1], VM reads [0] - keyboard from OS */
     int os_input_pipe[2];
@@ -53,7 +53,7 @@ static struct yetty_core_size_result tinyemu_pty_read(struct yetty_platform_pty 
 static struct yetty_core_size_result tinyemu_pty_write(struct yetty_platform_pty *self, const char *data, size_t len);
 static struct yetty_core_void_result tinyemu_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
 static struct yetty_core_void_result tinyemu_pty_stop(struct yetty_platform_pty *self);
-static struct yetty_platform_pty_poll_source *tinyemu_pty_poll_source(struct yetty_platform_pty *self);
+static struct yetty_platform_pty_pipe_source *tinyemu_pty_pipe_source(struct yetty_platform_pty *self);
 
 /* Ops table */
 static const struct yetty_platform_pty_ops tinyemu_pty_ops = {
@@ -62,7 +62,7 @@ static const struct yetty_platform_pty_ops tinyemu_pty_ops = {
     .write = tinyemu_pty_write,
     .resize = tinyemu_pty_resize,
     .stop = tinyemu_pty_stop,
-    .poll_source = tinyemu_pty_poll_source,
+    .pipe_source = tinyemu_pty_pipe_source,
 };
 
 /* Global PTY pointer for console callbacks */
@@ -449,10 +449,10 @@ static struct yetty_core_void_result tinyemu_pty_stop(struct yetty_platform_pty 
     return YETTY_OK_VOID();
 }
 
-static struct yetty_platform_pty_poll_source *tinyemu_pty_poll_source(struct yetty_platform_pty *self)
+static struct yetty_platform_pty_pipe_source *tinyemu_pty_pipe_source(struct yetty_platform_pty *self)
 {
     struct tinyemu_pty *pty = container_of(self, struct tinyemu_pty, base);
-    return &pty->poll_source;
+    return &pty->pipe_source;
 }
 
 /* Create TinyEMU PTY */
@@ -494,7 +494,7 @@ static struct yetty_platform_pty_result tinyemu_pty_create(struct yetty_config *
     fcntl(pty->pty_pipe[1], F_SETFL, O_NONBLOCK);
 
     /* Terminal polls pty_pipe[0] for VM output */
-    pty->poll_source.fd = pty->pty_pipe[0];
+    pty->pipe_source.abstract = pty->pty_pipe[0];
 
     /* Get VM config path - use bundle directory */
     {
