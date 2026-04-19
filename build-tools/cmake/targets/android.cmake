@@ -19,7 +19,8 @@ if(TOYBOX_PATH)
 endif()
 
 # Set ANDROID_ASSETS_DIR BEFORE adding yetty subdirectory so shaders/CMakeLists.txt can use it
-set(ANDROID_ASSETS_DIR "${ANDROID_BUILD_DIR}/assets")
+# Note: Use CMAKE_BINARY_DIR not ANDROID_BUILD_DIR, as CMake operates within the cxx subdirectory
+set(ANDROID_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets")
 file(MAKE_DIRECTORY ${ANDROID_ASSETS_DIR})
 
 # Note: src/yetty is already added by shared.cmake
@@ -39,6 +40,7 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pty.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
+    ${YETTY_PLATFORM_THREAD_SOURCES}
 )
 
 # Create shared library with core sources + android platform

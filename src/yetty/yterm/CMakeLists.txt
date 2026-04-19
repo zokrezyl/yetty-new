@@ -7,7 +7,7 @@ add_library(yetty_term
 )
 
 target_include_directories(yetty_term PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
+    ${YETTY_ROOT}/include
 )
 
 target_link_libraries(yetty_term

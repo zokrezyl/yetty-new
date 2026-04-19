@@ -3,7 +3,7 @@ add_library(yetty_webgpu
 )
 
 target_include_directories(yetty_webgpu PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
+    ${YETTY_ROOT}/include
 )
 
 target_link_libraries(yetty_webgpu
