@@ -15,6 +15,7 @@ on:
 # =============================================================================
 env:
   BUILD_LINUX: false
+  BUILD_LINUX_ASAN: false
   BUILD_MACOS: false
   BUILD_WINDOWS: false
   BUILD_ANDROID: false
@@ -36,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       linux: ${{ steps.set.outputs.linux }}
+      linux_asan: ${{ steps.set.outputs.linux_asan }}
       macos: ${{ steps.set.outputs.macos }}
       windows: ${{ steps.set.outputs.windows }}
       android: ${{ steps.set.outputs.android }}
@@ -51,6 +53,7 @@ jobs:
         run: |
           if [[ "${{ startsWith(github.ref, 'refs/tags/') }}" == "true" ]]; then
             echo "linux=true" >> $GITHUB_OUTPUT
+            echo "linux_asan=true" >> $GITHUB_OUTPUT
             echo "macos=true" >> $GITHUB_OUTPUT
             echo "windows=true" >> $GITHUB_OUTPUT
             echo "android=true" >> $GITHUB_OUTPUT
@@ -63,6 +66,7 @@ jobs:
             echo "test_android=true" >> $GITHUB_OUTPUT
           else
             echo "linux=${{ env.BUILD_LINUX }}" >> $GITHUB_OUTPUT
+            echo "linux_asan=${{ env.BUILD_LINUX_ASAN }}" >> $GITHUB_OUTPUT
             echo "macos=${{ env.BUILD_MACOS }}" >> $GITHUB_OUTPUT
             echo "windows=${{ env.BUILD_WINDOWS }}" >> $GITHUB_OUTPUT
             echo "android=${{ env.BUILD_ANDROID }}" >> $GITHUB_OUTPUT
@@ -79,7 +83,7 @@ jobs:
   # =============================================================================
   # Desktop Build (Linux)
   # =============================================================================
-  build-desktop:
+  build-linux-ytrace-release:
     needs: read-flags
     if: needs.read-flags.outputs.linux == 'true'
     runs-on: ${{ matrix.os }}
@@ -152,9 +156,55 @@ jobs:
         # Note: fonts and shaders are embedded via incbin, no need to include separately
 
   # =============================================================================
+  # Linux ASAN Build (AddressSanitizer)
+  # =============================================================================
+  build-linux-ytrace-asan:
+    needs: read-flags
+    if: needs.read-flags.outputs.linux_asan == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Linux dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          automake autoconf libtool \
+          meson ninja-build nasm \
+          brotli \
+          libfontconfig1-dev \
+          libxrandr-dev \
+          libxinerama-dev \
+          libxcursor-dev \
+          libxi-dev \
+          libxext-dev \
+          libx11-dev \
+          libgl1-mesa-dev \
+          libwayland-dev \
+          libxkbcommon-dev
+
+    - name: Build with ASAN
+      run: make build-desktop-ytrace-asan
+
+    - name: Run ASAN smoke test
+      run: |
+        # Run yetty with a simple command and capture ASAN output
+        export ASAN_OPTIONS="detect_leaks=1:halt_on_error=0:log_path=asan_log"
+        timeout 10 ./build-desktop-ytrace-asan/yetty -e 'echo "ASAN smoke test"; exit 0' || true
+        # Check for ASAN errors
+        if ls asan_log.* 1>/dev/null 2>&1; then
+          echo "=== ASAN ERRORS DETECTED ==="
+          cat asan_log.*
+          exit 1
+        else
+          echo "No ASAN errors detected"
+        fi
+
+  # =============================================================================
   # Desktop Build (macOS Intel)
   # =============================================================================
-  build-macos:
+  build-macos-ytrace-release:
     needs: read-flags
     if: needs.read-flags.outputs.macos == 'true'
     runs-on: macos-15-intel
@@ -201,7 +251,7 @@ jobs:
   # =============================================================================
   # Desktop Build (Windows)
   # =============================================================================
-  build-windows:
+  build-windows-ytrace-release:
     needs: read-flags
     if: needs.read-flags.outputs.windows == 'true'
     runs-on: windows-latest
@@ -305,7 +355,7 @@ jobs:
   # =============================================================================
   # Android Build
   # =============================================================================
-  build-android:
+  build-android-ytrace-release:
     needs: read-flags
     if: needs.read-flags.outputs.android == 'true'
     runs-on: ubuntu-latest
@@ -342,7 +392,7 @@ jobs:
   # =============================================================================
   # Android x86_64 Build (for Emulator Testing)
   # =============================================================================
-  build-android-x86_64:
+  build-android_x86_64-ytrace-release:
     needs: read-flags
     if: needs.read-flags.outputs.android_x86_64 == 'true'
     runs-on: ubuntu-latest
@@ -380,8 +430,8 @@ jobs:
   # Android Instrumented Tests (on Emulator)
   # =============================================================================
   test-android:
-    needs: [read-flags, build-android-x86_64]
-    if: needs.read-flags.outputs.test_android == 'true' && needs.build-android-x86_64.result == 'success'
+    needs: [read-flags, build-android_x86_64-ytrace-release]
+    if: needs.read-flags.outputs.test_android == 'true' && needs.build-android_x86_64-ytrace-release.result == 'success'
     runs-on: ubuntu-latest
 
     steps:
@@ -435,7 +485,7 @@ jobs:
   # =============================================================================
   # iOS Build (arm64 device)
   # =============================================================================
-  build-ios:
+  build-ios-ytrace-release:
     needs: read-flags
     if: needs.read-flags.outputs.ios == 'true'
     runs-on: macos-latest
@@ -476,7 +526,7 @@ jobs:
   # =============================================================================
   # iOS x86_64 Build (for Simulator)
   # =============================================================================
-  build-ios-x86_64:
+  build-ios_x86_64-ytrace-release:
     needs: read-flags
     if: needs.read-flags.outputs.ios_x86_64 == 'true'
     runs-on: macos-15-intel
@@ -518,7 +568,7 @@ jobs:
   # =============================================================================
   # WebAssembly Build (using nix for deterministic builds)
   # =============================================================================
-  build-webasm:
+  build-webasm-ytrace-release:
     needs: read-flags
     if: needs.read-flags.outputs.web == 'true'
     runs-on: ubuntu-latest
@@ -559,10 +609,10 @@ jobs:
   # =============================================================================
   deploy-pages:
     runs-on: ubuntu-latest
-    needs: [read-flags, build-webasm]
+    needs: [read-flags, build-webasm-ytrace-release]
     if: |
       always() &&
-      needs.build-webasm.result == 'success' &&
+      needs.build-webasm-ytrace-release.result == 'success' &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
 
     permissions:
@@ -606,8 +656,8 @@ jobs:
   # =============================================================================
   release-linux:
     runs-on: ubuntu-latest
-    needs: build-desktop
-    if: needs.build-desktop.result == 'success' && startsWith(github.ref, 'refs/tags/')
+    needs: build-linux-ytrace-release
+    if: needs.build-linux-ytrace-release.result == 'success' && startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
@@ -623,8 +673,8 @@ jobs:
 
   release-macos:
     runs-on: ubuntu-latest
-    needs: build-macos
-    if: needs.build-macos.result == 'success' && startsWith(github.ref, 'refs/tags/')
+    needs: build-macos-ytrace-release
+    if: needs.build-macos-ytrace-release.result == 'success' && startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
@@ -640,8 +690,8 @@ jobs:
 
   release-windows:
     runs-on: ubuntu-latest
-    needs: build-windows
-    if: needs.build-windows.result == 'success' && startsWith(github.ref, 'refs/tags/')
+    needs: build-windows-ytrace-release
+    if: needs.build-windows-ytrace-release.result == 'success' && startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
@@ -657,8 +707,8 @@ jobs:
 
   release-webasm:
     runs-on: ubuntu-latest
-    needs: build-webasm
-    if: needs.build-webasm.result == 'success' && startsWith(github.ref, 'refs/tags/')
+    needs: build-webasm-ytrace-release
+    if: needs.build-webasm-ytrace-release.result == 'success' && startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
@@ -674,8 +724,8 @@ jobs:
 
   release-android:
     runs-on: ubuntu-latest
-    needs: build-android
-    if: needs.build-android.result == 'success' && startsWith(github.ref, 'refs/tags/')
+    needs: build-android-ytrace-release
+    if: needs.build-android-ytrace-release.result == 'success' && startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
@@ -689,8 +739,8 @@ jobs:
 
   release-ios:
     runs-on: ubuntu-latest
-    needs: build-ios
-    if: needs.build-ios.result == 'success' && startsWith(github.ref, 'refs/tags/')
+    needs: build-ios-ytrace-release
+    if: needs.build-ios-ytrace-release.result == 'success' && startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
@@ -706,8 +756,8 @@ jobs:
 
   release-ios-x86_64:
     runs-on: ubuntu-latest
-    needs: build-ios-x86_64
-    if: needs.build-ios-x86_64.result == 'success' && startsWith(github.ref, 'refs/tags/')
+    needs: build-ios_x86_64-ytrace-release
+    if: needs.build-ios_x86_64-ytrace-release.result == 'success' && startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     steps:
