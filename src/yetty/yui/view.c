@@ -1,4 +1,5 @@
 #include <yetty/yui/view.h>
+#include <yetty/yrender/render-target.h>
 #include <stdlib.h>
 #include <stdatomic.h>
 
@@ -35,13 +36,13 @@ void yetty_yui_view_destroy(struct yetty_yui_view *view)
 }
 
 struct yetty_core_void_result yetty_yui_view_render(struct yetty_yui_view *view,
-						    void *render_pass)
+						    struct yetty_render_target *render_target)
 {
 	if (!view)
 		return YETTY_ERR(yetty_core_void, "view is NULL");
 	if (!view->ops || !view->ops->render)
 		return YETTY_ERR(yetty_core_void, "render not implemented");
-	return view->ops->render(view, render_pass);
+	return view->ops->render(view, render_target);
 }
 
 void yetty_yui_view_set_bounds(struct yetty_yui_view *view,

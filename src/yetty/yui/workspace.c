@@ -3,6 +3,7 @@
 #include <yetty/yui/view.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/event.h>
+#include <yetty/yrender/render-target.h>
 #include <yetty/yterm/terminal.h>
 #include <stdlib.h>
 
@@ -47,13 +48,14 @@ void yetty_yui_workspace_destroy(struct yetty_yui_workspace *ws)
  *===========================================================================*/
 
 struct yetty_core_void_result
-yetty_yui_workspace_render(struct yetty_yui_workspace *ws, void *render_pass)
+yetty_yui_workspace_render(struct yetty_yui_workspace *ws,
+			   struct yetty_render_target *render_target)
 {
 	if (!ws)
 		return YETTY_ERR(yetty_core_void, "workspace is NULL");
 
 	if (ws->root)
-		return yetty_yui_tile_render(ws->root, render_pass);
+		return yetty_yui_tile_render(ws->root, render_target);
 
 	return YETTY_OK_VOID();
 }

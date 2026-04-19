@@ -2,6 +2,7 @@
 #include <yetty/yui/view.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/event.h>
+#include <yetty/yrender/render-target.h>
 #include <yetty/yetty.h>
 #include <yetty/yterm/terminal.h>
 #include <stdlib.h>
@@ -34,7 +35,7 @@ struct yetty_yui_tile {
 struct yetty_yui_tile_ops {
 	void (*destroy)(struct yetty_yui_tile *self);
 	struct yetty_core_void_result (*render)(struct yetty_yui_tile *self,
-						void *render_pass);
+						struct yetty_render_target *render_target);
 	struct yetty_core_void_result (*set_bounds)(struct yetty_yui_tile *self,
 						    struct yetty_yui_rect bounds);
 	struct yetty_core_int_result (*on_event)(struct yetty_yui_tile *self,
@@ -74,18 +75,18 @@ static void split_destroy(struct yetty_yui_tile *self)
 }
 
 static struct yetty_core_void_result split_render(struct yetty_yui_tile *self,
-						  void *render_pass)
+						  struct yetty_render_target *render_target)
 {
 	struct yetty_yui_split *split = (struct yetty_yui_split *)self;
 	struct yetty_core_void_result res;
 
 	if (split->first) {
-		res = yetty_yui_tile_render(split->first, render_pass);
+		res = yetty_yui_tile_render(split->first, render_target);
 		if (YETTY_IS_ERR(res))
 			return res;
 	}
 	if (split->second) {
-		res = yetty_yui_tile_render(split->second, render_pass);
+		res = yetty_yui_tile_render(split->second, render_target);
 		if (YETTY_IS_ERR(res))
 			return res;
 	}
@@ -214,13 +215,13 @@ static void pane_destroy(struct yetty_yui_tile *self)
 }
 
 static struct yetty_core_void_result pane_render(struct yetty_yui_tile *self,
-						 void *render_pass)
+						 struct yetty_render_target *render_target)
 {
 	struct yetty_yui_pane *pane = (struct yetty_yui_pane *)self;
 
 	if (pane->view_count > 0 && pane->views[pane->view_count - 1])
 		return yetty_yui_view_render(pane->views[pane->view_count - 1],
-					     render_pass);
+					     render_target);
 
 	return YETTY_OK_VOID();
 }
@@ -287,13 +288,13 @@ void yetty_yui_tile_destroy(struct yetty_yui_tile *tile)
 }
 
 struct yetty_core_void_result yetty_yui_tile_render(struct yetty_yui_tile *tile,
-						    void *render_pass)
+						    struct yetty_render_target *render_target)
 {
 	if (!tile)
 		return YETTY_ERR(yetty_core_void, "tile is NULL");
 	if (!tile->ops || !tile->ops->render)
 		return YETTY_ERR(yetty_core_void, "render not implemented");
-	return tile->ops->render(tile, render_pass);
+	return tile->ops->render(tile, render_target);
 }
 
 struct yetty_core_void_result

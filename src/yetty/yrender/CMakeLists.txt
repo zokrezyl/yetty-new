@@ -2,9 +2,7 @@ add_library(yetty_render
     types.c
     gpu-allocator.c
     gpu-resource-binder.c
-    render-target-surface.c
-    rendered-layer.c
-    layer-renderer-surface.c
+    render-target-texture.c
 )
 
 target_include_directories(yetty_render PUBLIC

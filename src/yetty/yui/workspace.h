@@ -15,6 +15,7 @@ struct yetty_yui_workspace;
 struct yetty_config;
 struct yetty_context;
 struct yetty_core_event;
+struct yetty_render_target;
 
 /* Result types */
 YETTY_RESULT_DECLARE(yetty_yui_workspace_ptr, struct yetty_yui_workspace *);
@@ -26,7 +27,8 @@ void yetty_yui_workspace_destroy(struct yetty_yui_workspace *ws);
 
 /* Core operations */
 struct yetty_core_void_result
-yetty_yui_workspace_render(struct yetty_yui_workspace *ws, void *render_pass);
+yetty_yui_workspace_render(struct yetty_yui_workspace *ws,
+			   struct yetty_render_target *render_target);
 
 struct yetty_core_void_result
 yetty_yui_workspace_resize(struct yetty_yui_workspace *ws, float width,

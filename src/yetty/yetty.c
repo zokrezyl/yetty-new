@@ -6,6 +6,8 @@
 #include <yetty/yconfig.h>
 #include <yetty/ycore/event-loop.h>
 #include <yetty/ycore/event.h>
+#include <yetty/yrender/gpu-allocator.h>
+#include <yetty/yrender/render-target.h>
 #include <yetty/yterm/terminal.h>
 #include <yetty/webgpu/error.h>
 #include <yetty/ytrace.h>
@@ -29,6 +31,9 @@ struct yetty_yetty {
     WGPUDevice device;
     WGPUQueue queue;
     WGPUTextureFormat surface_format;
+
+    /* Big render target - window-sized texture with surface for presentation */
+    struct yetty_render_target *render_target;
 };
 
 /*===========================================================================
@@ -42,7 +47,81 @@ static struct yetty_core_int_result yetty_event_handler(
     struct yetty_yetty *yetty =
         container_of(listener, struct yetty_yetty, listener);
 
-    /* Forward all events to workspace */
+    /* Handle RENDER event directly - yetty owns the render cycle */
+    if (event->type == YETTY_EVENT_RENDER) {
+        if (!yetty->render_target) {
+            yerror("yetty: RENDER but no render_target");
+            return YETTY_OK(yetty_core_int, 0);
+        }
+
+        ydebug("yetty: RENDER event - calling workspace render");
+
+        /* Render workspace tree - pass render_target down */
+        if (yetty->workspace) {
+            struct yetty_core_void_result res =
+                yetty_yui_workspace_render(yetty->workspace, yetty->render_target);
+            if (!YETTY_IS_OK(res)) {
+                yerror("yetty: workspace render failed: %s", res.error.msg);
+            }
+        }
+
+        /* Present the big target to surface */
+        struct yetty_core_void_result res =
+            yetty->render_target->ops->present(yetty->render_target);
+        if (!YETTY_IS_OK(res)) {
+            yerror("yetty: present failed: %s", res.error.msg);
+        }
+
+        return YETTY_OK(yetty_core_int, 1);
+    }
+
+    /* Handle RESIZE event - reconfigure surface and resize render target */
+    if (event->type == YETTY_EVENT_RESIZE) {
+        uint32_t width = (uint32_t)event->resize.width;
+        uint32_t height = (uint32_t)event->resize.height;
+
+        ydebug("yetty: RESIZE %ux%u", width, height);
+
+        if (width == 0 || height == 0)
+            return YETTY_OK(yetty_core_int, 1);
+
+        /* Reconfigure surface */
+        WGPUSurface surface = yetty->context.app_context.app_gpu_context.surface;
+        if (surface && yetty->device) {
+            WGPUSurfaceConfiguration config = {0};
+            config.device = yetty->device;
+            config.format = yetty->surface_format;
+            config.usage = WGPUTextureUsage_RenderAttachment;
+            config.width = width;
+            config.height = height;
+            config.presentMode = WGPUPresentMode_Fifo;
+            wgpuSurfaceConfigure(surface, &config);
+
+            yetty->context.app_context.app_gpu_context.surface_width = width;
+            yetty->context.app_context.app_gpu_context.surface_height = height;
+            yetty->context.gpu_context.app_gpu_context.surface_width = width;
+            yetty->context.gpu_context.app_gpu_context.surface_height = height;
+        }
+
+        /* Resize render target */
+        if (yetty->render_target && yetty->render_target->ops->resize) {
+            yetty->render_target->ops->resize(yetty->render_target, width, height);
+        }
+
+        /* Resize workspace */
+        if (yetty->workspace) {
+            yetty_yui_workspace_resize(yetty->workspace,
+                (float)width, (float)height);
+        }
+
+        /* Forward to workspace for tile/view resize handling */
+        if (yetty->workspace)
+            yetty_yui_workspace_on_event(yetty->workspace, event);
+
+        return YETTY_OK(yetty_core_int, 1);
+    }
+
+    /* Forward other events to workspace */
     if (yetty->workspace)
         return yetty_yui_workspace_on_event(yetty->workspace, event);
 
@@ -266,12 +345,38 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     wgpuSurfaceConfigure(surface, &surface_config);
     ydebug("initWebGPU: Surface configured %ux%u", surface_config.width, surface_config.height);
 
+    /* Create GPU allocator */
+    struct yetty_render_gpu_allocator_result alloc_res =
+        yetty_render_gpu_allocator_create(yetty->device);
+    if (!YETTY_IS_OK(alloc_res)) {
+        return YETTY_ERR(yetty_core_void, "failed to create GPU allocator");
+    }
+    ydebug("initWebGPU: GPU allocator created");
+
     /* Complete context with owned GPU objects */
     yetty->context.gpu_context.app_gpu_context = yetty->context.app_context.app_gpu_context;
     yetty->context.gpu_context.adapter = yetty->adapter;
     yetty->context.gpu_context.device = yetty->device;
     yetty->context.gpu_context.queue = yetty->queue;
     yetty->context.gpu_context.surface_format = yetty->surface_format;
+    yetty->context.gpu_context.allocator = alloc_res.value;
+
+    /* Create big render target (window-sized texture with surface for presentation) */
+    struct yetty_render_target_ptr_result target_res = yetty_render_target_texture_create(
+        yetty->device,
+        yetty->queue,
+        yetty->surface_format,
+        alloc_res.value,
+        surface,  /* surface for presentation */
+        yetty->context.app_context.app_gpu_context.surface_width,
+        yetty->context.app_context.app_gpu_context.surface_height);
+    if (!YETTY_IS_OK(target_res)) {
+        return YETTY_ERR(yetty_core_void, "failed to create render target");
+    }
+    yetty->render_target = target_res.value;
+    ydebug("initWebGPU: render target created %ux%u",
+        yetty->context.app_context.app_gpu_context.surface_width,
+        yetty->context.app_context.app_gpu_context.surface_height);
 
     ydebug("initWebGPU: Complete");
     return YETTY_OK_VOID();
@@ -369,6 +474,22 @@ void yetty_destroy(struct yetty_yetty *yetty)
         yetty->event_loop = NULL;
         yetty->context.event_loop = NULL;
         ydebug("yetty_destroy: event_loop destroyed");
+    }
+
+    /* Destroy render target before allocator */
+    if (yetty->render_target && yetty->render_target->ops &&
+        yetty->render_target->ops->destroy) {
+        ydebug("yetty_destroy: destroying render_target");
+        yetty->render_target->ops->destroy(yetty->render_target);
+        yetty->render_target = NULL;
+    }
+
+    /* Destroy GPU allocator before device */
+    if (yetty->context.gpu_context.allocator) {
+        ydebug("yetty_destroy: destroying GPU allocator");
+        yetty->context.gpu_context.allocator->ops->destroy(
+            yetty->context.gpu_context.allocator);
+        yetty->context.gpu_context.allocator = NULL;
     }
 
     /* Surface is created by platform (glfw-main.c) but owned by yetty since we

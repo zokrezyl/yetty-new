@@ -16,6 +16,7 @@ struct yetty_platform_input_pipe;
 struct yetty_clipboard_manager;
 struct yetty_platform_pty_factory;
 struct yetty_core_event_loop;
+struct yetty_render_gpu_allocator;
 
 /* App GPU context - platform-owned GPU objects */
 struct yetty_app_gpu_context {
@@ -41,6 +42,7 @@ struct yetty_gpu_context {
     WGPUDevice device;
     WGPUQueue queue;
     WGPUTextureFormat surface_format;
+    struct yetty_render_gpu_allocator *allocator;
 };
 
 /* Yetty context - passed down the hierarchy to terminals */
