@@ -29,12 +29,16 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
     ${YETTY_ROOT}/src/yetty/yplatform/windows/platform-paths.c
+    ${YETTY_ROOT}/src/yetty/yplatform/windows/thread.c
+    ${YETTY_ROOT}/src/yetty/yplatform/windows/term.c
+    ${YETTY_ROOT}/src/yetty/yplatform/windows/fs.c
 )
 
 # Create executable with core sources + platform
 add_executable(yetty
+    ${YETTY_SOURCES}
     ${YETTY_CORE_SOURCES}
-    ${YETTY_WINDOWS_SOURCES}
+    ${YETTY_DESKTOP_SOURCES}
     ${YETTY_PLATFORM_SOURCES}
 )
 
@@ -158,6 +162,31 @@ if(WIN32)
         )
     else()
         message(WARNING "Could not find dxil.dll in Windows SDK")
+    endif()
+
+    # --- Find dxcompiler.dll (needed by Dawn for D3D12 shader compilation) ---
+    set(_dxcompiler_dll "")
+    if(EXISTS "C:/Program Files (x86)/Windows Kits/10/Redist/D3D/x64/dxcompiler.dll")
+        set(_dxcompiler_dll "C:/Program Files (x86)/Windows Kits/10/Redist/D3D/x64/dxcompiler.dll")
+    else()
+        foreach(_dir ${_sdk_bin_x64_dirs})
+            if(EXISTS "${_dir}/dxcompiler.dll")
+                set(_dxcompiler_dll "${_dir}/dxcompiler.dll")
+                break()
+            endif()
+        endforeach()
+    endif()
+
+    if(_dxcompiler_dll)
+        message(STATUS "Found dxcompiler.dll: ${_dxcompiler_dll}")
+        add_custom_command(TARGET yetty POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_dxcompiler_dll}"
+                "$<TARGET_FILE_DIR:yetty>/dxcompiler.dll"
+            COMMENT "Copying dxcompiler.dll"
+        )
+    else()
+        message(WARNING "Could not find dxcompiler.dll in Windows SDK")
     endif()
 endif()
 

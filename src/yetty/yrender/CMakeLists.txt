@@ -6,7 +6,7 @@ add_library(yetty_render
 )
 
 target_include_directories(yetty_render PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
+    ${YETTY_ROOT}/include
     ${INCBIN_INCLUDE_DIR}
 )
 

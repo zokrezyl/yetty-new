@@ -235,6 +235,14 @@ void yetty_term_pty_reader_register_osc_sink(
     reader->osc_sink_count++;
 }
 
+void yetty_term_pty_reader_feed(struct yetty_term_pty_reader *reader,
+                                const char *data, size_t len)
+{
+    if (!reader || !data || len == 0)
+        return;
+    process_data(reader, data, len);
+}
+
 int yetty_term_pty_reader_read(struct yetty_term_pty_reader *reader)
 {
     char buf[PTY_READ_BUF_SIZE];

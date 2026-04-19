@@ -5,12 +5,16 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <stdlib.h>
+#include <io.h>
+#include <fcntl.h>
 
 /* Windows input pipe - embeds base as first member */
 struct win_platform_input_pipe {
     struct yetty_platform_input_pipe base;
     HANDLE read_handle;
     HANDLE write_handle;
+    int read_fd;  /* CRT fd for libuv */
 };
 
 /* Forward declarations */
@@ -38,7 +42,10 @@ static void win_pipe_destroy(struct yetty_platform_input_pipe *self)
 
     pipe_impl = container_of(self, struct win_platform_input_pipe, base);
 
-    if (pipe_impl->read_handle != INVALID_HANDLE_VALUE)
+    /* read_fd owns read_handle via _open_osfhandle */
+    if (pipe_impl->read_fd >= 0)
+        _close(pipe_impl->read_fd);
+    else if (pipe_impl->read_handle != INVALID_HANDLE_VALUE)
         CloseHandle(pipe_impl->read_handle);
     if (pipe_impl->write_handle != INVALID_HANDLE_VALUE)
         CloseHandle(pipe_impl->write_handle);
@@ -89,9 +96,8 @@ static struct yetty_core_size_result win_pipe_read(struct yetty_platform_input_p
 
 static struct yetty_core_int_result win_pipe_read_fd(const struct yetty_platform_input_pipe *self)
 {
-    (void)self;
-    /* Windows doesn't use file descriptors for handles */
-    return YETTY_ERR(yetty_core_int, "Windows pipes don't have file descriptors");
+    struct win_platform_input_pipe *pipe_impl = container_of(self, struct win_platform_input_pipe, base);
+    return YETTY_OK(yetty_core_int, pipe_impl->read_fd);
 }
 
 static struct yetty_core_void_result win_pipe_set_event_loop(struct yetty_platform_input_pipe *self,
@@ -118,13 +124,43 @@ struct yetty_platform_input_pipe_result yetty_platform_input_pipe_create(void)
     pipe_impl->read_handle = INVALID_HANDLE_VALUE;
     pipe_impl->write_handle = INVALID_HANDLE_VALUE;
 
+    /* Use a named pipe with FILE_FLAG_OVERLAPPED so libuv can poll it */
+    static volatile LONG pipe_counter = 0;
+    char pipe_name[256];
+    LONG id = InterlockedIncrement(&pipe_counter);
+    snprintf(pipe_name, sizeof(pipe_name),
+             "\\\\.\\pipe\\yetty-input-%lu-%ld", (unsigned long)GetCurrentProcessId(), (long)id);
+
     ZeroMemory(&sa, sizeof(sa));
     sa.nLength = sizeof(sa);
     sa.bInheritHandle = FALSE;
 
-    if (!CreatePipe(&pipe_impl->read_handle, &pipe_impl->write_handle, &sa, 0)) {
+    pipe_impl->read_handle = CreateNamedPipeA(
+        pipe_name,
+        PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
+        PIPE_TYPE_BYTE | PIPE_WAIT,
+        1, 4096, 4096, 0, &sa);
+    if (pipe_impl->read_handle == INVALID_HANDLE_VALUE) {
         free(pipe_impl);
-        return YETTY_ERR(yetty_platform_input_pipe, "CreatePipe failed");
+        return YETTY_ERR(yetty_platform_input_pipe, "CreateNamedPipe failed");
+    }
+
+    pipe_impl->write_handle = CreateFileA(
+        pipe_name, GENERIC_WRITE, 0, &sa,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (pipe_impl->write_handle == INVALID_HANDLE_VALUE) {
+        CloseHandle(pipe_impl->read_handle);
+        free(pipe_impl);
+        return YETTY_ERR(yetty_platform_input_pipe, "CreateFile for pipe failed");
+    }
+
+    /* Create CRT fd so libuv can use uv_pipe_open */
+    pipe_impl->read_fd = _open_osfhandle((intptr_t)pipe_impl->read_handle, _O_RDONLY);
+    if (pipe_impl->read_fd < 0) {
+        CloseHandle(pipe_impl->read_handle);
+        CloseHandle(pipe_impl->write_handle);
+        free(pipe_impl);
+        return YETTY_ERR(yetty_platform_input_pipe, "_open_osfhandle failed");
     }
 
     return YETTY_OK(yetty_platform_input_pipe, &pipe_impl->base);

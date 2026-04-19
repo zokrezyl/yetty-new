@@ -2,16 +2,18 @@
 #include <yetty/yterm/text-layer.h>
 #include <yetty/yterm/ypaint-layer.h>
 #include <yetty/yterm/pty-reader.h>
+#include <yetty/yconfig.h>
 #include <yetty/ycore/event-loop.h>
 #include <yetty/ycore/event.h>
 #include <yetty/platform/pty.h>
 #include <yetty/platform/pty-factory.h>
-#include <yetty/platform/pty-poll-source.h>
+#include <yetty/platform/pty-pipe-source.h>
 #include <yetty/yrender/gpu-allocator.h>
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/yrender/render-target.h>
 #include <yetty/ytrace.h>
 #include <yetty/yui/view.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,7 +43,7 @@ struct yetty_term_terminal {
     uint32_t rows;
     struct yetty_term_terminal_layer *layers[YETTY_TERM_TERMINAL_MAX_LAYERS];
     size_t layer_count;
-    yetty_core_poll_id pty_poll_id;
+    yetty_core_pipe_id pty_pipe_id;
     /* Render targets - one per layer for render_layer */
     struct yetty_render_target *layer_targets[YETTY_TERM_TERMINAL_MAX_LAYERS];
     int shutting_down;
@@ -53,6 +55,34 @@ static void terminal_read_pty(struct yetty_term_terminal *terminal);
 static struct yetty_core_void_result terminal_render_frame(
     struct yetty_term_terminal *terminal,
     struct yetty_render_target *target);
+
+/* PTY pipe alloc callback — provides buffer for uv_pipe_t reads */
+static void terminal_pty_pipe_alloc(void *ctx, size_t suggested_size,
+                                     char **buf, size_t *buflen)
+{
+    (void)ctx;
+    (void)suggested_size;
+    static char pty_read_buf[8192];
+    *buf = pty_read_buf;
+    *buflen = sizeof(pty_read_buf);
+}
+
+/* PTY pipe read callback — feeds data to pty_reader, triggers render */
+static void terminal_pty_pipe_read(void *ctx, const char *buf, long nread)
+{
+    struct yetty_term_terminal *terminal = ctx;
+
+    if (nread > 0 && terminal->pty_reader) {
+        yetty_term_pty_reader_feed(terminal->pty_reader, buf, (size_t)nread);
+        if (terminal->layer_count > 0) {
+            struct yetty_term_terminal_layer *layer = terminal->layers[0];
+            if (layer && layer->dirty) {
+                terminal->context.yetty_context.event_loop->ops->request_render(
+                    terminal->context.yetty_context.event_loop);
+            }
+        }
+    }
+}
 
 /* PTY write callback for layers */
 static void terminal_pty_write_callback(const char *data, size_t len, void *userdata)
@@ -136,11 +166,9 @@ static struct yetty_core_int_result terminal_event_handler(
     struct yetty_term_terminal *terminal =
         container_of(listener, struct yetty_term_terminal, listener);
 
-    if (event->type == YETTY_EVENT_POLL_READABLE) {
-        ydebug("terminal: POLL_READABLE event fd=%d", event->poll.fd);
-        terminal_read_pty(terminal);
-        return YETTY_OK(yetty_core_int, 1);
-    }
+    /* PTY data now arrives via uv_pipe_t read callback, not through events */
+    (void)terminal;
+    (void)event;
 
     return YETTY_OK(yetty_core_int, 0);
 }
@@ -260,18 +288,17 @@ yetty_term_terminal_create(struct grid_size grid_size,
                 ydebug("terminal_create: pty_reader created");
             }
 
-            /* Set up PTY poll */
-            struct yetty_platform_pty_poll_source *poll_source = terminal->context.pty->ops->poll_source(terminal->context.pty);
-            if (poll_source) {
-                struct yetty_core_poll_id_result poll_res = terminal->context.yetty_context.event_loop->ops->create_pty_poll(
-                    terminal->context.yetty_context.event_loop, poll_source);
-                if (YETTY_IS_OK(poll_res)) {
-                    terminal->pty_poll_id = poll_res.value;
-                    terminal->context.yetty_context.event_loop->ops->register_poll_listener(
-                        terminal->context.yetty_context.event_loop, terminal->pty_poll_id, &terminal->listener);
-                    terminal->context.yetty_context.event_loop->ops->start_poll(
-                        terminal->context.yetty_context.event_loop, terminal->pty_poll_id, YETTY_CORE_POLL_READABLE);
-                    ydebug("terminal_create: PTY poll started");
+            /* Register PTY pipe — uv_pipe_t reads data, callbacks handle it */
+            struct yetty_platform_pty_pipe_source *pipe_source =
+                terminal->context.pty->ops->pipe_source(terminal->context.pty);
+            if (pipe_source && terminal->pty_reader) {
+                struct yetty_core_pipe_id_result pipe_res =
+                    terminal->context.yetty_context.event_loop->ops->register_pty_pipe(
+                        terminal->context.yetty_context.event_loop, pipe_source,
+                        terminal_pty_pipe_alloc, terminal_pty_pipe_read, terminal);
+                if (YETTY_IS_OK(pipe_res)) {
+                    terminal->pty_pipe_id = pipe_res.value;
+                    ydebug("terminal_create: PTY pipe registered");
                 }
             }
         } else {
@@ -287,12 +314,12 @@ yetty_term_terminal_create(struct grid_size grid_size,
         terminal_scroll_callback, terminal,
         terminal_cursor_callback, terminal);
     if (!YETTY_IS_OK(text_layer_res)) {
-        ydebug("terminal_create: failed to create text layer");
+        yerror("terminal_create: failed to create text layer: %s", text_layer_res.error.msg);
         yetty_term_pty_reader_destroy(terminal->pty_reader);
         if (terminal->context.pty)
             terminal->context.pty->ops->destroy(terminal->context.pty);
         free(terminal);
-        return YETTY_ERR(yetty_term_terminal, "failed to create text layer");
+        return YETTY_ERR(yetty_term_terminal, text_layer_res.error.msg);
     }
     yetty_term_terminal_layer_add(terminal, text_layer_res.value);
     ydebug("terminal_create: text_layer created and added");

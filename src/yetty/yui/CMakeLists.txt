@@ -4,11 +4,14 @@ add_library(yetty_yui STATIC
     workspace.c
 )
 
+# stdatomic.h requires C11
+set_target_properties(yetty_yui PROPERTIES C_STANDARD 11)
+
 target_include_directories(yetty_yui
     PUBLIC
-        ${CMAKE_SOURCE_DIR}/src
+        ${YETTY_ROOT}/src
     PRIVATE
-        ${CMAKE_SOURCE_DIR}/include
+        ${YETTY_ROOT}/include
 )
 
 target_link_libraries(yetty_yui

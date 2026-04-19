@@ -4,10 +4,20 @@
 #define YETTY_UTIL_H
 
 #include <stddef.h>
+#include <yetty/ycore/types.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * Read entire file into buffer.
+ * Caller owns the returned buffer and must free buffer.data.
+ *
+ * @param path File path
+ * @return Result containing buffer or error
+ */
+struct yetty_core_buffer_result yetty_core_read_file(const char *path);
 
 /**
  * Decode base64 data.

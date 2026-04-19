@@ -33,6 +33,16 @@ rendering:
 # ─────────────────────────────────────────────────────────────────────────────
 # Terminal Configuration
 # ─────────────────────────────────────────────────────────────────────────────
+terminal:
+  text-layer:
+    font:
+      # Font rendering method: "raster" or "msdf"
+      # - raster: Traditional bitmap rendering (faster, less GPU)
+      # - msdf: Multi-channel signed distance field (smoother scaling)
+      render-method: "raster"
+      # Font size in pixels (for msdf)
+      size: 14
+
 scrollback:
   # Number of lines to keep in scrollback buffer
   lines: 10000

@@ -36,7 +36,7 @@ else()
     # Build directory for host tools
     set(HOST_TOOLS_BUILD_DIR "${CMAKE_BINARY_DIR}/_host-tools-bootstrap")
     if(WIN32)
-        set(HOST_MSDF_GEN "${HOST_TOOLS_BUILD_DIR}/Release/yetty-msdf-gen.exe")
+        set(HOST_MSDF_GEN "${HOST_TOOLS_BUILD_DIR}/yetty-msdf-gen.exe")
     else()
         set(HOST_MSDF_GEN "${HOST_TOOLS_BUILD_DIR}/yetty-msdf-gen")
     endif()
@@ -66,10 +66,10 @@ else()
         message(STATUS "  Cross-compilation detected, using native compilers:")
         message(STATUS "    CC=${HOST_CC} CXX=${HOST_CXX}")
     elseif(WIN32)
-        # Windows: use Visual Studio generator (Ninja may not be configured properly)
-        list(APPEND HOST_CMAKE_ARGS "-G" "Visual Studio 17 2022")
-        list(APPEND HOST_CMAKE_ARGS "-A" "x64")
-        message(STATUS "  Windows detected, using Visual Studio generator")
+        # Windows: use Ninja generator
+        list(APPEND HOST_CMAKE_ARGS "-G" "Ninja")
+        list(APPEND HOST_CMAKE_ARGS "-DCMAKE_BUILD_TYPE=Release")
+        message(STATUS "  Windows detected, using Ninja generator")
     else()
         # Native build on Linux/macOS: use Ninja with current compilers
         list(APPEND HOST_CMAKE_ARGS "-G" "Ninja")
@@ -95,10 +95,7 @@ else()
     # Build yetty-msdf-gen
     message(STATUS "  Building yetty-msdf-gen...")
     set(HOST_BUILD_ARGS --build "${HOST_TOOLS_BUILD_DIR}" --target yetty-msdf-gen --parallel)
-    if(WIN32)
-        # Multi-config generator needs --config
-        list(APPEND HOST_BUILD_ARGS --config Release)
-    endif()
+    # Note: using Ninja (single-config) on all platforms, no --config needed
 
     execute_process(
         COMMAND ${CMAKE_COMMAND} ${HOST_BUILD_ARGS}

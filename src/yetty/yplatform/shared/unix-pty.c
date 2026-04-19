@@ -23,7 +23,7 @@
 /* Unix PTY implementation - embeds base as first member */
 struct unix_pty {
     struct yetty_platform_pty base;
-    struct yetty_platform_pty_poll_source poll_source;
+    struct yetty_platform_pty_pipe_source pipe_source;
     int pty_master;
     pid_t child_pid;
     uint32_t cols;
@@ -37,7 +37,7 @@ static struct yetty_core_size_result unix_pty_read(struct yetty_platform_pty *se
 static struct yetty_core_size_result unix_pty_write(struct yetty_platform_pty *self, const char *data, size_t len);
 static struct yetty_core_void_result unix_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
 static struct yetty_core_void_result unix_pty_stop(struct yetty_platform_pty *self);
-static struct yetty_platform_pty_poll_source *unix_pty_poll_source(struct yetty_platform_pty *self);
+static struct yetty_platform_pty_pipe_source *unix_pty_pipe_source(struct yetty_platform_pty *self);
 
 /* Ops table */
 static const struct yetty_platform_pty_ops unix_pty_ops = {
@@ -46,7 +46,7 @@ static const struct yetty_platform_pty_ops unix_pty_ops = {
     .write = unix_pty_write,
     .resize = unix_pty_resize,
     .stop = unix_pty_stop,
-    .poll_source = unix_pty_poll_source,
+    .pipe_source = unix_pty_pipe_source,
 };
 
 /* Unix PTY factory - embeds base as first member */
@@ -155,10 +155,10 @@ static struct yetty_core_void_result unix_pty_stop(struct yetty_platform_pty *se
     return YETTY_OK_VOID();
 }
 
-static struct yetty_platform_pty_poll_source *unix_pty_poll_source(struct yetty_platform_pty *self)
+static struct yetty_platform_pty_pipe_source *unix_pty_pipe_source(struct yetty_platform_pty *self)
 {
     struct unix_pty *pty = container_of(self, struct unix_pty, base);
-    return &pty->poll_source;
+    return &pty->pipe_source;
 }
 
 /* Create PTY with shell */
@@ -180,7 +180,7 @@ static struct yetty_platform_pty_result unix_pty_create(struct yetty_config *con
     pty->cols = 80;
     pty->rows = 24;
     pty->running = 0;
-    pty->poll_source.fd = -1;
+    pty->pipe_source.abstract = -1;
 
     shell = config->ops->get_string(config, "shell/path", "/bin/bash");
 
@@ -216,7 +216,7 @@ static struct yetty_platform_pty_result unix_pty_create(struct yetty_config *con
     flags = fcntl(pty->pty_master, F_GETFL, 0);
     fcntl(pty->pty_master, F_SETFL, flags | O_NONBLOCK);
 
-    pty->poll_source.fd = pty->pty_master;
+    pty->pipe_source.abstract = pty->pty_master;
     pty->running = 1;
 
     return YETTY_OK(yetty_platform_pty, &pty->base);
