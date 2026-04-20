@@ -25,6 +25,10 @@ const YPAINT_SDF_ELLIPSE: u32 = 6u;
 const YPAINT_SDF_CAPSULE: u32 = 18u;
 const YPAINT_SDF_GLYPH: u32 = 200u;
 
+// Complex primitive types (>= 0x80000000)
+const YPAINT_COMPLEX_TYPE_BASE: u32 = 0x80000000u;
+const YPAINT_TYPE_YPLOT: u32 = 0x80000003u;
+
 // =============================================================================
 // Vertex Shader
 // =============================================================================
@@ -268,12 +272,27 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
         let prim_type = ypaint_read_prim_type(prim_offset);
 
-        // Handle glyph primitives (MSDF rendering)
-        // Like SDF: transform pixel to local coords, compare in local space
-        if (prim_type == YPAINT_SDF_GLYPH) {
-            // Transform pixel position to primitive-local coords (same as SDF)
-            let local_pos = vec2<f32>(pixel_pos.x, pixel_pos.y - y_offset);
+        // Transform pixel position to primitive-local coords
+        let local_pos = vec2<f32>(pixel_pos.x, pixel_pos.y - y_offset);
 
+        // Handle complex primitives (type >= 0x80000000)
+        if (prim_type >= YPAINT_COMPLEX_TYPE_BASE) {
+            var complex_color = vec4<f32>(0.0);
+
+            if (prim_type == YPAINT_TYPE_YPLOT) {
+                complex_color = yplot_render(prim_offset, local_pos);
+            }
+            // Add other complex types here as needed
+
+            if (complex_color.a > 0.0) {
+                result_color = mix(result_color, complex_color.rgb, complex_color.a);
+                result_alpha = max(result_alpha, complex_color.a);
+            }
+            continue;
+        }
+
+        // Handle glyph primitives (MSDF rendering)
+        if (prim_type == YPAINT_SDF_GLYPH) {
             // Glyph position in local coords (with bearing already applied)
             let glyph_x = glyph_read_x(prim_offset);
             let glyph_y = glyph_read_y(prim_offset);
@@ -341,11 +360,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             continue;
         }
 
-        // Adjust scene position - primitive coords are relative to its line
-        let prim_scene_pos = vec2<f32>(pixel_pos.x, pixel_pos.y - y_offset);
-
         // Evaluate SDF for non-glyph primitives
-        let d = ypaint_evaluate_sdf(prim_offset, prim_scene_pos);
+        let d = ypaint_evaluate_sdf(prim_offset, local_pos);
 
         // Render fill
         let fill_color = ypaint_read_fill_color(prim_offset);

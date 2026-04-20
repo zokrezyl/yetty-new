@@ -39,6 +39,13 @@ struct yetty_core_buffer {
 
 YETTY_RESULT_DECLARE(yetty_core_buffer, struct yetty_core_buffer);
 
+/* Buffer operations - doubling growth like kernel/C++ vector */
+struct yetty_core_buffer_result yetty_core_buffer_create(size_t initial_capacity);
+void yetty_core_buffer_destroy(struct yetty_core_buffer *buf);
+void yetty_core_buffer_clear(struct yetty_core_buffer *buf);
+struct yetty_core_void_result yetty_core_buffer_append(
+    struct yetty_core_buffer *buf, const struct yetty_core_buffer *src);
+
 struct yetty_core_named_buffer {
   struct yetty_core_buffer buf;
   char name[YETTY_CORE_NAMED_BUFFER_MAX_NAME_LENGTH];

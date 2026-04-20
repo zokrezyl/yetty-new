@@ -5,6 +5,7 @@
 
 #include <yetty/ycore/result.h>
 #include <yetty/ycore/types.h>
+#include <yetty/ypaint-core/flyweight.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,30 +41,20 @@ struct yetty_ypaint_id_result
 yetty_ypaint_core_buffer_add_prim(struct yetty_ypaint_core_buffer *buf,
                              const void *data, size_t size);
 
-// Primitive size callback: given type, return size in bytes (0 = unknown type)
-typedef size_t (*yetty_ypaint_core_primitive_size_fn)(uint32_t type);
-
-// Register handler for type range [type_min, type_max] with buffer instance
-struct yetty_core_void_result yetty_ypaint_core_buffer_register_handler(
-    struct yetty_ypaint_core_buffer *buf,
-    uint32_t type_min,
-    uint32_t type_max,
-    yetty_ypaint_core_primitive_size_fn size_fn);
-
 // Primitive iterator
 struct yetty_ypaint_core_primitive_iter {
-    const void *data;
-    uint32_t type;
-    size_t size;
+    struct yetty_ypaint_prim_flyweight fw;
 };
 
 YETTY_RESULT_DECLARE(yetty_ypaint_core_primitive_iter, struct yetty_ypaint_core_primitive_iter);
 
 struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_first(
-    const struct yetty_ypaint_core_buffer *buf);
+    const struct yetty_ypaint_core_buffer *buf,
+    const struct yetty_ypaint_flyweight_registry *reg);
 
 struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_next(
     const struct yetty_ypaint_core_buffer *buf,
+    const struct yetty_ypaint_flyweight_registry *reg,
     const struct yetty_ypaint_core_primitive_iter *iter);
 
 /*=============================================================================

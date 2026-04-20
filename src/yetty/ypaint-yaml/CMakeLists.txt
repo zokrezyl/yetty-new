@@ -11,4 +11,6 @@ target_link_libraries(yetty_ypaint_yaml PUBLIC
     yaml
     yetty_ypaint_core
     yetty_ysdf
+    yetty_yplot
+    yetty_yfsvm
 )

@@ -2,6 +2,7 @@
 # Note: core moved to ypaint-core, SDF/yaml moved to ysdf
 
 add_library(yetty_ypaint STATIC
+    flyweight.c
     ypaint-canvas.c
 )
 
