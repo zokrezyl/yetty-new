@@ -3,6 +3,7 @@ add_library(yetty_yrender
     gpu-allocator.c
     gpu-resource-binder.c
     render-target-texture.c
+    render-target-vnc.c
 )
 
 target_include_directories(yetty_yrender PUBLIC

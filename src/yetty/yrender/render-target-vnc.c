@@ -1,0 +1,172 @@
+/*
+ * render-target-vnc.c - VNC render target implementation
+ *
+ * Wraps a texture render target and sends frames to VNC clients on present().
+ * For mirror mode: also presents to surface.
+ * For headless mode: only sends to VNC (no surface).
+ */
+
+#include <yetty/yrender/render-target.h>
+#include <yetty/yvnc/vnc-server.h>
+#include <yetty/ytrace.h>
+#include <stdlib.h>
+
+struct render_target_vnc {
+	struct yetty_render_target base;
+	struct yetty_render_target *inner;  /* Texture target for actual rendering */
+	struct yetty_vnc_server *vnc_server;
+	WGPUSurface surface;  /* NULL for headless, non-NULL for mirror */
+};
+
+/*=============================================================================
+ * Destroy
+ *===========================================================================*/
+
+static void render_target_vnc_destroy(struct yetty_render_target *self)
+{
+	struct render_target_vnc *rt = (struct render_target_vnc *)self;
+
+	if (rt->inner && rt->inner->ops && rt->inner->ops->destroy)
+		rt->inner->ops->destroy(rt->inner);
+
+	free(rt);
+}
+
+/*=============================================================================
+ * Delegated operations
+ *===========================================================================*/
+
+static struct yetty_core_void_result
+render_target_vnc_clear(struct yetty_render_target *self)
+{
+	struct render_target_vnc *rt = (struct render_target_vnc *)self;
+	return rt->inner->ops->clear(rt->inner);
+}
+
+static struct yetty_core_void_result
+render_target_vnc_render_layer(struct yetty_render_target *self,
+			       struct yetty_term_terminal_layer *layer)
+{
+	struct render_target_vnc *rt = (struct render_target_vnc *)self;
+	return rt->inner->ops->render_layer(rt->inner, layer);
+}
+
+static struct yetty_core_void_result
+render_target_vnc_blend(struct yetty_render_target *self,
+			struct yetty_render_target **sources, size_t count)
+{
+	struct render_target_vnc *rt = (struct render_target_vnc *)self;
+	return rt->inner->ops->blend(rt->inner, sources, count);
+}
+
+static WGPUTextureView
+render_target_vnc_get_view(const struct yetty_render_target *self)
+{
+	const struct render_target_vnc *rt =
+		(const struct render_target_vnc *)self;
+	return rt->inner->ops->get_view(rt->inner);
+}
+
+static WGPUTexture
+render_target_vnc_get_texture(const struct yetty_render_target *self)
+{
+	const struct render_target_vnc *rt =
+		(const struct render_target_vnc *)self;
+	return rt->inner->ops->get_texture(rt->inner);
+}
+
+static struct yetty_core_void_result
+render_target_vnc_resize(struct yetty_render_target *self,
+			 struct yetty_render_viewport viewport)
+{
+	struct render_target_vnc *rt = (struct render_target_vnc *)self;
+	rt->base.viewport = viewport;
+	return rt->inner->ops->resize(rt->inner, viewport);
+}
+
+/*=============================================================================
+ * Present - send to VNC and optionally to surface
+ *===========================================================================*/
+
+static struct yetty_core_void_result
+render_target_vnc_present(struct yetty_render_target *self)
+{
+	struct render_target_vnc *rt = (struct render_target_vnc *)self;
+	struct yetty_core_void_result res;
+
+	int has_clients = rt->vnc_server ? yetty_vnc_server_has_clients(rt->vnc_server) : 0;
+	ydebug("vnc_render_target_present: vnc_server=%p has_clients=%d",
+	       (void *)rt->vnc_server, has_clients);
+
+	/* Send frame to VNC clients if any connected */
+	if (rt->vnc_server && has_clients) {
+		WGPUTexture tex = rt->inner->ops->get_texture(rt->inner);
+		uint32_t w = (uint32_t)rt->base.viewport.w;
+		uint32_t h = (uint32_t)rt->base.viewport.h;
+
+		ydebug("vnc_render_target_present: sending frame %ux%u tex=%p",
+		       w, h, (void *)tex);
+
+		res = yetty_vnc_server_send_frame_gpu(rt->vnc_server, tex, w, h);
+		if (!YETTY_IS_OK(res)) {
+			ywarn("vnc render target: send_frame failed: %s", res.error.msg);
+		}
+	}
+
+	/* If surface provided (mirror mode), also present to window */
+	if (rt->surface) {
+		res = rt->inner->ops->present(rt->inner);
+		if (!YETTY_IS_OK(res))
+			return res;
+	}
+
+	return YETTY_OK_VOID();
+}
+
+/*=============================================================================
+ * vtable and create
+ *===========================================================================*/
+
+static const struct yetty_render_target_ops render_target_vnc_ops = {
+	.destroy = render_target_vnc_destroy,
+	.clear = render_target_vnc_clear,
+	.render_layer = render_target_vnc_render_layer,
+	.blend = render_target_vnc_blend,
+	.present = render_target_vnc_present,
+	.get_view = render_target_vnc_get_view,
+	.get_texture = render_target_vnc_get_texture,
+	.resize = render_target_vnc_resize,
+};
+
+struct yetty_render_target_ptr_result
+yetty_render_target_vnc_create(WGPUDevice device, WGPUQueue queue,
+			       WGPUTextureFormat format,
+			       struct yetty_render_gpu_allocator *allocator,
+			       WGPUSurface surface,
+			       struct yetty_vnc_server *vnc_server,
+			       struct yetty_render_viewport viewport)
+{
+	struct render_target_vnc *rt = calloc(1, sizeof(*rt));
+	if (!rt)
+		return YETTY_ERR(yetty_render_target_ptr,
+				 "failed to allocate vnc render target");
+
+	rt->base.ops = &render_target_vnc_ops;
+	rt->base.viewport = viewport;
+	rt->vnc_server = vnc_server;
+	rt->surface = surface;
+
+	/* Create inner texture target */
+	struct yetty_render_target_ptr_result inner_res =
+		yetty_render_target_texture_create(device, queue, format,
+						   allocator, surface, viewport);
+	if (!YETTY_IS_OK(inner_res)) {
+		free(rt);
+		return inner_res;
+	}
+	rt->inner = inner_res.value;
+
+	ydebug("yetty_render_target_vnc_create: %.0fx%.0f surface=%p vnc=%p",
+	       viewport.w, viewport.h, (void *)surface, (void *)vnc_server);
+	return YETTY_OK(yetty_render_target_ptr, &rt->base);
+}

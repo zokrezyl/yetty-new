@@ -4,9 +4,11 @@
 #include <webgpu/webgpu.h>
 #include <yetty/yplatform/thread.h>
 #include <yetty/yplatform/fs.h>
+#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <yetty/yetty.h>
 #include <yetty/yconfig.h>
@@ -52,6 +54,65 @@ static int render_thread_func(void *arg)
     return 0;
 }
 
+/* Command line options */
+static struct option long_options[] = {
+    {"config",       required_argument, 0, 'c'},
+    {"execute",      required_argument, 0, 'e'},
+    {"vnc-server",   no_argument,       0, 's'},
+    {"vnc-headless", no_argument,       0, 'H'},
+    {"vnc-port",     required_argument, 0, 'p'},
+    {"vnc-client",   required_argument, 0, 'C'},
+    {"help",         no_argument,       0, 'h'},
+    {0, 0, 0, 0}
+};
+
+static void print_usage(const char *prog)
+{
+    fprintf(stderr, "Usage: %s [options]\n", prog);
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  -c, --config=FILE      Load config from FILE\n");
+    fprintf(stderr, "  -e, --execute=CMD      Execute CMD in terminal\n");
+    fprintf(stderr, "  -s, --vnc-server       Run VNC server (mirror mode - window + VNC)\n");
+    fprintf(stderr, "  -H, --vnc-headless     Run VNC server (headless - no window)\n");
+    fprintf(stderr, "  -p, --vnc-port=PORT    VNC server port (default: 5900)\n");
+    fprintf(stderr, "  -C, --vnc-client=HOST  Connect as VNC client to HOST[:PORT]\n");
+    fprintf(stderr, "  -h, --help             Show this help\n");
+}
+
+static void parse_cmdline(int argc, char **argv, struct yetty_config *config)
+{
+    optind = 1; /* reset getopt */
+    int c;
+    while ((c = getopt_long(argc, argv, "c:e:sHp:C:h", long_options, NULL)) != -1) {
+        switch (c) {
+        case 'c':
+            /* config file already handled by yetty_config_create */
+            break;
+        case 'e':
+            config->ops->set_string(config, "shell/command", optarg);
+            break;
+        case 's':
+            config->ops->set_string(config, "vnc/server", "true");
+            break;
+        case 'H':
+            config->ops->set_string(config, "vnc/headless", "true");
+            break;
+        case 'p':
+            config->ops->set_string(config, "vnc/port", optarg);
+            break;
+        case 'C':
+            config->ops->set_string(config, "vnc/client", optarg);
+            break;
+        case 'h':
+            print_usage(argv[0]);
+            exit(0);
+        default:
+            print_usage(argv[0]);
+            exit(1);
+        }
+    }
+}
+
 int main(int argc, char **argv)
 {
     if (!glfwInit()) {
@@ -90,25 +151,38 @@ int main(int argc, char **argv)
     }
     struct yetty_config *config = config_result.value;
 
+    /* Parse command line arguments into config */
+    parse_cmdline(argc, argv, config);
+
     /* Extract assets */
     yetty_platform_extract_assets(config);
     ydebug("main: assets extracted");
 
-    /* Window */
+    /* Check for headless mode */
+    const char *vnc_headless = config->ops->get_string(config, "vnc/headless", NULL);
+    int headless = vnc_headless && strcmp(vnc_headless, "true") == 0;
+
+    /* Window dimensions */
     int width = config->ops->get_int(config, "window/width", 1280);
     int height = config->ops->get_int(config, "window/height", 720);
-    ydebug("main: creating window %dx%d", width, height);
-    GLFWwindow *window = yetty_platform_create_window(width, height, "yetty");
-    if (!window) {
-        fprintf(stderr, "Failed to create window\n");
-        config->ops->destroy(config);
-        glfwTerminate();
-        return 1;
-    }
-    ydebug("main: window created");
 
-    yetty_platform_setup_window_callbacks(window);
-    ydebug("main: window callbacks set up");
+    /* Window (skip for headless mode) */
+    GLFWwindow *window = NULL;
+    if (!headless) {
+        ydebug("main: creating window %dx%d", width, height);
+        window = yetty_platform_create_window(width, height, "yetty");
+        if (!window) {
+            fprintf(stderr, "Failed to create window\n");
+            config->ops->destroy(config);
+            glfwTerminate();
+            return 1;
+        }
+        ydebug("main: window created");
+        yetty_platform_setup_window_callbacks(window);
+        ydebug("main: window callbacks set up");
+    } else {
+        ydebug("main: headless mode, skipping window creation");
+    }
 
     /* Platform input pipe */
     ydebug("main: creating platform input pipe");
@@ -117,13 +191,15 @@ int main(int argc, char **argv)
     ydebug("main: platform input pipe created, ok=%d", pipe_result.ok);
     if (!YETTY_IS_OK(pipe_result)) {
         fprintf(stderr, "Failed to create platform input pipe\n");
-        yetty_platform_destroy_window(window);
+        if (window)
+            yetty_platform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
     }
     struct yetty_platform_input_pipe *platform_input_pipe = pipe_result.value;
-    glfwSetWindowUserPointer(window, platform_input_pipe);
+    if (window)
+        glfwSetWindowUserPointer(window, platform_input_pipe);
 
     /* PTY factory */
     ydebug("main: creating PTY factory");
@@ -131,40 +207,52 @@ int main(int argc, char **argv)
     if (!YETTY_IS_OK(pty_factory_result)) {
         fprintf(stderr, "Failed to create PTY factory\n");
         platform_input_pipe->ops->destroy(platform_input_pipe);
-        yetty_platform_destroy_window(window);
+        if (window)
+            yetty_platform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
     }
     struct yetty_platform_pty_factory *pty_factory = pty_factory_result.value;
 
-    /* WebGPU instance and surface */
+    /* WebGPU instance */
     WGPUInstance instance = wgpuCreateInstance(NULL);
     if (!instance) {
         fprintf(stderr, "Failed to create WebGPU instance\n");
         pty_factory->ops->destroy(pty_factory);
         platform_input_pipe->ops->destroy(platform_input_pipe);
-        yetty_platform_destroy_window(window);
+        if (window)
+            yetty_platform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
     }
 
-    WGPUSurface surface = yetty_platform_create_surface(instance, window);
-    if (!surface) {
-        fprintf(stderr, "Failed to create WebGPU surface\n");
-        wgpuInstanceRelease(instance);
-        pty_factory->ops->destroy(pty_factory);
-        platform_input_pipe->ops->destroy(platform_input_pipe);
-        yetty_platform_destroy_window(window);
-        config->ops->destroy(config);
-        glfwTerminate();
-        return 1;
+    /* Surface (NULL for headless mode) */
+    WGPUSurface surface = NULL;
+    if (window) {
+        surface = yetty_platform_create_surface(instance, window);
+        if (!surface) {
+            fprintf(stderr, "Failed to create WebGPU surface\n");
+            wgpuInstanceRelease(instance);
+            pty_factory->ops->destroy(pty_factory);
+            platform_input_pipe->ops->destroy(platform_input_pipe);
+            yetty_platform_destroy_window(window);
+            config->ops->destroy(config);
+            glfwTerminate();
+            return 1;
+        }
     }
 
     /* App context */
     int fb_width, fb_height;
-    yetty_platform_get_framebuffer_size(window, &fb_width, &fb_height);
+    if (window) {
+        yetty_platform_get_framebuffer_size(window, &fb_width, &fb_height);
+    } else {
+        /* Headless mode: use configured dimensions */
+        fb_width = width;
+        fb_height = height;
+    }
 
     struct yetty_app_context app_context = {
         .app_gpu_context = {
@@ -182,11 +270,13 @@ int main(int argc, char **argv)
     struct yetty_yetty_result yetty_result = yetty_create(&app_context);
     if (!YETTY_IS_OK(yetty_result)) {
         fprintf(stderr, "Failed to create Yetty\n");
-        wgpuSurfaceRelease(surface);
+        if (surface)
+            wgpuSurfaceRelease(surface);
         wgpuInstanceRelease(instance);
         pty_factory->ops->destroy(pty_factory);
         platform_input_pipe->ops->destroy(platform_input_pipe);
-        yetty_platform_destroy_window(window);
+        if (window)
+            yetty_platform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
@@ -205,7 +295,8 @@ int main(int argc, char **argv)
     ythread_t *render_thread = ythread_create(render_thread_func, &thread_args);
 
     /* Initial resize event */
-    yetty_platform_get_framebuffer_size(window, &fb_width, &fb_height);
+    if (window)
+        yetty_platform_get_framebuffer_size(window, &fb_width, &fb_height);
     struct yetty_core_event event = {
         .type = YETTY_EVENT_RESIZE,
         .resize = {
@@ -215,8 +306,15 @@ int main(int argc, char **argv)
     };
     platform_input_pipe->ops->write(platform_input_pipe, &event, sizeof(event));
 
-    /* OS event loop */
-    yetty_platform_run_os_event_loop(window, &running);
+    /* OS event loop (headless uses a simple wait loop) */
+    if (window) {
+        yetty_platform_run_os_event_loop(window, &running);
+    } else {
+        /* Headless mode: just wait for render thread to finish */
+        while (running) {
+            usleep(100000); /* 100ms */
+        }
+    }
     ythread_join(render_thread);
 
     /* Cleanup - surface is released by yetty_destroy (yetty owns it after configure) */
@@ -227,13 +325,18 @@ int main(int argc, char **argv)
     ydebug("main: instance released, destroying pty_factory");
     pty_factory->ops->destroy(pty_factory);
     ydebug("main: pty_factory destroyed");
-    glfwSetWindowUserPointer(window, NULL);
+    if (window)
+        glfwSetWindowUserPointer(window, NULL);
     platform_input_pipe->ops->destroy(platform_input_pipe);
     ydebug("main: platform_input_pipe destroyed");
     config->ops->destroy(config);
-    ydebug("main: config destroyed, destroying window");
-    yetty_platform_destroy_window(window);
-    ydebug("main: window destroyed, calling glfwTerminate");
+    ydebug("main: config destroyed");
+    if (window) {
+        ydebug("main: destroying window");
+        yetty_platform_destroy_window(window);
+        ydebug("main: window destroyed");
+    }
+    ydebug("main: calling glfwTerminate");
     glfwTerminate();
     ydebug("main: cleanup complete");
 

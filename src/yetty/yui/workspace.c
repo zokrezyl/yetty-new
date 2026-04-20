@@ -5,8 +5,10 @@
 #include <yetty/ycore/event.h>
 #include <yetty/yrender/render-target.h>
 #include <yetty/yterm/terminal.h>
+#include <yetty/yvnc/vnc-viewer.h>
 #include <yetty/ytrace.h>
 #include <stdlib.h>
+#include <string.h>
 
 /*=============================================================================
  * Internal workspace structure
@@ -313,24 +315,64 @@ yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
 		tile_res = yetty_yui_tile_create_from_config(layout_config,
 							     yetty_ctx);
 	} else {
-		/* Fallback: create default single pane with terminal */
+		/* Fallback: create default single pane */
+		if (!config)
+			return YETTY_ERR(yetty_core_void, "config is NULL");
+
 		tile_res = yetty_yui_pane_create();
 		if (YETTY_IS_OK(tile_res)) {
-			struct yetty_term_terminal_result term_res;
-			struct grid_size grid_size = {.rows = 24, .cols = 80};
+			/* Check if VNC client mode */
+			const char *vnc_client = config->ops->get_string(
+				config, "vnc/client", NULL);
+			ydebug("workspace: vnc_client config = '%s'",
+			       vnc_client ? vnc_client : "(null)");
 
-			term_res = yetty_term_terminal_create(grid_size,
-							      yetty_ctx);
-			if (YETTY_IS_ERR(term_res)) {
-				yetty_yui_tile_destroy(tile_res.value);
-				return YETTY_ERR(yetty_core_void,
-						 term_res.error.msg);
+			if (vnc_client && strlen(vnc_client) > 0) {
+				/* Parse host:port */
+				char host[256] = {0};
+				uint16_t port = 5900;
+				const char *colon = strchr(vnc_client, ':');
+				if (colon) {
+					size_t host_len = (size_t)(colon - vnc_client);
+					if (host_len >= sizeof(host))
+						host_len = sizeof(host) - 1;
+					memcpy(host, vnc_client, host_len);
+					port = (uint16_t)atoi(colon + 1);
+				} else {
+					strncpy(host, vnc_client, sizeof(host) - 1);
+				}
+
+				/* Create VNC viewer */
+				struct yetty_vnc_viewer_ptr_result vnc_res =
+					yetty_vnc_viewer_create(host, port, yetty_ctx);
+				if (YETTY_IS_ERR(vnc_res)) {
+					yetty_yui_tile_destroy(tile_res.value);
+					return YETTY_ERR(yetty_core_void,
+							 vnc_res.error.msg);
+				}
+
+				yetty_yui_pane_push_view(
+					tile_res.value,
+					yetty_vnc_viewer_as_view(vnc_res.value));
+				yetty_yui_pane_set_focused(tile_res.value, 1);
+			} else {
+				/* Create terminal */
+				struct yetty_term_terminal_result term_res;
+				struct grid_size grid_size = {.rows = 24, .cols = 80};
+
+				term_res = yetty_term_terminal_create(grid_size,
+								      yetty_ctx);
+				if (YETTY_IS_ERR(term_res)) {
+					yetty_yui_tile_destroy(tile_res.value);
+					return YETTY_ERR(yetty_core_void,
+							 term_res.error.msg);
+				}
+
+				yetty_yui_pane_push_view(
+				    tile_res.value,
+				    yetty_term_terminal_as_view(term_res.value));
+				yetty_yui_pane_set_focused(tile_res.value, 1);
 			}
-
-			yetty_yui_pane_push_view(
-			    tile_res.value,
-			    yetty_term_terminal_as_view(term_res.value));
-			yetty_yui_pane_set_focused(tile_res.value, 1);
 		}
 	}
 

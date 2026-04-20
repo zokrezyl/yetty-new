@@ -237,6 +237,14 @@ render_target_texture_get_view(const struct yetty_render_target *self)
 	return rt->view;
 }
 
+static WGPUTexture
+render_target_texture_get_texture(const struct yetty_render_target *self)
+{
+	const struct render_target_texture *rt =
+		(const struct render_target_texture *)self;
+	return rt->texture;
+}
+
 
 /*=============================================================================
  * render_layer - render a terminal layer to this target
@@ -704,6 +712,7 @@ static const struct yetty_render_target_ops render_target_texture_ops = {
 	.blend = render_target_texture_blend,
 	.present = render_target_texture_present,
 	.get_view = render_target_texture_get_view,
+	.get_texture = render_target_texture_get_texture,
 	.resize = render_target_texture_resize,
 };
 
