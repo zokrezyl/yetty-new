@@ -23,7 +23,7 @@ option(YETTY_ENABLE_LIB_YAML_CPP    "yaml-cpp — config parsing (C++)"       OF
 option(YETTY_ENABLE_LIB_LIBYAML     "libyaml — config parsing (C)"          ON)
 option(YETTY_ENABLE_LIB_SPDLOG      "spdlog — logging backend"              ON)
 option(YETTY_ENABLE_LIB_YTRACE      "ytrace — tracing framework"            ON)
-option(YETTY_ENABLE_LIB_MSGPACK     "msgpack — serialization"               OFF)
+option(YETTY_ENABLE_LIB_MSGPACK     "msgpack — serialization"               ON)
 option(YETTY_ENABLE_LIB_WEBGPU      "webgpu/dawn — GPU backend"             ON)
 option(YETTY_ENABLE_LIB_VTERM       "libvterm — terminal emulation"          ON)
 option(YETTY_ENABLE_LIB_ZLIB        "zlib — compression"                    ON)
@@ -85,7 +85,7 @@ option(YETTY_ENABLE_FEATURE_YVIDEO    "yvideo — video codec support"         O
 option(YETTY_ENABLE_FEATURE_YVNC       "vnc — VNC client/server"              ON)
 option(YETTY_ENABLE_FEATURE_TELNET    "telnet — telnet connectivity"         OFF)
 option(YETTY_ENABLE_FEATURE_SSH       "ssh — SSH connectivity"               OFF)
-option(YETTY_ENABLE_FEATURE_RPC       "rpc — msgpack-RPC interface"          OFF)
+option(YETTY_ENABLE_FEATURE_YRPC      "yrpc — msgpack-RPC interface"         ON)
 
 # Misc
 option(YETTY_ENABLE_FEATURE_YCDB      "ycdb — constant database wrapper"     ON)

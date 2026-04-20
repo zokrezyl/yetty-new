@@ -1,0 +1,88 @@
+#ifndef YETTY_YRPC_RPC_MESSAGE_H
+#define YETTY_YRPC_RPC_MESSAGE_H
+
+#include <stddef.h>
+#include <stdint.h>
+#include <yetty/ycore/result.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*
+ * msgpack-RPC wire format (compatible with yetty-poc):
+ *   Request:      [0, msgid, channel, method, params]
+ *   Response:     [1, msgid, error, result]
+ *   Notification: [2, channel, method, params]
+ */
+
+/* Message types */
+enum yetty_rpc_message_type {
+	YETTY_RPC_MSG_REQUEST = 0,
+	YETTY_RPC_MSG_RESPONSE = 1,
+	YETTY_RPC_MSG_NOTIFICATION = 2,
+};
+
+/* Channel IDs (extensible) */
+enum yetty_rpc_channel {
+	YETTY_RPC_CHANNEL_EVENT_LOOP = 0,
+	YETTY_RPC_CHANNEL_STREAM = 1,
+};
+
+/* Parsed RPC message */
+struct yetty_rpc_message {
+	enum yetty_rpc_message_type type;
+	uint32_t msgid;		  /* 0 for notifications */
+	uint32_t channel;	  /* target channel */
+	const char *method;	  /* method name (borrowed, valid during handling) */
+	size_t method_len;	  /* method name length */
+	const uint8_t *params;	  /* msgpack params (borrowed) */
+	size_t params_len;	  /* params length */
+};
+
+/* Result types */
+YETTY_RESULT_DECLARE(yetty_rpc_message, struct yetty_rpc_message);
+
+/*
+ * Parse a msgpack-RPC message from raw bytes.
+ * The returned message borrows pointers into the input buffer.
+ */
+struct yetty_rpc_message_result yetty_rpc_message_parse(const uint8_t *data,
+							size_t len);
+
+/*
+ * Write buffer for serializing responses.
+ */
+struct yetty_rpc_write_buffer {
+	uint8_t *data;
+	size_t len;
+	size_t capacity;
+};
+
+/* Initialize write buffer (caller owns memory) */
+void yetty_rpc_write_buffer_init(struct yetty_rpc_write_buffer *buf,
+				 uint8_t *storage, size_t capacity);
+
+/* Reset buffer for reuse */
+void yetty_rpc_write_buffer_reset(struct yetty_rpc_write_buffer *buf);
+
+/* Serialize success response: [1, msgid, nil, result] */
+struct yetty_core_void_result
+yetty_rpc_write_response_ok(struct yetty_rpc_write_buffer *buf, uint32_t msgid,
+			    const uint8_t *result, size_t result_len);
+
+/* Serialize error response: [1, msgid, error_msg, nil] */
+struct yetty_core_void_result
+yetty_rpc_write_response_error(struct yetty_rpc_write_buffer *buf,
+			       uint32_t msgid, const char *error_msg);
+
+/* Serialize bool result (common case) */
+struct yetty_core_void_result
+yetty_rpc_write_response_bool(struct yetty_rpc_write_buffer *buf,
+			      uint32_t msgid, int value);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* YETTY_YRPC_RPC_MESSAGE_H */
