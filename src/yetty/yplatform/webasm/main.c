@@ -467,15 +467,9 @@ int main(int argc, char **argv)
 	if (!YETTY_IS_OK(run_result))
 		yerror("Yetty run failed");
 
-	/* Cleanup (won't reach here on web - infinite loop) */
-	yetty_destroy(yetty);
-	wgpuSurfaceRelease(surface);
-	wgpuInstanceRelease(instance);
-	pty_factory->ops->destroy(pty_factory);
-	pipe->ops->destroy(pipe);
-	yetty_platform_webasm_destroy_window();
-	config->ops->destroy(config);
-
-	ydebug("main: Shutdown complete");
-	return YETTY_IS_OK(run_result) ? 0 : 1;
+	/* On webasm, return without cleanup - the event loop keeps running.
+	 * emscripten_set_main_loop_arg returns immediately but the loop continues.
+	 * Returning 0 keeps the runtime alive. */
+	ydebug("main: Returning (event loop continues asynchronously)");
+	return 0;
 }

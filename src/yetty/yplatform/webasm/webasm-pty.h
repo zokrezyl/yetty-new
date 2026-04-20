@@ -4,7 +4,7 @@
 #define WEBASM_PTY_H
 
 #include <yetty/platform/pty.h>
-#include "webasm-pty-poll-source.h"
+#include "webasm-pty-pipe-source.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -21,7 +21,7 @@ struct yetty_config;
  */
 struct webasm_pty {
 	struct yetty_platform_pty base;
-	struct webasm_pty_poll_source poll_source;
+	struct webasm_pty_pipe_source pipe_source;
 	uint32_t cols;
 	uint32_t rows;
 	int running;

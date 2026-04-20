@@ -18,7 +18,7 @@ static struct yetty_core_size_result webasm_pty_write(struct yetty_platform_pty 
 static struct yetty_core_void_result webasm_pty_resize(struct yetty_platform_pty *self,
 						       uint32_t cols, uint32_t rows);
 static struct yetty_core_void_result webasm_pty_stop(struct yetty_platform_pty *self);
-static struct yetty_platform_pty_poll_source *webasm_pty_poll_source(struct yetty_platform_pty *self);
+static struct yetty_platform_pty_pipe_source *webasm_pty_pipe_source(struct yetty_platform_pty *self);
 
 /* Ops table */
 static const struct yetty_platform_pty_ops webasm_pty_ops = {
@@ -27,12 +27,12 @@ static const struct yetty_platform_pty_ops webasm_pty_ops = {
 	.write = webasm_pty_write,
 	.resize = webasm_pty_resize,
 	.stop = webasm_pty_stop,
-	.poll_source = webasm_pty_poll_source,
+	.pipe_source = webasm_pty_pipe_source,
 };
 
-/* Poll source implementation */
+/* Pipe source implementation */
 
-void webasm_pty_poll_source_set_callback(struct webasm_pty_poll_source *source,
+void webasm_pty_pipe_source_set_callback(struct webasm_pty_pipe_source *source,
 					 webasm_pty_notify_callback callback,
 					 void *user_data)
 {
@@ -42,7 +42,7 @@ void webasm_pty_poll_source_set_callback(struct webasm_pty_poll_source *source,
 	source->notify_user_data = user_data;
 }
 
-void webasm_pty_poll_source_notify(struct webasm_pty_poll_source *source)
+void webasm_pty_pipe_source_notify(struct webasm_pty_pipe_source *source)
 {
 	if (source && source->notify_callback)
 		source->notify_callback(source->notify_user_data);
@@ -156,10 +156,10 @@ static struct yetty_core_void_result webasm_pty_stop(struct yetty_platform_pty *
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_platform_pty_poll_source *webasm_pty_poll_source(struct yetty_platform_pty *self)
+static struct yetty_platform_pty_pipe_source *webasm_pty_pipe_source(struct yetty_platform_pty *self)
 {
 	struct webasm_pty *pty = container_of(self, struct webasm_pty, base);
-	return &pty->poll_source.base;
+	return &pty->pipe_source.base;
 }
 
 /* Initialize PTY */
@@ -170,16 +170,16 @@ struct yetty_core_void_result webasm_pty_init(struct webasm_pty *pty,
 	pty->cols = (uint32_t)config->ops->get_int(config, "terminal/cols", 80);
 	pty->rows = (uint32_t)config->ops->get_int(config, "terminal/rows", 24);
 	pty->running = 1;
-	pty->poll_source.base.fd = -1;  /* No fd on webasm */
-	pty->poll_source.notify_callback = NULL;
-	pty->poll_source.notify_user_data = NULL;
+	pty->pipe_source.base.abstract = 0;  /* No fd on webasm */
+	pty->pipe_source.notify_callback = NULL;
+	pty->pipe_source.notify_user_data = NULL;
 
 	ydebug("webasm_pty: Starting (%ux%u)", pty->cols, pty->rows);
 
 	/* Set up JS buffer and message listener in parent window,
 	 * then create iframe for JSLinux VM */
 	EM_ASM({
-		var pollSourcePointer = $0;
+		var pipeSourcePointer = $0;
 		var cols = $1;
 		var rows = $2;
 
@@ -196,13 +196,13 @@ struct yetty_core_void_result webasm_pty_init(struct webasm_pty *pty,
 			return chunk;
 		};
 
-		/* Message listener - receives data from iframe, buffers it, notifies PollSource */
+		/* Message listener - receives data from iframe, buffers it, notifies PipeSource */
 		window.addEventListener('message', function(e) {
 			if (e.data && e.data.type === 'term-output') {
 				var data = e.data.data;
 				if (!data || data.length === 0) return;
 				window.ptyBuffer += data;
-				Module._webpty_poll_source_notify(pollSourcePointer);
+				Module._webpty_pipe_source_notify(pipeSourcePointer);
 			}
 			/* Handle term-ready: iframe is loaded, send pending resize */
 			if (e.data && e.data.type === 'term-ready') {
@@ -226,7 +226,7 @@ struct yetty_core_void_result webasm_pty_init(struct webasm_pty *pty,
 			     'cols=' + cols + '&rows=' + rows +
 			     '&cpu=x86_64&mem=256';
 		document.body.appendChild(iframe);
-	}, &pty->poll_source, pty->cols, pty->rows);
+	}, &pty->pipe_source, pty->cols, pty->rows);
 
 	return YETTY_OK_VOID();
 }
@@ -301,8 +301,8 @@ struct yetty_platform_pty_factory_result yetty_platform_pty_factory_create(
 /* C export - called by JS when data arrives in buffer */
 
 EMSCRIPTEN_KEEPALIVE
-void webpty_poll_source_notify(struct webasm_pty_poll_source *poll_source)
+void webpty_pipe_source_notify(struct webasm_pty_pipe_source *pipe_source)
 {
-	if (poll_source)
-		webasm_pty_poll_source_notify(poll_source);
+	if (pipe_source)
+		webasm_pty_pipe_source_notify(pipe_source);
 }
