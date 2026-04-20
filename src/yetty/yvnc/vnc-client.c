@@ -793,6 +793,9 @@ static struct yetty_core_int_result vnc_client_on_event(
 		(struct yetty_vnc_client *)((char *)listener -
 			offsetof(struct yetty_vnc_client, listener));
 
+	ydebug("vnc_client_on_event: type=%d fd=%d poll_id=%d",
+	       event->type, event->poll.fd, client->poll_id);
+
 	if (event->type == YETTY_EVENT_POLL_WRITABLE) {
 		/* Check async connect completion */
 		if (client->connecting) {
