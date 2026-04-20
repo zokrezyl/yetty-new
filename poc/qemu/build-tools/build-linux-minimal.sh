@@ -50,8 +50,8 @@ mkdir -p "$BUILDDIR"
 cd "$BUILDDIR"
 
 # Use minimal device config - copy our custom config
-#mkdir -p "$QEMUSRC/configs/devices/riscv64-softmmu"
-#cp "$SCRIPTDIR/../configs/riscv64-softmmu/default.mak" "$QEMUSRC/configs/devices/riscv64-softmmu/"
+mkdir -p "$QEMUSRC/configs/devices/riscv64-softmmu"
+cp "$SCRIPTDIR/../configs/riscv64-softmmu/default.mak" "$QEMUSRC/configs/devices/riscv64-softmmu/"
 
 echo "Configuring QEMU..."
 
