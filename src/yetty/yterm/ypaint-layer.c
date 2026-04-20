@@ -8,7 +8,7 @@
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/ypaint-yaml/ypaint-yaml.h>
-#include <yetty/ysdf/types.gen.h>
+#include <yetty/ysdf/handler.h>
 #include <yetty/yterm/osc-args.h>
 #include <yetty/yterm/ypaint-layer.h>
 #include <yetty/yconfig.h>
@@ -357,7 +357,7 @@ ypaint_layer_write(struct yetty_term_terminal_layer *self,
       yetty_term_osc_args_free(&args);
       return YETTY_ERR(yetty_core_void, res.error.msg);
     }
-    yetty_ypaint_core_buffer_register_handler(res.value, 0, 255, yetty_ysdf_primitive_size);
+    yetty_ypaint_core_buffer_set_default_handler(res.value, yetty_ysdf_handler);
 
     struct yetty_core_void_result add_res =
         yetty_ypaint_canvas_add_buffer(layer->canvas, res.value);
