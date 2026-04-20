@@ -11,6 +11,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Forward declarations for webasm pipe functions (from pipe.c) */
+int webasm_platform_input_pipe_has_pending(struct yetty_platform_input_pipe *self);
+void webasm_platform_input_pipe_process(struct yetty_platform_input_pipe *self);
+
 #define MAX_LISTENERS_PER_TYPE 64
 #define MAX_PTY_PIPES 16
 #define MAX_TIMERS 64
@@ -113,7 +117,7 @@ static const struct yetty_core_event_loop_ops webasm_ops = {
 	.request_render = webasm_request_render,
 };
 
-/* Main loop tick - processes PTY data and fires timers */
+/* Main loop tick - processes input events, PTY data, and fires timers */
 static void main_loop_tick(void *arg)
 {
 	struct webasm_event_loop *impl = arg;
@@ -123,7 +127,13 @@ static void main_loop_tick(void *arg)
 	if (!impl->running)
 		return;
 
-	/* Process pending PTY data first */
+	/* Process pending input pipe events first (keyboard, mouse, resize) */
+	if (impl->platform_input_pipe &&
+	    webasm_platform_input_pipe_has_pending(impl->platform_input_pipe)) {
+		webasm_platform_input_pipe_process(impl->platform_input_pipe);
+	}
+
+	/* Process pending PTY data */
 	for (i = 0; i < MAX_PTY_PIPES; i++) {
 		if (impl->pty_pipes[i].data_pending)
 			process_pty_data(&impl->pty_pipes[i]);
@@ -303,6 +313,7 @@ static void on_pty_data_available(void *user_data)
 
 	/* Just set flag - main loop will read the data */
 	ph->data_pending = 1;
+	EM_ASM({ console.log('[pty] on_pty_data_available: data_pending set'); });
 }
 
 /* Called from main loop to process pending PTY data */
@@ -330,6 +341,8 @@ static void process_pty_data(struct pty_pipe_handle *ph)
 	read_res = pty->base.ops->read(&pty->base, buf, buflen);
 	if (!YETTY_IS_OK(read_res) || read_res.value == 0)
 		return;
+
+	EM_ASM({ console.log('[pty] process_pty_data: read ' + $0 + ' bytes'); }, (int)read_res.value);
 
 	/* Call read_cb with the data (like libuv's on_pty_pipe_read) */
 	ph->read_cb(ph->cb_ctx, buf, (long)read_res.value);
@@ -513,6 +526,11 @@ struct yetty_core_event_loop_result yetty_core_event_loop_create(
 
 	impl->base.ops = &webasm_ops;
 	impl->platform_input_pipe = pipe;
+
+	/* On webasm, the platform input pipe uses async callbacks (no fd).
+	 * Set the event loop reference so the pipe can dispatch events. */
+	if (pipe && pipe->ops && pipe->ops->set_event_loop)
+		pipe->ops->set_event_loop(pipe, &impl->base);
 
 	ydebug("webasm_event_loop: created at %p", (void *)impl);
 

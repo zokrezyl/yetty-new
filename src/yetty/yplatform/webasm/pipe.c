@@ -5,7 +5,6 @@
 #include <yetty/ycore/event.h>
 #include <yetty/ycore/types.h>
 #include <yetty/ytrace.h>
-#include <emscripten/emscripten.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -40,20 +39,33 @@ static const struct yetty_platform_input_pipe_ops webasm_pipe_ops = {
 	.set_event_loop = webasm_pipe_set_event_loop,
 };
 
-/* Async callback to notify EventLoop */
-static void on_data_available(void *arg)
+/* Check if pipe has pending events - called from main loop tick */
+int webasm_platform_input_pipe_has_pending(struct yetty_platform_input_pipe *self)
 {
-	struct webasm_platform_input_pipe *pipe = arg;
+	struct webasm_platform_input_pipe *pipe;
 
-	pipe->callback_pending = 0;
+	if (!self)
+		return 0;
 
-	if (!pipe->event_loop) {
-		ywarn("webasm_pipe: on_data_available: no EventLoop");
-		return;
-	}
+	pipe = container_of(self, struct webasm_platform_input_pipe, base);
+	return pipe->buffer_size >= sizeof(struct yetty_core_event);
+}
 
-	/* Notify EventLoop - it will read and dispatch */
+/* Process pending events from main loop - avoids Asyncify issues */
+void webasm_platform_input_pipe_process(struct yetty_platform_input_pipe *self)
+{
+	struct webasm_platform_input_pipe *pipe;
 	struct yetty_core_event event;
+
+	if (!self)
+		return;
+
+	pipe = container_of(self, struct webasm_platform_input_pipe, base);
+
+	if (!pipe->event_loop)
+		return;
+
+	/* Process all pending events */
 	while (pipe->buffer_size >= sizeof(event)) {
 		memcpy(&event, pipe->buffer, sizeof(event));
 		memmove(pipe->buffer, pipe->buffer + sizeof(event),
@@ -63,6 +75,8 @@ static void on_data_available(void *arg)
 		ydebug("webasm_pipe: dispatching event type=%d", (int)event.type);
 		pipe->event_loop->ops->dispatch(pipe->event_loop, &event);
 	}
+
+	pipe->callback_pending = 0;
 }
 
 /* Implementation */
@@ -105,11 +119,9 @@ static struct yetty_core_size_result webasm_pipe_write(struct yetty_platform_inp
 	memcpy(pipe->buffer + pipe->buffer_size, data, size);
 	pipe->buffer_size += size;
 
-	/* Schedule async callback to notify EventLoop */
-	if (!pipe->callback_pending && pipe->event_loop) {
-		pipe->callback_pending = 1;
-		emscripten_async_call(on_data_available, pipe, 0);
-	}
+	/* Just mark as pending - main loop will process events.
+	 * Avoid emscripten_async_call to prevent Asyncify issues. */
+	pipe->callback_pending = 1;
 
 	return YETTY_OK(yetty_core_size, size);
 }
@@ -147,11 +159,9 @@ static struct yetty_core_void_result webasm_pipe_set_event_loop(struct yetty_pla
 	pipe = container_of(self, struct webasm_platform_input_pipe, base);
 	pipe->event_loop = loop;
 
-	/* If there's pending data from before setEventLoop was called, schedule callback now */
-	if (pipe->event_loop && pipe->buffer_size > 0 && !pipe->callback_pending) {
+	/* If there's pending data, just set the flag - main loop will process */
+	if (pipe->event_loop && pipe->buffer_size > 0)
 		pipe->callback_pending = 1;
-		emscripten_async_call(on_data_available, pipe, 0);
-	}
 
 	return YETTY_OK_VOID();
 }
