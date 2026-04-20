@@ -181,9 +181,25 @@ static struct rectangle_result yplot_prim_aabb(const uint32_t *prim)
     return yplot_wire_get_aabb(payload, payload_size);
 }
 
+static void yplot_prim_destroy(void *cache)
+{
+    yplot_wire_destroy_cache(cache);
+}
+
+static struct yetty_render_gpu_resource_set_result
+yplot_prim_get_gpu_resource_set(const uint32_t *prim, void **cache_ptr)
+{
+    // FAM format: [type:u32][payload_size:u32][payload...]
+    uint32_t payload_size = prim[1];
+    const uint8_t *payload = (const uint8_t *)&prim[2];
+    return yplot_wire_get_gpu_resource_set(payload, payload_size, cache_ptr);
+}
+
 static const struct yetty_ypaint_prim_ops yplot_prim_ops = {
     .size = yplot_prim_size,
     .aabb = yplot_prim_aabb,
+    .destroy = yplot_prim_destroy,
+    .get_gpu_resource_set = yplot_prim_get_gpu_resource_set,
 };
 
 struct yetty_ypaint_prim_flyweight yetty_yplot_handler(const uint32_t *prim)

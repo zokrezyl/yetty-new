@@ -5,6 +5,7 @@
 #include <yetty/ycore/util.h>
 #include <yetty/yfont/font.h>
 #include <yetty/ypaint-core/buffer.h>
+#include <yetty/ypaint-core/flyweight.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/ypaint-yaml/ypaint-yaml.h>
@@ -447,15 +448,47 @@ ypaint_layer_get_gpu_resource_set(
   }
 
   /* Include default font as child resource set for glyph rendering */
+  size_t child_idx = 0;
   struct yetty_font_font *font =
       yetty_yetty_ypaint_canvas_get_default_font(layer->canvas);
   if (font && font->ops && font->ops->get_gpu_resource_set) {
     struct yetty_render_gpu_resource_set_result font_rs =
         font->ops->get_gpu_resource_set(font);
-    if (YETTY_IS_OK(font_rs))
-      layer->rs.children[0] =
+    if (YETTY_IS_OK(font_rs)) {
+      layer->rs.children[child_idx++] =
           (struct yetty_render_gpu_resource_set *)font_rs.value;
+    }
   }
+
+  /* Include complex prim resource sets as children */
+  const struct yetty_ypaint_flyweight_registry *reg =
+      yetty_yetty_ypaint_canvas_get_flyweight_registry(layer->canvas);
+  uint32_t complex_count =
+      yetty_yetty_ypaint_canvas_complex_prim_count(layer->canvas);
+
+  for (uint32_t i = 0; i < complex_count && child_idx < YETTY_RENDER_RS_MAX_CHILDREN; i++) {
+    struct yetty_ypaint_canvas_complex_prim_ref ref =
+        yetty_yetty_ypaint_canvas_get_complex_prim(layer->canvas, i);
+    if (!ref.data)
+      continue;
+
+    /* Get flyweight for ops */
+    struct yetty_ypaint_prim_flyweight fw =
+        yetty_ypaint_flyweight_registry_get(reg, ref.data);
+    if (!fw.ops || !fw.ops->get_gpu_resource_set)
+      continue;
+
+    /* Get resource set (creates cache if needed) */
+    struct yetty_render_gpu_resource_set_result rs_res =
+        fw.ops->get_gpu_resource_set(ref.data, ref.cache_ptr);
+    if (YETTY_IS_OK(rs_res)) {
+      layer->rs.children[child_idx++] =
+          (struct yetty_render_gpu_resource_set *)rs_res.value;
+      ydebug("ypaint_layer: added complex prim %u as child %zu", i, child_idx - 1);
+    }
+  }
+
+  layer->rs.children_count = child_idx;
 
   return YETTY_OK(yetty_render_gpu_resource_set, &layer->rs);
 }

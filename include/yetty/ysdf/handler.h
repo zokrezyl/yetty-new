@@ -27,6 +27,8 @@ yetty_ysdf_prim_aabb(const uint32_t *prim) {
 static const struct yetty_ypaint_prim_ops yetty_ysdf_prim_ops = {
     .size = yetty_ysdf_prim_size,
     .aabb = yetty_ysdf_prim_aabb,
+    .destroy = NULL,              // SDF prims have no cached data
+    .get_gpu_resource_set = NULL, // SDF prims rendered by main shader
 };
 
 static inline struct yetty_ypaint_prim_flyweight

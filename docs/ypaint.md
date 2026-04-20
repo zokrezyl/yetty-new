@@ -432,3 +432,254 @@ Complex primitive rendering follows flyweight pattern:
 - Atlas region (render artifact)
 
 Type registration provides intrinsic parts. Instance data stored in buffer. Atlas is render-time artifact, cached but separate from data model.
+
+---
+
+## Flyweight Registry Architecture
+
+The flyweight registry is the central mechanism for handling different primitive types. It decouples primitive data storage (buffer) from primitive operations (size, aabb, destroy).
+
+### Module Structure
+
+```
+ypaint-core/flyweight.h    # Types and instance-based API
+ypaint-core/flyweight.c    # Registry implementation
+ypaint/flyweight.h         # Factory function
+ypaint/flyweight.c         # Creates configured registry with all handlers
+```
+
+### Core Types
+
+```c
+// Primitive ops vtable
+struct yetty_ypaint_prim_ops {
+    struct yetty_core_size_result (*size)(const uint32_t *prim);
+    struct rectangle_result (*aabb)(const uint32_t *prim);
+    void (*destroy)(void *cache);  // optional, NULL for simple prims
+    struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(
+        const uint32_t *prim, void **cache_ptr);  // optional, NULL for SDF prims
+};
+
+// Flyweight - wraps pointer to primitive data + ops
+struct yetty_ypaint_prim_flyweight {
+    const uint32_t *data;  // type at data[0]
+    const struct yetty_ypaint_prim_ops *ops;
+};
+
+// Handler function - returns flyweight (ops=NULL if not handled)
+typedef struct yetty_ypaint_prim_flyweight (*yetty_ypaint_prim_handler_fn)(
+    const uint32_t *prim);
+```
+
+### Registry API
+
+```c
+// Create/destroy registry instance
+struct yetty_ypaint_flyweight_registry_ptr_result
+yetty_ypaint_flyweight_registry_create(void);
+
+void yetty_ypaint_flyweight_registry_destroy(
+    struct yetty_ypaint_flyweight_registry *reg);
+
+// Set default handler (SDF) - tried first, fast path
+void yetty_ypaint_flyweight_registry_set_default(
+    struct yetty_ypaint_flyweight_registry *reg,
+    yetty_ypaint_prim_handler_fn handler);
+
+// Register handler for type range [type_min, type_max]
+struct yetty_core_void_result yetty_ypaint_flyweight_registry_add(
+    struct yetty_ypaint_flyweight_registry *reg,
+    uint32_t type_min, uint32_t type_max,
+    yetty_ypaint_prim_handler_fn handler);
+
+// Get flyweight for primitive
+struct yetty_ypaint_prim_flyweight yetty_ypaint_flyweight_registry_get(
+    const struct yetty_ypaint_flyweight_registry *reg,
+    const uint32_t *prim);
+```
+
+### Handler Lookup Order
+
+1. **Default handler** (SDF) - tried first for fast path
+2. **Type range handlers** - searched if default returns ops=NULL
+
+```c
+// Lookup logic in yetty_ypaint_flyweight_registry_get:
+if (default_handler) {
+    fw = default_handler(prim);
+    if (fw.ops) return fw;
+}
+uint32_t type = prim[0];
+for (each registered handler) {
+    if (type >= handler.type_min && type <= handler.type_max) {
+        fw = handler.handler(prim);
+        if (fw.ops) return fw;
+    }
+}
+return {NULL, NULL};  // unhandled
+```
+
+### Canvas Ownership
+
+Canvas owns the flyweight registry instance:
+
+```c
+struct yetty_yetty_ypaint_canvas {
+    // ...
+    struct yetty_ypaint_flyweight_registry *flyweight_registry;
+};
+
+// In canvas_create:
+struct yetty_ypaint_flyweight_registry_ptr_result fw_res =
+    yetty_ypaint_flyweight_create();  // from ypaint/flyweight.c
+canvas->flyweight_registry = fw_res.value;
+
+// In canvas_destroy:
+line_buffer_free(&canvas->lines, canvas->flyweight_registry);
+yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
+```
+
+### Buffer Read/Write Modes
+
+**Write mode** (adding primitives):
+- No registry needed
+- Buffer is pure data container
+- `yetty_ypaint_core_buffer_add_prim()` just appends bytes
+
+**Read mode** (iterating primitives):
+- Registry required for size lookup
+- Passed as parameter to iteration functions
+
+```c
+// Iteration with registry
+struct yetty_ypaint_core_primitive_iter_result
+yetty_ypaint_core_buffer_prim_first(
+    const struct yetty_ypaint_core_buffer *buf,
+    const struct yetty_ypaint_flyweight_registry *reg);
+
+struct yetty_ypaint_core_primitive_iter_result
+yetty_ypaint_core_buffer_prim_next(
+    const struct yetty_ypaint_core_buffer *buf,
+    const struct yetty_ypaint_flyweight_registry *reg,
+    const struct yetty_ypaint_core_primitive_iter *iter);
+```
+
+### Handler Implementation Example
+
+Each module implements its own handler:
+
+**SDF handler (ysdf/handler.h):**
+```c
+static inline struct yetty_ypaint_prim_flyweight
+yetty_ysdf_handler(const uint32_t *prim) {
+    uint32_t type = prim[0];
+    if (type > YETTY_YSDF_TYPE_MAX)
+        return (struct yetty_ypaint_prim_flyweight){NULL, NULL};
+    return (struct yetty_ypaint_prim_flyweight){prim, &yetty_ysdf_prim_ops};
+}
+```
+
+**yplot handler (yplot/yplot.c):**
+```c
+struct yetty_ypaint_prim_flyweight
+yetty_yplot_handler(const uint32_t *prim) {
+    uint32_t type = prim[0];
+    if (type != YETTY_YPLOT_PRIM_TYPE_ID)
+        return (struct yetty_ypaint_prim_flyweight){NULL, NULL};
+    return (struct yetty_ypaint_prim_flyweight){prim, &yplot_prim_ops};
+}
+```
+
+### Wiring Layer (ypaint/flyweight.c)
+
+Creates configured registry with all handlers:
+
+```c
+struct yetty_ypaint_flyweight_registry_ptr_result
+yetty_ypaint_flyweight_create(void) {
+    struct yetty_ypaint_flyweight_registry_ptr_result res =
+        yetty_ypaint_flyweight_registry_create();
+    if (YETTY_IS_ERR(res)) return res;
+
+    // Default handler for SDF (fast path)
+    yetty_ypaint_flyweight_registry_set_default(res.value, yetty_ysdf_handler);
+
+    // Complex primitive handlers by type range
+    yetty_ypaint_flyweight_registry_add(res.value,
+        YETTY_YPAINT_TYPE_YPLOT, YETTY_YPAINT_TYPE_YPLOT,
+        yetty_yplot_handler);
+
+    // Future: yimage, yvideo handlers
+
+    return res;
+}
+```
+
+### Complex Prim Cleanup
+
+When grid lines are freed, complex prim caches need cleanup via flyweight ops:
+
+```c
+// In grid_line_free:
+for (each complex_prim) {
+    if (cp->cache) {
+        struct yetty_ypaint_prim_flyweight fw =
+            yetty_ypaint_flyweight_registry_get(reg, cp->data);
+        if (fw.ops && fw.ops->destroy)
+            fw.ops->destroy(cp->cache);
+    }
+    free(cp->data);
+}
+```
+
+### Canvas Complex Prim Access
+
+Canvas exposes visible complex prims for rendering:
+
+```c
+// Get count of visible complex prims
+uint32_t yetty_yetty_ypaint_canvas_complex_prim_count(canvas);
+
+// Get complex prim reference by index
+struct yetty_ypaint_canvas_complex_prim_ref {
+    const uint32_t *data;  // FAM: [type][payload_size][payload...]
+    void **cache_ptr;      // Pointer to cache storage
+};
+struct yetty_ypaint_canvas_complex_prim_ref
+yetty_yetty_ypaint_canvas_get_complex_prim(canvas, index);
+```
+
+### Layer Integration
+
+ypaint-layer collects complex prim resource sets:
+
+```c
+// In ypaint_layer_get_gpu_resource_set:
+for (each visible complex prim) {
+    struct yetty_ypaint_prim_flyweight fw =
+        yetty_ypaint_flyweight_registry_get(reg, ref.data);
+    if (fw.ops && fw.ops->get_gpu_resource_set) {
+        struct yetty_render_gpu_resource_set_result rs =
+            fw.ops->get_gpu_resource_set(ref.data, ref.cache_ptr);
+        layer->rs.children[child_idx++] = rs.value;
+    }
+}
+```
+
+---
+
+## Implementation Status
+
+### Completed
+
+1. **Flyweight registry** - instance-based with handlers for size, aabb, destroy, get_gpu_resource_set
+2. **yplot handler** - implements all flyweight ops
+3. **Canvas complex prim access** - exposes visible complex prims for rendering
+4. **Layer integration** - collects complex prim resource sets as children
+
+### Remaining (Atlas Rendering)
+
+1. **Atlas texture management** - create shared texture, bin-pack regions
+2. **Pre-render pass** - render each complex prim to its atlas region using its resource set
+3. **Atlas binding** - pass atlas texture + region info to ypaint shader
+4. **Shader changes** - sample from atlas for pixels in complex prim bounding boxes

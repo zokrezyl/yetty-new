@@ -1595,3 +1595,59 @@ struct yetty_font_font *yetty_yetty_ypaint_canvas_get_default_font(
     struct yetty_yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->default_font : NULL;
 }
+
+//=============================================================================
+// Complex primitive access (for atlas rendering)
+//=============================================================================
+
+uint32_t yetty_yetty_ypaint_canvas_complex_prim_count(
+    struct yetty_yetty_ypaint_canvas *canvas) {
+  if (!canvas)
+    return 0;
+
+  uint32_t count = 0;
+  uint32_t visible_lines = canvas->grid_size.rows;
+  if (visible_lines > canvas->lines.count)
+    visible_lines = canvas->lines.count;
+
+  for (uint32_t i = 0; i < visible_lines; i++) {
+    struct yetty_yetty_ypaint_canvas_grid_line *line =
+        line_buffer_get(&canvas->lines, i);
+    count += line->complex_prim_count;
+  }
+  return count;
+}
+
+struct yetty_ypaint_canvas_complex_prim_ref
+yetty_yetty_ypaint_canvas_get_complex_prim(
+    struct yetty_yetty_ypaint_canvas *canvas, uint32_t index) {
+  struct yetty_ypaint_canvas_complex_prim_ref ref = {NULL, NULL};
+  if (!canvas)
+    return ref;
+
+  uint32_t visible_lines = canvas->grid_size.rows;
+  if (visible_lines > canvas->lines.count)
+    visible_lines = canvas->lines.count;
+
+  uint32_t current = 0;
+  for (uint32_t i = 0; i < visible_lines; i++) {
+    struct yetty_yetty_ypaint_canvas_grid_line *line =
+        line_buffer_get(&canvas->lines, i);
+    if (index < current + line->complex_prim_count) {
+      uint32_t local_idx = index - current;
+      struct yetty_yetty_ypaint_canvas_complex_prim *cp =
+          &line->complex_prims[local_idx];
+      ref.data = cp->data;
+      ref.cache_ptr = &cp->cache;
+      return ref;
+    }
+    current += line->complex_prim_count;
+  }
+  return ref;
+}
+
+const struct yetty_ypaint_flyweight_registry *
+yetty_yetty_ypaint_canvas_get_flyweight_registry(
+    struct yetty_yetty_ypaint_canvas *canvas) {
+  return canvas ? canvas->flyweight_registry : NULL;
+}
