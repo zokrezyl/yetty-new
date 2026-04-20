@@ -642,18 +642,31 @@ static void try_load_config_file(struct config_impl *impl, int argc, char *argv[
     }
 }
 
-/* Parse command line for -e (execute) */
+/* Find argument value by short or long name, returns NULL if not found */
 
-static void parse_execute_arg(struct config_impl *impl, int argc, char *argv[])
+static const char *find_arg(int argc, char *argv[], const char *short_name, const char *long_name)
 {
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-e") == 0 && i + 1 < argc) {
-            char key[MAX_KEY_LEN];
-            struct config_node *parent = navigate_or_create(impl->root, "shell/command", key);
-            if (parent)
-                node_set_value(parent, key, argv[i + 1]);
-            return;
-        }
+        if (short_name && strcmp(argv[i], short_name) == 0 && i + 1 < argc)
+            return argv[i + 1];
+        if (long_name && strcmp(argv[i], long_name) == 0 && i + 1 < argc)
+            return argv[i + 1];
+    }
+    return NULL;
+}
+
+/* Set config value from command line argument */
+
+static void parse_arg_to_config(struct config_impl *impl, int argc, char *argv[],
+                                const char *short_name, const char *long_name,
+                                const char *config_path)
+{
+    const char *value = find_arg(argc, argv, short_name, long_name);
+    if (value) {
+        char key[MAX_KEY_LEN];
+        struct config_node *parent = navigate_or_create(impl->root, config_path, key);
+        if (parent)
+            node_set_value(parent, key, value);
     }
 }
 
@@ -675,7 +688,8 @@ struct yetty_config_result yetty_config_create(int argc, char *argv[],
 
     try_load_config_file(impl, argc, argv);
     store_platform_paths(impl, paths);
-    parse_execute_arg(impl, argc, argv);
+    parse_arg_to_config(impl, argc, argv, "-e", NULL, "shell/command");
+    parse_arg_to_config(impl, argc, argv, "-r", "--rpc-socket", YETTY_CONFIG_KEY_RPC_SOCKET_PATH);
 
     return YETTY_OK(yetty_config, &impl->base);
 }

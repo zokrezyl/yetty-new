@@ -199,7 +199,7 @@ void yetty_rpc_server_destroy(struct yetty_rpc_server *server)
 }
 
 struct yetty_core_void_result
-yetty_rpc_server_start(struct yetty_rpc_server *server)
+yetty_rpc_server_start(struct yetty_rpc_server *server, const char *path)
 {
 	struct yetty_ipc_socket_result res;
 
@@ -209,7 +209,7 @@ yetty_rpc_server_start(struct yetty_rpc_server *server)
 	if (server->running)
 		return YETTY_ERR(yetty_core_void, "server already running");
 
-	res = yetty_ipc_socket_listen(NULL, server->socket_path);
+	res = yetty_ipc_socket_listen(path, server->socket_path);
 	if (YETTY_IS_ERR(res))
 		return YETTY_ERR(yetty_core_void, res.error.msg);
 

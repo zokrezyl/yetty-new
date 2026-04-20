@@ -11,7 +11,7 @@ target_include_directories(yetty_yrpc PUBLIC
 )
 
 target_link_libraries(yetty_yrpc PUBLIC
-    msgpack-cxx
+    msgpack-c
 )
 
 # Platform-specific IPC socket implementation

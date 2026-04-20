@@ -14,6 +14,7 @@
 #include <yetty/yui/workspace.h>
 #include <yetty/yui/tile.h>
 #include <yetty/yui/view.h>
+#include <yetty/yrpc/rpc-server.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -38,6 +39,9 @@ struct yetty_yetty {
 
     /* Big render target - window-sized texture with surface for presentation */
     struct yetty_render_target *render_target;
+
+    /* RPC server (optional, enabled via -r/--rpc-socket) */
+    struct yetty_rpc_server *rpc_server;
 };
 
 /*===========================================================================
@@ -481,6 +485,29 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
     }
     ydebug("yetty_create: Layout loaded");
 
+    /* Start RPC server if configured */
+    const char *rpc_socket = app_context->config->ops->get_string(
+        app_context->config, YETTY_CONFIG_KEY_RPC_SOCKET_PATH, NULL);
+    if (rpc_socket) {
+        ydebug("yetty_create: Starting RPC server on %s", rpc_socket);
+        struct yetty_rpc_server_ptr_result rpc_res = yetty_rpc_server_create();
+        if (YETTY_IS_OK(rpc_res)) {
+            yetty->rpc_server = rpc_res.value;
+            struct yetty_core_void_result start_res = yetty_rpc_server_start(yetty->rpc_server, rpc_socket);
+            if (YETTY_IS_OK(start_res)) {
+                const char *actual_path = yetty_rpc_server_get_socket_path(yetty->rpc_server);
+                yinfo("yetty: RPC server listening on %s", actual_path);
+                setenv("YETTY_SOCKET", actual_path, 1);
+            } else {
+                yerror("yetty: failed to start RPC server: %s", start_res.error.msg);
+                yetty_rpc_server_destroy(yetty->rpc_server);
+                yetty->rpc_server = NULL;
+            }
+        } else {
+            yerror("yetty: failed to create RPC server: %s", rpc_res.error.msg);
+        }
+    }
+
     ydebug("yetty_create: Complete");
     return YETTY_OK(yetty_yetty, yetty);
 }
@@ -492,6 +519,13 @@ void yetty_destroy(struct yetty_yetty *yetty)
     }
 
     ydebug("yetty_destroy: starting");
+
+    /* Destroy RPC server */
+    if (yetty->rpc_server) {
+        ydebug("yetty_destroy: destroying RPC server");
+        yetty_rpc_server_destroy(yetty->rpc_server);
+        yetty->rpc_server = NULL;
+    }
 
     /* Destroy workspace (also destroys tiles and views including terminals) */
     if (yetty->workspace) {

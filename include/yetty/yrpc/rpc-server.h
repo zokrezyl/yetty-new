@@ -68,11 +68,11 @@ void yetty_rpc_server_destroy(struct yetty_rpc_server *server);
 
 /*
  * Start RPC server on Unix domain socket.
- * Socket path is determined by: $XDG_RUNTIME_DIR/yetty/yetty-<pid>.sock
- * Returns the socket path on success (owned by server, valid until destroy).
+ * If path is NULL, auto-generates: $XDG_RUNTIME_DIR/yetty/yetty-<pid>.sock
+ * Use yetty_rpc_server_get_socket_path() to get the actual path.
  */
 struct yetty_core_void_result
-yetty_rpc_server_start(struct yetty_rpc_server *server);
+yetty_rpc_server_start(struct yetty_rpc_server *server, const char *path);
 
 /*
  * Get the socket path the server is listening on.
