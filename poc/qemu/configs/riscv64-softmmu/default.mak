@@ -1,0 +1,16 @@
+# Minimal configuration for riscv64-softmmu - only virt machine
+CONFIG_PCI_DEVICES=n
+CONFIG_TEST_DEVICES=n
+
+# Disable all machines except virt
+CONFIG_SPIKE=n
+CONFIG_SIFIVE_E=n
+CONFIG_SIFIVE_U=n
+CONFIG_MICROCHIP_PFSOC=n
+CONFIG_SHAKTI_C=n
+CONFIG_XIANGSHAN_KUNMINGHU=n
+CONFIG_MIPS_BOSTON_AIA=n
+CONFIG_MICROBLAZE_V=n
+
+# Keep only virt
+# CONFIG_RISCV_VIRT=y is default
