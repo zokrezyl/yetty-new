@@ -55,10 +55,12 @@ typedef struct yetty_rpc_handler_result (*yetty_rpc_handler_fn)(
 	const struct yetty_rpc_message *msg, void *userdata);
 
 /*
- * Create RPC server.
+ * Create RPC server with event loop for dispatching events.
  * Does not start listening until yetty_rpc_server_start() is called.
+ * Registers built-in handlers for EventLoop channel automatically.
  */
-struct yetty_rpc_server_ptr_result yetty_rpc_server_create(void);
+struct yetty_rpc_server_ptr_result
+yetty_rpc_server_create(struct yetty_core_event_loop *event_loop);
 
 /*
  * Destroy RPC server.
@@ -67,19 +69,19 @@ struct yetty_rpc_server_ptr_result yetty_rpc_server_create(void);
 void yetty_rpc_server_destroy(struct yetty_rpc_server *server);
 
 /*
- * Start RPC server on Unix domain socket.
- * If path is NULL, auto-generates: $XDG_RUNTIME_DIR/yetty/yetty-<pid>.sock
- * Use yetty_rpc_server_get_socket_path() to get the actual path.
+ * Start RPC server on TCP socket.
+ * Host is the bind address (e.g., "127.0.0.1" or "0.0.0.0").
+ * Port is the TCP port number.
  */
 struct yetty_core_void_result
-yetty_rpc_server_start(struct yetty_rpc_server *server, const char *path);
+yetty_rpc_server_start(struct yetty_rpc_server *server,
+		       const char *host, int port);
 
 /*
- * Get the socket path the server is listening on.
- * Returns NULL if server is not running.
+ * Get the port the server is listening on.
+ * Returns 0 if server is not running.
  */
-const char *yetty_rpc_server_get_socket_path(
-	const struct yetty_rpc_server *server);
+int yetty_rpc_server_get_port(const struct yetty_rpc_server *server);
 
 /*
  * Stop RPC server.
@@ -109,14 +111,6 @@ yetty_rpc_server_register_handler(struct yetty_rpc_server *server,
 struct yetty_core_void_result
 yetty_rpc_server_unregister_handler(struct yetty_rpc_server *server,
 				    uint32_t channel, const char *method);
-
-/*
- * Poll for incoming connections and messages.
- * Call this from the main event loop.
- * Timeout in milliseconds (-1 for infinite, 0 for non-blocking).
- */
-struct yetty_core_void_result yetty_rpc_server_poll(
-	struct yetty_rpc_server *server, int timeout_ms);
 
 /*
  * Get the number of connected clients.

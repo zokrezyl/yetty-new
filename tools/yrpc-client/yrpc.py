@@ -6,7 +6,7 @@
 """
 Async RPC client for yetty terminal.
 
-Protocol: msgpack-rpc over Unix domain sockets
+Protocol: msgpack-rpc over TCP
 - Notification: [2, channel, method, params]
 - Request:      [0, msgid, channel, method, params]
 - Response:     [1, msgid, error, result]
@@ -48,8 +48,9 @@ class RpcResponse:
 class RpcClient:
     """Async RPC client for yetty terminal."""
 
-    def __init__(self, socket_path: str | None = None):
-        self.socket_path = socket_path or os.environ.get("YETTY_SOCKET", "")
+    def __init__(self, host: str = "127.0.0.1", port: int = 9999):
+        self.host = host
+        self.port = port
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._msgid = 0
@@ -60,9 +61,7 @@ class RpcClient:
 
     async def connect(self) -> None:
         """Connect to the yetty RPC server."""
-        if not self.socket_path:
-            raise ValueError("No socket path specified. Set YETTY_SOCKET or pass socket_path.")
-        self._reader, self._writer = await asyncio.open_unix_connection(self.socket_path)
+        self._reader, self._writer = await asyncio.open_connection(self.host, self.port)
         self._connected = True
         self._recv_task = asyncio.create_task(self._recv_loop())
 
@@ -273,12 +272,14 @@ except ImportError:
 
 if click:
     @click.group()
-    @click.option("--socket", "-s", envvar="YETTY_SOCKET", help="Socket path")
+    @click.option("--host", "-h", default="127.0.0.1", help="Server host")
+    @click.option("--port", "-p", default=9999, type=int, help="Server port")
     @click.pass_context
-    def cli(ctx, socket):
+    def cli(ctx, host, port):
         """Yetty RPC client."""
         ctx.ensure_object(dict)
-        ctx.obj["socket"] = socket
+        ctx.obj["host"] = host
+        ctx.obj["port"] = port
 
     @cli.command()
     @click.argument("key", type=int)
@@ -287,7 +288,7 @@ if click:
     def key_down(ctx, key, mods):
         """Send key down event."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.key_down(key, mods)
         run_async(_run())
 
@@ -298,7 +299,7 @@ if click:
     def key_up(ctx, key, mods):
         """Send key up event."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.key_up(key, mods)
         run_async(_run())
 
@@ -309,7 +310,7 @@ if click:
     def press(ctx, key, mods):
         """Press and release a key."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.press_key(key, mods)
         run_async(_run())
 
@@ -320,7 +321,7 @@ if click:
     def char_cmd(ctx, codepoint, mods):
         """Send character input."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.char_input(codepoint, mods)
         run_async(_run())
 
@@ -332,7 +333,7 @@ if click:
     def mouse_down(ctx, x, y, button):
         """Send mouse down event."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.mouse_down(x, y, button)
         run_async(_run())
 
@@ -344,7 +345,7 @@ if click:
     def mouse_up(ctx, x, y, button):
         """Send mouse up event."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.mouse_up(x, y, button)
         run_async(_run())
 
@@ -355,7 +356,7 @@ if click:
     def mouse_move(ctx, x, y):
         """Send mouse move event."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.mouse_move(x, y)
         run_async(_run())
 
@@ -369,7 +370,7 @@ if click:
     def scroll(ctx, x, y, dx, dy, mods):
         """Send scroll event."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.scroll(x, y, dx, dy, mods)
         run_async(_run())
 
@@ -380,7 +381,7 @@ if click:
     def resize(ctx, width, height):
         """Resize window."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.resize(width, height)
         run_async(_run())
 
@@ -389,7 +390,7 @@ if click:
     def ui_tree(ctx):
         """Get UI tree."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 tree = await client.ui_tree()
                 click.echo(tree)
         run_async(_run())
@@ -401,7 +402,7 @@ if click:
     def type_cmd(ctx, text, delay):
         """Type text."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.type_text(text, delay)
         run_async(_run())
 
@@ -412,7 +413,7 @@ if click:
     def run(ctx, command, delay):
         """Run a command (type + Enter)."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.run_command(command, delay)
         run_async(_run())
 
@@ -421,7 +422,7 @@ if click:
     def enter(ctx):
         """Press Enter."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.char_input(ord('\n'))
         run_async(_run())
 
@@ -430,7 +431,7 @@ if click:
     def tab(ctx):
         """Press Tab."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.press_key(Keys.TAB)
         run_async(_run())
 
@@ -439,7 +440,7 @@ if click:
     def escape(ctx):
         """Press Escape."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.press_key(Keys.ESCAPE)
         run_async(_run())
 
@@ -448,7 +449,7 @@ if click:
     def ctrl_c(ctx):
         """Send Ctrl+C."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.char_input(3, Mods.CONTROL)
         run_async(_run())
 
@@ -457,7 +458,7 @@ if click:
     def ctrl_d(ctx):
         """Send Ctrl+D."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 await client.char_input(4, Mods.CONTROL)
         run_async(_run())
 
@@ -466,7 +467,7 @@ if click:
     def interactive(ctx):
         """Interactive mode."""
         async def _run():
-            async with RpcClient(ctx.obj["socket"]) as client:
+            async with RpcClient(ctx.obj["host"], ctx.obj["port"]) as client:
                 click.echo("Interactive mode. Ctrl+D to exit.")
                 while True:
                     try:

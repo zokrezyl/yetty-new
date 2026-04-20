@@ -1,26 +1,19 @@
-/* RPC server implementation */
+/* RPC server implementation using event loop TCP server */
 
 #include <yetty/yrpc/rpc-server.h>
-#include <yetty/platform/ipc-socket.h>
+#include <yetty/ycore/event-loop.h>
+#include <yetty/ycore/event.h>
 #include <yetty/ytrace.h>
 
+#include <msgpack.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <poll.h>
-#endif
 
 /* Maximum number of handlers */
 #define MAX_HANDLERS 64
 
-/* Maximum number of clients */
-#define MAX_CLIENTS 16
-
-/* Receive buffer size */
-#define RECV_BUFFER_SIZE 4096
+/* Read buffer size */
+#define READ_BUFFER_SIZE 65536
 
 /* Response buffer size */
 #define RESPONSE_BUFFER_SIZE 4096
@@ -33,29 +26,26 @@ struct yetty_rpc_handler_entry {
 	void *userdata;
 };
 
-/* Client connection */
-struct yetty_rpc_client {
-	yetty_ipc_socket_t socket;
-	uint8_t recv_buf[RECV_BUFFER_SIZE];
-	size_t recv_len;
+/* Per-connection context */
+struct rpc_conn_ctx {
+	struct yetty_rpc_server *server;
+	char read_buf[READ_BUFFER_SIZE];
+	uint8_t response_buf[RESPONSE_BUFFER_SIZE];
 };
 
 /* RPC server */
 struct yetty_rpc_server {
-	yetty_ipc_socket_t listen_socket;
-	char socket_path[YETTY_IPC_SOCKET_PATH_MAX];
+	struct yetty_core_event_loop *event_loop;
+	yetty_core_tcp_server_id server_id;
+	int port;
 	int running;
 
 	/* Handlers */
 	struct yetty_rpc_handler_entry handlers[MAX_HANDLERS];
 	size_t handler_count;
 
-	/* Connected clients */
-	struct yetty_rpc_client clients[MAX_CLIENTS];
+	/* Client count */
 	size_t client_count;
-
-	/* Response buffer (reused) */
-	uint8_t response_buf[RESPONSE_BUFFER_SIZE];
 };
 
 static struct yetty_rpc_handler_entry *
@@ -73,16 +63,16 @@ find_handler(struct yetty_rpc_server *server, uint32_t channel,
 	return NULL;
 }
 
-static void handle_message(struct yetty_rpc_server *server,
-			   struct yetty_rpc_client *client,
+static void handle_message(struct rpc_conn_ctx *ctx,
+			   struct yetty_tcp_conn *conn,
 			   const uint8_t *data, size_t len)
 {
+	struct yetty_rpc_server *server = ctx->server;
 	struct yetty_rpc_message_result parse_res;
 	struct yetty_rpc_message msg;
 	struct yetty_rpc_handler_entry *handler;
 	struct yetty_rpc_handler_result result;
 	struct yetty_rpc_write_buffer wbuf;
-	struct yetty_core_size_result send_res;
 
 	parse_res = yetty_rpc_message_parse(data, len);
 	if (YETTY_IS_ERR(parse_res)) {
@@ -106,13 +96,14 @@ static void handle_message(struct yetty_rpc_server *server,
 
 		if (msg.type == YETTY_RPC_MSG_REQUEST) {
 			/* Send error response */
-			yetty_rpc_write_buffer_init(&wbuf, server->response_buf,
+			yetty_rpc_write_buffer_init(&wbuf, ctx->response_buf,
 						    RESPONSE_BUFFER_SIZE);
 			yetty_rpc_write_response_error(&wbuf, msg.msgid,
 						       "method not found");
-			yetty_ipc_socket_send(client->socket, wbuf.data,
-					      wbuf.len);
+			server->event_loop->ops->tcp_send(conn, wbuf.data,
+							  wbuf.len);
 		}
+		free((void *)msg.params);
 		return;
 	}
 
@@ -121,7 +112,7 @@ static void handle_message(struct yetty_rpc_server *server,
 
 	/* Send response for requests */
 	if (msg.type == YETTY_RPC_MSG_REQUEST) {
-		yetty_rpc_write_buffer_init(&wbuf, server->response_buf,
+		yetty_rpc_write_buffer_init(&wbuf, ctx->response_buf,
 					    RESPONSE_BUFFER_SIZE);
 
 		if (result.ok) {
@@ -139,52 +130,102 @@ static void handle_message(struct yetty_rpc_server *server,
 						       result.error);
 		}
 
-		send_res = yetty_ipc_socket_send(client->socket, wbuf.data,
-						 wbuf.len);
-		if (YETTY_IS_ERR(send_res)) {
-			ytrace("yrpc: failed to send response: %s",
-			       send_res.error.msg);
-		}
+		server->event_loop->ops->tcp_send(conn, wbuf.data, wbuf.len);
 	}
+
+	free((void *)msg.params);
 }
 
-static void process_client_data(struct yetty_rpc_server *server,
-				struct yetty_rpc_client *client)
+/* TCP server callbacks */
+
+static void *rpc_on_connect(void *ctx, struct yetty_tcp_conn *conn)
 {
-	/* For now, assume each recv gets a complete message */
-	/* TODO: proper message framing with length prefix */
-	if (client->recv_len > 0) {
-		handle_message(server, client, client->recv_buf,
-			       client->recv_len);
-		client->recv_len = 0;
+	struct yetty_rpc_server *server = ctx;
+	struct rpc_conn_ctx *conn_ctx;
+
+	(void)conn;
+
+	conn_ctx = calloc(1, sizeof(struct rpc_conn_ctx));
+	if (!conn_ctx) {
+		ytrace("yrpc: failed to allocate connection context");
+		return NULL;
 	}
+
+	conn_ctx->server = server;
+	server->client_count++;
+
+	ytrace("yrpc: client connected (total: %zu)", server->client_count);
+
+	return conn_ctx;
 }
 
-static void close_client(struct yetty_rpc_server *server, size_t index)
+static void rpc_on_alloc(void *conn_ctx_ptr, size_t suggested,
+			 char **buf, size_t *len)
 {
-	struct yetty_rpc_client *client = &server->clients[index];
+	struct rpc_conn_ctx *ctx = conn_ctx_ptr;
 
-	ytrace("yrpc: closing client %zu", index);
+	(void)suggested;
 
-	yetty_ipc_socket_close(client->socket);
-	client->socket = YETTY_IPC_SOCKET_INVALID;
-	client->recv_len = 0;
-
-	/* Move last client to this slot */
-	if (index < server->client_count - 1) {
-		server->clients[index] =
-			server->clients[server->client_count - 1];
+	if (ctx) {
+		*buf = ctx->read_buf;
+		*len = READ_BUFFER_SIZE;
+	} else {
+		*buf = NULL;
+		*len = 0;
 	}
-	server->client_count--;
 }
 
-struct yetty_rpc_server_ptr_result yetty_rpc_server_create(void)
+static void rpc_on_data(void *conn_ctx_ptr, struct yetty_tcp_conn *conn,
+			const char *data, long nread)
+{
+	struct rpc_conn_ctx *ctx = conn_ctx_ptr;
+
+	if (!ctx || nread <= 0)
+		return;
+
+	handle_message(ctx, conn, (const uint8_t *)data, (size_t)nread);
+}
+
+static void rpc_on_disconnect(void *conn_ctx_ptr)
+{
+	struct rpc_conn_ctx *ctx = conn_ctx_ptr;
+
+	if (!ctx)
+		return;
+
+	if (ctx->server && ctx->server->client_count > 0)
+		ctx->server->client_count--;
+
+	ytrace("yrpc: client disconnected (remaining: %zu)",
+	       ctx->server ? ctx->server->client_count : 0);
+
+	free(ctx);
+}
+
+static struct yetty_core_void_result
+register_builtin_handlers(struct yetty_rpc_server *server);
+
+struct yetty_rpc_server_ptr_result
+yetty_rpc_server_create(struct yetty_core_event_loop *event_loop)
 {
 	struct yetty_rpc_server *server;
+	struct yetty_core_void_result res;
+
+	if (!event_loop)
+		return YETTY_ERR(yetty_rpc_server_ptr, "event_loop is NULL");
 
 	server = calloc(1, sizeof(struct yetty_rpc_server));
 	if (!server)
 		return YETTY_ERR(yetty_rpc_server_ptr, "out of memory");
+
+	server->event_loop = event_loop;
+	server->server_id = -1;
+
+	res = register_builtin_handlers(server);
+	if (YETTY_IS_ERR(res)) {
+		free(server);
+		return YETTY_ERR(yetty_rpc_server_ptr, res.error.msg);
+	}
 
 	return YETTY_OK(yetty_rpc_server_ptr, server);
 }
@@ -199,9 +240,12 @@ void yetty_rpc_server_destroy(struct yetty_rpc_server *server)
 }
 
 struct yetty_core_void_result
-yetty_rpc_server_start(struct yetty_rpc_server *server, const char *path)
+yetty_rpc_server_start(struct yetty_rpc_server *server,
+		       const char *host, int port)
 {
-	struct yetty_ipc_socket_result res;
+	struct yetty_core_tcp_server_id_result id_res;
+	struct yetty_core_void_result res;
+	struct yetty_tcp_server_callbacks callbacks;
 
 	if (!server)
 		return YETTY_ERR(yetty_core_void, "server is NULL");
@@ -209,24 +253,44 @@ yetty_rpc_server_start(struct yetty_rpc_server *server, const char *path)
 	if (server->running)
 		return YETTY_ERR(yetty_core_void, "server already running");
 
-	res = yetty_ipc_socket_listen(path, server->socket_path);
-	if (YETTY_IS_ERR(res))
-		return YETTY_ERR(yetty_core_void, res.error.msg);
+	/* Set up callbacks */
+	callbacks.ctx = server;
+	callbacks.on_connect = rpc_on_connect;
+	callbacks.on_alloc = rpc_on_alloc;
+	callbacks.on_data = rpc_on_data;
+	callbacks.on_disconnect = rpc_on_disconnect;
 
-	server->listen_socket = res.value;
+	/* Create TCP server with callbacks */
+	id_res = server->event_loop->ops->create_tcp_server(
+		server->event_loop, host, port, &callbacks);
+	if (YETTY_IS_ERR(id_res))
+		return YETTY_ERR(yetty_core_void, id_res.error.msg);
+
+	server->server_id = id_res.value;
+
+	/* Start listening */
+	res = server->event_loop->ops->start_tcp_server(
+		server->event_loop, server->server_id);
+	if (YETTY_IS_ERR(res)) {
+		server->event_loop->ops->stop_tcp_server(
+			server->event_loop, server->server_id);
+		server->server_id = -1;
+		return res;
+	}
+
+	server->port = port;
 	server->running = 1;
 
-	ytrace("yrpc: server listening on %s", server->socket_path);
+	ytrace("yrpc: server listening on %s:%d", host, port);
 
 	return YETTY_OK_VOID();
 }
 
-const char *
-yetty_rpc_server_get_socket_path(const struct yetty_rpc_server *server)
+int yetty_rpc_server_get_port(const struct yetty_rpc_server *server)
 {
 	if (!server || !server->running)
-		return NULL;
-	return server->socket_path;
+		return 0;
+	return server->port;
 }
 
 struct yetty_core_void_result
@@ -235,19 +299,14 @@ yetty_rpc_server_stop(struct yetty_rpc_server *server)
 	if (!server)
 		return YETTY_OK_VOID();
 
-	/* Close all clients */
-	while (server->client_count > 0) {
-		close_client(server, server->client_count - 1);
-	}
-
-	/* Close listening socket */
-	if (server->listen_socket) {
-		yetty_ipc_socket_close(server->listen_socket);
-		yetty_ipc_socket_unlink(server->socket_path);
-		server->listen_socket = NULL;
+	if (server->server_id >= 0) {
+		server->event_loop->ops->stop_tcp_server(
+			server->event_loop, server->server_id);
+		server->server_id = -1;
 	}
 
 	server->running = 0;
+	server->client_count = 0;
 
 	ytrace("yrpc: server stopped");
 
@@ -315,122 +374,339 @@ yetty_rpc_server_unregister_handler(struct yetty_rpc_server *server,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
-yetty_rpc_server_poll(struct yetty_rpc_server *server, int timeout_ms)
-{
-	struct yetty_ipc_socket_result accept_res;
-	struct yetty_core_size_result recv_res;
-
-	if (!server || !server->running)
-		return YETTY_ERR(yetty_core_void, "server not running");
-
-#ifndef _WIN32
-	/* Unix: use poll() */
-	struct pollfd fds[MAX_CLIENTS + 1];
-	int nfds = 0;
-
-	/* Add listening socket */
-	fds[nfds].fd = yetty_ipc_socket_get_fd(server->listen_socket);
-	fds[nfds].events = POLLIN;
-	nfds++;
-
-	/* Add client sockets */
-	for (size_t i = 0; i < server->client_count; i++) {
-		fds[nfds].fd = yetty_ipc_socket_get_fd(server->clients[i].socket);
-		fds[nfds].events = POLLIN;
-		nfds++;
-	}
-
-	int ret = poll(fds, nfds, timeout_ms);
-	if (ret < 0)
-		return YETTY_ERR(yetty_core_void, "poll failed");
-
-	if (ret == 0)
-		return YETTY_OK_VOID(); /* timeout */
-
-	/* Check for new connections */
-	if (fds[0].revents & POLLIN) {
-		accept_res = yetty_ipc_socket_accept(server->listen_socket);
-		if (YETTY_IS_OK(accept_res) && accept_res.value) {
-			if (server->client_count < MAX_CLIENTS) {
-				struct yetty_rpc_client *client =
-					&server->clients[server->client_count++];
-				client->socket = accept_res.value;
-				client->recv_len = 0;
-				ytrace("yrpc: new client connected (total: %zu)",
-				       server->client_count);
-			} else {
-				yetty_ipc_socket_close(accept_res.value);
-				ytrace("yrpc: rejected client: too many connections");
-			}
-		}
-	}
-
-	/* Check clients for data */
-	for (size_t i = 0; i < server->client_count; i++) {
-		if (fds[i + 1].revents & (POLLIN | POLLHUP | POLLERR)) {
-			struct yetty_rpc_client *client = &server->clients[i];
-
-			recv_res = yetty_ipc_socket_recv(
-				client->socket, client->recv_buf,
-				RECV_BUFFER_SIZE);
-
-			if (YETTY_IS_ERR(recv_res) ||
-			    (YETTY_IS_OK(recv_res) && recv_res.value == 0 &&
-			     (fds[i + 1].revents & POLLHUP))) {
-				/* Connection closed or error */
-				close_client(server, i);
-				i--; /* Recheck this index */
-			} else if (YETTY_IS_OK(recv_res) && recv_res.value > 0) {
-				client->recv_len = recv_res.value;
-				process_client_data(server, client);
-			}
-		}
-	}
-
-#else
-	/* Windows: use has_data polling */
-	(void)timeout_ms; /* TODO: implement timeout */
-
-	/* Check for new connections */
-	accept_res = yetty_ipc_socket_accept(server->listen_socket);
-	if (YETTY_IS_OK(accept_res) && accept_res.value) {
-		if (server->client_count < MAX_CLIENTS) {
-			struct yetty_rpc_client *client =
-				&server->clients[server->client_count++];
-			client->socket = accept_res.value;
-			client->recv_len = 0;
-			ytrace("yrpc: new client connected (total: %zu)",
-			       server->client_count);
-		} else {
-			yetty_ipc_socket_close(accept_res.value);
-		}
-	}
-
-	/* Check clients for data */
-	for (size_t i = 0; i < server->client_count; i++) {
-		struct yetty_rpc_client *client = &server->clients[i];
-
-		if (yetty_ipc_socket_has_data(client->socket)) {
-			recv_res = yetty_ipc_socket_recv(
-				client->socket, client->recv_buf,
-				RECV_BUFFER_SIZE);
-
-			if (YETTY_IS_ERR(recv_res)) {
-				close_client(server, i);
-				i--;
-			} else if (recv_res.value > 0) {
-				client->recv_len = recv_res.value;
-				process_client_data(server, client);
-			}
-		}
-	}
-#endif
-
-	return YETTY_OK_VOID();
-}
-
 size_t yetty_rpc_server_client_count(const struct yetty_rpc_server *server)
 {
 	return server ? server->client_count : 0;
+}
+
+
+/*
+ * Helper to get int from msgpack map by key
+ */
+static int get_map_int(const msgpack_object *map, const char *key, int def)
+{
+	if (map->type != MSGPACK_OBJECT_MAP)
+		return def;
+	size_t key_len = strlen(key);
+	for (uint32_t i = 0; i < map->via.map.size; i++) {
+		msgpack_object_kv *kv = &map->via.map.ptr[i];
+		if (kv->key.type == MSGPACK_OBJECT_STR &&
+		    kv->key.via.str.size == key_len &&
+		    memcmp(kv->key.via.str.ptr, key, key_len) == 0) {
+			if (kv->val.type == MSGPACK_OBJECT_POSITIVE_INTEGER)
+				return (int)kv->val.via.u64;
+			if (kv->val.type == MSGPACK_OBJECT_NEGATIVE_INTEGER)
+				return (int)kv->val.via.i64;
+		}
+	}
+	return def;
+}
+
+static float get_map_float(const msgpack_object *map, const char *key, float def)
+{
+	if (map->type != MSGPACK_OBJECT_MAP)
+		return def;
+	size_t key_len = strlen(key);
+	for (uint32_t i = 0; i < map->via.map.size; i++) {
+		msgpack_object_kv *kv = &map->via.map.ptr[i];
+		if (kv->key.type == MSGPACK_OBJECT_STR &&
+		    kv->key.via.str.size == key_len &&
+		    memcmp(kv->key.via.str.ptr, key, key_len) == 0) {
+			if (kv->val.type == MSGPACK_OBJECT_FLOAT64)
+				return (float)kv->val.via.f64;
+			if (kv->val.type == MSGPACK_OBJECT_FLOAT32)
+				return kv->val.via.f64;
+			if (kv->val.type == MSGPACK_OBJECT_POSITIVE_INTEGER)
+				return (float)kv->val.via.u64;
+			if (kv->val.type == MSGPACK_OBJECT_NEGATIVE_INTEGER)
+				return (float)kv->val.via.i64;
+		}
+	}
+	return def;
+}
+
+/*
+ * Built-in EventLoop channel handlers
+ */
+
+static struct yetty_rpc_handler_result
+handle_key_down(const struct yetty_rpc_message *msg, void *userdata)
+{
+	struct yetty_rpc_server *server = userdata;
+	struct yetty_core_event event = {0};
+	msgpack_unpacked unpacked;
+	msgpack_object *params;
+
+	if (!server->event_loop)
+		return YETTY_RPC_HANDLER_ERR("no event loop");
+	if (!msg->params || msg->params_len == 0)
+		return YETTY_RPC_HANDLER_ERR("missing params");
+
+	msgpack_unpacked_init(&unpacked);
+	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
+				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
+		msgpack_unpacked_destroy(&unpacked);
+		return YETTY_RPC_HANDLER_ERR("invalid params");
+	}
+	params = &unpacked.data;
+
+	event.type = YETTY_EVENT_KEY_DOWN;
+	event.key.key = get_map_int(params, "key", 0);
+	event.key.mods = get_map_int(params, "mods", 0);
+	event.key.scancode = get_map_int(params, "scancode", 0);
+
+	msgpack_unpacked_destroy(&unpacked);
+	server->event_loop->ops->dispatch(server->event_loop, &event);
+	return YETTY_RPC_HANDLER_OK_BOOL(1);
+}
+
+static struct yetty_rpc_handler_result
+handle_key_up(const struct yetty_rpc_message *msg, void *userdata)
+{
+	struct yetty_rpc_server *server = userdata;
+	struct yetty_core_event event = {0};
+	msgpack_unpacked unpacked;
+	msgpack_object *params;
+
+	if (!server->event_loop)
+		return YETTY_RPC_HANDLER_ERR("no event loop");
+	if (!msg->params || msg->params_len == 0)
+		return YETTY_RPC_HANDLER_ERR("missing params");
+
+	msgpack_unpacked_init(&unpacked);
+	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
+				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
+		msgpack_unpacked_destroy(&unpacked);
+		return YETTY_RPC_HANDLER_ERR("invalid params");
+	}
+	params = &unpacked.data;
+
+	event.type = YETTY_EVENT_KEY_UP;
+	event.key.key = get_map_int(params, "key", 0);
+	event.key.mods = get_map_int(params, "mods", 0);
+	event.key.scancode = get_map_int(params, "scancode", 0);
+
+	msgpack_unpacked_destroy(&unpacked);
+	server->event_loop->ops->dispatch(server->event_loop, &event);
+	return YETTY_RPC_HANDLER_OK_BOOL(1);
+}
+
+static struct yetty_rpc_handler_result
+handle_char(const struct yetty_rpc_message *msg, void *userdata)
+{
+	struct yetty_rpc_server *server = userdata;
+	struct yetty_core_event event = {0};
+	msgpack_unpacked unpacked;
+	msgpack_object *params;
+
+	if (!server->event_loop)
+		return YETTY_RPC_HANDLER_ERR("no event loop");
+	if (!msg->params || msg->params_len == 0)
+		return YETTY_RPC_HANDLER_ERR("missing params");
+
+	msgpack_unpacked_init(&unpacked);
+	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
+				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
+		msgpack_unpacked_destroy(&unpacked);
+		return YETTY_RPC_HANDLER_ERR("invalid params");
+	}
+	params = &unpacked.data;
+
+	event.type = YETTY_EVENT_CHAR;
+	event.chr.codepoint = (uint32_t)get_map_int(params, "codepoint", 0);
+	event.chr.mods = get_map_int(params, "mods", 0);
+
+	ytrace("yrpc: handle_char: codepoint=%u ('%c') mods=%d",
+	       event.chr.codepoint,
+	       event.chr.codepoint >= 32 && event.chr.codepoint < 127 ?
+	           (char)event.chr.codepoint : '?',
+	       event.chr.mods);
+
+	msgpack_unpacked_destroy(&unpacked);
+	server->event_loop->ops->dispatch(server->event_loop, &event);
+	return YETTY_RPC_HANDLER_OK_BOOL(1);
+}
+
+static struct yetty_rpc_handler_result
+handle_mouse_down(const struct yetty_rpc_message *msg, void *userdata)
+{
+	struct yetty_rpc_server *server = userdata;
+	struct yetty_core_event event = {0};
+	msgpack_unpacked unpacked;
+	msgpack_object *params;
+
+	if (!server->event_loop)
+		return YETTY_RPC_HANDLER_ERR("no event loop");
+	if (!msg->params || msg->params_len == 0)
+		return YETTY_RPC_HANDLER_ERR("missing params");
+
+	msgpack_unpacked_init(&unpacked);
+	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
+				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
+		msgpack_unpacked_destroy(&unpacked);
+		return YETTY_RPC_HANDLER_ERR("invalid params");
+	}
+	params = &unpacked.data;
+
+	event.type = YETTY_EVENT_MOUSE_DOWN;
+	event.mouse.x = get_map_float(params, "x", 0);
+	event.mouse.y = get_map_float(params, "y", 0);
+	event.mouse.button = get_map_int(params, "button", 0);
+
+	msgpack_unpacked_destroy(&unpacked);
+	server->event_loop->ops->dispatch(server->event_loop, &event);
+	return YETTY_RPC_HANDLER_OK_BOOL(1);
+}
+
+static struct yetty_rpc_handler_result
+handle_mouse_up(const struct yetty_rpc_message *msg, void *userdata)
+{
+	struct yetty_rpc_server *server = userdata;
+	struct yetty_core_event event = {0};
+	msgpack_unpacked unpacked;
+	msgpack_object *params;
+
+	if (!server->event_loop)
+		return YETTY_RPC_HANDLER_ERR("no event loop");
+	if (!msg->params || msg->params_len == 0)
+		return YETTY_RPC_HANDLER_ERR("missing params");
+
+	msgpack_unpacked_init(&unpacked);
+	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
+				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
+		msgpack_unpacked_destroy(&unpacked);
+		return YETTY_RPC_HANDLER_ERR("invalid params");
+	}
+	params = &unpacked.data;
+
+	event.type = YETTY_EVENT_MOUSE_UP;
+	event.mouse.x = get_map_float(params, "x", 0);
+	event.mouse.y = get_map_float(params, "y", 0);
+	event.mouse.button = get_map_int(params, "button", 0);
+
+	msgpack_unpacked_destroy(&unpacked);
+	server->event_loop->ops->dispatch(server->event_loop, &event);
+	return YETTY_RPC_HANDLER_OK_BOOL(1);
+}
+
+static struct yetty_rpc_handler_result
+handle_mouse_move(const struct yetty_rpc_message *msg, void *userdata)
+{
+	struct yetty_rpc_server *server = userdata;
+	struct yetty_core_event event = {0};
+	msgpack_unpacked unpacked;
+	msgpack_object *params;
+
+	if (!server->event_loop)
+		return YETTY_RPC_HANDLER_ERR("no event loop");
+	if (!msg->params || msg->params_len == 0)
+		return YETTY_RPC_HANDLER_ERR("missing params");
+
+	msgpack_unpacked_init(&unpacked);
+	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
+				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
+		msgpack_unpacked_destroy(&unpacked);
+		return YETTY_RPC_HANDLER_ERR("invalid params");
+	}
+	params = &unpacked.data;
+
+	event.type = YETTY_EVENT_MOUSE_MOVE;
+	event.mouse.x = get_map_float(params, "x", 0);
+	event.mouse.y = get_map_float(params, "y", 0);
+
+	msgpack_unpacked_destroy(&unpacked);
+	server->event_loop->ops->dispatch(server->event_loop, &event);
+	return YETTY_RPC_HANDLER_OK_BOOL(1);
+}
+
+static struct yetty_rpc_handler_result
+handle_scroll(const struct yetty_rpc_message *msg, void *userdata)
+{
+	struct yetty_rpc_server *server = userdata;
+	struct yetty_core_event event = {0};
+	msgpack_unpacked unpacked;
+	msgpack_object *params;
+
+	if (!server->event_loop)
+		return YETTY_RPC_HANDLER_ERR("no event loop");
+	if (!msg->params || msg->params_len == 0)
+		return YETTY_RPC_HANDLER_ERR("missing params");
+
+	msgpack_unpacked_init(&unpacked);
+	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
+				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
+		msgpack_unpacked_destroy(&unpacked);
+		return YETTY_RPC_HANDLER_ERR("invalid params");
+	}
+	params = &unpacked.data;
+
+	event.type = YETTY_EVENT_SCROLL;
+	event.scroll.x = get_map_float(params, "x", 0);
+	event.scroll.y = get_map_float(params, "y", 0);
+	event.scroll.dx = get_map_float(params, "dx", 0);
+	event.scroll.dy = get_map_float(params, "dy", 0);
+	event.scroll.mods = get_map_int(params, "mods", 0);
+
+	msgpack_unpacked_destroy(&unpacked);
+	server->event_loop->ops->dispatch(server->event_loop, &event);
+	return YETTY_RPC_HANDLER_OK_BOOL(1);
+}
+
+static struct yetty_rpc_handler_result
+handle_resize(const struct yetty_rpc_message *msg, void *userdata)
+{
+	struct yetty_rpc_server *server = userdata;
+	struct yetty_core_event event = {0};
+	msgpack_unpacked unpacked;
+	msgpack_object *params;
+
+	if (!server->event_loop)
+		return YETTY_RPC_HANDLER_ERR("no event loop");
+	if (!msg->params || msg->params_len == 0)
+		return YETTY_RPC_HANDLER_ERR("missing params");
+
+	msgpack_unpacked_init(&unpacked);
+	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
+				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
+		msgpack_unpacked_destroy(&unpacked);
+		return YETTY_RPC_HANDLER_ERR("invalid params");
+	}
+	params = &unpacked.data;
+
+	event.type = YETTY_EVENT_RESIZE;
+	event.resize.width = get_map_float(params, "width", 0);
+	event.resize.height = get_map_float(params, "height", 0);
+
+	msgpack_unpacked_destroy(&unpacked);
+	server->event_loop->ops->dispatch(server->event_loop, &event);
+	return YETTY_RPC_HANDLER_OK_BOOL(1);
+}
+
+static struct yetty_core_void_result
+register_builtin_handlers(struct yetty_rpc_server *server)
+{
+	struct yetty_core_void_result res;
+
+	if (!server)
+		return YETTY_ERR(yetty_core_void, "server is NULL");
+
+#define REG(method, handler)                                                   \
+	res = yetty_rpc_server_register_handler(                               \
+		server, YETTY_RPC_CHANNEL_EVENT_LOOP, method, handler, server);\
+	if (YETTY_IS_ERR(res))                                                 \
+		return res;
+
+	REG("key_down", handle_key_down);
+	REG("key_up", handle_key_up);
+	REG("char", handle_char);
+	REG("mouse_down", handle_mouse_down);
+	REG("mouse_up", handle_mouse_up);
+	REG("mouse_move", handle_mouse_move);
+	REG("scroll", handle_scroll);
+	REG("resize", handle_resize);
+
+#undef REG
+
+	ytrace("yrpc: registered builtin handlers");
+	return YETTY_OK_VOID();
 }

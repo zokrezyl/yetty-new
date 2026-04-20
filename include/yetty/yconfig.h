@@ -66,7 +66,8 @@ struct yetty_config {
 #define YETTY_CONFIG_KEY_DEBUG_DAMAGE_RECTS "debug/damage-rects"
 #define YETTY_CONFIG_KEY_FONT_FAMILY "font/family"
 #define YETTY_CONFIG_KEY_TERMINAL_FONT_RENDER_METHOD "terminal/text-layer/font/render-method"
-#define YETTY_CONFIG_KEY_RPC_SOCKET_PATH "rpc/socket-path"
+#define YETTY_CONFIG_KEY_RPC_HOST "rpc/host"
+#define YETTY_CONFIG_KEY_RPC_PORT "rpc/port"
 
 /* Create config */
 struct yetty_config_result yetty_config_create(int argc, char *argv[],

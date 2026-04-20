@@ -72,10 +72,17 @@ struct yetty_rpc_message_result yetty_rpc_message_parse(const uint8_t *data,
 		msg.method = array->via.array.ptr[3].via.str.ptr;
 		msg.method_len = array->via.array.ptr[3].via.str.size;
 
-		/* Store params region (raw msgpack bytes) */
-		/* For simplicity, we pass the entire params object as-is */
-		msg.params = NULL;
-		msg.params_len = 0;
+		/* Pack params object back to msgpack bytes */
+		if (array_size >= 5) {
+			msgpack_sbuffer sbuf;
+			msgpack_packer pk;
+			msgpack_sbuffer_init(&sbuf);
+			msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+			msgpack_pack_object(&pk, array->via.array.ptr[4]);
+			/* Caller must free msg.params */
+			msg.params = (uint8_t *)sbuf.data;
+			msg.params_len = sbuf.size;
+		}
 
 	} else if (type == YETTY_RPC_MSG_RESPONSE) {
 		/* Response: [1, msgid, error, result] */
@@ -108,6 +115,18 @@ struct yetty_rpc_message_result yetty_rpc_message_parse(const uint8_t *data,
 		}
 		msg.method = array->via.array.ptr[2].via.str.ptr;
 		msg.method_len = array->via.array.ptr[2].via.str.size;
+
+		/* Pack params object back to msgpack bytes */
+		if (array_size >= 4) {
+			msgpack_sbuffer sbuf;
+			msgpack_packer pk;
+			msgpack_sbuffer_init(&sbuf);
+			msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
+			msgpack_pack_object(&pk, array->via.array.ptr[3]);
+			/* Caller must free msg.params */
+			msg.params = (uint8_t *)sbuf.data;
+			msg.params_len = sbuf.size;
+		}
 
 	} else {
 		msgpack_unpacked_destroy(&unpacked);

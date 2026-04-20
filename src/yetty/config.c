@@ -689,7 +689,8 @@ struct yetty_config_result yetty_config_create(int argc, char *argv[],
     try_load_config_file(impl, argc, argv);
     store_platform_paths(impl, paths);
     parse_arg_to_config(impl, argc, argv, "-e", NULL, "shell/command");
-    parse_arg_to_config(impl, argc, argv, "-r", "--rpc-socket", YETTY_CONFIG_KEY_RPC_SOCKET_PATH);
+    parse_arg_to_config(impl, argc, argv, NULL, "--rpc-host", YETTY_CONFIG_KEY_RPC_HOST);
+    parse_arg_to_config(impl, argc, argv, "-r", "--rpc-port", YETTY_CONFIG_KEY_RPC_PORT);
 
     return YETTY_OK(yetty_config, &impl->base);
 }
