@@ -100,7 +100,7 @@ jobs:
         nix_path: nixpkgs=channel:nixos-unstable
 
     - name: Build Linux
-      run: nix develop --command make -f Makefile.2 build PLATFORM=desktop LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
+      run: make -f Makefile.2 build PLATFORM=desktop LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
 
     - name: Upload Linux artifacts
       uses: actions/upload-artifact@v4
@@ -134,7 +134,7 @@ jobs:
         nix_path: nixpkgs=channel:nixos-unstable
 
     - name: Build with ASAN
-      run: nix develop --command make -f Makefile.2 build PLATFORM=desktop LOGLEVEL=ytrace BUILDTYPE=asan USE_NIX=yes
+      run: make -f Makefile.2 build PLATFORM=desktop LOGLEVEL=ytrace BUILDTYPE=asan USE_NIX=yes
 
     - name: Run ASAN smoke test
       run: |
@@ -281,7 +281,7 @@ jobs:
           -dname "CN=Android Debug,O=Android,C=US"
 
     - name: Build Android APK
-      run: nix develop .#android --command make -f Makefile.2 build PLATFORM=android LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
+      run: make -f Makefile.2 build PLATFORM=android LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
 
     - name: Upload Android APK
       uses: actions/upload-artifact@v4
@@ -318,7 +318,7 @@ jobs:
           -dname "CN=Android Debug,O=Android,C=US"
 
     - name: Build Android x86_64 APK
-      run: nix develop .#android --command make -f Makefile.2 build PLATFORM=android_x86_64 LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
+      run: make -f Makefile.2 build PLATFORM=android_x86_64 LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
 
     - name: Upload Android x86_64 APK
       uses: actions/upload-artifact@v4
@@ -482,7 +482,7 @@ jobs:
         nix_path: nixpkgs=channel:nixos-unstable
 
     - name: Build WebAssembly with Nix
-      run: nix develop .#web --command make -f Makefile.2 build PLATFORM=webasm LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
+      run: make -f Makefile.2 build PLATFORM=webasm LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
 
     - name: Prepare site directory
       run: |

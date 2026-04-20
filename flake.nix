@@ -74,6 +74,7 @@
           # Fonts
           freetype
           fontconfig
+          expat  # Required by fontconfig
 
           # Other
           glfw
