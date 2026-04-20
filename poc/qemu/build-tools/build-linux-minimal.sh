@@ -50,8 +50,8 @@ mkdir -p "$BUILDDIR"
 cd "$BUILDDIR"
 
 # Use minimal device config - copy our custom config
-mkdir -p "$QEMUSRC/configs/devices/riscv64-softmmu"
-cp "$SCRIPTDIR/../configs/riscv64-softmmu/default.mak" "$QEMUSRC/configs/devices/riscv64-softmmu/"
+#mkdir -p "$QEMUSRC/configs/devices/riscv64-softmmu"
+#cp "$SCRIPTDIR/../configs/riscv64-softmmu/default.mak" "$QEMUSRC/configs/devices/riscv64-softmmu/"
 
 echo "Configuring QEMU..."
 
@@ -64,12 +64,16 @@ CONFIGURE_OPTS=(
   --enable-virtfs
   --enable-attr
   --enable-fdt=internal
+  --enable-trace-backends=nop
   --disable-werror
   --disable-docs
   --disable-guest-agent
   --disable-tools
-  --extra-cflags="-Os"
-  --extra-cxxflags="-Os"
+  --disable-qom-cast-debug
+  --disable-coroutine-pool
+  --extra-cflags="-Os -ffunction-sections -fdata-sections"
+  --extra-cxxflags="-Os -ffunction-sections -fdata-sections"
+  --extra-ldflags="-Wl,--gc-sections"
 )
 
 if [ -n "$CC_WRAPPER" ]; then
