@@ -1,30 +1,13 @@
 # QA/Static analysis tools
 # These tools require LLVM/Clang development libraries
-#
-# LLVM/Clang discovery:
-#   - In nix shell: LLVM is in PATH, CMake finds it automatically
-#   - On system: Set LLVM_DIR and Clang_DIR externally if not in standard paths
-#     e.g., cmake -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm -DClang_DIR=/usr/lib/cmake/clang-18
 
-# Only set default system paths if not already provided and not in nix
+# Use LLVM 18 on system, nix provides its own
 if(NOT DEFINED LLVM_DIR AND NOT DEFINED ENV{NIX_CC})
-    # Try common system locations for Ubuntu/Debian
-    foreach(LLVM_VER 21 20 19 18 17 16 15)
-        if(EXISTS "/usr/lib/llvm-${LLVM_VER}/lib/cmake/llvm")
-            set(LLVM_DIR "/usr/lib/llvm-${LLVM_VER}/lib/cmake/llvm")
-            break()
-        endif()
-    endforeach()
+    set(LLVM_DIR "/usr/lib/llvm-18/lib/cmake/llvm")
 endif()
 
 if(NOT DEFINED Clang_DIR AND NOT DEFINED ENV{NIX_CC})
-    # Try common system locations for Ubuntu/Debian
-    foreach(LLVM_VER 21 20 19 18 17 16 15)
-        if(EXISTS "/usr/lib/cmake/clang-${LLVM_VER}")
-            set(Clang_DIR "/usr/lib/cmake/clang-${LLVM_VER}")
-            break()
-        endif()
-    endforeach()
+    set(Clang_DIR "/usr/lib/cmake/clang-18")
 endif()
 
 find_package(LLVM REQUIRED CONFIG)

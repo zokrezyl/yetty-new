@@ -68,7 +68,7 @@ target_compile_definitions(yetty PRIVATE
 
 set_target_properties(yetty PROPERTIES ENABLE_EXPORTS TRUE)
 
-# Fontconfig
+# Fontconfig - static linking
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
 target_include_directories(yetty PRIVATE ${FONTCONFIG_INCLUDE_DIRS})
