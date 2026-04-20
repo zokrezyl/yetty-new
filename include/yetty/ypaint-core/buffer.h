@@ -40,21 +40,37 @@ struct yetty_ypaint_id_result
 yetty_ypaint_core_buffer_add_prim(struct yetty_ypaint_core_buffer *buf,
                              const void *data, size_t size);
 
-// Primitive size callback: given type, return size in bytes (0 = unknown type)
-typedef size_t (*yetty_ypaint_core_primitive_size_fn)(uint32_t type);
+// Primitive ops vtable - all functions return result types
+struct yetty_ypaint_prim_ops {
+    struct yetty_core_size_result (*size)(const uint32_t *prim);
+    struct rectangle_result (*aabb)(const uint32_t *prim);
+};
 
-// Register handler for type range [type_min, type_max] with buffer instance
+// Flyweight - returned by handler
+struct yetty_ypaint_prim_flyweight {
+    const uint32_t *data;  // type at data[0]
+    const struct yetty_ypaint_prim_ops *ops;
+};
+
+// Handler function - takes position, returns flyweight (ops=NULL if not handled)
+typedef struct yetty_ypaint_prim_flyweight (*yetty_ypaint_prim_handler_fn)(
+    const uint32_t *prim);
+
+// Set default handler (SDF) - called first, fast path
+void yetty_ypaint_core_buffer_set_default_handler(
+    struct yetty_ypaint_core_buffer *buf,
+    yetty_ypaint_prim_handler_fn handler);
+
+// Register additional handler for type range [type_min, type_max]
 struct yetty_core_void_result yetty_ypaint_core_buffer_register_handler(
     struct yetty_ypaint_core_buffer *buf,
     uint32_t type_min,
     uint32_t type_max,
-    yetty_ypaint_core_primitive_size_fn size_fn);
+    yetty_ypaint_prim_handler_fn handler);
 
 // Primitive iterator
 struct yetty_ypaint_core_primitive_iter {
-    const void *data;
-    uint32_t type;
-    size_t size;
+    struct yetty_ypaint_prim_flyweight fw;
 };
 
 YETTY_RESULT_DECLARE(yetty_ypaint_core_primitive_iter, struct yetty_ypaint_core_primitive_iter);

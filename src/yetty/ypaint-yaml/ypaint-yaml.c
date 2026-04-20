@@ -1,7 +1,10 @@
 // ypaint-yaml - YAML parser for ypaint primitives
 
 #include <yetty/ypaint-yaml/ypaint-yaml.h>
-#include <yetty/ysdf/types.gen.h>
+#include <yetty/ysdf/handler.h>
+#include <yetty/yplot/yplot.h>
+#include <yetty/yfsvm/compiler.h>
+#include <yetty/ypaint-core/complex-prim-types.h>
 #include <yetty/ytrace.h>
 #include <yaml.h>
 #include <stdlib.h>
@@ -318,6 +321,202 @@ static void register_text_factory(struct yetty_ypaint_yaml_parser *parser)
 }
 
 //=============================================================================
+// yplot factory
+//=============================================================================
+
+#define YPLOT_MAX_FUNCTIONS 8
+
+static struct yetty_core_void_result
+yplot_factory(struct yetty_ypaint_core_buffer *buffer,
+              yaml_parser_t *yaml_parser,
+              const char *primitive_type_name)
+{
+    (void)primitive_type_name;
+
+    float x = 0, y = 0, w = 300, h = 200;
+    float x_min = -3.14159f, x_max = 3.14159f;
+    float y_min = -1.5f, y_max = 1.5f;
+    bool show_grid = true, show_axes = true, show_labels = true;
+    char exprs[YPLOT_MAX_FUNCTIONS][256] = {{0}};
+    uint32_t colors[YPLOT_MAX_FUNCTIONS] = {0};
+    int func_count = 0;
+
+    char prop_key[64] = {0};
+    int expect_value = 0;
+    int in_array = 0, in_functions = 0, in_func_item = 0;
+    int array_idx = 0;
+    float array_vals[8] = {0};
+
+    yaml_event_t event;
+    int depth = 0, done = 0;
+
+    while (!done) {
+        if (!yaml_parser_parse(yaml_parser, &event))
+            return YETTY_ERR(yetty_core_void, "yaml parse error in yplot");
+
+        switch (event.type) {
+        case YAML_MAPPING_START_EVENT:
+            depth++;
+            if (in_functions && !in_func_item) {
+                in_func_item = 1;
+                if (func_count < YPLOT_MAX_FUNCTIONS) {
+                    colors[func_count] = yetty_yplot_default_color(func_count);
+                }
+            }
+            break;
+        case YAML_MAPPING_END_EVENT:
+            depth--;
+            if (in_func_item) {
+                in_func_item = 0;
+                if (func_count < YPLOT_MAX_FUNCTIONS)
+                    func_count++;
+            }
+            if (depth == 0) done = 1;
+            break;
+        case YAML_SEQUENCE_START_EVENT:
+            if (strcmp(prop_key, "functions") == 0) {
+                in_functions = 1;
+            } else {
+                in_array = 1;
+                array_idx = 0;
+            }
+            break;
+        case YAML_SEQUENCE_END_EVENT:
+            if (in_functions) {
+                in_functions = 0;
+            } else if (in_array) {
+                if (strcmp(prop_key, "position") == 0 && array_idx >= 2) {
+                    x = array_vals[0]; y = array_vals[1];
+                } else if (strcmp(prop_key, "size") == 0 && array_idx >= 2) {
+                    w = array_vals[0]; h = array_vals[1];
+                } else if (strcmp(prop_key, "x_range") == 0 && array_idx >= 2) {
+                    x_min = array_vals[0]; x_max = array_vals[1];
+                } else if (strcmp(prop_key, "y_range") == 0 && array_idx >= 2) {
+                    y_min = array_vals[0]; y_max = array_vals[1];
+                }
+                in_array = 0;
+            }
+            expect_value = 0;
+            break;
+        case YAML_SCALAR_EVENT: {
+            const char *val = (const char *)event.data.scalar.value;
+            if (in_array) {
+                if (array_idx < 8)
+                    array_vals[array_idx++] = strtof(val, NULL);
+            } else if (in_func_item) {
+                if (!expect_value) {
+                    strncpy(prop_key, val, sizeof(prop_key) - 1);
+                    expect_value = 1;
+                } else {
+                    if (strcmp(prop_key, "expr") == 0 && func_count < YPLOT_MAX_FUNCTIONS) {
+                        strncpy(exprs[func_count], val, 255);
+                    } else if (strcmp(prop_key, "color") == 0 && func_count < YPLOT_MAX_FUNCTIONS) {
+                        yetty_yplot_parse_color(val, &colors[func_count]);
+                    }
+                    expect_value = 0;
+                }
+            } else if (!expect_value) {
+                strncpy(prop_key, val, sizeof(prop_key) - 1);
+                expect_value = 1;
+            } else {
+                if (strcmp(prop_key, "show_grid") == 0)
+                    show_grid = (strcmp(val, "true") == 0 || strcmp(val, "1") == 0);
+                else if (strcmp(prop_key, "show_axes") == 0)
+                    show_axes = (strcmp(val, "true") == 0 || strcmp(val, "1") == 0);
+                else if (strcmp(prop_key, "show_labels") == 0)
+                    show_labels = (strcmp(val, "true") == 0 || strcmp(val, "1") == 0);
+                expect_value = 0;
+            }
+            break;
+        }
+        default:
+            break;
+        }
+        yaml_event_delete(&event);
+    }
+
+    /* Create yplot object */
+    struct yetty_yplot_yplot_result plot_res = yetty_yplot_yplot_create();
+    if (YETTY_IS_ERR(plot_res))
+        return YETTY_ERR(yetty_core_void, plot_res.error.msg);
+
+    struct yetty_yplot_yplot *plot = plot_res.value;
+    yetty_yplot_yplot_set_bounds(plot, x, y, w, h);
+    yetty_yplot_yplot_set_range(plot, x_min, x_max, y_min, y_max);
+
+    struct yetty_yplot_axis *axis = yetty_yplot_yplot_axis(plot);
+    axis->show_grid = show_grid;
+    axis->show_axes = show_axes;
+    axis->show_labels = show_labels;
+
+    /* Compile expressions and build combined bytecode */
+    if (func_count > 0) {
+        /* Build multi-expression string: "expr1; expr2; ..." */
+        char multi_expr[2048] = {0};
+        size_t off = 0;
+        for (int i = 0; i < func_count; i++) {
+            if (i > 0 && off < sizeof(multi_expr) - 2) {
+                multi_expr[off++] = ';';
+                multi_expr[off++] = ' ';
+            }
+            size_t len = strlen(exprs[i]);
+            if (off + len < sizeof(multi_expr)) {
+                memcpy(multi_expr + off, exprs[i], len);
+                off += len;
+            }
+        }
+
+        struct yetty_yfsvm_program_result prog_res =
+            yetty_yfsvm_compile_multi_expr(multi_expr, off);
+        if (YETTY_IS_ERR(prog_res)) {
+            ydebug("yplot: compile failed: %s", prog_res.error.msg);
+        } else {
+            uint32_t bc_buf[1024];
+            uint32_t bc_count = yetty_yfsvm_program_serialize(&prog_res.value, bc_buf, 1024);
+            if (bc_count > 0) {
+                yetty_yplot_yplot_set_bytecode(plot, bc_buf, bc_count);
+            }
+        }
+
+        for (int i = 0; i < func_count; i++)
+            yetty_yplot_yplot_set_function_color(plot, i, colors[i]);
+    }
+
+    /* Serialize to wire format */
+    uint32_t payload_size = yetty_yplot_yplot_serialize_wire(plot, NULL, 0);
+    size_t total_size = sizeof(struct yetty_ypaint_complex_prim) + payload_size;
+    uint8_t *prim_buf = malloc(total_size);
+    if (!prim_buf) {
+        yetty_yplot_yplot_destroy(plot);
+        return YETTY_ERR(yetty_core_void, "malloc failed");
+    }
+
+    struct yetty_ypaint_complex_prim *prim = (struct yetty_ypaint_complex_prim *)prim_buf;
+    prim->type = YETTY_YPLOT_PRIM_TYPE_ID;
+    prim->payload_size = payload_size;
+    yetty_yplot_yplot_serialize_wire(plot, prim->data, payload_size);
+
+    yetty_yplot_yplot_destroy(plot);
+
+    /* Add to buffer */
+    struct yetty_ypaint_id_result id_res =
+        yetty_ypaint_core_buffer_add_prim(buffer, prim_buf, total_size);
+    free(prim_buf);
+
+    if (id_res.error) {
+        return YETTY_ERR(yetty_core_void, "add_prim failed");
+    }
+
+    ydebug("yplot: added prim at offset %u, total_size=%zu", id_res.id, total_size);
+    return YETTY_OK_VOID();
+}
+
+static void register_yplot_factory(struct yetty_ypaint_yaml_parser *parser)
+{
+    yetty_ypaint_yaml_parser_register(parser, "yplot", yplot_factory);
+}
+
+//=============================================================================
 // High level API
 //=============================================================================
 
@@ -333,7 +532,10 @@ yetty_ypaint_yaml_parse(const char *yaml, size_t len)
 
     struct yetty_ypaint_core_buffer *buffer = buf_res.value;
 
-    yetty_ypaint_core_buffer_register_handler(buffer, 0, 255, yetty_ysdf_primitive_size);
+    /* Register complex prim types (only needs to be done once, but is idempotent) */
+    yetty_yplot_register();
+
+    yetty_ypaint_core_buffer_set_default_handler(buffer, yetty_ysdf_handler);
 
     struct yetty_ypaint_yaml_parser *parser = yetty_ypaint_yaml_parser_create();
     if (!parser) {
@@ -348,7 +550,8 @@ yetty_ypaint_yaml_parse(const char *yaml, size_t len)
         ydebug("ypaint_yaml: ysdf factories registered, count=%zu", parser->count);
     }
     register_text_factory(parser);
-    ydebug("ypaint_yaml: text factory registered, total count=%zu", parser->count);
+    register_yplot_factory(parser);
+    ydebug("ypaint_yaml: text+yplot factories registered, total count=%zu", parser->count);
 
     struct yetty_core_void_result parse_res =
         yetty_ypaint_yaml_parser_parse(parser, buffer, yaml, len);

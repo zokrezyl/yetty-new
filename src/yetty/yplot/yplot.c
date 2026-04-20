@@ -1,9 +1,179 @@
 // yplot - Plot complex primitive for ypaint
 
 #include <yetty/yplot/yplot.h>
+#include <yetty/ypaint-core/complex-prim-types.h>
+#include <yetty/yrender/gpu-resource-set.h>
 
 #include <stdlib.h>
 #include <string.h>
+
+#define INCBIN_STYLE 1
+#include <incbin.h>
+INCBIN(yplot_shader, YETTY_YPLOT_SHADER_PATH);
+
+//=============================================================================
+// Wire format layout (payload after FAM header)
+//=============================================================================
+//
+// Offset  Size  Field
+// 0       4     bounds_x (float)
+// 4       4     bounds_y (float)
+// 8       4     bounds_w (float)
+// 12      4     bounds_h (float)
+// 16      4     flags (u32)
+// 20      4     function_count (u32)
+// 24      32    colors[8] (u32 * 8)
+// 56      4     bytecode_word_count (u32)
+// 60      var   bytecode[] (u32 * bytecode_word_count)
+//
+#define YPLOT_WIRE_BOUNDS_X_OFF      0
+#define YPLOT_WIRE_BOUNDS_Y_OFF      4
+#define YPLOT_WIRE_BOUNDS_W_OFF      8
+#define YPLOT_WIRE_BOUNDS_H_OFF      12
+#define YPLOT_WIRE_FLAGS_OFF         16
+#define YPLOT_WIRE_FUNC_COUNT_OFF    20
+#define YPLOT_WIRE_COLORS_OFF        24
+#define YPLOT_WIRE_BYTECODE_LEN_OFF  56
+#define YPLOT_WIRE_BYTECODE_OFF      60
+#define YPLOT_WIRE_HEADER_SIZE       60
+
+//=============================================================================
+// Wire format cache (for GPU resources)
+//=============================================================================
+
+struct yplot_wire_cache {
+    struct yetty_render_gpu_resource_set rs;
+    struct yetty_render_buffer bytecode_buf;
+    struct yetty_render_buffer color_buf;
+};
+
+//=============================================================================
+// Wire format ops implementation
+//=============================================================================
+
+static struct rectangle_result
+yplot_wire_get_aabb(const uint8_t *data, uint32_t payload_size)
+{
+    if (payload_size < YPLOT_WIRE_HEADER_SIZE)
+        return YETTY_ERR(rectangle, "payload too small");
+
+    float x, y, w, h;
+    memcpy(&x, data + YPLOT_WIRE_BOUNDS_X_OFF, sizeof(float));
+    memcpy(&y, data + YPLOT_WIRE_BOUNDS_Y_OFF, sizeof(float));
+    memcpy(&w, data + YPLOT_WIRE_BOUNDS_W_OFF, sizeof(float));
+    memcpy(&h, data + YPLOT_WIRE_BOUNDS_H_OFF, sizeof(float));
+
+    struct rectangle rect = {
+        .min = { .x = x, .y = y },
+        .max = { .x = x + w, .y = y + h }
+    };
+    return YETTY_OK(rectangle, rect);
+}
+
+static struct yetty_render_gpu_resource_set_result
+yplot_wire_get_gpu_resource_set(const uint8_t *data, uint32_t payload_size,
+                                 void **cache_ptr)
+{
+    if (payload_size < YPLOT_WIRE_HEADER_SIZE)
+        return YETTY_ERR(yetty_render_gpu_resource_set, "payload too small");
+
+    /* Get or create cache */
+    struct yplot_wire_cache *cache = *cache_ptr;
+    if (!cache) {
+        cache = calloc(1, sizeof(struct yplot_wire_cache));
+        if (!cache)
+            return YETTY_ERR(yetty_render_gpu_resource_set, "alloc failed");
+        *cache_ptr = cache;
+        strncpy(cache->rs.namespace, "yplot", YETTY_RENDER_NAME_MAX - 1);
+    }
+
+    /* Parse wire data */
+    uint32_t bytecode_word_count;
+    memcpy(&bytecode_word_count, data + YPLOT_WIRE_BYTECODE_LEN_OFF, sizeof(uint32_t));
+
+    size_t expected_size = YPLOT_WIRE_HEADER_SIZE + bytecode_word_count * sizeof(uint32_t);
+    if (payload_size < expected_size)
+        return YETTY_ERR(yetty_render_gpu_resource_set, "bytecode truncated");
+
+    /* Update bytecode buffer */
+    size_t bc_size = bytecode_word_count * sizeof(uint32_t);
+    if (cache->bytecode_buf.capacity < bc_size) {
+        free(cache->bytecode_buf.data);
+        cache->bytecode_buf.data = malloc(bc_size);
+        cache->bytecode_buf.capacity = bc_size;
+    }
+    memcpy(cache->bytecode_buf.data, data + YPLOT_WIRE_BYTECODE_OFF, bc_size);
+    cache->bytecode_buf.size = bc_size;
+
+    /* Update color buffer */
+    size_t color_size = YETTY_YPLOT_MAX_FUNCTIONS * sizeof(uint32_t);
+    if (cache->color_buf.capacity < color_size) {
+        free(cache->color_buf.data);
+        cache->color_buf.data = malloc(color_size);
+        cache->color_buf.capacity = color_size;
+    }
+    memcpy(cache->color_buf.data, data + YPLOT_WIRE_COLORS_OFF, color_size);
+    cache->color_buf.size = color_size;
+
+    /* Build resource set */
+    cache->rs.buffer_count = 0;
+
+    if (bc_size > 0) {
+        cache->rs.buffers[cache->rs.buffer_count] = cache->bytecode_buf;
+        strncpy(cache->rs.buffers[cache->rs.buffer_count].name,
+                "bytecode", YETTY_RENDER_NAME_MAX - 1);
+        cache->rs.buffer_count++;
+    }
+
+    cache->rs.buffers[cache->rs.buffer_count] = cache->color_buf;
+    strncpy(cache->rs.buffers[cache->rs.buffer_count].name,
+            "colors", YETTY_RENDER_NAME_MAX - 1);
+    cache->rs.buffer_count++;
+
+    /* Set shader code */
+    yetty_render_shader_code_set(&cache->rs.shader,
+        (const char *)gyplot_shader_data, gyplot_shader_size);
+
+    return YETTY_OK(yetty_render_gpu_resource_set, &cache->rs);
+}
+
+static void yplot_wire_destroy_cache(void *cache_ptr)
+{
+    struct yplot_wire_cache *cache = cache_ptr;
+    if (!cache)
+        return;
+    free(cache->bytecode_buf.data);
+    free(cache->color_buf.data);
+    free(cache);
+}
+
+//=============================================================================
+// Wire format ops tables
+//=============================================================================
+
+static const struct yetty_ypaint_complex_prim_parse_ops yplot_parse_ops = {
+    .get_aabb = yplot_wire_get_aabb,
+};
+
+static const struct yetty_ypaint_complex_prim_runtime_ops yplot_runtime_ops = {
+    .get_gpu_resource_set = yplot_wire_get_gpu_resource_set,
+    .destroy_cache = yplot_wire_destroy_cache,
+};
+
+//=============================================================================
+// Registration
+//=============================================================================
+
+void yetty_yplot_register(void)
+{
+    static const struct yetty_ypaint_complex_prim_type_info info = {
+        .type_id = YETTY_YPLOT_PRIM_TYPE_ID,
+        .name = "yplot",
+        .parse_ops = &yplot_parse_ops,
+        .runtime_ops = &yplot_runtime_ops,
+    };
+    yetty_ypaint_complex_prim_register(&info);
+}
 
 //=============================================================================
 // Default color palette
@@ -401,6 +571,56 @@ uint32_t yetty_yplot_yplot_serialize_prim_header(struct yetty_yplot_yplot *plot,
     conv.f = plot->bounds_h; buffer[i++] = conv.u;
 
     return YETTY_YPLOT_PRIM_HEADER_WORDS;
+}
+
+//=============================================================================
+// Wire format serialization
+//=============================================================================
+
+uint32_t yetty_yplot_yplot_serialize_wire(struct yetty_yplot_yplot *plot,
+                                           uint8_t *buffer,
+                                           uint32_t buffer_capacity)
+{
+    if (!plot)
+        return 0;
+
+    uint32_t bytecode_bytes = plot->bytecode_word_count * sizeof(uint32_t);
+    uint32_t total_size = YPLOT_WIRE_HEADER_SIZE + bytecode_bytes;
+
+    if (!buffer)
+        return total_size;
+    if (buffer_capacity < total_size)
+        return 0;
+
+    /* bounds */
+    memcpy(buffer + YPLOT_WIRE_BOUNDS_X_OFF, &plot->bounds_x, sizeof(float));
+    memcpy(buffer + YPLOT_WIRE_BOUNDS_Y_OFF, &plot->bounds_y, sizeof(float));
+    memcpy(buffer + YPLOT_WIRE_BOUNDS_W_OFF, &plot->bounds_w, sizeof(float));
+    memcpy(buffer + YPLOT_WIRE_BOUNDS_H_OFF, &plot->bounds_h, sizeof(float));
+
+    /* flags */
+    uint32_t flags = 0;
+    if (plot->axis.show_grid) flags |= YETTY_YPLOT_FLAG_GRID;
+    if (plot->axis.show_axes) flags |= YETTY_YPLOT_FLAG_AXES;
+    if (plot->axis.show_labels) flags |= YETTY_YPLOT_FLAG_LABELS;
+    memcpy(buffer + YPLOT_WIRE_FLAGS_OFF, &flags, sizeof(uint32_t));
+
+    /* function count */
+    memcpy(buffer + YPLOT_WIRE_FUNC_COUNT_OFF, &plot->function_count, sizeof(uint32_t));
+
+    /* colors */
+    for (int i = 0; i < YETTY_YPLOT_MAX_FUNCTIONS; i++) {
+        memcpy(buffer + YPLOT_WIRE_COLORS_OFF + i * sizeof(uint32_t),
+               &plot->functions[i].color, sizeof(uint32_t));
+    }
+
+    /* bytecode length and data */
+    memcpy(buffer + YPLOT_WIRE_BYTECODE_LEN_OFF, &plot->bytecode_word_count, sizeof(uint32_t));
+    if (plot->bytecode && bytecode_bytes > 0) {
+        memcpy(buffer + YPLOT_WIRE_BYTECODE_OFF, plot->bytecode, bytecode_bytes);
+    }
+
+    return total_size;
 }
 
 //=============================================================================

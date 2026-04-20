@@ -1,5 +1,6 @@
 add_library(yetty_ypaint_core STATIC
     buffer.c
+    complex-prim-types.c
 )
 
 target_include_directories(yetty_ypaint_core PUBLIC

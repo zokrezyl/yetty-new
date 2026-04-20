@@ -48,8 +48,7 @@ grid[row=7].add(prim_ref{lines_ahead=0, prim_index=0})
 
 **STEP 5: Serialize to GPU buffer**
 ```
-packed_offset = col | (rolling_row << 16) = col | (5 << 16)
-[packed_offset][type][z][fill][stroke][stroke_w][cx][cy=30][radius=25]
+[rolling_row=5][type][z][fill][stroke][stroke_w][cx][cy=30][radius=25]
 ```
 
 **IMPORTANT: Geometry coordinates (cy=30) are stored exactly as user specified. NO transformation. The shader adjusts the TEST POSITION, not the primitive coordinates.**
@@ -61,8 +60,8 @@ packed_offset = col | (rolling_row << 16) = col | (5 << 16)
 **STEP 6: Render pixel at screen Y=130 (circle center)**
 ```wgsl
 pixel_pos_y = 130              // screen pixel Y coordinate
-rolling_row = 5                // from packed_offset
-row_origin = 0                 // uniform
+rolling_row = 5                // from buffer[prim_offset + 0]
+row_origin = 0                 // uniform (rolling_row_0)
 
 y_offset = (rolling_row - row_origin) * cell_height = (5 - 0) * 20 = 100
 prim_scene_pos_y = pixel_pos_y - y_offset = 130 - 100 = 30
@@ -110,7 +109,7 @@ In scrolling mode (terminal), lines scroll off the top. Naive approach updates e
 
 2. **Primitive stores rolling_row at creation** - First word of primitive data:
    ```
-   packed_offset = col | (rolling_row << 16)
+   [0] rolling_row
    ```
    Where `rolling_row` = row0_absolute + cursor_row (rolling row at insertion).
 
@@ -120,8 +119,8 @@ In scrolling mode (terminal), lines scroll off the top. Naive approach updates e
 
 5. **GPU adjusts test position:**
    ```wgsl
-   let rolling_row = (packed_offset >> 16u) & 0xFFFFu;
-   let y_offset = f32(rolling_row - row_origin) * cell_height;
+   let rolling_row = storage_buffer[prim_offset + 0u];
+   let y_offset = f32(i32(rolling_row) - i32(row_origin)) * cell_height;
    let prim_scene_pos_y = pixel_pos_y - y_offset;
    // SDF evaluates: sd_xxx(prim_scene_pos, stored_coords)
    ```
@@ -145,35 +144,37 @@ In scrolling mode (terminal), lines scroll off the top. Naive approach updates e
 Each primitive is serialized to a GPU buffer as consecutive 32-bit words:
 
 ```
-[packed_offset][type][attrs][style][geometry...]
+[rolling_row][type][z_order][fill_color][stroke_color][stroke_width][geometry...]
 ```
 
 Where:
-- `packed_offset` = `col | (rolling_row << 16)` - column and rolling row at insertion
+- `rolling_row` = rolling row at insertion (for y_offset calculation)
 - `type` = primitive type for shader dispatch
-- `attrs` = rendering attributes
-- `style` = fill/stroke colors and width
+- `z_order` = rendering order
+- `fill_color` = packed RGBA
+- `stroke_color` = packed RGBA
+- `stroke_width` = f32
 - `geometry` = primitive-specific SDF parameters (stored as-is, no transformation)
 
 ---
 
 ## Shader Access
 
-Buffer is `array<f32>` in WGSL. Shader reads at fixed offsets:
+Buffer is `array<u32>` in WGSL. Shader reads at fixed offsets:
 
 ```
-[0] packed_offset - col | (rolling_row << 16)
-[1] type          - bitcast<u32> for dispatch
-[2] z_order       - rendering order
-[3] fill_color    - bitcast<u32>
-[4] stroke_color  - bitcast<u32>
-[5] stroke_width  - f32
+[0] rolling_row   - u32, rolling row at insertion
+[1] type          - u32, primitive type for dispatch
+[2] z_order       - u32, rendering order
+[3] fill_color    - u32, packed RGBA
+[4] stroke_color  - u32, packed RGBA
+[5] stroke_width  - f32 (bitcast)
 [6+] geometry     - primitive-specific args (stored as-is)
 ```
 
 Shader:
-1. Extracts `rolling_row` from `packed_offset`
-2. Computes `y_offset = (rolling_row - row_origin) * cell_height`
+1. Reads `rolling_row` from offset 0
+2. Computes `y_offset = (rolling_row - row_origin) * cell_height` (signed arithmetic)
 3. Adjusts **test position**: `prim_scene_pos_y = pixel_pos_y - y_offset`
 4. Dispatches based on type
 5. Extracts geometry at known offsets (used as-is, no transformation)
@@ -277,3 +278,157 @@ struct yetty_ypaint_box {
     float round;
 };
 ```
+
+---
+
+## Complex Primitives
+
+Complex primitives (yplot, nested ypaint, images, video) require more than simple SDF evaluation. They have their own rendering logic and may contain nested content.
+
+### Types
+
+| Type ID | Name | Description |
+|---------|------|-------------|
+| 0x80000001 | FONT | Font definition (atlas + metrics) |
+| 0x80000002 | TEXT_SPAN | Text with font reference |
+| 0x80000003 | YPLOT | Function plot with yfsvm bytecode |
+| 0x80000004+ | Reserved | Future: images, video, nested ypaint |
+
+### Storage (Simplified vs Simple Primitives)
+
+Unlike simple primitives which register in ALL overlapping grid cells, complex primitives use simplified storage:
+
+**Simple primitives:**
+```
+grid[row=5].add(prim_ref{lines_ahead=2, prim_index=0})
+grid[row=6].add(prim_ref{lines_ahead=1, prim_index=0})
+grid[row=7].add(prim_ref{lines_ahead=0, prim_index=0})
+```
+
+**Complex primitives:**
+```
+line[7].complex_prims.add(ptr)  // Only last overlapping line
+```
+
+Why simplified:
+- Complex prims render to atlas, not via grid dispatch
+- Last line reference sufficient for lifetime management
+- When last line scrolls out → prim out of scope → release
+
+### Atlas-Based Rendering
+
+Complex primitives use a render-to-texture approach with atlas composition:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  Render Target                       │
+│  ┌───────────────────────────────────────────────┐  │
+│  │ Simple prims layer (SDF + glyphs via grid)    │  │
+│  └───────────────────────────────────────────────┘  │
+│                        ↓ blend                       │
+│  ┌───────────────────────────────────────────────┐  │
+│  │ Complex prims atlas (pre-rendered textures)   │  │
+│  │  ┌────────┬────────┬────────┐                 │  │
+│  │  │ yplot1 │ yplot2 │ image1 │                 │  │
+│  │  ├────────┴────────┴────────┤                 │  │
+│  │  │    nested_ypaint         │                 │  │
+│  │  └──────────────────────────┘                 │  │
+│  └───────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────┘
+```
+
+**Flow:**
+1. Simple prims → rendered via grid dispatch (existing flow)
+2. Complex prims → each rendered to atlas region
+3. Atlas texture blended with simple prims layer
+4. Result → render target (surface or ymux)
+
+### Atlas Lifecycle
+
+**Creation:**
+- Atlas created on first render of complex prims
+- Regions packed (simple bin packing)
+- Each complex prim renders to its region
+
+**Caching:**
+- Atlas texture cached between frames
+- Prim dirty flag → re-render only that region (or full atlas if simpler)
+- No re-render if nothing changed
+
+**Release:**
+- Complex prim attached to last overlapping line
+- Line scrolls out → prim released
+- Atlas region freed (or full atlas recreated)
+
+### Recursive Composition
+
+Complex primitives can contain nested ypaint (recursive):
+
+```
+Terminal
+  └── ypaint layer
+        ├── simple prims → grid dispatch
+        └── complex prims → atlas
+              └── nested ypaint → nested atlas (cached)
+                    ├── simple prims → nested grid dispatch
+                    └── complex prims → nested-nested atlas
+                          └── ...recursive
+```
+
+Each nesting level:
+- Has its own atlas
+- Renders independently
+- Cached separately
+- Blended into parent's atlas
+
+### Atlas Sizing
+
+| Scenario | Atlas Size | Memory |
+|----------|-----------|--------|
+| Typical (5-20 prims) | 2048×2048 | 16MB |
+| Busy (50+ prims) | 4096×4096 | 64MB |
+| Extreme (100+ prims) | 8192×8192 | 256MB |
+
+Query `device.limits.maxTextureDimension2D` for GPU limit. Safe baseline: 4096×4096.
+
+### Render Target Integration
+
+The render target abstraction handles both local GPU and remote ymux:
+
+**Surface target (local GPU):**
+```
+layer_renderer[0] → simple prims texture
+complex_prim_atlas → pre-rendered complex prims
+         ↓
+    blend_pass → surface
+```
+
+**ymux target (remote):**
+```
+Serialize complex prim data → send to remote
+Remote renders using same atlas approach
+```
+
+### Wire Format (FAM - Flexible Array Member)
+
+Complex primitives in buffer use FAM format:
+
+```
+[type: u32][payload_size: u32][data: u8[payload_size]]
+```
+
+Type IDs use upper half of u32 range (≥ 0x80000000) to distinguish from simple SDF types (0-255).
+
+### Flyweight Pattern
+
+Complex primitive rendering follows flyweight pattern:
+
+**Intrinsic (shared per type):**
+- Shader code
+- Uniforms (constants)
+
+**Extrinsic (per instance):**
+- Bounds, colors, content data
+- Atlas region (render artifact)
+
+Type registration provides intrinsic parts. Instance data stored in buffer. Atlas is render-time artifact, cached but separate from data model.

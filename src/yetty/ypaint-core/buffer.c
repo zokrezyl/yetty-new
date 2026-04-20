@@ -9,11 +9,11 @@
 #define YPAINT_BUFFER_INITIAL_CAPACITY 1024
 #define YPAINT_MAX_HANDLERS 4
 
-// Primitive handler
-struct primitive_handler {
+// Handler registration
+struct primitive_handler_reg {
     uint32_t type_min;
     uint32_t type_max;
-    yetty_ypaint_core_primitive_size_fn size_fn;
+    yetty_ypaint_prim_handler_fn handler;
 };
 
 #define YPAINT_MAX_FONTS 8
@@ -22,7 +22,8 @@ struct primitive_handler {
 // YPaint buffer - contains primitive data, fonts, text spans
 struct yetty_ypaint_core_buffer {
   struct yetty_core_named_buffer primitives;
-  struct primitive_handler handlers[YPAINT_MAX_HANDLERS];
+  yetty_ypaint_prim_handler_fn default_handler;
+  struct primitive_handler_reg handlers[YPAINT_MAX_HANDLERS];
   size_t handler_count;
 
   struct yetty_font_blob fonts[YPAINT_MAX_FONTS];
@@ -32,34 +33,52 @@ struct yetty_ypaint_core_buffer {
   uint32_t text_span_count;
 };
 
+void yetty_ypaint_core_buffer_set_default_handler(
+    struct yetty_ypaint_core_buffer *buf,
+    yetty_ypaint_prim_handler_fn handler) {
+    if (buf)
+        buf->default_handler = handler;
+}
+
 struct yetty_core_void_result yetty_ypaint_core_buffer_register_handler(
     struct yetty_ypaint_core_buffer *buf,
     uint32_t type_min,
     uint32_t type_max,
-    yetty_ypaint_core_primitive_size_fn size_fn) {
+    yetty_ypaint_prim_handler_fn handler) {
     if (!buf)
         return YETTY_ERR(yetty_core_void, "buf is NULL");
     if (buf->handler_count >= YPAINT_MAX_HANDLERS)
         return YETTY_ERR(yetty_core_void, "max handlers reached");
-    if (!size_fn)
-        return YETTY_ERR(yetty_core_void, "size_fn is NULL");
+    if (!handler)
+        return YETTY_ERR(yetty_core_void, "handler is NULL");
     buf->handlers[buf->handler_count].type_min = type_min;
     buf->handlers[buf->handler_count].type_max = type_max;
-    buf->handlers[buf->handler_count].size_fn = size_fn;
+    buf->handlers[buf->handler_count].handler = handler;
     buf->handler_count++;
     return YETTY_OK_VOID();
 }
 
-static struct yetty_core_size_result get_primitive_size(
-    const struct yetty_ypaint_core_buffer *buf, uint32_t type) {
+// Get flyweight for primitive at position
+static struct yetty_ypaint_prim_flyweight get_flyweight(
+    const struct yetty_ypaint_core_buffer *buf, const uint32_t *prim) {
+    struct yetty_ypaint_prim_flyweight fw = {NULL, NULL};
+
+    // Try default handler first (fast path for SDF types)
+    if (buf->default_handler) {
+        fw = buf->default_handler(prim);
+        if (fw.ops)
+            return fw;
+    }
+    // Fallback to additional handlers by type range
+    uint32_t type = prim[0];
     for (size_t i = 0; i < buf->handler_count; i++) {
         if (type >= buf->handlers[i].type_min && type <= buf->handlers[i].type_max) {
-            size_t size = buf->handlers[i].size_fn(type);
-            if (size > 0)
-                return YETTY_OK(yetty_core_size, size);
+            fw = buf->handlers[i].handler(prim);
+            if (fw.ops)
+                return fw;
         }
     }
-    return YETTY_ERR(yetty_core_size, "unknown primitive type");
+    return fw;  // ops=NULL means unhandled
 }
 
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
@@ -182,19 +201,12 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_fir
   if (!buf->primitives.buf.data || buf->primitives.buf.size == 0)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "buffer empty");
 
-  const uint8_t *data = buf->primitives.buf.data;
-  uint32_t type;
-  memcpy(&type, data, sizeof(type));
+  const uint32_t *prim = (const uint32_t *)buf->primitives.buf.data;
+  struct yetty_ypaint_prim_flyweight fw = get_flyweight(buf, prim);
+  if (!fw.ops)
+    return YETTY_ERR(yetty_ypaint_core_primitive_iter, "unknown primitive type");
 
-  struct yetty_core_size_result size_res = get_primitive_size(buf, type);
-  if (YETTY_IS_ERR(size_res))
-    return YETTY_ERR(yetty_ypaint_core_primitive_iter, size_res.error.msg);
-
-  struct yetty_ypaint_core_primitive_iter iter = {
-      .data = data,
-      .type = type,
-      .size = size_res.value,
-  };
+  struct yetty_ypaint_core_primitive_iter iter = {.fw = fw};
   return YETTY_OK(yetty_ypaint_core_primitive_iter, iter);
 }
 
@@ -203,29 +215,25 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_nex
     const struct yetty_ypaint_core_primitive_iter *iter) {
   if (!buf)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "buf is NULL");
-  if (!iter)
+  if (!iter || !iter->fw.ops)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "iter is NULL");
 
   const uint8_t *base = buf->primitives.buf.data;
   size_t buf_size = buf->primitives.buf.size;
-  const uint8_t *next = (const uint8_t *)iter->data + iter->size;
-  size_t offset = next - base;
+  struct yetty_core_size_result size_res = iter->fw.ops->size(iter->fw.data);
+  if (YETTY_IS_ERR(size_res))
+    return YETTY_ERR(yetty_ypaint_core_primitive_iter, size_res.error.msg);
+  const uint32_t *next = (const uint32_t *)((const uint8_t *)iter->fw.data + size_res.value);
+  size_t offset = (const uint8_t *)next - base;
 
   if (offset >= buf_size)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "end of buffer");
 
-  uint32_t type;
-  memcpy(&type, next, sizeof(type));
+  struct yetty_ypaint_prim_flyweight fw = get_flyweight(buf, next);
+  if (!fw.ops)
+    return YETTY_ERR(yetty_ypaint_core_primitive_iter, "unknown primitive type");
 
-  struct yetty_core_size_result size_res = get_primitive_size(buf, type);
-  if (YETTY_IS_ERR(size_res))
-    return YETTY_ERR(yetty_ypaint_core_primitive_iter, size_res.error.msg);
-
-  struct yetty_ypaint_core_primitive_iter new_iter = {
-      .data = next,
-      .type = type,
-      .size = size_res.value,
-  };
+  struct yetty_ypaint_core_primitive_iter new_iter = {.fw = fw};
   return YETTY_OK(yetty_ypaint_core_primitive_iter, new_iter);
 }
 

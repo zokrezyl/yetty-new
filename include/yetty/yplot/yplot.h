@@ -13,6 +13,7 @@
 #include <yetty/ycore/result.h>
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/ypaint-core/complex-prim.h>
+#include <yetty/ypaint-core/complex-prim-types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,8 +29,8 @@ extern "C" {
 #define YETTY_YPLOT_DEFAULT_Y_MIN -1.5f
 #define YETTY_YPLOT_DEFAULT_Y_MAX  1.5f
 
-// Primitive type ID (must match shader)
-#define YETTY_YPLOT_PRIM_TYPE_ID 0x0009
+// Primitive type ID - use complex prim range
+#define YETTY_YPLOT_PRIM_TYPE_ID YETTY_YPAINT_TYPE_YPLOT
 
 // Flags
 #define YETTY_YPLOT_FLAG_GRID   0x01
@@ -174,6 +175,19 @@ uint32_t yetty_yplot_yplot_serialize_prim_header(struct yetty_yplot_yplot *plot,
                                                   uint32_t z_order,
                                                   uint32_t *buffer,
                                                   uint32_t buffer_capacity);
+
+//=============================================================================
+// Wire format (for complex prim buffer storage)
+//=============================================================================
+
+// Register yplot with complex prim type registry (call at init)
+void yetty_yplot_register(void);
+
+// Serialize yplot to wire format payload (returns payload size, or 0 on error)
+// If buffer is NULL, returns required size
+uint32_t yetty_yplot_yplot_serialize_wire(struct yetty_yplot_yplot *plot,
+                                           uint8_t *buffer,
+                                           uint32_t buffer_capacity);
 
 //=============================================================================
 // Utilities

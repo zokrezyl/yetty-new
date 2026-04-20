@@ -508,19 +508,24 @@ add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
                        const struct yetty_ypaint_core_primitive_iter *iter) {
   if (!canvas)
     return YETTY_ERR(uint32, "canvas is NULL");
-  if (!iter || !iter->data || iter->size == 0)
+  if (!iter || !iter->fw.data || !iter->fw.ops)
     return YETTY_ERR(uint32, "invalid iterator");
   if (canvas->cell_size.height <= 0.0f)
     return YETTY_ERR(uint32, "cell_height <= 0");
   if (canvas->cell_size.width <= 0.0f)
     return YETTY_ERR(uint32, "cell_width <= 0");
 
-  uint32_t word_count = iter->size / sizeof(float);
-  struct rectangle_result aabb_res =
-      yetty_ysdf_compute_aabb(iter->data, word_count);
+  if (!iter->fw.ops->aabb || !iter->fw.ops->size)
+    return YETTY_ERR(uint32, "handler missing ops");
+  struct rectangle_result aabb_res = iter->fw.ops->aabb(iter->fw.data);
   if (YETTY_IS_ERR(aabb_res))
     return YETTY_ERR(uint32, aabb_res.error.msg);
   struct rectangle aabb = aabb_res.value;
+
+  struct yetty_core_size_result size_res = iter->fw.ops->size(iter->fw.data);
+  if (YETTY_IS_ERR(size_res))
+    return YETTY_ERR(uint32, size_res.error.msg);
+  uint32_t word_count = size_res.value / sizeof(uint32_t);
 
   if (aabb.min.y > aabb.max.y) {
     yerror("BUG: inverted AABB! min.y=%.1f > max.y=%.1f", aabb.min.y,
@@ -544,7 +549,8 @@ add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
     return YETTY_ERR(uint32, "line_buffer_get returned NULL");
 
   uint32_t prim_index = prim_data_array_push(
-      &base_line->prims, primitive_rolling_row, iter->data, word_count);
+      &base_line->prims, primitive_rolling_row,
+      (const float *)iter->fw.data, word_count);
 
   uint32_t prim_col_min =
       (uint32_t)(aabb.min.x / canvas->cell_size.width);
@@ -729,10 +735,9 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
     struct yetty_ypaint_core_primitive_iter iter = iter_res.value;
 
     while (1) {
-      uint32_t word_count = iter.size / sizeof(float);
-
-      struct rectangle_result aabb_res =
-          yetty_ysdf_compute_aabb(iter.data, word_count);
+      if (!iter.fw.ops->aabb)
+        break;
+      struct rectangle_result aabb_res = iter.fw.ops->aabb(iter.fw.data);
       if (YETTY_IS_ERR(aabb_res))
         break;
       struct rectangle aabb = aabb_res.value;
@@ -825,7 +830,7 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
       }
       uint32_t prim_max_row = prim_res.value;
 
-      ydebug("add_buffer: PASS2 added prim type=%u max_row=%u", iter.type,
+      ydebug("add_buffer: PASS2 added prim type=%u max_row=%u", iter.fw.data[0],
              prim_max_row);
 
       if (prim_max_row > max_row_seen)

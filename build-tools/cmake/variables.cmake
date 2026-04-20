@@ -71,7 +71,7 @@ option(YETTY_ENABLE_FEATURE_YDRAW_MAZE "ydraw-maze — ydraw maze demo"        O
 option(YETTY_ENABLE_FEATURE_YPAINT    "ypaint — painting"                    ON)
 option(YETTY_ENABLE_FEATURE_YRICH     "yrich — rich text"                    OFF)
 option(YETTY_ENABLE_FEATURE_DIAGRAM   "diagram — diagram rendering"          OFF)
-option(YETTY_ENABLE_FEATURE_YPLOT     "yplot — plotting"                     OFF)
+option(YETTY_ENABLE_FEATURE_YPLOT     "yplot — plotting"                     ON)
 
 # Cards
 option(YETTY_ENABLE_FEATURE_CARDS     "cards — card plugin system"           OFF)
