@@ -157,18 +157,23 @@ jobs:
     runs-on: macos-15-intel
 
     env:
-      BUILD_DIR: build-desktop-ytrace-release-nix
+      BUILD_DIR: build-macos-ytrace-release
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install Nix
-      uses: cachix/install-nix-action@v27
-      with:
-        nix_path: nixpkgs=channel:nixos-unstable
+    - name: Install macOS dependencies
+      run: brew install automake autoconf libtool meson ninja nasm brotli
 
-    - name: Build macOS
-      run: nix develop --command make -f Makefile.2 build PLATFORM=desktop LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes PARALLEL_JOBS=4
+    - name: Configure CMake
+      run: >
+        cmake -B ${{ env.BUILD_DIR }}
+        -DCMAKE_BUILD_TYPE=Release
+        -DYETTY_ENABLE_TOOL_QA=OFF
+        -S ${{ github.workspace }}
+
+    - name: Build
+      run: cmake --build ${{ env.BUILD_DIR }} --config Release --parallel 4
 
     - name: Upload macOS artifacts
       uses: actions/upload-artifact@v4
@@ -191,13 +196,28 @@ jobs:
     runs-on: windows-latest
 
     env:
-      BUILD_DIR: build-windows-ytrace-release-nonix
+      BUILD_DIR: build-windows-ytrace-release
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Build Windows
-      run: make -f Makefile.2 build PLATFORM=windows LOGLEVEL=ytrace BUILDTYPE=release
+    - name: Install Windows build dependencies
+      shell: bash
+      run: |
+        choco install nasm -y
+        choco install make -y
+        pip install meson
+
+    - name: Configure CMake
+      run: >
+        cmake -B ${{ env.BUILD_DIR }}
+        -DCMAKE_BUILD_TYPE=Release
+        -DWEBGPU_BACKEND=dawn
+        -DYETTY_ENABLE_TOOL_QA=OFF
+        -S ${{ github.workspace }}
+
+    - name: Build
+      run: cmake --build ${{ env.BUILD_DIR }} --config Release --parallel
 
     - name: Stage Windows runtime
       shell: pwsh
@@ -207,8 +227,6 @@ jobs:
         New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 
         $ExeDir = if (Test-Path "$BuildDir/Release/yetty.exe") { "$BuildDir/Release" } else { $BuildDir }
-        Write-Host "Exe directory: $ExeDir"
-
         Get-ChildItem "$ExeDir/*.exe" -ErrorAction SilentlyContinue | Copy-Item -Destination $StageDir
         Get-ChildItem "$ExeDir/*.dll" -ErrorAction SilentlyContinue | Copy-Item -Destination $StageDir
 
@@ -374,18 +392,28 @@ jobs:
     runs-on: macos-latest
 
     env:
-      BUILD_DIR: build-ios-ytrace-release-nix
+      BUILD_DIR: build-ios-ytrace-release
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install Nix
-      uses: cachix/install-nix-action@v27
-      with:
-        nix_path: nixpkgs=channel:nixos-unstable
+    - name: Install macOS dependencies
+      run: brew install automake autoconf libtool ninja nasm brotli meson
 
-    - name: Build iOS
-      run: nix develop --command make -f Makefile.2 build PLATFORM=ios LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes PARALLEL_JOBS=4
+    - name: Configure CMake for iOS
+      run: >
+        cmake -B ${{ env.BUILD_DIR }}
+        -G Ninja
+        -DCMAKE_SYSTEM_NAME=iOS
+        -DCMAKE_OSX_ARCHITECTURES=arm64
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+        -DCMAKE_BUILD_TYPE=Release
+        -DYETTY_IOS=ON
+        -DYETTY_ENABLE_TOOL_QA=OFF
+        -S ${{ github.workspace }}
+
+    - name: Build
+      run: cmake --build ${{ env.BUILD_DIR }} --config Release --parallel 4
 
     - name: Upload iOS artifacts
       uses: actions/upload-artifact@v4
@@ -403,18 +431,29 @@ jobs:
     runs-on: macos-15-intel
 
     env:
-      BUILD_DIR: build-ios_x86_64-ytrace-release-nix
+      BUILD_DIR: build-ios_x86_64-ytrace-release
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install Nix
-      uses: cachix/install-nix-action@v27
-      with:
-        nix_path: nixpkgs=channel:nixos-unstable
+    - name: Install macOS dependencies
+      run: brew install automake autoconf libtool ninja nasm brotli meson
 
-    - name: Build iOS Simulator
-      run: nix develop --command make -f Makefile.2 build PLATFORM=ios_x86_64 LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes PARALLEL_JOBS=4
+    - name: Configure CMake for iOS Simulator
+      run: >
+        cmake -B ${{ env.BUILD_DIR }}
+        -G Ninja
+        -DCMAKE_SYSTEM_NAME=iOS
+        -DCMAKE_OSX_ARCHITECTURES=x86_64
+        -DCMAKE_OSX_SYSROOT=iphonesimulator
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+        -DCMAKE_BUILD_TYPE=Release
+        -DYETTY_IOS=ON
+        -DYETTY_ENABLE_TOOL_QA=OFF
+        -S ${{ github.workspace }}
+
+    - name: Build
+      run: cmake --build ${{ env.BUILD_DIR }} --config Release --parallel 4
 
     - name: Upload iOS Simulator artifacts
       uses: actions/upload-artifact@v4
