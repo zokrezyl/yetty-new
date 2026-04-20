@@ -13,6 +13,7 @@
 #include <yetty/yterm/ypaint-layer.h>
 #include <yetty/yconfig.h>
 #include <yetty/yetty.h>
+#include <yetty/yplot/yplot.h>
 #include <yetty/ytrace.h>
 
 
@@ -330,12 +331,18 @@ ypaint_layer_write(struct yetty_term_terminal_layer *self,
     free(decoded);
 
     if (YETTY_IS_ERR(res)) {
+      yerror("ypaint_layer_write: yaml parse failed: %s", res.error.msg);
       yetty_term_osc_args_free(&args);
       return YETTY_ERR(yetty_core_void, res.error.msg);
     }
 
+    ydebug("ypaint_layer_write: yaml parsed OK");
+
     struct yetty_core_void_result add_res =
         yetty_ypaint_canvas_add_buffer(layer->canvas, res.value);
+
+    ydebug("ypaint_layer_write: add_buffer result=%s",
+           YETTY_IS_OK(add_res) ? "OK" : add_res.error.msg);
     yetty_ypaint_core_buffer_destroy(res.value);
     if (YETTY_IS_ERR(add_res)) {
       yetty_term_osc_args_free(&args);
@@ -458,6 +465,14 @@ ypaint_layer_get_gpu_resource_set(
       layer->rs.children[child_idx++] =
           (struct yetty_render_gpu_resource_set *)font_rs.value;
     }
+  }
+
+  /* Include yplot shader (for yplot_render function, includes yfsvm as child) */
+  const struct yetty_render_gpu_resource_set *yplot_shader_rs =
+      yetty_yplot_get_shader_resource_set();
+  if (yplot_shader_rs && child_idx < YETTY_RENDER_RS_MAX_CHILDREN) {
+    layer->rs.children[child_idx++] =
+        (struct yetty_render_gpu_resource_set *)yplot_shader_rs;
   }
 
   /* Include complex prim resource sets as children */

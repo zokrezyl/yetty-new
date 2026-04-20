@@ -359,6 +359,7 @@ yplot_factory(struct yetty_ypaint_core_buffer *buffer,
             depth++;
             if (in_functions && !in_func_item) {
                 in_func_item = 1;
+                expect_value = 0;  /* Reset for new func item context */
                 if (func_count < YPLOT_MAX_FUNCTIONS) {
                     colors[func_count] = yetty_yplot_default_color(func_count);
                 }
@@ -404,12 +405,15 @@ yplot_factory(struct yetty_ypaint_core_buffer *buffer,
                 if (array_idx < 8)
                     array_vals[array_idx++] = strtof(val, NULL);
             } else if (in_func_item) {
+                ydebug("yplot: func_item scalar val='%s' expect_value=%d prop_key='%s'",
+                       val, expect_value, prop_key);
                 if (!expect_value) {
                     strncpy(prop_key, val, sizeof(prop_key) - 1);
                     expect_value = 1;
                 } else {
                     if (strcmp(prop_key, "expr") == 0 && func_count < YPLOT_MAX_FUNCTIONS) {
                         strncpy(exprs[func_count], val, 255);
+                        ydebug("yplot: parsed expr[%d]='%s'", func_count, exprs[func_count]);
                     } else if (strcmp(prop_key, "color") == 0 && func_count < YPLOT_MAX_FUNCTIONS) {
                         yetty_yplot_parse_color(val, &colors[func_count]);
                     }
@@ -466,6 +470,7 @@ yplot_factory(struct yetty_ypaint_core_buffer *buffer,
             }
         }
 
+        ydebug("yplot: compiling %d functions, expr='%.*s'", func_count, (int)off, multi_expr);
         struct yetty_yfsvm_program_result prog_res =
             yetty_yfsvm_compile_multi_expr(multi_expr, off);
         if (YETTY_IS_ERR(prog_res)) {
@@ -473,6 +478,7 @@ yplot_factory(struct yetty_ypaint_core_buffer *buffer,
         } else {
             uint32_t bc_buf[1024];
             uint32_t bc_count = yetty_yfsvm_program_serialize(&prog_res.value, bc_buf, 1024);
+            ydebug("yplot: bytecode serialized, bc_count=%u words", bc_count);
             if (bc_count > 0) {
                 yetty_yplot_yplot_set_bytecode(plot, bc_buf, bc_count);
             }
@@ -495,6 +501,18 @@ yplot_factory(struct yetty_ypaint_core_buffer *buffer,
     prim->type = YETTY_YPLOT_PRIM_TYPE_ID;
     prim->payload_size = payload_size;
     yetty_yplot_yplot_serialize_wire(plot, prim->data, payload_size);
+
+    /* Debug: dump wire format */
+    uint32_t *wire = (uint32_t *)prim->data;
+    ydebug("yplot wire: func_count=%u bytecode_len=%u payload_size=%u",
+           wire[5], wire[14], payload_size);
+    if (wire[14] > 0) {
+        ydebug("yplot wire: bytecode header[0..3] = 0x%08x 0x%08x 0x%08x 0x%08x",
+               wire[15], wire[16], wire[17], wire[18]);
+        /* Function table at bytecode+4 */
+        ydebug("yplot wire: func_table[0..1] = 0x%08x 0x%08x",
+               wire[15+4], wire[15+5]);
+    }
 
     yetty_yplot_yplot_destroy(plot);
 

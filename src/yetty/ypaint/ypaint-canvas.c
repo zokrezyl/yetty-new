@@ -8,6 +8,7 @@
 #include <yetty/ycore/result.h>
 #include <yetty/ycore/types.h>
 #include <yetty/ypaint-core/buffer.h>
+#include <yetty/ypaint-core/complex-prim-types.h>
 #include <yetty/ypaint/flyweight.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/yfont/font.h>
@@ -593,15 +594,26 @@ add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
 
   if (!iter->fw.ops->aabb || !iter->fw.ops->size)
     return YETTY_ERR(uint32, "handler missing ops");
+
+  uint32_t prim_type = iter->fw.data[0];
+  ydebug("add_primitive_internal: START type=0x%08x", prim_type);
+
   struct rectangle_result aabb_res = iter->fw.ops->aabb(iter->fw.data);
-  if (YETTY_IS_ERR(aabb_res))
+  if (YETTY_IS_ERR(aabb_res)) {
+    yerror("add_primitive_internal: aabb failed: %s", aabb_res.error.msg);
     return YETTY_ERR(uint32, aabb_res.error.msg);
+  }
   struct rectangle aabb = aabb_res.value;
 
   struct yetty_core_size_result size_res = iter->fw.ops->size(iter->fw.data);
-  if (YETTY_IS_ERR(size_res))
+  if (YETTY_IS_ERR(size_res)) {
+    yerror("add_primitive_internal: size failed: %s", size_res.error.msg);
     return YETTY_ERR(uint32, size_res.error.msg);
+  }
   uint32_t word_count = size_res.value / sizeof(uint32_t);
+
+  ydebug("add_primitive_internal: type=0x%08x aabb=[%.1f,%.1f,%.1f,%.1f] words=%u",
+         prim_type, aabb.min.x, aabb.min.y, aabb.max.x, aabb.max.y, word_count);
 
   if (aabb.min.y > aabb.max.y) {
     yerror("BUG: inverted AABB! min.y=%.1f > max.y=%.1f", aabb.min.y,
@@ -673,6 +685,38 @@ add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
   ydebug(
       "add_primitive_internal: prim_min_row=%u prim_max_row=%u lines.count=%u",
       prim_row_min, prim_row_max, canvas->lines.count);
+
+  // Track complex prims for resource set collection
+  if (yetty_ypaint_is_complex_type(prim_type)) {
+    // Ensure capacity
+    if (base_line->complex_prim_count >= base_line->complex_prim_capacity) {
+      uint32_t new_cap = base_line->complex_prim_capacity == 0
+                             ? 4
+                             : base_line->complex_prim_capacity * 2;
+      base_line->complex_prims = realloc(
+          base_line->complex_prims,
+          new_cap * sizeof(struct yetty_yetty_ypaint_canvas_complex_prim));
+      if (!base_line->complex_prims)
+        return YETTY_ERR(uint32, "realloc complex_prims failed");
+      base_line->complex_prim_capacity = new_cap;
+    }
+
+    // Copy primitive data (we need to own it for cache management)
+    uint32_t *data_copy = malloc(word_count * sizeof(uint32_t));
+    if (!data_copy)
+      return YETTY_ERR(uint32, "malloc complex prim data failed");
+    memcpy(data_copy, iter->fw.data, word_count * sizeof(uint32_t));
+
+    struct yetty_yetty_ypaint_canvas_complex_prim *cp =
+        &base_line->complex_prims[base_line->complex_prim_count++];
+    cp->data = data_copy;
+    cp->word_count = word_count;
+    cp->rolling_row = primitive_rolling_row;
+    cp->cache = NULL;
+
+    ydebug("add_primitive_internal: added complex prim type=0x%08x to line %u",
+           prim_type, primitive_grid_line);
+  }
 
   canvas->dirty = true;
   return YETTY_OK(uint32, primitive_grid_line);

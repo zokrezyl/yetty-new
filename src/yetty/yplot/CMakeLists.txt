@@ -19,4 +19,5 @@ target_compile_definitions(yetty_yplot PRIVATE
 target_link_libraries(yetty_yplot PUBLIC
     yetty_ypaint_core
     yetty_yrender
+    yetty_yfsvm
 )

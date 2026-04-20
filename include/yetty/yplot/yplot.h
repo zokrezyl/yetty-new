@@ -159,6 +159,10 @@ void yetty_yplot_yplot_get_aabb(struct yetty_yplot_yplot *plot,
 struct yetty_render_gpu_resource_set_result
 yetty_yplot_yplot_get_gpu_resource_set(struct yetty_yplot_yplot *plot);
 
+// Get static shader-only resource set (for ypaint layer to include yplot_render)
+// This resource set contains only shader code, no buffers.
+const struct yetty_render_gpu_resource_set *yetty_yplot_get_shader_resource_set(void);
+
 bool yetty_yplot_yplot_is_dirty(struct yetty_yplot_yplot *plot);
 void yetty_yplot_yplot_clear_dirty(struct yetty_yplot_yplot *plot);
 

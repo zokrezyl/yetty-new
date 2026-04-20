@@ -668,6 +668,39 @@ for (each visible complex prim) {
 
 ---
 
+## Complex Prim Shader Dispatch
+
+Complex primitives are rendered via shader dispatch in the main ypaint fragment shader. The shader checks for complex prim types (>= 0x80000000) and calls the appropriate render function.
+
+```wgsl
+// In ypaint-layer.wgsl fragment shader:
+const YPAINT_COMPLEX_TYPE_BASE: u32 = 0x80000000u;
+const YPAINT_TYPE_YPLOT: u32 = 0x80000003u;
+
+// In the primitive loop:
+if (prim_type >= YPAINT_COMPLEX_TYPE_BASE) {
+    var complex_color = vec4<f32>(0.0);
+
+    if (prim_type == YPAINT_TYPE_YPLOT) {
+        complex_color = yplot_render(prim_offset, local_pos);
+    }
+    // Add other complex types here as needed
+
+    if (complex_color.a > 0.0) {
+        result_color = mix(result_color, complex_color.rgb, complex_color.a);
+        result_alpha = max(result_alpha, complex_color.a);
+    }
+    continue;
+}
+```
+
+The `yplot_render()` function is defined in `yplot.wgsl` and merged by the binder. Each complex prim type provides its own render function that:
+- Takes `prim_offset` and `local_pos` (pixel position in primitive-local coords)
+- Returns `vec4<f32>` color (premultiplied alpha)
+- Does its own bounds checking internally
+
+---
+
 ## Implementation Status
 
 ### Completed
@@ -676,10 +709,13 @@ for (each visible complex prim) {
 2. **yplot handler** - implements all flyweight ops
 3. **Canvas complex prim access** - exposes visible complex prims for rendering
 4. **Layer integration** - collects complex prim resource sets as children
+5. **Shader dispatch** - ypaint shader dispatches to complex prim render functions (e.g., `yplot_render()`)
 
-### Remaining (Atlas Rendering)
+### Remaining (Atlas Rendering - Future)
 
-1. **Atlas texture management** - create shared texture, bin-pack regions
-2. **Pre-render pass** - render each complex prim to its atlas region using its resource set
-3. **Atlas binding** - pass atlas texture + region info to ypaint shader
-4. **Shader changes** - sample from atlas for pixels in complex prim bounding boxes
+Atlas-based rendering is an alternative approach for complex prims that:
+- Have expensive per-pixel evaluation (images, video)
+- Benefit from texture caching
+- Need to composite with effects
+
+For now, yplot uses inline shader dispatch (fast enough). Atlas rendering will be added for yimage/yvideo.

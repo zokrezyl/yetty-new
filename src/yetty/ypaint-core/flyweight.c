@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <yetty/ypaint-core/flyweight.h>
+#include <yetty/ytrace.h>
 
 #define FLYWEIGHT_MAX_HANDLERS 8
 
@@ -69,22 +70,31 @@ struct yetty_ypaint_prim_flyweight yetty_ypaint_flyweight_registry_get(
     if (!reg || !prim)
         return fw;
 
+    uint32_t type = prim[0];
+    ydebug("flyweight_registry_get: type=0x%08x handler_count=%zu", type, reg->handler_count);
+
     // Try default handler first (fast path for SDF types)
     if (reg->default_handler) {
         fw = reg->default_handler(prim);
-        if (fw.ops)
+        if (fw.ops) {
+            ydebug("flyweight_registry_get: default handler matched type=0x%08x", type);
             return fw;
-    }
-
-    // Fallback to additional handlers by type range
-    uint32_t type = prim[0];
-    for (size_t i = 0; i < reg->handler_count; i++) {
-        if (type >= reg->handlers[i].type_min && type <= reg->handlers[i].type_max) {
-            fw = reg->handlers[i].handler(prim);
-            if (fw.ops)
-                return fw;
         }
     }
 
+    // Fallback to additional handlers by type range
+    for (size_t i = 0; i < reg->handler_count; i++) {
+        ydebug("flyweight_registry_get: checking handler[%zu] range=[0x%08x, 0x%08x]",
+               i, reg->handlers[i].type_min, reg->handlers[i].type_max);
+        if (type >= reg->handlers[i].type_min && type <= reg->handlers[i].type_max) {
+            fw = reg->handlers[i].handler(prim);
+            if (fw.ops) {
+                ydebug("flyweight_registry_get: handler[%zu] matched type=0x%08x", i, type);
+                return fw;
+            }
+        }
+    }
+
+    ydebug("flyweight_registry_get: NO HANDLER for type=0x%08x", type);
     return fw;  // ops=NULL means unhandled
 }

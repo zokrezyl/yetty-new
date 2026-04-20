@@ -4,6 +4,7 @@
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/ypaint-core/complex-prim-types.h>
 #include <yetty/yrender/gpu-resource-set.h>
+#include <yetty/yfsvm/compiler.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,34 @@
 #define INCBIN_STYLE 1
 #include <incbin.h>
 INCBIN(yplot_shader, YETTY_YPLOT_SHADER_PATH);
+
+//=============================================================================
+// Static shader-only resource set (always included for yplot_render function)
+//=============================================================================
+
+static struct yetty_render_gpu_resource_set yplot_static_shader_rs;
+static bool yplot_static_shader_rs_initialized = false;
+
+const struct yetty_render_gpu_resource_set *yetty_yplot_get_shader_resource_set(void)
+{
+    if (!yplot_static_shader_rs_initialized) {
+        memset(&yplot_static_shader_rs, 0, sizeof(yplot_static_shader_rs));
+        yetty_render_shader_code_set(&yplot_static_shader_rs.shader,
+            (const char *)gyplot_shader_data, gyplot_shader_size);
+
+        /* Include yfsvm shader as child (yplot depends on yfsvm_execute) */
+        const struct yetty_render_gpu_resource_set *yfsvm_rs =
+            yetty_yfsvm_get_shader_resource_set();
+        if (yfsvm_rs) {
+            yplot_static_shader_rs.children[0] =
+                (struct yetty_render_gpu_resource_set *)yfsvm_rs;
+            yplot_static_shader_rs.children_count = 1;
+        }
+
+        yplot_static_shader_rs_initialized = true;
+    }
+    return &yplot_static_shader_rs;
+}
 
 //=============================================================================
 // Wire format layout (payload after FAM header)
@@ -44,8 +73,7 @@ INCBIN(yplot_shader, YETTY_YPLOT_SHADER_PATH);
 
 struct yplot_wire_cache {
     struct yetty_render_gpu_resource_set rs;
-    struct yetty_render_buffer bytecode_buf;
-    struct yetty_render_buffer color_buf;
+    /* bytecode/colors are inline in primitive buffer, no separate buffers needed */
 };
 
 //=============================================================================
@@ -75,77 +103,29 @@ static struct yetty_render_gpu_resource_set_result
 yplot_wire_get_gpu_resource_set(const uint8_t *data, uint32_t payload_size,
                                  void **cache_ptr)
 {
-    if (payload_size < YPLOT_WIRE_HEADER_SIZE)
-        return YETTY_ERR(yetty_render_gpu_resource_set, "payload too small");
+    (void)data;
+    (void)payload_size;
 
-    /* Get or create cache */
+    /* yplot data (bytecode, colors) is stored inline in the primitive buffer.
+     * The shader reads it via prim_offset, so no separate buffers needed.
+     * Instance resource set is empty - shader comes from static RS. */
+
     struct yplot_wire_cache *cache = *cache_ptr;
     if (!cache) {
         cache = calloc(1, sizeof(struct yplot_wire_cache));
         if (!cache)
             return YETTY_ERR(yetty_render_gpu_resource_set, "alloc failed");
         *cache_ptr = cache;
-        strncpy(cache->rs.namespace, "yplot", YETTY_RENDER_NAME_MAX - 1);
+        strncpy(cache->rs.namespace, "yplot_instance", YETTY_RENDER_NAME_MAX - 1);
+        cache->rs.buffer_count = 0;
     }
-
-    /* Parse wire data */
-    uint32_t bytecode_word_count;
-    memcpy(&bytecode_word_count, data + YPLOT_WIRE_BYTECODE_LEN_OFF, sizeof(uint32_t));
-
-    size_t expected_size = YPLOT_WIRE_HEADER_SIZE + bytecode_word_count * sizeof(uint32_t);
-    if (payload_size < expected_size)
-        return YETTY_ERR(yetty_render_gpu_resource_set, "bytecode truncated");
-
-    /* Update bytecode buffer */
-    size_t bc_size = bytecode_word_count * sizeof(uint32_t);
-    if (cache->bytecode_buf.capacity < bc_size) {
-        free(cache->bytecode_buf.data);
-        cache->bytecode_buf.data = malloc(bc_size);
-        cache->bytecode_buf.capacity = bc_size;
-    }
-    memcpy(cache->bytecode_buf.data, data + YPLOT_WIRE_BYTECODE_OFF, bc_size);
-    cache->bytecode_buf.size = bc_size;
-
-    /* Update color buffer */
-    size_t color_size = YETTY_YPLOT_MAX_FUNCTIONS * sizeof(uint32_t);
-    if (cache->color_buf.capacity < color_size) {
-        free(cache->color_buf.data);
-        cache->color_buf.data = malloc(color_size);
-        cache->color_buf.capacity = color_size;
-    }
-    memcpy(cache->color_buf.data, data + YPLOT_WIRE_COLORS_OFF, color_size);
-    cache->color_buf.size = color_size;
-
-    /* Build resource set */
-    cache->rs.buffer_count = 0;
-
-    if (bc_size > 0) {
-        cache->rs.buffers[cache->rs.buffer_count] = cache->bytecode_buf;
-        strncpy(cache->rs.buffers[cache->rs.buffer_count].name,
-                "bytecode", YETTY_RENDER_NAME_MAX - 1);
-        cache->rs.buffer_count++;
-    }
-
-    cache->rs.buffers[cache->rs.buffer_count] = cache->color_buf;
-    strncpy(cache->rs.buffers[cache->rs.buffer_count].name,
-            "colors", YETTY_RENDER_NAME_MAX - 1);
-    cache->rs.buffer_count++;
-
-    /* Set shader code */
-    yetty_render_shader_code_set(&cache->rs.shader,
-        (const char *)gyplot_shader_data, gyplot_shader_size);
 
     return YETTY_OK(yetty_render_gpu_resource_set, &cache->rs);
 }
 
 static void yplot_wire_destroy_cache(void *cache_ptr)
 {
-    struct yplot_wire_cache *cache = cache_ptr;
-    if (!cache)
-        return;
-    free(cache->bytecode_buf.data);
-    free(cache->color_buf.data);
-    free(cache);
+    free(cache_ptr);
 }
 
 //=============================================================================

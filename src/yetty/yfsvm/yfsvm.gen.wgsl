@@ -110,16 +110,16 @@ fn yfsvm_write_reg(regs: ptr<function, array<f32, 16>>, idx: u32, val: f32) {
 // x: domain value, t: time, samplers: s0-s7
 fn yfsvm_execute(bytecodeOffset: u32, funcIndex: u32, x: f32, t: f32, samplers: array<f32, 8>) -> f32 {
     // Read header
-    let magic = bitcast<u32>(buf[bytecodeOffset]);
+    let magic = bitcast<u32>(storage_buffer[bytecodeOffset]);
     if (magic != YFSVM_MAGIC) { return 0.0; }
 
-    let funcCount = bitcast<u32>(buf[bytecodeOffset + 2u]);
-    let constCount = bitcast<u32>(buf[bytecodeOffset + 3u]);
+    let funcCount = bitcast<u32>(storage_buffer[bytecodeOffset + 2u]);
+    let constCount = bitcast<u32>(storage_buffer[bytecodeOffset + 3u]);
     if (funcIndex >= funcCount) { return 0.0; }
 
     // Function table at offset 4, packed u32 per function (offset:16, length:16)
     let funcTableOffset = bytecodeOffset + 4u;
-    let packedFunc = bitcast<u32>(buf[funcTableOffset + funcIndex]);
+    let packedFunc = bitcast<u32>(storage_buffer[funcTableOffset + funcIndex]);
     let funcOffset = packedFunc & 0xFFFFu;
     let funcLength = packedFunc >> 16u;
 
@@ -139,7 +139,7 @@ fn yfsvm_execute(bytecodeOffset: u32, funcIndex: u32, x: f32, t: f32, samplers: 
     for (var iter = 0u; iter < YFSVM_MAX_EXECUTION_STEPS; iter++) {
         if (pc >= endPc) { break; }
 
-        let instr = bitcast<u32>(buf[codeOffset + pc]);
+        let instr = bitcast<u32>(storage_buffer[codeOffset + pc]);
         pc++;
 
         let op = yfsvm_decode_opcode(instr);
@@ -152,9 +152,9 @@ fn yfsvm_execute(bytecodeOffset: u32, funcIndex: u32, x: f32, t: f32, samplers: 
         let v2 = yfsvm_read_reg(&regs, src2);
 
         switch op {
-            case YFSVM_OP_NOP: { // nop }
+            case YFSVM_OP_NOP: {}
             case YFSVM_OP_RET: { return regs[0]; }
-            case YFSVM_OP_LOAD_C: { regs[dst] = bitcast<f32>(buf[constOffset + imm]); }
+            case YFSVM_OP_LOAD_C: { regs[dst] = bitcast<f32>(storage_buffer[constOffset + imm]); }
             case YFSVM_OP_LOAD_X: { regs[dst] = x; }
             case YFSVM_OP_LOAD_T: { regs[dst] = t; }
             case YFSVM_OP_LOAD_S: { regs[dst] = samplers[imm & 7u]; }

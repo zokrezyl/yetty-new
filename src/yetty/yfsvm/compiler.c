@@ -1,5 +1,10 @@
 #include <yetty/yfsvm/compiler.h>
 #include <string.h>
+#include <stdbool.h>
+
+#define INCBIN_STYLE 1
+#include <incbin.h>
+INCBIN(yfsvm_shader, YETTY_YFSVM_SHADER_PATH);
 
 /*=============================================================================
  * Instruction builder (internal)
@@ -451,8 +456,8 @@ uint32_t yetty_yfsvm_program_serialize(const struct yetty_yfsvm_program *prog,
 	if (!prog || !buf)
 		return 0;
 
-	uint32_t func_table_size = prog->function_count * 2;
-	uint32_t total = 4 + func_table_size + prog->constant_count +
+	/* Layout: header(4) + func_table(MAX_FUNCTIONS) + constants + code */
+	uint32_t total = 4 + YFSVM_MAX_FUNCTIONS + prog->constant_count +
 			 prog->code_count;
 	if (total > buf_capacity)
 		return 0;
@@ -465,10 +470,15 @@ uint32_t yetty_yfsvm_program_serialize(const struct yetty_yfsvm_program *prog,
 	buf[pos++] = prog->function_count;
 	buf[pos++] = prog->constant_count;
 
-	/* Function table */
-	for (uint32_t i = 0; i < prog->function_count; i++) {
-		buf[pos++] = prog->functions[i].code_offset;
-		buf[pos++] = prog->functions[i].code_length;
+	/* Function table - packed (length:16 | offset:16), padded to MAX_FUNCTIONS */
+	for (uint32_t i = 0; i < YFSVM_MAX_FUNCTIONS; i++) {
+		if (i < prog->function_count) {
+			uint32_t packed = ((prog->functions[i].code_length & 0xFFFF) << 16) |
+					  (prog->functions[i].code_offset & 0xFFFF);
+			buf[pos++] = packed;
+		} else {
+			buf[pos++] = 0;  /* Padding */
+		}
 	}
 
 	/* Constants (bitcast float to u32) */
@@ -483,4 +493,23 @@ uint32_t yetty_yfsvm_program_serialize(const struct yetty_yfsvm_program *prog,
 	pos += prog->code_count;
 
 	return pos;
+}
+
+
+/*=============================================================================
+ * Shader resource set (for ypaint integration)
+ *===========================================================================*/
+
+static struct yetty_render_gpu_resource_set yfsvm_static_shader_rs;
+static bool yfsvm_static_shader_rs_initialized = false;
+
+const struct yetty_render_gpu_resource_set *yetty_yfsvm_get_shader_resource_set(void)
+{
+    if (!yfsvm_static_shader_rs_initialized) {
+        memset(&yfsvm_static_shader_rs, 0, sizeof(yfsvm_static_shader_rs));
+        yetty_render_shader_code_set(&yfsvm_static_shader_rs.shader,
+            (const char *)gyfsvm_shader_data, gyfsvm_shader_size);
+        yfsvm_static_shader_rs_initialized = true;
+    }
+    return &yfsvm_static_shader_rs;
 }
