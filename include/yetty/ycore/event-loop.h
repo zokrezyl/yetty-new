@@ -3,6 +3,7 @@
 
 #include <yetty/ycore/event.h>
 #include <yetty/ycore/result.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,10 +11,47 @@ extern "C" {
 
 typedef int yetty_core_pipe_id;
 typedef int yetty_core_timer_id;
+typedef int yetty_core_tcp_server_id;
+typedef int yetty_core_tcp_client_id;
 
 /* Result types for this module */
 YETTY_RESULT_DECLARE(yetty_core_pipe_id, yetty_core_pipe_id);
 YETTY_RESULT_DECLARE(yetty_core_timer_id, yetty_core_timer_id);
+YETTY_RESULT_DECLARE(yetty_core_tcp_server_id, yetty_core_tcp_server_id);
+YETTY_RESULT_DECLARE(yetty_core_tcp_client_id, yetty_core_tcp_client_id);
+
+/* TCP connection handle (opaque, passed to callbacks) */
+struct yetty_tcp_conn;
+
+/* TCP server listener callbacks */
+struct yetty_tcp_server_callbacks {
+    void *ctx;
+    /* New client connected, returns connection-specific context */
+    void *(*on_connect)(void *ctx, struct yetty_tcp_conn *conn);
+    /* Allocate buffer for reading */
+    void (*on_alloc)(void *conn_ctx, size_t suggested, char **buf, size_t *len);
+    /* Data received */
+    void (*on_data)(void *conn_ctx, struct yetty_tcp_conn *conn,
+                    const char *data, long nread);
+    /* Client disconnected */
+    void (*on_disconnect)(void *conn_ctx);
+};
+
+/* TCP client callbacks */
+struct yetty_tcp_client_callbacks {
+    void *ctx;
+    /* Connected to server */
+    void (*on_connect)(void *ctx, struct yetty_tcp_conn *conn);
+    /* Connection failed */
+    void (*on_connect_error)(void *ctx, const char *error);
+    /* Allocate buffer for reading */
+    void (*on_alloc)(void *ctx, size_t suggested, char **buf, size_t *len);
+    /* Data received */
+    void (*on_data)(void *ctx, struct yetty_tcp_conn *conn,
+                    const char *data, long nread);
+    /* Disconnected */
+    void (*on_disconnect)(void *ctx);
+};
 
 struct yetty_core_event_loop;
 struct yetty_core_event_listener;
@@ -93,6 +131,37 @@ struct yetty_core_event_loop_ops {
         struct yetty_core_event_loop *self,
         yetty_core_timer_id id,
         struct yetty_core_event_listener *listener);
+
+    /* TCP server */
+    struct yetty_core_tcp_server_id_result (*create_tcp_server)(
+        struct yetty_core_event_loop *self,
+        const char *host,
+        int port,
+        const struct yetty_tcp_server_callbacks *callbacks);
+    struct yetty_core_void_result (*start_tcp_server)(
+        struct yetty_core_event_loop *self,
+        yetty_core_tcp_server_id id);
+    struct yetty_core_void_result (*stop_tcp_server)(
+        struct yetty_core_event_loop *self,
+        yetty_core_tcp_server_id id);
+
+    /* TCP client */
+    struct yetty_core_tcp_client_id_result (*create_tcp_client)(
+        struct yetty_core_event_loop *self,
+        const char *host,
+        int port,
+        const struct yetty_tcp_client_callbacks *callbacks);
+    struct yetty_core_void_result (*stop_tcp_client)(
+        struct yetty_core_event_loop *self,
+        yetty_core_tcp_client_id id);
+
+    /* TCP connection operations (works for both server and client connections) */
+    struct yetty_core_size_result (*tcp_send)(
+        struct yetty_tcp_conn *conn,
+        const void *data,
+        size_t len);
+    struct yetty_core_void_result (*tcp_close)(
+        struct yetty_tcp_conn *conn);
 
     void (*request_render)(struct yetty_core_event_loop *self);
 };

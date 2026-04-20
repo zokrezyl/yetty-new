@@ -23,6 +23,44 @@
 #define MAX_LISTENERS_PER_TYPE 64
 #define MAX_PTY_PIPES 16
 #define MAX_TIMERS 64
+#define MAX_TCP_SERVERS 4
+#define MAX_TCP_CLIENTS 16
+#define TCP_CLIENT_BUFFER_SIZE 65536
+
+/* TCP connection - used for both server connections and client connections */
+struct yetty_tcp_conn {
+    uv_tcp_t tcp;
+    struct libuv_event_loop *loop_impl;
+    void *conn_ctx;                      /* connection-specific context from on_connect */
+    struct tcp_server_handle *server;    /* NULL for client connections */
+    struct tcp_client_handle *client;    /* NULL for server connections */
+    int active;
+};
+
+/* TCP server */
+struct tcp_server_handle {
+    uv_tcp_t tcp;
+    struct libuv_event_loop *loop_impl;
+    int id;
+    char host[256];
+    int port;
+    int active;
+    struct yetty_tcp_server_callbacks callbacks;
+    struct yetty_tcp_conn *conns[MAX_TCP_CLIENTS];
+    int conn_count;
+};
+
+/* TCP client (outbound connection) */
+struct tcp_client_handle {
+    struct yetty_tcp_conn conn;
+    uv_connect_t connect_req;
+    struct libuv_event_loop *loop_impl;
+    int id;
+    char host[256];
+    int port;
+    int active;
+    struct yetty_tcp_client_callbacks callbacks;
+};
 
 struct pty_pipe_handle {
     uv_pipe_t pipe;
@@ -58,6 +96,12 @@ struct libuv_event_loop {
 
     struct timer_handle timers[MAX_TIMERS];
     int next_timer_id;
+
+    struct tcp_server_handle tcp_servers[MAX_TCP_SERVERS];
+    int next_tcp_server_id;
+
+    struct tcp_client_handle tcp_clients[MAX_TCP_CLIENTS];
+    int next_tcp_client_id;
 
     struct yetty_platform_input_pipe *platform_input_pipe;
     uv_pipe_t input_pipe;
@@ -106,6 +150,22 @@ static struct yetty_core_void_result libuv_destroy_timer(
 static struct yetty_core_void_result libuv_register_timer_listener(
     struct yetty_core_event_loop *self, yetty_core_timer_id id,
     struct yetty_core_event_listener *listener);
+static struct yetty_core_tcp_server_id_result libuv_create_tcp_server(
+    struct yetty_core_event_loop *self, const char *host, int port,
+    const struct yetty_tcp_server_callbacks *callbacks);
+static struct yetty_core_void_result libuv_start_tcp_server(
+    struct yetty_core_event_loop *self, yetty_core_tcp_server_id id);
+static struct yetty_core_void_result libuv_stop_tcp_server(
+    struct yetty_core_event_loop *self, yetty_core_tcp_server_id id);
+static struct yetty_core_tcp_client_id_result libuv_create_tcp_client(
+    struct yetty_core_event_loop *self, const char *host, int port,
+    const struct yetty_tcp_client_callbacks *callbacks);
+static struct yetty_core_void_result libuv_stop_tcp_client(
+    struct yetty_core_event_loop *self, yetty_core_tcp_client_id id);
+static struct yetty_core_size_result libuv_tcp_send(
+    struct yetty_tcp_conn *conn, const void *data, size_t len);
+static struct yetty_core_void_result libuv_tcp_close(
+    struct yetty_tcp_conn *conn);
 static void libuv_request_render(struct yetty_core_event_loop *self);
 
 static const struct yetty_core_event_loop_ops libuv_ops = {
@@ -124,6 +184,13 @@ static const struct yetty_core_event_loop_ops libuv_ops = {
     .stop_timer = libuv_stop_timer,
     .destroy_timer = libuv_destroy_timer,
     .register_timer_listener = libuv_register_timer_listener,
+    .create_tcp_server = libuv_create_tcp_server,
+    .start_tcp_server = libuv_start_tcp_server,
+    .stop_tcp_server = libuv_stop_tcp_server,
+    .create_tcp_client = libuv_create_tcp_client,
+    .stop_tcp_client = libuv_stop_tcp_client,
+    .tcp_send = libuv_tcp_send,
+    .tcp_close = libuv_tcp_close,
     .request_render = libuv_request_render,
 };
 
@@ -314,7 +381,8 @@ static struct yetty_core_int_result libuv_dispatch(
     count = impl->listener_counts[event->type];
     for (i = 0; i < count; i++) {
         struct yetty_core_event_listener *listener = impl->listeners[event->type][i].listener;
-        if (listener->handler(listener, event))
+        struct yetty_core_int_result res = listener->handler(listener, event);
+        if (YETTY_IS_OK(res) && res.value)
             return YETTY_OK(yetty_core_int, 1);
     }
 
@@ -501,6 +569,416 @@ static void libuv_request_render(struct yetty_core_event_loop *self)
     ydebug("libuv_request_render: setting render_pending=1");
     impl->render_pending = 1;
     uv_async_send(&impl->render_async);
+}
+
+/* TCP Server & Client */
+
+/* Alloc callback for server connections */
+static void on_server_conn_alloc(uv_handle_t *handle, size_t suggested, uv_buf_t *buf)
+{
+    struct yetty_tcp_conn *conn = handle->data;
+    struct tcp_server_handle *server = conn->server;
+    char *base = NULL;
+    size_t len = 0;
+
+    if (server->callbacks.on_alloc)
+        server->callbacks.on_alloc(conn->conn_ctx, suggested, &base, &len);
+
+    buf->base = base;
+    buf->len = len;
+}
+
+/* Read callback for server connections */
+static void on_server_conn_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
+{
+    struct yetty_tcp_conn *conn = stream->data;
+    struct tcp_server_handle *server = conn->server;
+
+    if (nread < 0) {
+        ytrace("tcp_server: client disconnected");
+        if (server->callbacks.on_disconnect)
+            server->callbacks.on_disconnect(conn->conn_ctx);
+        uv_close((uv_handle_t *)stream, NULL);
+        conn->active = 0;
+        server->conn_count--;
+        return;
+    }
+
+    if (nread == 0)
+        return;
+
+    if (server->callbacks.on_data)
+        server->callbacks.on_data(conn->conn_ctx, conn, buf->base, nread);
+}
+
+/* New connection callback */
+static void on_tcp_server_connection(uv_stream_t *server_stream, int status)
+{
+    struct tcp_server_handle *server = server_stream->data;
+    struct yetty_tcp_conn *conn;
+    int i, r;
+
+    if (status < 0) {
+        yerror("tcp_server: connection error: %s", uv_strerror(status));
+        return;
+    }
+
+    /* Find free connection slot */
+    conn = NULL;
+    for (i = 0; i < MAX_TCP_CLIENTS; i++) {
+        if (server->conns[i] == NULL) {
+            conn = calloc(1, sizeof(struct yetty_tcp_conn));
+            if (!conn) {
+                yerror("tcp_server: out of memory");
+                return;
+            }
+            server->conns[i] = conn;
+            break;
+        } else if (!server->conns[i]->active) {
+            conn = server->conns[i];
+            break;
+        }
+    }
+
+    if (!conn) {
+        yerror("tcp_server: too many clients");
+        uv_tcp_t reject;
+        uv_tcp_init(server->loop_impl->loop, &reject);
+        uv_accept(server_stream, (uv_stream_t *)&reject);
+        uv_close((uv_handle_t *)&reject, NULL);
+        return;
+    }
+
+    uv_tcp_init(server->loop_impl->loop, &conn->tcp);
+    conn->tcp.data = conn;
+    conn->server = server;
+    conn->loop_impl = server->loop_impl;
+
+    r = uv_accept(server_stream, (uv_stream_t *)&conn->tcp);
+    if (r != 0) {
+        yerror("tcp_server: accept failed: %s", uv_strerror(r));
+        uv_close((uv_handle_t *)&conn->tcp, NULL);
+        return;
+    }
+
+    conn->active = 1;
+    server->conn_count++;
+
+    /* Call on_connect to get connection context */
+    if (server->callbacks.on_connect)
+        conn->conn_ctx = server->callbacks.on_connect(server->callbacks.ctx, conn);
+
+    ytrace("tcp_server: client connected (total: %d)", server->conn_count);
+
+    r = uv_read_start((uv_stream_t *)&conn->tcp, on_server_conn_alloc, on_server_conn_read);
+    if (r != 0) {
+        yerror("tcp_server: read_start failed: %s", uv_strerror(r));
+        if (server->callbacks.on_disconnect)
+            server->callbacks.on_disconnect(conn->conn_ctx);
+        uv_close((uv_handle_t *)&conn->tcp, NULL);
+        conn->active = 0;
+        server->conn_count--;
+    }
+}
+
+static struct yetty_core_tcp_server_id_result libuv_create_tcp_server(
+    struct yetty_core_event_loop *self, const char *host, int port,
+    const struct yetty_tcp_server_callbacks *callbacks)
+{
+    struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
+    int id = impl->next_tcp_server_id++;
+    struct tcp_server_handle *server;
+
+    if (id >= MAX_TCP_SERVERS)
+        return YETTY_ERR(yetty_core_tcp_server_id, "too many tcp servers");
+
+    if (!callbacks)
+        return YETTY_ERR(yetty_core_tcp_server_id, "callbacks required");
+
+    server = &impl->tcp_servers[id];
+    memset(server, 0, sizeof(*server));
+    server->id = id;
+    server->loop_impl = impl;
+    server->callbacks = *callbacks;
+    if (host)
+        strncpy(server->host, host, sizeof(server->host) - 1);
+    server->port = port;
+
+    ytrace("tcp_server: created server id=%d host=%s port=%d", id, host, port);
+    return YETTY_OK(yetty_core_tcp_server_id, id);
+}
+
+static struct yetty_core_void_result libuv_start_tcp_server(
+    struct yetty_core_event_loop *self, yetty_core_tcp_server_id id)
+{
+    struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
+    struct tcp_server_handle *server;
+    struct sockaddr_in addr;
+    int r;
+
+    if (id < 0 || id >= MAX_TCP_SERVERS)
+        return YETTY_ERR(yetty_core_void, "invalid server id");
+
+    server = &impl->tcp_servers[id];
+
+    if (server->active)
+        return YETTY_ERR(yetty_core_void, "server already running");
+
+    r = uv_tcp_init(impl->loop, &server->tcp);
+    if (r != 0)
+        return YETTY_ERR(yetty_core_void, "uv_tcp_init failed");
+
+    server->tcp.data = server;
+
+    r = uv_ip4_addr(server->host, server->port, &addr);
+    if (r != 0) {
+        yerror("tcp_server: invalid address %s:%d", server->host, server->port);
+        return YETTY_ERR(yetty_core_void, "uv_ip4_addr failed");
+    }
+
+    r = uv_tcp_bind(&server->tcp, (const struct sockaddr *)&addr, 0);
+    if (r != 0) {
+        yerror("tcp_server: bind failed: %s", uv_strerror(r));
+        return YETTY_ERR(yetty_core_void, "uv_tcp_bind failed");
+    }
+
+    r = uv_listen((uv_stream_t *)&server->tcp, 128, on_tcp_server_connection);
+    if (r != 0) {
+        yerror("tcp_server: listen failed: %s", uv_strerror(r));
+        return YETTY_ERR(yetty_core_void, "uv_listen failed");
+    }
+
+    server->active = 1;
+    ytrace("tcp_server: listening on %s:%d", server->host, server->port);
+    return YETTY_OK_VOID();
+}
+
+static struct yetty_core_void_result libuv_stop_tcp_server(
+    struct yetty_core_event_loop *self, yetty_core_tcp_server_id id)
+{
+    struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
+    struct tcp_server_handle *server;
+
+    if (id < 0 || id >= MAX_TCP_SERVERS)
+        return YETTY_ERR(yetty_core_void, "invalid server id");
+
+    server = &impl->tcp_servers[id];
+
+    if (!server->active)
+        return YETTY_OK_VOID();
+
+    /* Close all connections */
+    for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+        if (server->conns[i] && server->conns[i]->active) {
+            if (server->callbacks.on_disconnect)
+                server->callbacks.on_disconnect(server->conns[i]->conn_ctx);
+            uv_close((uv_handle_t *)&server->conns[i]->tcp, NULL);
+            server->conns[i]->active = 0;
+        }
+    }
+    server->conn_count = 0;
+
+    uv_close((uv_handle_t *)&server->tcp, NULL);
+    server->active = 0;
+
+    ytrace("tcp_server: stopped server id=%d", id);
+    return YETTY_OK_VOID();
+}
+
+/* TCP Client (outbound connection) */
+
+static void on_client_alloc(uv_handle_t *handle, size_t suggested, uv_buf_t *buf)
+{
+    struct yetty_tcp_conn *conn = handle->data;
+    struct tcp_client_handle *client = conn->client;
+    char *base = NULL;
+    size_t len = 0;
+
+    if (client->callbacks.on_alloc)
+        client->callbacks.on_alloc(client->callbacks.ctx, suggested, &base, &len);
+
+    buf->base = base;
+    buf->len = len;
+}
+
+static void on_client_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
+{
+    struct yetty_tcp_conn *conn = stream->data;
+    struct tcp_client_handle *client = conn->client;
+
+    if (nread < 0) {
+        ytrace("tcp_client: disconnected");
+        if (client->callbacks.on_disconnect)
+            client->callbacks.on_disconnect(client->callbacks.ctx);
+        uv_close((uv_handle_t *)stream, NULL);
+        conn->active = 0;
+        client->active = 0;
+        return;
+    }
+
+    if (nread == 0)
+        return;
+
+    if (client->callbacks.on_data)
+        client->callbacks.on_data(client->callbacks.ctx, conn, buf->base, nread);
+}
+
+static void on_client_connect(uv_connect_t *req, int status)
+{
+    struct tcp_client_handle *client = req->data;
+    struct yetty_tcp_conn *conn = &client->conn;
+
+    if (status < 0) {
+        yerror("tcp_client: connect failed: %s", uv_strerror(status));
+        if (client->callbacks.on_connect_error)
+            client->callbacks.on_connect_error(client->callbacks.ctx, uv_strerror(status));
+        uv_close((uv_handle_t *)&conn->tcp, NULL);
+        client->active = 0;
+        return;
+    }
+
+    conn->active = 1;
+    client->active = 1;
+
+    ytrace("tcp_client: connected to %s:%d", client->host, client->port);
+
+    if (client->callbacks.on_connect)
+        client->callbacks.on_connect(client->callbacks.ctx, conn);
+
+    int r = uv_read_start((uv_stream_t *)&conn->tcp, on_client_alloc, on_client_read);
+    if (r != 0) {
+        yerror("tcp_client: read_start failed: %s", uv_strerror(r));
+        if (client->callbacks.on_disconnect)
+            client->callbacks.on_disconnect(client->callbacks.ctx);
+        uv_close((uv_handle_t *)&conn->tcp, NULL);
+        conn->active = 0;
+        client->active = 0;
+    }
+}
+
+static struct yetty_core_tcp_client_id_result libuv_create_tcp_client(
+    struct yetty_core_event_loop *self, const char *host, int port,
+    const struct yetty_tcp_client_callbacks *callbacks)
+{
+    struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
+    int id = impl->next_tcp_client_id++;
+    struct tcp_client_handle *client;
+    struct sockaddr_in addr;
+    int r;
+
+    if (id >= MAX_TCP_CLIENTS)
+        return YETTY_ERR(yetty_core_tcp_client_id, "too many tcp clients");
+
+    if (!callbacks)
+        return YETTY_ERR(yetty_core_tcp_client_id, "callbacks required");
+
+    client = &impl->tcp_clients[id];
+    memset(client, 0, sizeof(*client));
+    client->id = id;
+    client->loop_impl = impl;
+    client->callbacks = *callbacks;
+    if (host)
+        strncpy(client->host, host, sizeof(client->host) - 1);
+    client->port = port;
+
+    /* Setup connection */
+    client->conn.loop_impl = impl;
+    client->conn.client = client;
+    client->conn.tcp.data = &client->conn;
+
+    r = uv_tcp_init(impl->loop, &client->conn.tcp);
+    if (r != 0)
+        return YETTY_ERR(yetty_core_tcp_client_id, "uv_tcp_init failed");
+
+    r = uv_ip4_addr(host, port, &addr);
+    if (r != 0)
+        return YETTY_ERR(yetty_core_tcp_client_id, "uv_ip4_addr failed");
+
+    client->connect_req.data = client;
+    r = uv_tcp_connect(&client->connect_req, &client->conn.tcp,
+                       (const struct sockaddr *)&addr, on_client_connect);
+    if (r != 0)
+        return YETTY_ERR(yetty_core_tcp_client_id, "uv_tcp_connect failed");
+
+    ytrace("tcp_client: connecting to %s:%d", host, port);
+    return YETTY_OK(yetty_core_tcp_client_id, id);
+}
+
+static struct yetty_core_void_result libuv_stop_tcp_client(
+    struct yetty_core_event_loop *self, yetty_core_tcp_client_id id)
+{
+    struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
+    struct tcp_client_handle *client;
+
+    if (id < 0 || id >= MAX_TCP_CLIENTS)
+        return YETTY_ERR(yetty_core_void, "invalid client id");
+
+    client = &impl->tcp_clients[id];
+
+    if (!client->active)
+        return YETTY_OK_VOID();
+
+    if (client->callbacks.on_disconnect)
+        client->callbacks.on_disconnect(client->callbacks.ctx);
+
+    uv_close((uv_handle_t *)&client->conn.tcp, NULL);
+    client->conn.active = 0;
+    client->active = 0;
+
+    ytrace("tcp_client: stopped client id=%d", id);
+    return YETTY_OK_VOID();
+}
+
+/* TCP send/close (works for both server and client connections) */
+
+static void on_tcp_write_done(uv_write_t *req, int status)
+{
+    (void)status;
+    free(req);
+}
+
+static struct yetty_core_size_result libuv_tcp_send(
+    struct yetty_tcp_conn *conn, const void *data, size_t len)
+{
+    uv_write_t *req;
+    uv_buf_t buf;
+
+    if (!conn || !conn->active)
+        return YETTY_ERR(yetty_core_size, "invalid connection");
+
+    req = malloc(sizeof(uv_write_t));
+    if (!req)
+        return YETTY_ERR(yetty_core_size, "out of memory");
+
+    buf = uv_buf_init((char *)data, len);
+    if (uv_write(req, (uv_stream_t *)&conn->tcp, &buf, 1, on_tcp_write_done) != 0) {
+        free(req);
+        return YETTY_ERR(yetty_core_size, "uv_write failed");
+    }
+
+    return YETTY_OK(yetty_core_size, len);
+}
+
+static struct yetty_core_void_result libuv_tcp_close(struct yetty_tcp_conn *conn)
+{
+    if (!conn)
+        return YETTY_ERR(yetty_core_void, "invalid connection");
+
+    if (conn->active) {
+        /* Call disconnect callback */
+        if (conn->server && conn->server->callbacks.on_disconnect)
+            conn->server->callbacks.on_disconnect(conn->conn_ctx);
+        else if (conn->client && conn->client->callbacks.on_disconnect)
+            conn->client->callbacks.on_disconnect(conn->client->callbacks.ctx);
+
+        uv_close((uv_handle_t *)&conn->tcp, NULL);
+        conn->active = 0;
+
+        if (conn->server)
+            conn->server->conn_count--;
+    }
+
+    return YETTY_OK_VOID();
 }
 
 struct yetty_core_event_loop_result yetty_core_event_loop_create(

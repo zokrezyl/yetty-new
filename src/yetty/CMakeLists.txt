@@ -24,8 +24,8 @@ if(YETTY_ENABLE_FEATURE_MSDF_GEN)
     add_subdirectory(msdf-gen)
 endif()
 
-if(YETTY_ENABLE_FEATURE_RPC)
-    add_subdirectory(rpc)
+if(YETTY_ENABLE_FEATURE_YRPC)
+    add_subdirectory(yrpc)
 endif()
 
 # Yetty sources (src/yetty/*.c)
