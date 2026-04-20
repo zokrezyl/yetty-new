@@ -124,7 +124,8 @@ NIX_WRAP := nix develop .\#android --command bash -c
 else ifeq ($(PLATFORM),android_x86_64)
 NIX_WRAP := nix develop .\#android --command bash -c
 else
-NIX_WRAP := bash -c
+# Desktop/iOS/macOS use default nix shell
+NIX_WRAP := nix develop --command bash -c
 endif
 else
 NIX_WRAP := bash -c
@@ -158,7 +159,11 @@ config: _config-$(PLATFORM)
 
 .PHONY: _config-desktop
 _config-desktop:
+ifeq ($(USE_NIX),yes)
+	$(NIX_WRAP) '$(CMAKE) -B $(BUILD_DIR) $(CMAKE_GENERATOR) $(CMAKE_BUILDTYPE_FLAGS) $(CMAKE_LOGLEVEL_FLAGS) $(CMAKE_COMPILER_LAUNCHER)'
+else
 	$(PATH_CMD) $(CMAKE) -B $(BUILD_DIR) $(CMAKE_GENERATOR) $(CMAKE_BUILDTYPE_FLAGS) $(CMAKE_LOGLEVEL_FLAGS) $(CMAKE_COMPILER_LAUNCHER)
+endif
 	@ln -sfn $(BUILD_DIR)/compile_commands.json compile_commands.json
 
 .PHONY: _config-webasm
@@ -196,7 +201,11 @@ build: _build-$(PLATFORM)
 .PHONY: _build-desktop
 _build-desktop:
 	@if [ ! -f "$(BUILD_DIR)/build.ninja" ]; then $(MAKE) -f Makefile.2 config PLATFORM=$(PLATFORM) LOGLEVEL=$(LOGLEVEL) BUILDTYPE=$(BUILDTYPE) USE_NIX=$(USE_NIX); fi
+ifeq ($(USE_NIX),yes)
+	$(NIX_WRAP) '$(CMAKE) --build $(BUILD_DIR) $(CMAKE_PARALLEL)'
+else
 	$(PATH_CMD) $(CMAKE) --build $(BUILD_DIR) $(CMAKE_PARALLEL)
+endif
 
 .PHONY: _build-webasm
 _build-webasm:

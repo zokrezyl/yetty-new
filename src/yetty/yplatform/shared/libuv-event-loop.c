@@ -314,7 +314,10 @@ static struct yetty_core_int_result libuv_dispatch(
     count = impl->listener_counts[event->type];
     for (i = 0; i < count; i++) {
         struct yetty_core_event_listener *listener = impl->listeners[event->type][i].listener;
-        if (listener->handler(listener, event))
+        struct yetty_core_int_result res = listener->handler(listener, event);
+        if (YETTY_IS_ERR(res))
+            return res;
+        if (res.value)
             return YETTY_OK(yetty_core_int, 1);
     }
 
