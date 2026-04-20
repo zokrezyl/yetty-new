@@ -19,6 +19,6 @@ target_link_libraries(yetty_yrender
 )
 
 # Embed shaders via incbin (or stubs on Emscripten)
-incbin_add_resources(yetty_render
+incbin_add_resources(yetty_yrender
     blend_shader "${CMAKE_CURRENT_SOURCE_DIR}/blend.wgsl"
 )
