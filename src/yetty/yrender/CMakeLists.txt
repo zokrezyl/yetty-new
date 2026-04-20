@@ -17,3 +17,8 @@ target_compile_definitions(yetty_render PRIVATE
 target_link_libraries(yetty_render
     webgpu
 )
+
+# Embed shaders via incbin (or stubs on Emscripten)
+incbin_add_resources(yetty_render
+    blend_shader "${CMAKE_CURRENT_SOURCE_DIR}/blend.wgsl"
+)

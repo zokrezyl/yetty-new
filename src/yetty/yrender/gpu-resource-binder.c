@@ -93,6 +93,10 @@ struct gpu_resource_binder_impl {
     size_t last_buffer_sizes[MAX_FLAT_BUFFERS];
     uint32_t last_tex_width[MAX_FLAT_TEXTURES];
     uint32_t last_tex_height[MAX_FLAT_TEXTURES];
+
+    /* Visited resource sets during collection (to avoid duplicates) */
+    const struct yetty_render_gpu_resource_set *visited_rs[MAX_RESOURCE_SETS * 4];
+    size_t visited_rs_count;
 };
 
 /* Forward declarations */
@@ -154,6 +158,14 @@ static uint64_t compute_tree_shader_hash(const struct yetty_render_gpu_resource_
 static void collect_resources(struct gpu_resource_binder_impl *impl,
                               struct yetty_render_gpu_resource_set *rs)
 {
+    /* Check if already visited (avoid duplicating shared children) */
+    for (size_t i = 0; i < impl->visited_rs_count; i++) {
+        if (impl->visited_rs[i] == rs)
+            return;
+    }
+    if (impl->visited_rs_count < sizeof(impl->visited_rs) / sizeof(impl->visited_rs[0]))
+        impl->visited_rs[impl->visited_rs_count++] = rs;
+
     /* Children first — depth-first, they define shader functions */
     for (size_t i = 0; i < rs->children_count; i++) {
         if (rs->children[i])
@@ -831,6 +843,7 @@ static struct yetty_core_void_result binder_finalize(struct yetty_render_gpu_res
     impl->flat_uniform_count = 0;
     impl->storage_buffer_size = 0;
     impl->shader_code.size = 0;
+    impl->visited_rs_count = 0;
 
     for (size_t i = 0; i < impl->resource_set_count; i++)
         collect_resources(impl, impl->resource_sets[i]);

@@ -82,7 +82,7 @@ option(YETTY_ENABLE_FEATURE_YTHORVG   "ythorvg — thorvg card"               OF
 option(YETTY_ENABLE_FEATURE_YVIDEO    "yvideo — video codec support"         OFF)
 
 # Network / connectivity
-option(YETTY_ENABLE_FEATURE_VNC       "vnc — VNC client/server"              ON)
+option(YETTY_ENABLE_FEATURE_YVNC       "vnc — VNC client/server"              ON)
 option(YETTY_ENABLE_FEATURE_TELNET    "telnet — telnet connectivity"         OFF)
 option(YETTY_ENABLE_FEATURE_SSH       "ssh — SSH connectivity"               OFF)
 option(YETTY_ENABLE_FEATURE_RPC       "rpc — msgpack-RPC interface"          OFF)

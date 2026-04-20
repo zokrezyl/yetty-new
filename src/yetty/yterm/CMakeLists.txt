@@ -18,3 +18,9 @@ target_link_libraries(yetty_term
     yetty_yfont
     yetty_yui
 )
+
+# Embed shaders via incbin (or stubs on Emscripten)
+incbin_add_resources(yetty_term
+    text_layer_shader "${CMAKE_CURRENT_SOURCE_DIR}/text-layer.wgsl"
+    ypaint_layer_shader "${CMAKE_CURRENT_SOURCE_DIR}/ypaint-layer.wgsl"
+)

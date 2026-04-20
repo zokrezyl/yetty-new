@@ -1,6 +1,9 @@
 #include <yetty/yrender/types.h>
+#include <yetty/ytrace.h>
 #include <webgpu/webgpu.h>
+#include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 uint64_t yetty_render_hash(const void *data, size_t size)
 {
@@ -19,6 +22,49 @@ void yetty_render_shader_code_set(struct yetty_render_shader_code *sc,
     sc->data = data;
     sc->size = size;
     sc->hash = (data && size > 0) ? yetty_render_hash(data, size) : 0;
+}
+
+int yetty_render_shader_code_load_file(struct yetty_render_shader_code *sc,
+                                        const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        yerror("shader_code_load_file: failed to open %s", path);
+        return -1;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    if (size <= 0) {
+        yerror("shader_code_load_file: empty or invalid file %s", path);
+        fclose(f);
+        return -1;
+    }
+
+    char *data = malloc((size_t)size + 1);
+    if (!data) {
+        yerror("shader_code_load_file: failed to allocate %ld bytes", size);
+        fclose(f);
+        return -1;
+    }
+
+    size_t read = fread(data, 1, (size_t)size, f);
+    fclose(f);
+
+    if (read != (size_t)size) {
+        yerror("shader_code_load_file: read %zu of %ld bytes", read, size);
+        free(data);
+        return -1;
+    }
+
+    data[size] = '\0';  /* null-terminate for safety */
+    sc->data = data;
+    sc->size = (size_t)size;
+    sc->hash = yetty_render_hash(data, (size_t)size);
+    ydebug("shader_code_load_file: loaded %s (%zu bytes)", path, sc->size);
+    return 0;
 }
 
 size_t yetty_render_texture_get_size(const struct yetty_render_texture *texture)

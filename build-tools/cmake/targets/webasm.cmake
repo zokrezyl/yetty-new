@@ -24,13 +24,15 @@ set(YETTY_SHADERS_DIR "/assets/shaders" CACHE STRING "Shader directory path")
 
 # Platform sources
 set(YETTY_PLATFORM_SOURCES
-    ${YETTY_ROOT}/src/yetty/yplatform/webasm/main.cpp
-    ${YETTY_ROOT}/src/yetty/yplatform/webasm/surface.cpp
-    ${YETTY_ROOT}/src/yetty/yplatform/webasm/webasm-pty.cpp
-    ${YETTY_ROOT}/src/yetty/yplatform/webasm/webasm-pty-factory.cpp
-    ${YETTY_ROOT}/src/yetty/yplatform/webasm/window.cpp
-    ${YETTY_ROOT}/src/yetty/yplatform/webasm/event-loop.cpp
-    ${YETTY_ROOT}/src/yetty/yplatform/webasm/pipe.cpp
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/main.c
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/surface.c
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/webasm-pty.c
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/window.c
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/event-loop.c
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/pipe.c
+    ${YETTY_ROOT}/src/yetty/yplatform/webasm/platform-paths.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/term.c
 )
 
 # Create executable with core sources + web platform
@@ -99,7 +101,7 @@ target_link_options(yetty PRIVATE
     "--preload-file=${CMAKE_BINARY_DIR}/assets@/assets"
     "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','FS','ENV','HEAPU8']"
     # "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_yetty_write','_yetty_key','_yetty_special_key','_yetty_read_input','_yetty_sync','_yetty_set_scale','_yetty_resize','_yetty_get_cols','_yetty_get_rows','_webpty_on_data']"
-    "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_webpty_poll_source_notify']"
+    "-sEXPORTED_FUNCTIONS=['_main','_malloc','_free','_webpty_pipe_source_notify']"
 )
 
 if(YETTY_ENABLE_FEATURE_DEMO)
