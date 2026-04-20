@@ -532,11 +532,6 @@ yetty_ypaint_yaml_parse(const char *yaml, size_t len)
 
     struct yetty_ypaint_core_buffer *buffer = buf_res.value;
 
-    /* Register complex prim types (only needs to be done once, but is idempotent) */
-    yetty_yplot_register();
-
-    yetty_ypaint_core_buffer_set_default_handler(buffer, yetty_ysdf_handler);
-
     struct yetty_ypaint_yaml_parser *parser = yetty_ypaint_yaml_parser_create();
     if (!parser) {
         yetty_ypaint_core_buffer_destroy(buffer);

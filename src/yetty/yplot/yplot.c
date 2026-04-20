@@ -1,6 +1,7 @@
 // yplot - Plot complex primitive for ypaint
 
 #include <yetty/yplot/yplot.h>
+#include <yetty/ypaint-core/buffer.h>
 #include <yetty/ypaint-core/complex-prim-types.h>
 #include <yetty/yrender/gpu-resource-set.h>
 
@@ -159,6 +160,39 @@ static const struct yetty_ypaint_complex_prim_runtime_ops yplot_runtime_ops = {
     .get_gpu_resource_set = yplot_wire_get_gpu_resource_set,
     .destroy_cache = yplot_wire_destroy_cache,
 };
+
+//=============================================================================
+// Flyweight handler for buffer iteration
+//=============================================================================
+
+static struct yetty_core_size_result yplot_prim_size(const uint32_t *prim)
+{
+    // FAM format: [type:u32][payload_size:u32][payload...]
+    uint32_t payload_size = prim[1];
+    size_t total = sizeof(uint32_t) * 2 + payload_size;
+    return YETTY_OK(yetty_core_size, total);
+}
+
+static struct rectangle_result yplot_prim_aabb(const uint32_t *prim)
+{
+    // FAM format: payload starts at prim[2]
+    uint32_t payload_size = prim[1];
+    const uint8_t *payload = (const uint8_t *)&prim[2];
+    return yplot_wire_get_aabb(payload, payload_size);
+}
+
+static const struct yetty_ypaint_prim_ops yplot_prim_ops = {
+    .size = yplot_prim_size,
+    .aabb = yplot_prim_aabb,
+};
+
+struct yetty_ypaint_prim_flyweight yetty_yplot_handler(const uint32_t *prim)
+{
+    uint32_t type = prim[0];
+    if (type == YETTY_YPLOT_PRIM_TYPE_ID)
+        return (struct yetty_ypaint_prim_flyweight){.data = prim, .ops = &yplot_prim_ops};
+    return (struct yetty_ypaint_prim_flyweight){.data = NULL, .ops = NULL};
+}
 
 //=============================================================================
 // Registration

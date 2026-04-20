@@ -8,6 +8,7 @@
 #include <yetty/ycore/result.h>
 #include <yetty/ycore/types.h>
 #include <yetty/ypaint-core/buffer.h>
+#include <yetty/ypaint/flyweight.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/yfont/font.h>
 #include <yetty/yfont/msdf-font.h>
@@ -64,6 +65,14 @@ struct yetty_yetty_ypaint_canvas_font_entry {
   int32_t font_id;              // buffer-level font id
 };
 
+// Complex primitive reference (stored on last overlapping line)
+struct yetty_yetty_ypaint_canvas_complex_prim {
+  uint32_t *data;           // copied primitive data (owned)
+  uint32_t word_count;      // size in words
+  uint32_t rolling_row;     // rolling row at insertion
+  void *cache;              // runtime cache (for gpu_resource_set)
+};
+
 // A single row/line in the grid
 struct yetty_yetty_ypaint_canvas_grid_line {
   struct yetty_yetty_ypaint_canvas_prim_data_array
@@ -76,6 +85,11 @@ struct yetty_yetty_ypaint_canvas_grid_line {
   struct yetty_yetty_ypaint_canvas_font_entry *fonts;
   uint32_t font_count;
   uint32_t font_capacity;
+
+  // Complex primitives whose BASE (last overlapping line) is this line
+  struct yetty_yetty_ypaint_canvas_complex_prim *complex_prims;
+  uint32_t complex_prim_count;
+  uint32_t complex_prim_capacity;
 };
 
 // Simple line array
@@ -126,6 +140,9 @@ struct yetty_yetty_ypaint_canvas {
 
   // Shaders directory for creating fonts from buffers
   char shaders_dir[512];
+
+  // Flyweight registry for primitive handlers
+  struct yetty_ypaint_flyweight_registry *flyweight_registry;
 };
 
 #define DEFAULT_MAX_PRIMS_PER_CELL 16
@@ -218,6 +235,9 @@ grid_line_init(struct yetty_yetty_ypaint_canvas_grid_line *line,
   line->cells = NULL;
   line->cell_count = 0;
   line->cell_capacity = 0;
+  line->complex_prims = NULL;
+  line->complex_prim_count = 0;
+  line->complex_prim_capacity = 0;
   if (initial_cells > 0) {
     line->cells = calloc(initial_cells,
                          sizeof(struct yetty_yetty_ypaint_canvas_grid_cell));
@@ -228,7 +248,12 @@ grid_line_init(struct yetty_yetty_ypaint_canvas_grid_line *line,
   return YETTY_OK_VOID();
 }
 
-static void grid_line_free(struct yetty_yetty_ypaint_canvas_grid_line *line) {
+static struct yetty_core_void_result
+grid_line_free(struct yetty_yetty_ypaint_canvas_grid_line *line,
+               const struct yetty_ypaint_flyweight_registry *reg) {
+  if (!reg)
+    return YETTY_ERR(yetty_core_void, "reg is NULL");
+
   prim_data_array_free(&line->prims);
   /* Destroy fonts owned by this line */
   for (uint32_t i = 0; i < line->font_count; i++) {
@@ -239,12 +264,30 @@ static void grid_line_free(struct yetty_yetty_ypaint_canvas_grid_line *line) {
   line->fonts = NULL;
   line->font_count = 0;
   line->font_capacity = 0;
+  /* Destroy complex prims owned by this line */
+  for (uint32_t i = 0; i < line->complex_prim_count; i++) {
+    struct yetty_yetty_ypaint_canvas_complex_prim *cp = &line->complex_prims[i];
+    if (cp->cache) {
+      struct yetty_ypaint_prim_flyweight fw =
+          yetty_ypaint_flyweight_registry_get(reg, cp->data);
+      if (!fw.ops)
+        return YETTY_ERR(yetty_core_void, "no handler for complex prim type");
+      if (fw.ops->destroy)
+        fw.ops->destroy(cp->cache);
+    }
+    free(cp->data);
+  }
+  free(line->complex_prims);
+  line->complex_prims = NULL;
+  line->complex_prim_count = 0;
+  line->complex_prim_capacity = 0;
   for (uint32_t i = 0; i < line->cell_count; i++)
     prim_ref_array_free(&line->cells[i].refs);
   free(line->cells);
   line->cells = NULL;
   line->cell_count = 0;
   line->cell_capacity = 0;
+  return YETTY_OK_VOID();
 }
 
 static struct yetty_core_void_result
@@ -288,15 +331,19 @@ line_buffer_init(struct yetty_yetty_ypaint_canvas_line_buffer *buf) {
   buf->count = 0;
 }
 
-static void
-line_buffer_free(struct yetty_yetty_ypaint_canvas_line_buffer *buf) {
+static struct yetty_core_void_result
+line_buffer_free(struct yetty_yetty_ypaint_canvas_line_buffer *buf,
+                 const struct yetty_ypaint_flyweight_registry *reg) {
   for (uint32_t i = 0; i < buf->count; i++) {
-    grid_line_free(&buf->lines[i]);
+    struct yetty_core_void_result res = grid_line_free(&buf->lines[i], reg);
+    if (YETTY_IS_ERR(res))
+      return res;
   }
   free(buf->lines);
   buf->lines = NULL;
   buf->capacity = 0;
   buf->count = 0;
+  return YETTY_OK_VOID();
 }
 
 static struct yetty_yetty_ypaint_canvas_grid_line *
@@ -339,17 +386,20 @@ canvas_ensure_lines(struct yetty_yetty_ypaint_canvas *canvas,
   return YETTY_OK_VOID();
 }
 
-static void
+static struct yetty_core_void_result
 line_buffer_pop_front(struct yetty_yetty_ypaint_canvas_line_buffer *buf,
+                      const struct yetty_ypaint_flyweight_registry *reg,
                       uint32_t count) {
   if (count == 0 || buf->count == 0)
-    return;
+    return YETTY_OK_VOID();
   if (count > buf->count)
     count = buf->count;
 
   // Free the top lines being removed
   for (uint32_t i = 0; i < count; i++) {
-    grid_line_free(&buf->lines[i]);
+    struct yetty_core_void_result res = grid_line_free(&buf->lines[i], reg);
+    if (YETTY_IS_ERR(res))
+      return res;
   }
 
   // Memmove remaining lines to front
@@ -364,6 +414,7 @@ line_buffer_pop_front(struct yetty_yetty_ypaint_canvas_line_buffer *buf,
          count * sizeof(struct yetty_yetty_ypaint_canvas_grid_line));
 
   buf->count = remaining;
+  return YETTY_OK_VOID();
 }
 
 //=============================================================================
@@ -388,6 +439,18 @@ yetty_yetty_ypaint_canvas_create(bool scrolling_mode,
 
   line_buffer_init(&canvas->lines);
 
+  /* Create flyweight registry with all handlers */
+  struct yetty_ypaint_flyweight_registry_ptr_result fw_res =
+      yetty_ypaint_flyweight_create();
+  if (YETTY_IS_ERR(fw_res)) {
+    yerror("ypaint_canvas: flyweight creation failed: %s", fw_res.error.msg);
+    /* lines buffer is empty here, no registry needed for cleanup */
+    free(canvas->lines.lines);
+    free(canvas);
+    return NULL;
+  }
+  canvas->flyweight_registry = fw_res.value;
+
   /* Create default MSDF font for text spans (font_id = -1) */
   struct yetty_config *config = context->app_context.config;
   const char *fonts_dir = config->ops->get_string(config, "paths/fonts", "");
@@ -408,7 +471,9 @@ yetty_yetty_ypaint_canvas_create(bool scrolling_mode,
     ydebug("ypaint_canvas: default font created");
   } else {
     yerror("ypaint_canvas: default font creation failed: %s", font_res.error.msg);
-    line_buffer_free(&canvas->lines);
+    yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
+    /* lines buffer is empty here, no registry needed for cleanup */
+    free(canvas->lines.lines);
     free(canvas);
     return NULL;
   }
@@ -423,7 +488,11 @@ yetty_yetty_ypaint_canvas_destroy(struct yetty_yetty_ypaint_canvas *canvas) {
 
   if (canvas->default_font)
     canvas->default_font->ops->destroy(canvas->default_font);
-  line_buffer_free(&canvas->lines);
+  struct yetty_core_void_result res =
+      line_buffer_free(&canvas->lines, canvas->flyweight_registry);
+  if (YETTY_IS_ERR(res))
+    return res;
+  yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
   free(canvas->grid_staging);
   free(canvas->prim_staging);
   free(canvas);
@@ -718,7 +787,7 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
 
   // Check if buffer has SDF primitives (text spans handled separately in PASS 4)
   struct yetty_ypaint_core_primitive_iter_result iter_res =
-      yetty_ypaint_core_buffer_prim_first(buffer);
+      yetty_ypaint_core_buffer_prim_first(buffer, canvas->flyweight_registry);
   bool has_sdf_primitives = YETTY_IS_OK(iter_res);
 
   // Save original cursor - primitives coords are relative to THIS position
@@ -758,7 +827,7 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
       if (prim_max_row > max_row_needed)
         max_row_needed = prim_max_row;
 
-      iter_res = yetty_ypaint_core_buffer_prim_next(buffer, &iter);
+      iter_res = yetty_ypaint_core_buffer_prim_next(buffer, canvas->flyweight_registry, &iter);
       if (YETTY_IS_ERR(iter_res))
         break;
       iter = iter_res.value;
@@ -825,7 +894,7 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
            "scrolled=%u)",
            adjusted_cursor, original_cursor_row, lines_scrolled);
 
-    iter_res = yetty_ypaint_core_buffer_prim_first(buffer);
+    iter_res = yetty_ypaint_core_buffer_prim_first(buffer, canvas->flyweight_registry);
     struct yetty_ypaint_core_primitive_iter iter = iter_res.value;
 
     while (1) {
@@ -843,7 +912,7 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
       if (prim_max_row > max_row_seen)
         max_row_seen = prim_max_row;
 
-      iter_res = yetty_ypaint_core_buffer_prim_next(buffer, &iter);
+      iter_res = yetty_ypaint_core_buffer_prim_next(buffer, canvas->flyweight_registry, &iter);
       if (YETTY_IS_ERR(iter_res))
         break;
       iter = iter_res.value;
@@ -946,7 +1015,7 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
       }
       const struct yetty_render_gpu_resource_set *rs = rs_res.value;
       if (rs->buffer_count == 0 || !rs->buffers[0].data) {
-        ydebug("add_buffer: no buffer data buf_count=%u data=%p", rs->buffer_count, (void*)rs->buffers[0].data);
+        ydebug("add_buffer: no buffer data buf_count=%zu data=%p", rs->buffer_count, (void*)rs->buffers[0].data);
         continue;
       }
 
@@ -1181,7 +1250,10 @@ yetty_yetty_ypaint_canvas_scroll_lines(struct yetty_yetty_ypaint_canvas *canvas,
   dump_grid(canvas, "BEFORE SCROLL");
 
   // Pop lines from front (memmove)
-  line_buffer_pop_front(&canvas->lines, num_lines);
+  struct yetty_core_void_result pop_res =
+      line_buffer_pop_front(&canvas->lines, canvas->flyweight_registry, num_lines);
+  if (YETTY_IS_ERR(pop_res))
+    return pop_res;
 
   // Always increment rolling_row_0
   canvas->rolling_row_0 += num_lines;
@@ -1477,7 +1549,10 @@ yetty_yetty_ypaint_canvas_clear(struct yetty_yetty_ypaint_canvas *canvas) {
   if (!canvas)
     return YETTY_ERR(yetty_core_void, "canvas is NULL");
 
-  line_buffer_free(&canvas->lines);
+  struct yetty_core_void_result res =
+      line_buffer_free(&canvas->lines, canvas->flyweight_registry);
+  if (YETTY_IS_ERR(res))
+    return res;
   line_buffer_init(&canvas->lines);
 
   canvas->grid_staging_count = 0;

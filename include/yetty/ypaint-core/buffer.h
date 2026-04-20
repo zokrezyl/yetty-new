@@ -5,6 +5,7 @@
 
 #include <yetty/ycore/result.h>
 #include <yetty/ycore/types.h>
+#include <yetty/ypaint-core/flyweight.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,34 +41,6 @@ struct yetty_ypaint_id_result
 yetty_ypaint_core_buffer_add_prim(struct yetty_ypaint_core_buffer *buf,
                              const void *data, size_t size);
 
-// Primitive ops vtable - all functions return result types
-struct yetty_ypaint_prim_ops {
-    struct yetty_core_size_result (*size)(const uint32_t *prim);
-    struct rectangle_result (*aabb)(const uint32_t *prim);
-};
-
-// Flyweight - returned by handler
-struct yetty_ypaint_prim_flyweight {
-    const uint32_t *data;  // type at data[0]
-    const struct yetty_ypaint_prim_ops *ops;
-};
-
-// Handler function - takes position, returns flyweight (ops=NULL if not handled)
-typedef struct yetty_ypaint_prim_flyweight (*yetty_ypaint_prim_handler_fn)(
-    const uint32_t *prim);
-
-// Set default handler (SDF) - called first, fast path
-void yetty_ypaint_core_buffer_set_default_handler(
-    struct yetty_ypaint_core_buffer *buf,
-    yetty_ypaint_prim_handler_fn handler);
-
-// Register additional handler for type range [type_min, type_max]
-struct yetty_core_void_result yetty_ypaint_core_buffer_register_handler(
-    struct yetty_ypaint_core_buffer *buf,
-    uint32_t type_min,
-    uint32_t type_max,
-    yetty_ypaint_prim_handler_fn handler);
-
 // Primitive iterator
 struct yetty_ypaint_core_primitive_iter {
     struct yetty_ypaint_prim_flyweight fw;
@@ -76,10 +49,12 @@ struct yetty_ypaint_core_primitive_iter {
 YETTY_RESULT_DECLARE(yetty_ypaint_core_primitive_iter, struct yetty_ypaint_core_primitive_iter);
 
 struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_first(
-    const struct yetty_ypaint_core_buffer *buf);
+    const struct yetty_ypaint_core_buffer *buf,
+    const struct yetty_ypaint_flyweight_registry *reg);
 
 struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_next(
     const struct yetty_ypaint_core_buffer *buf,
+    const struct yetty_ypaint_flyweight_registry *reg,
     const struct yetty_ypaint_core_primitive_iter *iter);
 
 /*=============================================================================

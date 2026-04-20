@@ -7,24 +7,12 @@
 #include <yetty/ytrace.h>
 
 #define YPAINT_BUFFER_INITIAL_CAPACITY 1024
-#define YPAINT_MAX_HANDLERS 4
-
-// Handler registration
-struct primitive_handler_reg {
-    uint32_t type_min;
-    uint32_t type_max;
-    yetty_ypaint_prim_handler_fn handler;
-};
-
 #define YPAINT_MAX_FONTS 8
 #define YPAINT_MAX_TEXT_SPANS 64
 
 // YPaint buffer - contains primitive data, fonts, text spans
 struct yetty_ypaint_core_buffer {
   struct yetty_core_named_buffer primitives;
-  yetty_ypaint_prim_handler_fn default_handler;
-  struct primitive_handler_reg handlers[YPAINT_MAX_HANDLERS];
-  size_t handler_count;
 
   struct yetty_font_blob fonts[YPAINT_MAX_FONTS];
   uint32_t font_count;
@@ -32,54 +20,6 @@ struct yetty_ypaint_core_buffer {
   struct yetty_text_span text_spans[YPAINT_MAX_TEXT_SPANS];
   uint32_t text_span_count;
 };
-
-void yetty_ypaint_core_buffer_set_default_handler(
-    struct yetty_ypaint_core_buffer *buf,
-    yetty_ypaint_prim_handler_fn handler) {
-    if (buf)
-        buf->default_handler = handler;
-}
-
-struct yetty_core_void_result yetty_ypaint_core_buffer_register_handler(
-    struct yetty_ypaint_core_buffer *buf,
-    uint32_t type_min,
-    uint32_t type_max,
-    yetty_ypaint_prim_handler_fn handler) {
-    if (!buf)
-        return YETTY_ERR(yetty_core_void, "buf is NULL");
-    if (buf->handler_count >= YPAINT_MAX_HANDLERS)
-        return YETTY_ERR(yetty_core_void, "max handlers reached");
-    if (!handler)
-        return YETTY_ERR(yetty_core_void, "handler is NULL");
-    buf->handlers[buf->handler_count].type_min = type_min;
-    buf->handlers[buf->handler_count].type_max = type_max;
-    buf->handlers[buf->handler_count].handler = handler;
-    buf->handler_count++;
-    return YETTY_OK_VOID();
-}
-
-// Get flyweight for primitive at position
-static struct yetty_ypaint_prim_flyweight get_flyweight(
-    const struct yetty_ypaint_core_buffer *buf, const uint32_t *prim) {
-    struct yetty_ypaint_prim_flyweight fw = {NULL, NULL};
-
-    // Try default handler first (fast path for SDF types)
-    if (buf->default_handler) {
-        fw = buf->default_handler(prim);
-        if (fw.ops)
-            return fw;
-    }
-    // Fallback to additional handlers by type range
-    uint32_t type = prim[0];
-    for (size_t i = 0; i < buf->handler_count; i++) {
-        if (type >= buf->handlers[i].type_min && type <= buf->handlers[i].type_max) {
-            fw = buf->handlers[i].handler(prim);
-            if (fw.ops)
-                return fw;
-        }
-    }
-    return fw;  // ops=NULL means unhandled
-}
 
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
     const struct yetty_core_buffer *base64_buf) {
@@ -195,14 +135,17 @@ yetty_ypaint_core_buffer_add_prim(struct yetty_ypaint_core_buffer *buf,
 }
 
 struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_first(
-    const struct yetty_ypaint_core_buffer *buf) {
+    const struct yetty_ypaint_core_buffer *buf,
+    const struct yetty_ypaint_flyweight_registry *reg) {
   if (!buf)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "buf is NULL");
+  if (!reg)
+    return YETTY_ERR(yetty_ypaint_core_primitive_iter, "reg is NULL");
   if (!buf->primitives.buf.data || buf->primitives.buf.size == 0)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "buffer empty");
 
   const uint32_t *prim = (const uint32_t *)buf->primitives.buf.data;
-  struct yetty_ypaint_prim_flyweight fw = get_flyweight(buf, prim);
+  struct yetty_ypaint_prim_flyweight fw = yetty_ypaint_flyweight_registry_get(reg, prim);
   if (!fw.ops)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "unknown primitive type");
 
@@ -212,9 +155,12 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_fir
 
 struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_next(
     const struct yetty_ypaint_core_buffer *buf,
+    const struct yetty_ypaint_flyweight_registry *reg,
     const struct yetty_ypaint_core_primitive_iter *iter) {
   if (!buf)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "buf is NULL");
+  if (!reg)
+    return YETTY_ERR(yetty_ypaint_core_primitive_iter, "reg is NULL");
   if (!iter || !iter->fw.ops)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "iter is NULL");
 
@@ -229,7 +175,7 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_nex
   if (offset >= buf_size)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "end of buffer");
 
-  struct yetty_ypaint_prim_flyweight fw = get_flyweight(buf, next);
+  struct yetty_ypaint_prim_flyweight fw = yetty_ypaint_flyweight_registry_get(reg, next);
   if (!fw.ops)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "unknown primitive type");
 
