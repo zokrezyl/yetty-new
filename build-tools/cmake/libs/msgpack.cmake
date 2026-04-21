@@ -25,3 +25,8 @@ CPMAddPackage(
         "MSGPACK_BUILD_TESTS OFF"
         "MSGPACK_BUILD_EXAMPLES OFF"
 )
+
+# Create alias for the C library target (always static)
+if(NOT TARGET msgpack-c)
+    add_library(msgpack-c ALIAS msgpackc-static)
+endif()

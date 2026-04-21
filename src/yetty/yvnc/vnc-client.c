@@ -1,15 +1,19 @@
+/*
+ * vnc-client.c - VNC client using libuv TCP via event loop
+ */
+
 #include <yetty/yvnc/vnc-client.h>
-#include <yetty/platform/socket.h>
+#include <yetty/ycore/event-loop.h>
 #include <yetty/ytrace.h>
 #include "protocol.h"
 
-#include <poll.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
 #include <turbojpeg.h>
 #include <time.h>
+
+#define RECV_BUFFER_SIZE 65536
 
 /* Recv state machine */
 enum recv_state {
@@ -62,13 +66,11 @@ struct yetty_vnc_client {
 
 	/* Event loop for async I/O */
 	struct yetty_core_event_loop *event_loop;
-	struct yetty_core_event_listener listener;
-	yetty_core_poll_id poll_id;
+	yetty_core_tcp_client_id tcp_client_id;
+	struct yetty_tcp_conn *conn;
 
-	/* Network */
-	yetty_socket_fd socket;
+	/* Connection state */
 	int connected;
-	int connecting;
 	int wants_reconnect;
 
 	/* Reconnection */
@@ -91,12 +93,6 @@ struct yetty_vnc_client {
 	struct vnc_tile_header current_tile;
 	struct vnc_rect_header current_rect;
 	uint16_t tiles_received;
-
-	/* Send queue for async writes */
-	uint8_t *send_queue;
-	size_t send_queue_size;
-	size_t send_queue_capacity;
-	size_t send_offset;
 
 	/* GPU resources */
 	WGPUTexture texture;
@@ -137,27 +133,475 @@ static double get_time_sec(void)
 	return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
-static inline int clamp_int(int val, int min_val, int max_val)
-{
-	if (val < min_val)
-		return min_val;
-	if (val > max_val)
-		return max_val;
-	return val;
-}
-
 static struct yetty_core_void_result ensure_resources(
 	struct yetty_vnc_client *client, uint16_t width, uint16_t height);
 static struct yetty_core_void_result create_pipeline(
 	struct yetty_vnc_client *client);
-static void send_input(struct yetty_vnc_client *client, const void *data,
-		       size_t size);
-static void drain_send_queue(struct yetty_vnc_client *client);
 
-/* Forward declaration */
-static struct yetty_core_int_result vnc_client_on_event(
-	struct yetty_core_event_listener *listener,
-	const struct yetty_core_event *event);
+/*===========================================================================
+ * Send helper
+ *===========================================================================*/
+
+static void send_input(struct yetty_vnc_client *client, const void *data, size_t size)
+{
+	if (!client || !client->connected || !client->conn)
+		return;
+
+	client->event_loop->ops->tcp_send(client->conn, data, size);
+}
+
+/*===========================================================================
+ * Frame processing
+ *===========================================================================*/
+
+static void process_tile_data(struct yetty_vnc_client *client)
+{
+	ydebug("vnc_client: tile (%u,%u) encoding=%u size=%u",
+	       client->current_tile.tile_x, client->current_tile.tile_y,
+	       client->current_tile.encoding, client->current_tile.data_size);
+
+	memset(client->tile_pixels, 0, VNC_TILE_SIZE * VNC_TILE_SIZE * 4);
+
+	switch (client->current_tile.encoding) {
+	case VNC_ENCODING_RAW:
+		ydebug("vnc_client: decoding RAW tile");
+		if (client->current_tile.data_size == VNC_TILE_SIZE * VNC_TILE_SIZE * 4) {
+			memcpy(client->tile_pixels, client->recv_buffer,
+			       client->current_tile.data_size);
+		}
+		break;
+
+	case VNC_ENCODING_JPEG: {
+		ydebug("vnc_client: decoding JPEG tile");
+		int w, h, subsamp, cs;
+		if (tjDecompressHeader3(client->jpeg_decompressor,
+					client->recv_buffer,
+					client->current_tile.data_size,
+					&w, &h, &subsamp, &cs) == 0) {
+			if (w <= VNC_TILE_SIZE && h <= VNC_TILE_SIZE) {
+				tjDecompress2(client->jpeg_decompressor,
+					      client->recv_buffer,
+					      client->current_tile.data_size,
+					      client->tile_pixels,
+					      VNC_TILE_SIZE, 0, VNC_TILE_SIZE,
+					      TJPF_BGRA, TJFLAG_FASTDCT);
+			}
+		}
+		break;
+	}
+
+	case VNC_ENCODING_FULL_FRAME: {
+		int w, h, subsamp, cs;
+		if (tjDecompressHeader3(client->jpeg_decompressor,
+					client->recv_buffer,
+					client->current_tile.data_size,
+					&w, &h, &subsamp, &cs) == 0) {
+			if ((uint16_t)w == client->width && (uint16_t)h == client->height) {
+				uint8_t *full_frame = malloc(client->width * client->height * 4);
+				if (full_frame) {
+					tjDecompress2(client->jpeg_decompressor,
+						      client->recv_buffer,
+						      client->current_tile.data_size,
+						      full_frame,
+						      client->width, 0, client->height,
+						      TJPF_BGRA, TJFLAG_FASTDCT);
+
+					if (client->texture) {
+						WGPUTexelCopyTextureInfo dst = {0};
+						dst.texture = client->texture;
+						dst.origin = (WGPUOrigin3D){0, 0, 0};
+
+						WGPUTexelCopyBufferLayout layout = {0};
+						layout.bytesPerRow = client->width * 4;
+						layout.rowsPerImage = client->height;
+
+						WGPUExtent3D size = {client->width, client->height, 1};
+						wgpuQueueWriteTexture(client->queue, &dst, full_frame,
+								      client->width * client->height * 4,
+								      &layout, &size);
+					}
+					free(full_frame);
+				}
+			}
+		}
+		client->tiles_received++;
+		client->stats_tiles_window++;
+		if (client->tiles_received >= client->current_frame.num_tiles) {
+			client->stats_frames_window++;
+			client->recv_state = RECV_FRAME_HEADER;
+			client->recv_needed = sizeof(struct vnc_frame_header);
+			client->recv_offset = 0;
+			yetty_vnc_client_send_frame_ack(client);
+		}
+		return;
+	}
+
+	default:
+		break;
+	}
+
+	/* Upload tile to GPU */
+	if (client->texture && client->width > 0 && client->height > 0) {
+		uint32_t px = client->current_tile.tile_x * VNC_TILE_SIZE;
+		uint32_t py = client->current_tile.tile_y * VNC_TILE_SIZE;
+		if (px < client->width && py < client->height) {
+			uint32_t tw = VNC_TILE_SIZE;
+			uint32_t th = VNC_TILE_SIZE;
+			if (px + tw > client->width)
+				tw = client->width - px;
+			if (py + th > client->height)
+				th = client->height - py;
+
+			ydebug("vnc_client: uploading tile to GPU at (%u,%u) size %ux%u",
+			       px, py, tw, th);
+
+			WGPUTexelCopyTextureInfo dst = {0};
+			dst.texture = client->texture;
+			dst.origin = (WGPUOrigin3D){px, py, 0};
+
+			WGPUTexelCopyBufferLayout layout = {0};
+			layout.bytesPerRow = VNC_TILE_SIZE * 4;
+			layout.rowsPerImage = VNC_TILE_SIZE;
+
+			WGPUExtent3D size = {tw, th, 1};
+			wgpuQueueWriteTexture(client->queue, &dst,
+					      client->tile_pixels,
+					      VNC_TILE_SIZE * VNC_TILE_SIZE * 4,
+					      &layout, &size);
+		}
+	}
+
+	client->tiles_received++;
+	client->stats_tiles_window++;
+
+	if (client->tiles_received >= client->current_frame.num_tiles) {
+		client->stats_frames_window++;
+		client->recv_state = RECV_FRAME_HEADER;
+		client->recv_needed = sizeof(struct vnc_frame_header);
+		client->recv_offset = 0;
+		yetty_vnc_client_send_frame_ack(client);
+	} else {
+		client->recv_state = RECV_TILE_HEADER;
+		client->recv_needed = sizeof(struct vnc_tile_header);
+		client->recv_offset = 0;
+	}
+}
+
+static void process_rect_data(struct yetty_vnc_client *client)
+{
+	uint16_t px = client->current_rect.px_x;
+	uint16_t py = client->current_rect.px_y;
+	uint16_t rw = client->current_rect.width;
+	uint16_t rh = client->current_rect.height;
+
+	uint8_t *pixels = malloc(rw * rh * 4);
+	if (!pixels)
+		return;
+
+	memset(pixels, 0, rw * rh * 4);
+
+	switch (client->current_rect.encoding) {
+	case VNC_ENCODING_RAW:
+		if (client->current_rect.data_size == (uint32_t)(rw * rh * 4)) {
+			memcpy(pixels, client->recv_buffer, client->current_rect.data_size);
+		}
+		break;
+
+	case VNC_ENCODING_JPEG: {
+		int w, h, subsamp, cs;
+		if (tjDecompressHeader3(client->jpeg_decompressor,
+					client->recv_buffer,
+					client->current_rect.data_size,
+					&w, &h, &subsamp, &cs) == 0) {
+			if (w == rw && h == rh) {
+				tjDecompress2(client->jpeg_decompressor,
+					      client->recv_buffer,
+					      client->current_rect.data_size,
+					      pixels, rw, 0, rh,
+					      TJPF_BGRA, TJFLAG_FASTDCT);
+			}
+		}
+		break;
+	}
+
+	default:
+		break;
+	}
+
+	/* Upload to GPU */
+	if (client->texture && client->width > 0 && client->height > 0) {
+		if (px < client->width && py < client->height) {
+			uint32_t uw = rw;
+			uint32_t uh = rh;
+			if (px + uw > client->width)
+				uw = client->width - px;
+			if (py + uh > client->height)
+				uh = client->height - py;
+
+			WGPUTexelCopyTextureInfo dst = {0};
+			dst.texture = client->texture;
+			dst.origin = (WGPUOrigin3D){px, py, 0};
+
+			WGPUTexelCopyBufferLayout layout = {0};
+			layout.bytesPerRow = rw * 4;
+			layout.rowsPerImage = rh;
+
+			WGPUExtent3D size = {uw, uh, 1};
+			wgpuQueueWriteTexture(client->queue, &dst, pixels,
+					      rw * rh * 4, &layout, &size);
+		}
+	}
+
+	free(pixels);
+
+	client->tiles_received++;
+	client->stats_tiles_window++;
+
+	if (client->tiles_received >= client->current_frame.num_tiles) {
+		client->stats_frames_window++;
+		client->recv_state = RECV_FRAME_HEADER;
+		client->recv_needed = sizeof(struct vnc_frame_header);
+		client->recv_offset = 0;
+		yetty_vnc_client_send_frame_ack(client);
+	} else {
+		client->recv_state = RECV_RECT_HEADER;
+		client->recv_needed = sizeof(struct vnc_rect_header);
+		client->recv_offset = 0;
+	}
+}
+
+static void process_received_data(struct yetty_vnc_client *client)
+{
+	int tiles_received = 0;
+
+	while (client->recv_offset >= client->recv_needed) {
+		switch (client->recv_state) {
+		case RECV_FRAME_HEADER: {
+			memcpy(&client->current_frame, client->recv_buffer,
+			       sizeof(struct vnc_frame_header));
+
+			if (client->current_frame.magic != VNC_FRAME_MAGIC) {
+				ywarn("VNC client: invalid frame magic 0x%08X",
+				      client->current_frame.magic);
+				client->recv_state = RECV_FRAME_HEADER;
+				client->recv_needed = sizeof(struct vnc_frame_header);
+				client->recv_offset = 0;
+				return;
+			}
+
+			if (client->current_frame.width == 0 ||
+			    client->current_frame.height == 0 ||
+			    client->current_frame.width > 8192 ||
+			    client->current_frame.height > 8192) {
+				ywarn("VNC client: invalid frame dimensions %ux%u",
+				      client->current_frame.width,
+				      client->current_frame.height);
+				client->recv_state = RECV_FRAME_HEADER;
+				client->recv_needed = sizeof(struct vnc_frame_header);
+				client->recv_offset = 0;
+				return;
+			}
+
+			ydebug("VNC client: frame %ux%u tiles=%u",
+			       client->current_frame.width,
+			       client->current_frame.height,
+			       client->current_frame.num_tiles);
+
+			if (client->current_frame.width != client->width ||
+			    client->current_frame.height != client->height) {
+				client->width = client->current_frame.width;
+				client->height = client->current_frame.height;
+			}
+
+			ensure_resources(client, client->width, client->height);
+			client->tiles_received = 0;
+
+			/* Consume header and shift remaining data */
+			size_t consumed = sizeof(struct vnc_frame_header);
+			size_t remaining = client->recv_offset - consumed;
+			if (remaining > 0)
+				memmove(client->recv_buffer,
+					client->recv_buffer + consumed, remaining);
+			client->recv_offset = remaining;
+
+			if (client->current_frame.num_tiles == 0) {
+				client->recv_needed = sizeof(struct vnc_frame_header);
+			} else {
+				client->recv_state = RECV_TILE_HEADER;
+				client->recv_needed = sizeof(struct vnc_tile_header);
+			}
+			break;
+		}
+
+		case RECV_TILE_HEADER: {
+			memcpy(&client->current_tile, client->recv_buffer,
+			       sizeof(struct vnc_tile_header));
+
+			if (client->current_tile.data_size > 16 * 1024 * 1024) {
+				ywarn("VNC client: tile data too large %u",
+				      client->current_tile.data_size);
+				client->recv_state = RECV_FRAME_HEADER;
+				client->recv_needed = sizeof(struct vnc_frame_header);
+				client->recv_offset = 0;
+				return;
+			}
+
+			size_t consumed = sizeof(struct vnc_tile_header);
+			size_t remaining = client->recv_offset - consumed;
+			if (remaining > 0)
+				memmove(client->recv_buffer,
+					client->recv_buffer + consumed, remaining);
+			client->recv_offset = remaining;
+
+			client->recv_state = RECV_TILE_DATA;
+			client->recv_needed = client->current_tile.data_size;
+			break;
+		}
+
+		case RECV_TILE_DATA: {
+			process_tile_data(client);
+			tiles_received = 1;
+
+			size_t consumed = client->current_tile.data_size;
+			size_t remaining = client->recv_offset - consumed;
+			if (remaining > 0)
+				memmove(client->recv_buffer,
+					client->recv_buffer + consumed, remaining);
+			client->recv_offset = remaining;
+			break;
+		}
+
+		case RECV_RECT_HEADER: {
+			memcpy(&client->current_rect, client->recv_buffer,
+			       sizeof(struct vnc_rect_header));
+
+			if (client->current_rect.data_size > 16 * 1024 * 1024) {
+				ywarn("VNC client: rect data too large %u",
+				      client->current_rect.data_size);
+				client->recv_state = RECV_FRAME_HEADER;
+				client->recv_needed = sizeof(struct vnc_frame_header);
+				client->recv_offset = 0;
+				return;
+			}
+
+			size_t consumed = sizeof(struct vnc_rect_header);
+			size_t remaining = client->recv_offset - consumed;
+			if (remaining > 0)
+				memmove(client->recv_buffer,
+					client->recv_buffer + consumed, remaining);
+			client->recv_offset = remaining;
+
+			client->recv_state = RECV_RECT_DATA;
+			client->recv_needed = client->current_rect.data_size;
+			break;
+		}
+
+		case RECV_RECT_DATA: {
+			process_rect_data(client);
+			tiles_received = 1;
+
+			size_t consumed = client->current_rect.data_size;
+			size_t remaining = client->recv_offset - consumed;
+			if (remaining > 0)
+				memmove(client->recv_buffer,
+					client->recv_buffer + consumed, remaining);
+			client->recv_offset = remaining;
+			break;
+		}
+		}
+	}
+
+	if (tiles_received && client->on_frame_fn)
+		client->on_frame_fn(client->on_frame_userdata);
+}
+
+/*===========================================================================
+ * TCP Client Callbacks
+ *===========================================================================*/
+
+static void vnc_client_on_connect(void *ctx, struct yetty_tcp_conn *conn)
+{
+	struct yetty_vnc_client *client = ctx;
+	client->conn = conn;
+	client->connected = 1;
+
+	yinfo("VNC client connected");
+
+	if (client->on_connected_fn)
+		client->on_connected_fn(client->on_connected_userdata);
+}
+
+static void vnc_client_on_connect_error(void *ctx, const char *error)
+{
+	struct yetty_vnc_client *client = ctx;
+	(void)error;
+
+	yerror("VNC client connect failed: %s", error);
+	client->connected = 0;
+	client->conn = NULL;
+	client->tcp_client_id = -1;
+	client->wants_reconnect = 1;
+
+	if (client->on_disconnected_fn)
+		client->on_disconnected_fn(client->on_disconnected_userdata);
+}
+
+static void vnc_client_on_alloc(void *ctx, size_t suggested, char **buf, size_t *len)
+{
+	struct yetty_vnc_client *client = ctx;
+	(void)suggested;
+
+	/* Ensure buffer capacity */
+	size_t need = client->recv_offset + suggested;
+	if (need > client->recv_buffer_capacity) {
+		size_t new_cap = need * 2;
+		if (new_cap < 64 * 1024)
+			new_cap = 64 * 1024;
+		uint8_t *new_buf = realloc(client->recv_buffer, new_cap);
+		if (new_buf) {
+			client->recv_buffer = new_buf;
+			client->recv_buffer_capacity = new_cap;
+		}
+	}
+
+	*buf = (char *)client->recv_buffer + client->recv_offset;
+	*len = client->recv_buffer_capacity - client->recv_offset;
+}
+
+static void vnc_client_on_data(void *ctx, struct yetty_tcp_conn *conn,
+			       const char *data, long nread)
+{
+	struct yetty_vnc_client *client = ctx;
+	(void)conn;
+	(void)data; /* Data already in recv_buffer from on_alloc */
+
+	if (nread <= 0)
+		return;
+
+	client->recv_offset += (size_t)nread;
+	client->stats_bytes_window += (size_t)nread;
+
+	process_received_data(client);
+}
+
+static void vnc_client_on_disconnect(void *ctx)
+{
+	struct yetty_vnc_client *client = ctx;
+
+	yinfo("VNC client disconnected");
+
+	client->connected = 0;
+	client->conn = NULL;
+	client->tcp_client_id = -1;
+	client->wants_reconnect = 1;
+
+	if (client->on_disconnected_fn)
+		client->on_disconnected_fn(client->on_disconnected_userdata);
+}
+
+/*===========================================================================
+ * Public API
+ *===========================================================================*/
 
 struct yetty_vnc_client_ptr_result
 yetty_vnc_client_create(WGPUDevice device, WGPUQueue queue,
@@ -177,16 +621,14 @@ yetty_vnc_client_create(WGPUDevice device, WGPUQueue queue,
 	client->queue = queue;
 	client->surface_format = surface_format;
 	client->event_loop = event_loop;
-	client->listener.handler = vnc_client_on_event;
-	client->poll_id = -1;
+	client->tcp_client_id = -1;
 	client->width = width;
 	client->height = height;
-	client->socket = YETTY_SOCKET_INVALID;
 
 	/* Initialize recv state */
 	client->recv_state = RECV_FRAME_HEADER;
 	client->recv_needed = sizeof(struct vnc_frame_header);
-	client->recv_buffer_capacity = 64 * 1024;
+	client->recv_buffer_capacity = RECV_BUFFER_SIZE;
 	client->recv_buffer = malloc(client->recv_buffer_capacity);
 	if (!client->recv_buffer) {
 		free(client);
@@ -253,7 +695,6 @@ void yetty_vnc_client_destroy(struct yetty_vnc_client *client)
 	free(client->reconnect_host);
 	free(client->tile_pixels);
 	free(client->recv_buffer);
-	free(client->send_queue);
 	free(client);
 }
 
@@ -266,87 +707,31 @@ yetty_vnc_client_connect(struct yetty_vnc_client *client, const char *host,
 	if (client->connected)
 		return YETTY_ERR(yetty_core_void, "already connected");
 
-	yetty_platform_socket_init();
-
-	/* Create socket */
-	struct yetty_socket_fd_result sock_res = yetty_platform_socket_create_tcp();
-	if (!YETTY_IS_OK(sock_res))
-		return YETTY_ERR(yetty_core_void, "failed to create socket");
-
-	client->socket = sock_res.value;
-
-	/* Set non-blocking */
-	struct yetty_core_void_result res = yetty_platform_socket_set_nonblocking(client->socket);
-	if (!YETTY_IS_OK(res)) {
-		yetty_platform_socket_close(client->socket);
-		client->socket = YETTY_SOCKET_INVALID;
-		return res;
-	}
-
-	/* Set TCP_NODELAY */
-	yetty_platform_socket_set_nodelay(client->socket, 1);
-
 	/* Reset recv state */
 	client->recv_state = RECV_FRAME_HEADER;
 	client->recv_needed = sizeof(struct vnc_frame_header);
 	client->recv_offset = 0;
 
-	/* Register socket with event loop */
-	struct yetty_core_poll_id_result poll_res =
-		client->event_loop->ops->create_poll(client->event_loop);
-	if (!YETTY_IS_OK(poll_res)) {
-		yetty_platform_socket_close(client->socket);
-		client->socket = YETTY_SOCKET_INVALID;
-		return YETTY_ERR(yetty_core_void, "failed to create poll");
-	}
-	client->poll_id = poll_res.value;
+	/* Setup TCP client callbacks */
+	struct yetty_tcp_client_callbacks callbacks = {
+		.ctx = client,
+		.on_connect = vnc_client_on_connect,
+		.on_connect_error = vnc_client_on_connect_error,
+		.on_alloc = vnc_client_on_alloc,
+		.on_data = vnc_client_on_data,
+		.on_disconnect = vnc_client_on_disconnect,
+	};
 
-	res = client->event_loop->ops->config_poll(client->event_loop,
-						   client->poll_id,
-						   client->socket);
-	if (!YETTY_IS_OK(res)) {
-		client->event_loop->ops->destroy_poll(client->event_loop, client->poll_id);
-		client->poll_id = -1;
-		yetty_platform_socket_close(client->socket);
-		client->socket = YETTY_SOCKET_INVALID;
-		return res;
-	}
+	/* Create TCP client (starts connecting immediately) */
+	struct yetty_core_tcp_client_id_result id_res =
+		client->event_loop->ops->create_tcp_client(
+			client->event_loop, host, port, &callbacks);
+	if (!YETTY_IS_OK(id_res))
+		return YETTY_ERR(yetty_core_void, "failed to create TCP client");
 
-	res = client->event_loop->ops->register_poll_listener(
-		client->event_loop, client->poll_id, &client->listener);
-	if (!YETTY_IS_OK(res)) {
-		client->event_loop->ops->destroy_poll(client->event_loop, client->poll_id);
-		client->poll_id = -1;
-		yetty_platform_socket_close(client->socket);
-		client->socket = YETTY_SOCKET_INVALID;
-		return res;
-	}
+	client->tcp_client_id = id_res.value;
 
-	/* Connect (async) */
-	res = yetty_platform_socket_connect(client->socket, host, port);
-	if (!YETTY_IS_OK(res)) {
-		if (!yetty_platform_socket_connect_in_progress()) {
-			client->event_loop->ops->destroy_poll(client->event_loop, client->poll_id);
-			client->poll_id = -1;
-			yetty_platform_socket_close(client->socket);
-			client->socket = YETTY_SOCKET_INVALID;
-			return res;
-		}
-		/* Connect in progress - watch for writable to know when connected */
-		client->connecting = 1;
-		client->event_loop->ops->start_poll(client->event_loop, client->poll_id,
-						    YETTY_CORE_POLL_READABLE | YETTY_CORE_POLL_WRITABLE);
-		ydebug("VNC client connecting to %s:%u (async)...", host, port);
-	} else {
-		/* Connected immediately (localhost) - watch for readable */
-		client->connected = 1;
-		client->event_loop->ops->start_poll(client->event_loop, client->poll_id,
-						    YETTY_CORE_POLL_READABLE);
-		ydebug("VNC client connected to %s:%u (immediate)", host, port);
-		if (client->on_connected_fn)
-			client->on_connected_fn(client->on_connected_userdata);
-	}
-
+	ydebug("VNC client connecting to %s:%u", host, port);
 	return YETTY_OK_VOID();
 }
 
@@ -356,21 +741,14 @@ yetty_vnc_client_disconnect(struct yetty_vnc_client *client)
 	if (!client)
 		return YETTY_OK_VOID();
 
-	/* Unregister poll before closing socket */
-	if (client->poll_id >= 0) {
-		client->event_loop->ops->stop_poll(client->event_loop,
-						   client->poll_id);
-		client->event_loop->ops->destroy_poll(client->event_loop,
-						      client->poll_id);
-		client->poll_id = -1;
+	if (client->tcp_client_id >= 0) {
+		client->event_loop->ops->stop_tcp_client(
+			client->event_loop, client->tcp_client_id);
+		client->tcp_client_id = -1;
 	}
 
-	if (client->socket != YETTY_SOCKET_INVALID) {
-		yetty_platform_socket_close(client->socket);
-		client->socket = YETTY_SOCKET_INVALID;
-	}
 	client->connected = 0;
-	client->connecting = 0;
+	client->conn = NULL;
 
 	return YETTY_OK_VOID();
 }
@@ -390,482 +768,19 @@ uint16_t yetty_vnc_client_height(const struct yetty_vnc_client *client)
 	return client ? client->height : 0;
 }
 
-static void process_socket_readable(struct yetty_vnc_client *client)
-{
-	if (!client->connected || client->socket == YETTY_SOCKET_INVALID)
-		return;
-
-	int tiles_received = 0;
-	int loop_count = 0;
-
-	while (1) {
-		loop_count++;
-		if (loop_count > 10000) {
-			yerror("VNC client: infinite loop in recv, breaking");
-			break;
-		}
-
-		/* Ensure recv buffer capacity */
-		if (client->recv_needed > client->recv_buffer_capacity) {
-			size_t new_cap = client->recv_needed * 2;
-			uint8_t *new_buf = realloc(client->recv_buffer, new_cap);
-			if (!new_buf) {
-				yerror("VNC client: failed to resize recv buffer");
-				break;
-			}
-			client->recv_buffer = new_buf;
-			client->recv_buffer_capacity = new_cap;
-		}
-
-		struct yetty_core_size_result recv_res = yetty_platform_socket_recv(
-			client->socket,
-			client->recv_buffer + client->recv_offset,
-			client->recv_needed - client->recv_offset);
-
-		if (!YETTY_IS_OK(recv_res)) {
-			if (yetty_platform_socket_would_block()) {
-				/* No more data */
-				if (tiles_received && client->on_frame_fn)
-					client->on_frame_fn(client->on_frame_userdata);
-				return;
-			}
-			ywarn("VNC client: recv error");
-			yetty_vnc_client_disconnect(client);
-			if (client->on_disconnected_fn)
-				client->on_disconnected_fn(client->on_disconnected_userdata);
-			return;
-		}
-
-		if (recv_res.value == 0) {
-			ydebug("VNC client: server closed connection");
-			yetty_vnc_client_disconnect(client);
-			if (client->on_disconnected_fn)
-				client->on_disconnected_fn(client->on_disconnected_userdata);
-			return;
-		}
-
-		client->recv_offset += recv_res.value;
-		client->stats_bytes_window += recv_res.value;
-
-		if (client->recv_offset < client->recv_needed)
-			continue;
-
-		/* Process based on current state */
-		switch (client->recv_state) {
-		case RECV_FRAME_HEADER: {
-			memcpy(&client->current_frame, client->recv_buffer,
-			       sizeof(struct vnc_frame_header));
-
-			if (client->current_frame.magic != VNC_FRAME_MAGIC) {
-				ywarn("VNC client: invalid frame magic 0x%08X",
-				      client->current_frame.magic);
-				/* Reset and try to resync */
-				client->recv_state = RECV_FRAME_HEADER;
-				client->recv_needed = sizeof(struct vnc_frame_header);
-				client->recv_offset = 0;
-				return;
-			}
-
-			/* Sanity check */
-			if (client->current_frame.width == 0 ||
-			    client->current_frame.height == 0 ||
-			    client->current_frame.width > 8192 ||
-			    client->current_frame.height > 8192) {
-				ywarn("VNC client: invalid frame dimensions %ux%u",
-				      client->current_frame.width,
-				      client->current_frame.height);
-				client->recv_state = RECV_FRAME_HEADER;
-				client->recv_needed = sizeof(struct vnc_frame_header);
-				client->recv_offset = 0;
-				return;
-			}
-
-			ydebug("VNC client: frame %ux%u tiles=%u",
-			       client->current_frame.width,
-			       client->current_frame.height,
-			       client->current_frame.num_tiles);
-
-			/* Update dimensions */
-			if (client->current_frame.width != client->width ||
-			    client->current_frame.height != client->height) {
-				client->width = client->current_frame.width;
-				client->height = client->current_frame.height;
-			}
-
-			ensure_resources(client, client->width, client->height);
-			client->tiles_received = 0;
-
-			if (client->current_frame.num_tiles == 0) {
-				/* No tiles */
-				client->recv_state = RECV_FRAME_HEADER;
-				client->recv_needed = sizeof(struct vnc_frame_header);
-				client->recv_offset = 0;
-			} else if (client->current_frame.tile_size == 0) {
-				/* Rectangle mode */
-				client->recv_state = RECV_RECT_HEADER;
-				client->recv_needed = sizeof(struct vnc_rect_header);
-				client->recv_offset = 0;
-			} else {
-				/* Tile mode */
-				client->recv_state = RECV_TILE_HEADER;
-				client->recv_needed = sizeof(struct vnc_tile_header);
-				client->recv_offset = 0;
-			}
-			break;
-		}
-
-		case RECV_TILE_HEADER: {
-			memcpy(&client->current_tile, client->recv_buffer,
-			       sizeof(struct vnc_tile_header));
-
-			if (client->current_tile.data_size > 16 * 1024 * 1024) {
-				ywarn("VNC client: tile data too large %u",
-				      client->current_tile.data_size);
-				client->recv_state = RECV_FRAME_HEADER;
-				client->recv_needed = sizeof(struct vnc_frame_header);
-				client->recv_offset = 0;
-				return;
-			}
-
-			client->recv_state = RECV_TILE_DATA;
-			client->recv_needed = client->current_tile.data_size;
-			client->recv_offset = 0;
-			break;
-		}
-
-		case RECV_TILE_DATA: {
-			ydebug("vnc_client: tile (%u,%u) encoding=%u size=%u",
-			       client->current_tile.tile_x, client->current_tile.tile_y,
-			       client->current_tile.encoding, client->current_tile.data_size);
-
-			memset(client->tile_pixels, 0, VNC_TILE_SIZE * VNC_TILE_SIZE * 4);
-
-			switch (client->current_tile.encoding) {
-			case VNC_ENCODING_RAW:
-				ydebug("vnc_client: decoding RAW tile");
-				if (client->current_tile.data_size == VNC_TILE_SIZE * VNC_TILE_SIZE * 4) {
-					memcpy(client->tile_pixels, client->recv_buffer,
-					       client->current_tile.data_size);
-				}
-				break;
-
-			case VNC_ENCODING_JPEG: {
-				ydebug("vnc_client: decoding JPEG tile");
-				int w, h, subsamp, cs;
-				if (tjDecompressHeader3(client->jpeg_decompressor,
-							client->recv_buffer,
-							client->current_tile.data_size,
-							&w, &h, &subsamp, &cs) == 0) {
-					if (w <= VNC_TILE_SIZE && h <= VNC_TILE_SIZE) {
-						tjDecompress2(client->jpeg_decompressor,
-							      client->recv_buffer,
-							      client->current_tile.data_size,
-							      client->tile_pixels,
-							      VNC_TILE_SIZE, 0, VNC_TILE_SIZE,
-							      TJPF_BGRA, TJFLAG_FASTDCT);
-					}
-				}
-				break;
-			}
-
-			case VNC_ENCODING_FULL_FRAME: {
-				/* Full frame JPEG */
-				int w, h, subsamp, cs;
-				if (tjDecompressHeader3(client->jpeg_decompressor,
-							client->recv_buffer,
-							client->current_tile.data_size,
-							&w, &h, &subsamp, &cs) == 0) {
-					if ((uint16_t)w == client->width && (uint16_t)h == client->height) {
-						uint8_t *full_frame = malloc(client->width * client->height * 4);
-						if (full_frame) {
-							tjDecompress2(client->jpeg_decompressor,
-								      client->recv_buffer,
-								      client->current_tile.data_size,
-								      full_frame,
-								      client->width, 0, client->height,
-								      TJPF_BGRA, TJFLAG_FASTDCT);
-
-							if (client->texture) {
-								WGPUTexelCopyTextureInfo dst = {0};
-								dst.texture = client->texture;
-								dst.origin = (WGPUOrigin3D){0, 0, 0};
-
-								WGPUTexelCopyBufferLayout layout = {0};
-								layout.bytesPerRow = client->width * 4;
-								layout.rowsPerImage = client->height;
-
-								WGPUExtent3D size = {client->width, client->height, 1};
-								wgpuQueueWriteTexture(client->queue, &dst, full_frame,
-										      client->width * client->height * 4,
-										      &layout, &size);
-							}
-							free(full_frame);
-						}
-					}
-				}
-				tiles_received = 1;
-				client->tiles_received++;
-				client->stats_tiles_window++;
-				if (client->tiles_received >= client->current_frame.num_tiles) {
-					client->stats_frames_window++;
-					client->recv_state = RECV_FRAME_HEADER;
-					client->recv_needed = sizeof(struct vnc_frame_header);
-					client->recv_offset = 0;
-					yetty_vnc_client_send_frame_ack(client);
-				}
-				break;
-			}
-
-			default:
-				break;
-			}
-
-			/* Upload tile to GPU (skip for FULL_FRAME - already handled) */
-			if (client->current_tile.encoding != VNC_ENCODING_FULL_FRAME &&
-			    client->texture && client->width > 0 && client->height > 0) {
-				uint32_t px = client->current_tile.tile_x * VNC_TILE_SIZE;
-				uint32_t py = client->current_tile.tile_y * VNC_TILE_SIZE;
-				if (px < client->width && py < client->height) {
-					uint32_t tw = VNC_TILE_SIZE;
-					uint32_t th = VNC_TILE_SIZE;
-					if (px + tw > client->width)
-						tw = client->width - px;
-					if (py + th > client->height)
-						th = client->height - py;
-
-					ydebug("vnc_client: uploading tile to GPU at (%u,%u) size %ux%u",
-					       px, py, tw, th);
-
-					/* Debug: check first pixel */
-					uint8_t *p = client->tile_pixels;
-					ydebug("vnc_client: first pixel BGRA = %u,%u,%u,%u",
-					       p[0], p[1], p[2], p[3]);
-
-					WGPUTexelCopyTextureInfo dst = {0};
-					dst.texture = client->texture;
-					dst.origin = (WGPUOrigin3D){px, py, 0};
-
-					WGPUTexelCopyBufferLayout layout = {0};
-					layout.bytesPerRow = VNC_TILE_SIZE * 4;
-					layout.rowsPerImage = VNC_TILE_SIZE;
-
-					WGPUExtent3D size = {tw, th, 1};
-					wgpuQueueWriteTexture(client->queue, &dst,
-							      client->tile_pixels,
-							      VNC_TILE_SIZE * VNC_TILE_SIZE * 4,
-							      &layout, &size);
-				}
-			}
-
-			if (client->current_tile.encoding != VNC_ENCODING_FULL_FRAME) {
-				tiles_received = 1;
-				client->tiles_received++;
-				client->stats_tiles_window++;
-			}
-
-			if (client->tiles_received >= client->current_frame.num_tiles) {
-				client->stats_frames_window++;
-				client->recv_state = RECV_FRAME_HEADER;
-				client->recv_needed = sizeof(struct vnc_frame_header);
-				client->recv_offset = 0;
-				yetty_vnc_client_send_frame_ack(client);
-			} else {
-				client->recv_state = RECV_TILE_HEADER;
-				client->recv_needed = sizeof(struct vnc_tile_header);
-				client->recv_offset = 0;
-			}
-			break;
-		}
-
-		case RECV_RECT_HEADER: {
-			memcpy(&client->current_rect, client->recv_buffer,
-			       sizeof(struct vnc_rect_header));
-
-			if (client->current_rect.data_size > 16 * 1024 * 1024) {
-				ywarn("VNC client: rect data too large %u",
-				      client->current_rect.data_size);
-				client->recv_state = RECV_FRAME_HEADER;
-				client->recv_needed = sizeof(struct vnc_frame_header);
-				client->recv_offset = 0;
-				return;
-			}
-
-			client->recv_state = RECV_RECT_DATA;
-			client->recv_needed = client->current_rect.data_size;
-			client->recv_offset = 0;
-			break;
-		}
-
-		case RECV_RECT_DATA: {
-			uint16_t px = client->current_rect.px_x;
-			uint16_t py = client->current_rect.px_y;
-			uint16_t rw = client->current_rect.width;
-			uint16_t rh = client->current_rect.height;
-
-			uint8_t *pixels = malloc(rw * rh * 4);
-			if (!pixels)
-				break;
-
-			memset(pixels, 0, rw * rh * 4);
-
-			switch (client->current_rect.encoding) {
-			case VNC_ENCODING_RECT_RAW:
-				if (client->current_rect.data_size == (uint32_t)(rw * rh * 4)) {
-					memcpy(pixels, client->recv_buffer,
-					       client->current_rect.data_size);
-				}
-				break;
-
-			case VNC_ENCODING_RECT_JPEG: {
-				int w, h, subsamp, cs;
-				if (tjDecompressHeader3(client->jpeg_decompressor,
-							client->recv_buffer,
-							client->current_rect.data_size,
-							&w, &h, &subsamp, &cs) == 0) {
-					if (w == rw && h == rh) {
-						tjDecompress2(client->jpeg_decompressor,
-							      client->recv_buffer,
-							      client->current_rect.data_size,
-							      pixels, rw, 0, rh,
-							      TJPF_BGRA, TJFLAG_FASTDCT);
-					}
-				}
-				break;
-			}
-
-			default:
-				break;
-			}
-
-			/* Upload to GPU */
-			if (client->texture && client->width > 0 && client->height > 0) {
-				if (px < client->width && py < client->height) {
-					uint32_t uw = rw;
-					uint32_t uh = rh;
-					if (px + uw > client->width)
-						uw = client->width - px;
-					if (py + uh > client->height)
-						uh = client->height - py;
-
-					WGPUTexelCopyTextureInfo dst = {0};
-					dst.texture = client->texture;
-					dst.origin = (WGPUOrigin3D){px, py, 0};
-
-					WGPUTexelCopyBufferLayout layout = {0};
-					layout.bytesPerRow = rw * 4;
-					layout.rowsPerImage = rh;
-
-					WGPUExtent3D size = {uw, uh, 1};
-					wgpuQueueWriteTexture(client->queue, &dst, pixels,
-							      rw * rh * 4, &layout, &size);
-				}
-			}
-
-			free(pixels);
-
-			tiles_received = 1;
-			client->tiles_received++;
-			client->stats_tiles_window++;
-
-			if (client->tiles_received >= client->current_frame.num_tiles) {
-				client->stats_frames_window++;
-				client->recv_state = RECV_FRAME_HEADER;
-				client->recv_needed = sizeof(struct vnc_frame_header);
-				client->recv_offset = 0;
-				yetty_vnc_client_send_frame_ack(client);
-			} else {
-				client->recv_state = RECV_RECT_HEADER;
-				client->recv_needed = sizeof(struct vnc_rect_header);
-				client->recv_offset = 0;
-			}
-			break;
-		}
-		}
-	}
-}
-
-/* Event loop callback for socket events */
-static struct yetty_core_int_result vnc_client_on_event(
-	struct yetty_core_event_listener *listener,
-	const struct yetty_core_event *event)
-{
-	struct yetty_vnc_client *client =
-		(struct yetty_vnc_client *)((char *)listener -
-			offsetof(struct yetty_vnc_client, listener));
-
-	ydebug("vnc_client_on_event: type=%d fd=%d poll_id=%d",
-	       event->type, event->poll.fd, client->poll_id);
-
-	if (event->type == YETTY_EVENT_POLL_WRITABLE) {
-		/* Check async connect completion */
-		if (client->connecting) {
-			struct yetty_core_void_result res =
-				yetty_platform_socket_connect_check(client->socket);
-			if (YETTY_IS_OK(res)) {
-				client->connecting = 0;
-				client->connected = 1;
-				/* Switch to readable-only now that we're connected */
-				client->event_loop->ops->start_poll(
-					client->event_loop, client->poll_id,
-					YETTY_CORE_POLL_READABLE);
-				ydebug("VNC client connected (async complete)");
-				if (client->on_connected_fn)
-					client->on_connected_fn(client->on_connected_userdata);
-			} else {
-				yerror("VNC client async connect failed");
-				yetty_vnc_client_disconnect(client);
-				if (client->on_disconnected_fn)
-					client->on_disconnected_fn(client->on_disconnected_userdata);
-			}
-			return YETTY_OK(yetty_core_int, 1);
-		}
-
-		/* Drain send queue */
-		drain_send_queue(client);
-		return YETTY_OK(yetty_core_int, 1);
-	}
-
-	if (event->type == YETTY_EVENT_POLL_READABLE) {
-		ydebug("VNC client socket readable");
-		process_socket_readable(client);
-		return YETTY_OK(yetty_core_int, 1);
-	}
-
-	return YETTY_OK(yetty_core_int, 0);
-}
-
-struct yetty_core_void_result
-yetty_vnc_client_update_texture(struct yetty_vnc_client *client)
-{
-	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
-
-	/* Socket events are now handled by the event loop callback */
-
-	/* Update stats every second */
-	double now = get_time_sec();
-	double elapsed = now - client->stats_window_start;
-	if (elapsed >= 1.0) {
-		client->stats.fps = client->stats_frames_window / elapsed;
-		client->stats.tps = client->stats_tiles_window / elapsed;
-		client->stats.mbps = (client->stats_bytes_window * 8.0) / (elapsed * 1000000.0);
-		client->stats_frames_window = 0;
-		client->stats_tiles_window = 0;
-		client->stats_bytes_window = 0;
-		client->stats_window_start = now;
-	}
-
-	return YETTY_OK_VOID();
-}
+/*===========================================================================
+ * GPU Resources
+ *===========================================================================*/
 
 static struct yetty_core_void_result ensure_resources(
 	struct yetty_vnc_client *client, uint16_t width, uint16_t height)
 {
-	if (client->texture && client->texture_width == width &&
-	    client->texture_height == height)
+	if (client->texture_width == width &&
+	    client->texture_height == height &&
+	    client->texture)
 		return YETTY_OK_VOID();
 
-	/* Cleanup old resources */
+	/* Release old */
 	if (client->bind_group) {
 		wgpuBindGroupRelease(client->bind_group);
 		client->bind_group = NULL;
@@ -878,6 +793,9 @@ static struct yetty_core_void_result ensure_resources(
 		wgpuTextureRelease(client->texture);
 		client->texture = NULL;
 	}
+
+	client->texture_width = width;
+	client->texture_height = height;
 
 	/* Create texture */
 	WGPUTextureDescriptor tex_desc = {0};
@@ -892,25 +810,41 @@ static struct yetty_core_void_result ensure_resources(
 	if (!client->texture)
 		return YETTY_ERR(yetty_core_void, "failed to create texture");
 
-	client->texture_width = width;
-	client->texture_height = height;
+	/* Clear texture to black with alpha */
+	size_t pixel_count = width * height;
+	uint8_t *clear_data = calloc(pixel_count, 4);
+	if (clear_data) {
+		for (size_t i = 0; i < pixel_count; i++)
+			clear_data[i * 4 + 3] = 255; /* Set alpha to 255 */
 
+		WGPUTexelCopyTextureInfo dst = {0};
+		dst.texture = client->texture;
+		WGPUTexelCopyBufferLayout layout = {0};
+		layout.bytesPerRow = width * 4;
+		layout.rowsPerImage = height;
+		WGPUExtent3D size = {width, height, 1};
+		wgpuQueueWriteTexture(client->queue, &dst, clear_data,
+				      pixel_count * 4, &layout, &size);
+		free(clear_data);
+	}
+
+	/* Create texture view */
 	client->texture_view = wgpuTextureCreateView(client->texture, NULL);
 	if (!client->texture_view)
 		return YETTY_ERR(yetty_core_void, "failed to create texture view");
 
-	/* Create sampler (once) */
+	/* Create sampler if needed */
 	if (!client->sampler) {
 		WGPUSamplerDescriptor sampler_desc = {0};
 		sampler_desc.magFilter = WGPUFilterMode_Linear;
 		sampler_desc.minFilter = WGPUFilterMode_Linear;
 		sampler_desc.addressModeU = WGPUAddressMode_ClampToEdge;
 		sampler_desc.addressModeV = WGPUAddressMode_ClampToEdge;
-		sampler_desc.maxAnisotropy = 1;
+		sampler_desc.addressModeW = WGPUAddressMode_ClampToEdge;
 		client->sampler = wgpuDeviceCreateSampler(client->device, &sampler_desc);
 	}
 
-	/* Create pipeline (once) */
+	/* Create pipeline if needed */
 	if (!client->pipeline) {
 		struct yetty_core_void_result res = create_pipeline(client);
 		if (!YETTY_IS_OK(res))
@@ -928,76 +862,72 @@ static struct yetty_core_void_result ensure_resources(
 	bg_desc.layout = client->bind_group_layout;
 	bg_desc.entryCount = 2;
 	bg_desc.entries = entries;
-
 	client->bind_group = wgpuDeviceCreateBindGroup(client->device, &bg_desc);
-	if (!client->bind_group)
-		return YETTY_ERR(yetty_core_void, "failed to create bind group");
 
+	ydebug("VNC client: created resources %ux%u", width, height);
 	return YETTY_OK_VOID();
 }
 
 static struct yetty_core_void_result create_pipeline(struct yetty_vnc_client *client)
 {
-	/* Create shader module */
+	/* Create shader */
 	WGPUShaderSourceWGSL wgsl_desc = {0};
 	wgsl_desc.chain.sType = WGPUSType_ShaderSourceWGSL;
-	wgsl_desc.code = (WGPUStringView){QUAD_SHADER, strlen(QUAD_SHADER)};
+	wgsl_desc.code = (WGPUStringView){.data = QUAD_SHADER, .length = strlen(QUAD_SHADER)};
 
 	WGPUShaderModuleDescriptor shader_desc = {0};
-	shader_desc.nextInChain = &wgsl_desc.chain;
+	shader_desc.nextInChain = (WGPUChainedStruct *)&wgsl_desc;
 
 	WGPUShaderModule shader = wgpuDeviceCreateShaderModule(client->device, &shader_desc);
 	if (!shader)
 		return YETTY_ERR(yetty_core_void, "failed to create shader");
 
 	/* Bind group layout */
-	WGPUBindGroupLayoutEntry layout_entries[2] = {0};
-	layout_entries[0].binding = 0;
-	layout_entries[0].visibility = WGPUShaderStage_Fragment;
-	layout_entries[0].texture.sampleType = WGPUTextureSampleType_Float;
-	layout_entries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+	WGPUBindGroupLayoutEntry entries[2] = {0};
+	entries[0].binding = 0;
+	entries[0].visibility = WGPUShaderStage_Fragment;
+	entries[0].texture.sampleType = WGPUTextureSampleType_Float;
+	entries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
 
-	layout_entries[1].binding = 1;
-	layout_entries[1].visibility = WGPUShaderStage_Fragment;
-	layout_entries[1].sampler.type = WGPUSamplerBindingType_Filtering;
+	entries[1].binding = 1;
+	entries[1].visibility = WGPUShaderStage_Fragment;
+	entries[1].sampler.type = WGPUSamplerBindingType_Filtering;
 
 	WGPUBindGroupLayoutDescriptor bgl_desc = {0};
 	bgl_desc.entryCount = 2;
-	bgl_desc.entries = layout_entries;
+	bgl_desc.entries = entries;
 	client->bind_group_layout = wgpuDeviceCreateBindGroupLayout(client->device, &bgl_desc);
 
 	/* Pipeline layout */
 	WGPUPipelineLayoutDescriptor pl_desc = {0};
 	pl_desc.bindGroupLayoutCount = 1;
 	pl_desc.bindGroupLayouts = &client->bind_group_layout;
-	WGPUPipelineLayout pipeline_layout = wgpuDeviceCreatePipelineLayout(client->device, &pl_desc);
+	WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(client->device, &pl_desc);
 
 	/* Render pipeline */
-	WGPURenderPipelineDescriptor pipeline_desc = {0};
-	pipeline_desc.layout = pipeline_layout;
-
-	pipeline_desc.vertex.module = shader;
-	pipeline_desc.vertex.entryPoint = (WGPUStringView){"vs_main", 7};
-
-	WGPUColorTargetState color_target = {0};
-	color_target.format = client->surface_format;
-	color_target.writeMask = WGPUColorWriteMask_All;
+	WGPUColorTargetState target = {0};
+	target.format = client->surface_format;
+	target.writeMask = WGPUColorWriteMask_All;
 
 	WGPUFragmentState fragment = {0};
 	fragment.module = shader;
-	fragment.entryPoint = (WGPUStringView){"fs_main", 7};
+	fragment.entryPoint = (WGPUStringView){.data = "fs_main", .length = 7};
 	fragment.targetCount = 1;
-	fragment.targets = &color_target;
-	pipeline_desc.fragment = &fragment;
+	fragment.targets = &target;
 
-	pipeline_desc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
-	pipeline_desc.multisample.count = 1;
-	pipeline_desc.multisample.mask = ~0u;
+	WGPURenderPipelineDescriptor rp_desc = {0};
+	rp_desc.layout = layout;
+	rp_desc.vertex.module = shader;
+	rp_desc.vertex.entryPoint = (WGPUStringView){.data = "vs_main", .length = 7};
+	rp_desc.fragment = &fragment;
+	rp_desc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+	rp_desc.multisample.count = 1;
+	rp_desc.multisample.mask = ~0u;
 
-	client->pipeline = wgpuDeviceCreateRenderPipeline(client->device, &pipeline_desc);
+	client->pipeline = wgpuDeviceCreateRenderPipeline(client->device, &rp_desc);
 
 	wgpuShaderModuleRelease(shader);
-	wgpuPipelineLayoutRelease(pipeline_layout);
+	wgpuPipelineLayoutRelease(layout);
 
 	if (!client->pipeline)
 		return YETTY_ERR(yetty_core_void, "failed to create pipeline");
@@ -1005,116 +935,43 @@ static struct yetty_core_void_result create_pipeline(struct yetty_vnc_client *cl
 	return YETTY_OK_VOID();
 }
 
+/*===========================================================================
+ * Rendering
+ *===========================================================================*/
+
+struct yetty_core_void_result
+yetty_vnc_client_update_texture(struct yetty_vnc_client *client)
+{
+	(void)client;
+	/* Texture is updated in on_data callback */
+	return YETTY_OK_VOID();
+}
+
 struct yetty_core_void_result
 yetty_vnc_client_render(struct yetty_vnc_client *client,
-			WGPURenderPassEncoder pass, uint32_t render_target_w,
-			uint32_t render_target_h)
+			WGPURenderPassEncoder pass,
+			uint32_t viewport_width, uint32_t viewport_height)
 {
-	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+	(void)viewport_width;
+	(void)viewport_height;
 
-	ydebug("vnc_client_render: pipeline=%p bind_group=%p texture=%p",
-	       (void *)client->pipeline, (void *)client->bind_group,
-	       (void *)client->texture);
-	ydebug("vnc_client_render: client dims %ux%u, target %ux%u",
-	       client->width, client->height, render_target_w, render_target_h);
-	ydebug("vnc_client_render: texture dims %ux%u",
-	       client->texture_width, client->texture_height);
-
-	if (!client->pipeline || !client->bind_group) {
-		ydebug("vnc_client_render: no pipeline or bind_group, skipping");
-		return YETTY_OK_VOID();
-	}
-
-	/* NOTE: Caller (vnc_viewer) already sets viewport, don't override it!
-	 * The fullscreen quad shader draws -1..1 NDC which maps to the viewport.
-	 */
+	if (!client || !client->pipeline || !client->bind_group)
+		return YETTY_ERR(yetty_core_void, "resources not ready");
 
 	wgpuRenderPassEncoderSetPipeline(pass, client->pipeline);
 	wgpuRenderPassEncoderSetBindGroup(pass, 0, client->bind_group, 0, NULL);
 	wgpuRenderPassEncoderDraw(pass, 6, 1, 0, 0);
 
-	ydebug("vnc_client_render: draw submitted");
-
 	return YETTY_OK_VOID();
 }
 
-WGPUTextureView
-yetty_vnc_client_get_texture_view(const struct yetty_vnc_client *client)
-{
-	return client ? client->texture_view : NULL;
-}
-
-/* Input sending */
-
-static void send_input(struct yetty_vnc_client *client, const void *data,
-		       size_t size)
-{
-	if (!client->connected || client->socket == YETTY_SOCKET_INVALID)
-		return;
-
-	const uint8_t *ptr = data;
-
-	/* If send queue is empty, try to send directly */
-	if (client->send_queue_size == client->send_offset) {
-		struct yetty_core_size_result res =
-			yetty_platform_socket_send(client->socket, ptr, size);
-		if (YETTY_IS_OK(res)) {
-			if ((size_t)res.value == size)
-				return; /* All sent */
-			ptr += res.value;
-			size -= res.value;
-		} else if (!yetty_platform_socket_would_block()) {
-			return;
-		}
-	}
-
-	/* Queue remaining data */
-	size_t new_size = client->send_queue_size + size;
-	if (new_size > client->send_queue_capacity) {
-		size_t new_cap = new_size * 2;
-		uint8_t *new_buf = realloc(client->send_queue, new_cap);
-		if (!new_buf)
-			return;
-		client->send_queue = new_buf;
-		client->send_queue_capacity = new_cap;
-	}
-	memcpy(client->send_queue + client->send_queue_size, ptr, size);
-	client->send_queue_size += size;
-}
-
-static void drain_send_queue(struct yetty_vnc_client *client)
-{
-	if (client->send_offset >= client->send_queue_size ||
-	    client->socket == YETTY_SOCKET_INVALID)
-		return;
-
-	while (client->send_offset < client->send_queue_size) {
-		size_t remaining = client->send_queue_size - client->send_offset;
-		struct yetty_core_size_result res = yetty_platform_socket_send(
-			client->socket,
-			client->send_queue + client->send_offset,
-			remaining);
-
-		if (!YETTY_IS_OK(res) || res.value <= 0) {
-			if (yetty_platform_socket_would_block())
-				return;
-			client->send_queue_size = 0;
-			client->send_offset = 0;
-			return;
-		}
-
-		client->send_offset += res.value;
-	}
-
-	/* All sent */
-	client->send_queue_size = 0;
-	client->send_offset = 0;
-}
+/*===========================================================================
+ * Input sending
+ *===========================================================================*/
 
 struct yetty_core_void_result
-yetty_vnc_client_send_mouse_move(struct yetty_vnc_client *client, int16_t x,
-				 int16_t y, uint8_t mods)
+yetty_vnc_client_send_mouse_move(struct yetty_vnc_client *client,
+				 int16_t x, int16_t y, uint8_t buttons)
 {
 	if (!client)
 		return YETTY_ERR(yetty_core_void, "null client");
@@ -1123,23 +980,23 @@ yetty_vnc_client_send_mouse_move(struct yetty_vnc_client *client, int16_t x,
 	hdr.type = VNC_INPUT_MOUSE_MOVE;
 	hdr.data_size = sizeof(struct vnc_mouse_move_event);
 
-	struct vnc_mouse_move_event evt = {0};
-	evt.x = x;
-	evt.y = y;
-	evt.mods = mods;
+	struct vnc_mouse_move_event msg = {0};
+	msg.x = x;
+	msg.y = y;
+	msg.mods = buttons;
 
-	uint8_t buf[sizeof(hdr) + sizeof(evt)];
+	uint8_t buf[sizeof(hdr) + sizeof(msg)];
 	memcpy(buf, &hdr, sizeof(hdr));
-	memcpy(buf + sizeof(hdr), &evt, sizeof(evt));
+	memcpy(buf + sizeof(hdr), &msg, sizeof(msg));
 	send_input(client, buf, sizeof(buf));
 
 	return YETTY_OK_VOID();
 }
 
 struct yetty_core_void_result
-yetty_vnc_client_send_mouse_button(struct yetty_vnc_client *client, int16_t x,
-				   int16_t y, uint8_t button, int pressed,
-				   uint8_t mods)
+yetty_vnc_client_send_mouse_button(struct yetty_vnc_client *client,
+				   int16_t x, int16_t y, uint8_t button,
+				   int pressed, uint8_t mods)
 {
 	if (!client)
 		return YETTY_ERR(yetty_core_void, "null client");
@@ -1148,25 +1005,25 @@ yetty_vnc_client_send_mouse_button(struct yetty_vnc_client *client, int16_t x,
 	hdr.type = VNC_INPUT_MOUSE_BUTTON;
 	hdr.data_size = sizeof(struct vnc_mouse_button_event);
 
-	struct vnc_mouse_button_event evt = {0};
-	evt.x = x;
-	evt.y = y;
-	evt.button = button;
-	evt.pressed = pressed ? 1 : 0;
-	evt.mods = mods;
+	struct vnc_mouse_button_event msg = {0};
+	msg.x = x;
+	msg.y = y;
+	msg.button = button;
+	msg.pressed = (uint8_t)pressed;
+	msg.mods = mods;
 
-	uint8_t buf[sizeof(hdr) + sizeof(evt)];
+	uint8_t buf[sizeof(hdr) + sizeof(msg)];
 	memcpy(buf, &hdr, sizeof(hdr));
-	memcpy(buf + sizeof(hdr), &evt, sizeof(evt));
+	memcpy(buf + sizeof(hdr), &msg, sizeof(msg));
 	send_input(client, buf, sizeof(buf));
 
 	return YETTY_OK_VOID();
 }
 
 struct yetty_core_void_result
-yetty_vnc_client_send_mouse_scroll(struct yetty_vnc_client *client, int16_t x,
-				   int16_t y, int16_t delta_x, int16_t delta_y,
-				   uint8_t mods)
+yetty_vnc_client_send_mouse_scroll(struct yetty_vnc_client *client,
+				   int16_t x, int16_t y, int16_t dx, int16_t dy,
+				   uint8_t buttons)
 {
 	if (!client)
 		return YETTY_ERR(yetty_core_void, "null client");
@@ -1175,16 +1032,16 @@ yetty_vnc_client_send_mouse_scroll(struct yetty_vnc_client *client, int16_t x,
 	hdr.type = VNC_INPUT_MOUSE_SCROLL;
 	hdr.data_size = sizeof(struct vnc_mouse_scroll_event);
 
-	struct vnc_mouse_scroll_event evt = {0};
-	evt.x = x;
-	evt.y = y;
-	evt.delta_x = delta_x;
-	evt.delta_y = delta_y;
-	evt.mods = mods;
+	struct vnc_mouse_scroll_event msg = {0};
+	msg.x = x;
+	msg.y = y;
+	msg.delta_x = dx;
+	msg.delta_y = dy;
+	msg.mods = buttons;
 
-	uint8_t buf[sizeof(hdr) + sizeof(evt)];
+	uint8_t buf[sizeof(hdr) + sizeof(msg)];
 	memcpy(buf, &hdr, sizeof(hdr));
-	memcpy(buf + sizeof(hdr), &evt, sizeof(evt));
+	memcpy(buf + sizeof(hdr), &msg, sizeof(msg));
 	send_input(client, buf, sizeof(buf));
 
 	return YETTY_OK_VOID();
@@ -1202,22 +1059,23 @@ yetty_vnc_client_send_key_down(struct yetty_vnc_client *client,
 	hdr.type = VNC_INPUT_KEY_DOWN;
 	hdr.data_size = sizeof(struct vnc_key_event);
 
-	struct vnc_key_event evt = {0};
-	evt.keycode = keycode;
-	evt.scancode = scancode;
-	evt.mods = mods;
+	struct vnc_key_event msg = {0};
+	msg.keycode = keycode;
+	msg.scancode = scancode;
+	msg.mods = mods;
 
-	uint8_t buf[sizeof(hdr) + sizeof(evt)];
+	uint8_t buf[sizeof(hdr) + sizeof(msg)];
 	memcpy(buf, &hdr, sizeof(hdr));
-	memcpy(buf + sizeof(hdr), &evt, sizeof(evt));
+	memcpy(buf + sizeof(hdr), &msg, sizeof(msg));
 	send_input(client, buf, sizeof(buf));
 
 	return YETTY_OK_VOID();
 }
 
 struct yetty_core_void_result
-yetty_vnc_client_send_key_up(struct yetty_vnc_client *client, uint32_t keycode,
-			     uint32_t scancode, uint8_t mods)
+yetty_vnc_client_send_key_up(struct yetty_vnc_client *client,
+			     uint32_t keycode, uint32_t scancode,
+			     uint8_t mods)
 {
 	if (!client)
 		return YETTY_ERR(yetty_core_void, "null client");
@@ -1226,14 +1084,14 @@ yetty_vnc_client_send_key_up(struct yetty_vnc_client *client, uint32_t keycode,
 	hdr.type = VNC_INPUT_KEY_UP;
 	hdr.data_size = sizeof(struct vnc_key_event);
 
-	struct vnc_key_event evt = {0};
-	evt.keycode = keycode;
-	evt.scancode = scancode;
-	evt.mods = mods;
+	struct vnc_key_event msg = {0};
+	msg.keycode = keycode;
+	msg.scancode = scancode;
+	msg.mods = mods;
 
-	uint8_t buf[sizeof(hdr) + sizeof(evt)];
+	uint8_t buf[sizeof(hdr) + sizeof(msg)];
 	memcpy(buf, &hdr, sizeof(hdr));
-	memcpy(buf + sizeof(hdr), &evt, sizeof(evt));
+	memcpy(buf + sizeof(hdr), &msg, sizeof(msg));
 	send_input(client, buf, sizeof(buf));
 
 	return YETTY_OK_VOID();
@@ -1250,46 +1108,21 @@ yetty_vnc_client_send_char_with_mods(struct yetty_vnc_client *client,
 	hdr.type = VNC_INPUT_CHAR_WITH_MODS;
 	hdr.data_size = sizeof(struct vnc_char_with_mods_event);
 
-	struct vnc_char_with_mods_event evt = {0};
-	evt.codepoint = codepoint;
-	evt.mods = mods;
+	struct vnc_char_with_mods_event msg = {0};
+	msg.codepoint = codepoint;
+	msg.mods = mods;
 
-	uint8_t buf[sizeof(hdr) + sizeof(evt)];
+	uint8_t buf[sizeof(hdr) + sizeof(msg)];
 	memcpy(buf, &hdr, sizeof(hdr));
-	memcpy(buf + sizeof(hdr), &evt, sizeof(evt));
+	memcpy(buf + sizeof(hdr), &msg, sizeof(msg));
 	send_input(client, buf, sizeof(buf));
 
 	return YETTY_OK_VOID();
 }
 
 struct yetty_core_void_result
-yetty_vnc_client_send_text_input(struct yetty_vnc_client *client,
-				 const char *text, size_t len)
-{
-	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
-	if (len == 0 || len > 1024)
-		return YETTY_OK_VOID();
-
-	struct vnc_input_header hdr = {0};
-	hdr.type = VNC_INPUT_TEXT;
-	hdr.data_size = (uint16_t)len;
-
-	uint8_t *buf = malloc(sizeof(hdr) + len);
-	if (!buf)
-		return YETTY_ERR(yetty_core_void, "out of memory");
-
-	memcpy(buf, &hdr, sizeof(hdr));
-	memcpy(buf + sizeof(hdr), text, len);
-	send_input(client, buf, sizeof(hdr) + len);
-	free(buf);
-
-	return YETTY_OK_VOID();
-}
-
-struct yetty_core_void_result
-yetty_vnc_client_send_resize(struct yetty_vnc_client *client, uint16_t width,
-			     uint16_t height)
+yetty_vnc_client_send_resize(struct yetty_vnc_client *client,
+			     uint16_t width, uint16_t height)
 {
 	if (!client)
 		return YETTY_ERR(yetty_core_void, "null client");
@@ -1300,35 +1133,13 @@ yetty_vnc_client_send_resize(struct yetty_vnc_client *client, uint16_t width,
 	hdr.type = VNC_INPUT_RESIZE;
 	hdr.data_size = sizeof(struct vnc_resize_event);
 
-	struct vnc_resize_event evt = {0};
-	evt.width = width;
-	evt.height = height;
+	struct vnc_resize_event msg = {0};
+	msg.width = width;
+	msg.height = height;
 
-	uint8_t buf[sizeof(hdr) + sizeof(evt)];
+	uint8_t buf[sizeof(hdr) + sizeof(msg)];
 	memcpy(buf, &hdr, sizeof(hdr));
-	memcpy(buf + sizeof(hdr), &evt, sizeof(evt));
-	send_input(client, buf, sizeof(buf));
-
-	return YETTY_OK_VOID();
-}
-
-struct yetty_core_void_result
-yetty_vnc_client_send_cell_size(struct yetty_vnc_client *client,
-				uint8_t cell_height)
-{
-	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
-
-	struct vnc_input_header hdr = {0};
-	hdr.type = VNC_INPUT_CELL_SIZE;
-	hdr.data_size = sizeof(struct vnc_cell_size_event);
-
-	struct vnc_cell_size_event evt = {0};
-	evt.cell_height = cell_height;
-
-	uint8_t buf[sizeof(hdr) + sizeof(evt)];
-	memcpy(buf, &hdr, sizeof(hdr));
-	memcpy(buf + sizeof(hdr), &evt, sizeof(evt));
+	memcpy(buf + sizeof(hdr), &msg, sizeof(msg));
 	send_input(client, buf, sizeof(buf));
 
 	return YETTY_OK_VOID();
@@ -1349,33 +1160,9 @@ yetty_vnc_client_send_frame_ack(struct yetty_vnc_client *client)
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
-yetty_vnc_client_send_compression_config(struct yetty_vnc_client *client,
-					 int force_raw, uint8_t quality,
-					 int always_full, uint8_t codec)
-{
-	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
-
-	client->stats.quality = quality;
-
-	struct vnc_input_header hdr = {0};
-	hdr.type = VNC_INPUT_COMPRESSION_CONFIG;
-	hdr.data_size = sizeof(struct vnc_compression_config_event);
-
-	struct vnc_compression_config_event evt = {0};
-	evt.force_raw = force_raw ? 1 : 0;
-	evt.quality = quality;
-	evt.always_full = always_full ? 1 : 0;
-	evt.codec = codec;
-
-	uint8_t buf[sizeof(hdr) + sizeof(evt)];
-	memcpy(buf, &hdr, sizeof(hdr));
-	memcpy(buf + sizeof(hdr), &evt, sizeof(evt));
-	send_input(client, buf, sizeof(buf));
-
-	return YETTY_OK_VOID();
-}
+/*===========================================================================
+ * Callbacks and stats
+ *===========================================================================*/
 
 void yetty_vnc_client_set_on_frame(struct yetty_vnc_client *client,
 				   yetty_vnc_on_frame_fn callback,
@@ -1443,10 +1230,6 @@ yetty_vnc_client_reconnect(struct yetty_vnc_client *client)
 	client->recv_state = RECV_FRAME_HEADER;
 	client->recv_needed = sizeof(struct vnc_frame_header);
 	client->recv_offset = 0;
-
-	/* Clear send queue */
-	client->send_queue_size = 0;
-	client->send_offset = 0;
 
 	return yetty_vnc_client_connect(client, client->reconnect_host,
 					client->reconnect_port);

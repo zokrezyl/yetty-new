@@ -163,7 +163,7 @@ if(YETTY_ENABLE_FEATURE_YSHADERS)
     add_subdirectory(yshaders)
 endif()
 
-if(YETTY_ENABLE_FEATURE_VNC)
+if(YETTY_ENABLE_FEATURE_YVNC)
     add_subdirectory(yvnc)
 endif()
 
