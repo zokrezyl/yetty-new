@@ -68,20 +68,31 @@ target_compile_definitions(yetty PRIVATE
 
 set_target_properties(yetty PROPERTIES ENABLE_EXPORTS TRUE)
 
-# Fontconfig - static linking
+# Fontconfig linking
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
 target_include_directories(yetty PRIVATE ${FONTCONFIG_INCLUDE_DIRS})
-find_library(FONTCONFIG_STATIC_LIB libfontconfig.a PATHS /usr/lib/x86_64-linux-gnu /usr/lib REQUIRED)
-find_library(EXPAT_STATIC_LIB libexpat.a PATHS /usr/lib/x86_64-linux-gnu /usr/lib REQUIRED)
-find_library(UUID_STATIC_LIB libuuid.a PATHS /usr/lib/x86_64-linux-gnu /usr/lib REQUIRED)
+
+if(DEFINED ENV{NIX_CC})
+    # Nix: use static libs from env vars set by flake.nix
+    set(FONTCONFIG_STATIC_LIB "$ENV{FONTCONFIG_STATIC_LIB}")
+    set(EXPAT_STATIC_LIB "$ENV{EXPAT_STATIC_LIB}")
+    set(UUID_STATIC_LIB "$ENV{UUID_STATIC_LIB}")
+    message(STATUS "Nix detected - using static fontconfig: ${FONTCONFIG_STATIC_LIB}")
+    set(FONTCONFIG_LINK_LIBS ${FONTCONFIG_STATIC_LIB} ${EXPAT_STATIC_LIB} ${UUID_STATIC_LIB})
+else()
+    # System: use static libs
+    find_library(FONTCONFIG_STATIC_LIB libfontconfig.a PATHS /usr/lib/x86_64-linux-gnu /usr/lib NO_DEFAULT_PATH REQUIRED)
+    find_library(EXPAT_STATIC_LIB libexpat.a PATHS /usr/lib/x86_64-linux-gnu /usr/lib NO_DEFAULT_PATH REQUIRED)
+    find_library(UUID_STATIC_LIB libuuid.a PATHS /usr/lib/x86_64-linux-gnu /usr/lib NO_DEFAULT_PATH REQUIRED)
+    message(STATUS "Using static fontconfig/expat/uuid")
+    set(FONTCONFIG_LINK_LIBS ${FONTCONFIG_STATIC_LIB} ${EXPAT_STATIC_LIB} ${UUID_STATIC_LIB})
+endif()
 
 target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
     ${BROTLIDEC_LIBRARIES}
-    ${FONTCONFIG_STATIC_LIB}
-    ${EXPAT_STATIC_LIB}
-    ${UUID_STATIC_LIB}
+    ${FONTCONFIG_LINK_LIBS}
     rt
     util
 )

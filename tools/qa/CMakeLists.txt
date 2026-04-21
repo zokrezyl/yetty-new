@@ -1,13 +1,18 @@
 # QA/Static analysis tools
 # These tools require LLVM/Clang development libraries
 
-# Use LLVM 18 on system, nix provides its own
-if(NOT DEFINED LLVM_DIR AND NOT DEFINED ENV{NIX_CC})
-    set(LLVM_DIR "/usr/lib/llvm-18/lib/cmake/llvm")
-endif()
-
-if(NOT DEFINED Clang_DIR AND NOT DEFINED ENV{NIX_CC})
-    set(Clang_DIR "/usr/lib/cmake/clang-18")
+if(DEFINED ENV{NIX_CC})
+    # Nix: use LLVM/Clang from flake.nix env vars
+    set(LLVM_DIR "$ENV{LLVM_DIR}")
+    set(Clang_DIR "$ENV{Clang_DIR}")
+else()
+    # System: use LLVM 18
+    if(NOT DEFINED LLVM_DIR)
+        set(LLVM_DIR "/usr/lib/llvm-18/lib/cmake/llvm")
+    endif()
+    if(NOT DEFINED Clang_DIR)
+        set(Clang_DIR "/usr/lib/cmake/clang-18")
+    endif()
 endif()
 
 find_package(LLVM REQUIRED CONFIG)

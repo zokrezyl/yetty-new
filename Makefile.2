@@ -24,19 +24,21 @@ $(if $(filter $(PLATFORM),$(VALID_PLATFORMS)),,$(error Invalid PLATFORM=$(PLATFO
 $(if $(filter $(LOGLEVEL),$(VALID_LOGLEVELS)),,$(error Invalid LOGLEVEL=$(LOGLEVEL). Valid: $(VALID_LOGLEVELS)))
 $(if $(filter $(BUILDTYPE),$(VALID_BUILDTYPES)),,$(error Invalid BUILDTYPE=$(BUILDTYPE). Valid: $(VALID_BUILDTYPES)))
 
-# Build directory (includes nix/nonix suffix)
+# Build directory. Suffix -nix/-nonix keeps nix and host builds separated:
+# CMakeCache.txt bakes absolute paths (nix store vs /usr/lib), so a single dir
+# cannot be reused when USE_NIX toggles without a full reconfigure/rebuild.
 ifeq ($(USE_NIX),yes)
 BUILD_DIR := build-$(PLATFORM)-$(LOGLEVEL)-$(BUILDTYPE)-nix
 else
 BUILD_DIR := build-$(PLATFORM)-$(LOGLEVEL)-$(BUILDTYPE)-nonix
 endif
 
-# Path handling: when USE_NIX=yes, inherit nix shell's PATH; otherwise use system paths
+# Path handling: when USE_NIX=yes, nix shell supplies PATH; else force host paths.
 ifeq ($(USE_NIX),yes)
 PATH_CMD :=
 else
 SYSTEM_PATH := /opt/emsdk:/opt/emsdk/upstream/emscripten:/usr/local/bin:/usr/bin:/bin
-PATH_CMD := $(PATH_CMD)
+PATH_CMD := PATH="$(SYSTEM_PATH)"
 endif
 
 # Android SDK
@@ -176,7 +178,7 @@ endif
 
 .PHONY: _config-android _config-android_x86_64
 _config-android _config-android_x86_64:
-	@cd $(CURDIR) && ANDROID_ABI=$(ANDROID_ABI) ANDROID_BUILD_DIR=$(CURDIR)/$(BUILD_DIR) bash build-tools/android/build-dawn.sh
+	$(NIX_WRAP) 'cd $(CURDIR) && ANDROID_ABI=$(ANDROID_ABI) ANDROID_BUILD_DIR=$(CURDIR)/$(BUILD_DIR) bash build-tools/android/build-dawn.sh'
 
 .PHONY: _config-windows
 _config-windows:

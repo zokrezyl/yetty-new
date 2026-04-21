@@ -57,6 +57,23 @@
           nasm   # For dav1d assembly optimizations
         ];
 
+        # Static library packages (for static linking)
+        fontconfigStatic = pkgs.fontconfig.overrideAttrs (old: {
+          configureFlags = (old.configureFlags or []) ++ [ "--enable-static" "--disable-shared" ];
+          postInstall = (old.postInstall or "") + ''
+            rm -f $out/lib/*.so*
+          '';
+        });
+        expatStatic = pkgs.expat.overrideAttrs (old: {
+          configureFlags = (old.configureFlags or []) ++ [ "--enable-static" "--disable-shared" ];
+          postInstall = (old.postInstall or "") + ''
+            rm -f $out/lib/*.so*
+          '';
+        });
+        libuuidStatic = pkgs.libuuid.overrideAttrs (old: {
+          configureFlags = (old.configureFlags or []) ++ [ "--enable-static" ];
+        });
+
         # Desktop build dependencies
         desktopDeps = with pkgs; [
           # Graphics
@@ -81,6 +98,12 @@
           zlib
           openssl
           brotli  # For asset compression in incbin
+
+          # Static libraries (referenced via *_STATIC_LIB env vars, not linked globally)
+          zlib.static
+          fontconfigStatic
+          expatStatic
+          libuuidStatic
         ];
 
         # Android build dependencies
@@ -143,6 +166,16 @@
             buildInputs = commonDeps ++ desktopDeps;
 
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath desktopDeps;
+
+            # Static library paths for cmake
+            FONTCONFIG_STATIC_LIB = "${fontconfigStatic.lib}/lib/libfontconfig.a";
+            EXPAT_STATIC_LIB = "${expatStatic}/lib/libexpat.a";
+            ZLIB_STATIC_LIB = "${pkgs.zlib.static}/lib/libz.a";
+            UUID_STATIC_LIB = "${libuuidStatic.lib}/lib/libuuid.a";
+
+            # LLVM/Clang paths for QA tools
+            LLVM_DIR = "${pkgs.llvmPackages_21.llvm.dev}/lib/cmake/llvm";
+            Clang_DIR = "${pkgs.llvmPackages_21.clang-unwrapped.dev}/lib/cmake/clang";
 
             shellHook = ''
               echo "Yetty development environment (desktop)"
