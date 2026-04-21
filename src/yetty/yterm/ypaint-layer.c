@@ -488,14 +488,15 @@ ypaint_layer_get_gpu_resource_set(
       continue;
 
     /* Get flyweight for ops */
-    struct yetty_ypaint_prim_flyweight fw =
-        yetty_ypaint_flyweight_registry_get(reg, ref.data);
-    if (!fw.ops || !fw.ops->get_gpu_resource_set)
+    uint32_t prim_type = ref.data[0];
+    struct yetty_ypaint_prim_flyweight_ptr_result fw_res =
+        yetty_ypaint_flyweight_registry_get(reg, prim_type, ref.data);
+    if (YETTY_IS_ERR(fw_res) || !fw_res.value->ops->get_gpu_resource_set)
       continue;
 
     /* Get resource set (creates cache if needed) */
     struct yetty_render_gpu_resource_set_result rs_res =
-        fw.ops->get_gpu_resource_set(ref.data, ref.cache_ptr);
+        fw_res.value->ops->get_gpu_resource_set(ref.data, ref.cache_ptr);
     if (YETTY_IS_OK(rs_res)) {
       layer->rs.children[child_idx++] =
           (struct yetty_render_gpu_resource_set *)rs_res.value;

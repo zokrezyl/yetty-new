@@ -31,13 +31,11 @@ static const struct yetty_ypaint_prim_ops yetty_ysdf_prim_ops = {
     .get_gpu_resource_set = NULL, // SDF prims rendered by main shader
 };
 
-static inline struct yetty_ypaint_prim_flyweight
-yetty_ysdf_handler(const uint32_t *prim) {
-  uint32_t type = prim[0];
-  if (type < 256 && yetty_ysdf_primitive_size(type) > 0)
-    return (struct yetty_ypaint_prim_flyweight){.data = prim,
-                                                .ops = &yetty_ysdf_prim_ops};
-  return (struct yetty_ypaint_prim_flyweight){.data = NULL, .ops = NULL};
+static inline struct yetty_ypaint_prim_ops_ptr_result
+yetty_ysdf_handler(uint32_t prim_type) {
+  if (prim_type < 256 && yetty_ysdf_primitive_size(prim_type) > 0)
+    return YETTY_OK(yetty_ypaint_prim_ops_ptr, &yetty_ysdf_prim_ops);
+  return YETTY_ERR(yetty_ypaint_prim_ops_ptr, "not an SDF type");
 }
 
 #ifdef __cplusplus

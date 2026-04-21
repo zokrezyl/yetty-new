@@ -1,0 +1,41 @@
+# YPlot complex primitive schema
+# Generator produces: C serializer, WGSL accessors, GPU resource set logic
+
+name: yplot
+type_id: 0x80000003
+description: Function plotter with yfsvm bytecode interpreter
+
+# Shader libraries (concatenated before main shader)
+libraries:
+  - yfsvm
+
+# Fixed-size uniforms (serialized first)
+uniforms:
+  - name: bounds_x
+    type: f32
+    description: Plot X position in canvas
+  - name: bounds_y
+    type: f32
+    description: Plot Y position in canvas
+  - name: bounds_w
+    type: f32
+    description: Plot width
+  - name: bounds_h
+    type: f32
+    description: Plot height
+  - name: flags
+    type: u32
+    description: GRID=1, AXES=2, LABELS=4
+  - name: function_count
+    type: u32
+    description: Number of functions (max 8)
+  - name: colors
+    type: u32
+    count: 8
+    description: Per-function colors (ARGB)
+
+# Variable-size buffers (serialized after uniforms)
+buffers:
+  - name: bytecode
+    element_type: u32
+    description: yfsvm compiled bytecode

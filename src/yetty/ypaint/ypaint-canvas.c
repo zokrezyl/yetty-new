@@ -269,12 +269,13 @@ grid_line_free(struct yetty_yetty_ypaint_canvas_grid_line *line,
   for (uint32_t i = 0; i < line->complex_prim_count; i++) {
     struct yetty_yetty_ypaint_canvas_complex_prim *cp = &line->complex_prims[i];
     if (cp->cache) {
-      struct yetty_ypaint_prim_flyweight fw =
-          yetty_ypaint_flyweight_registry_get(reg, cp->data);
-      if (!fw.ops)
-        return YETTY_ERR(yetty_core_void, "no handler for complex prim type");
-      if (fw.ops->destroy)
-        fw.ops->destroy(cp->cache);
+      uint32_t prim_type = cp->data[0];
+      struct yetty_ypaint_prim_flyweight_ptr_result fw_res =
+          yetty_ypaint_flyweight_registry_get(reg, prim_type, cp->data);
+      if (YETTY_IS_ERR(fw_res))
+        return YETTY_ERR(yetty_core_void, fw_res.error.msg);
+      if (fw_res.value->ops->destroy)
+        fw_res.value->ops->destroy(cp->cache);
     }
     free(cp->data);
   }

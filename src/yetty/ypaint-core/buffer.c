@@ -145,11 +145,13 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_fir
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "buffer empty");
 
   const uint32_t *prim = (const uint32_t *)buf->primitives.buf.data;
-  struct yetty_ypaint_prim_flyweight fw = yetty_ypaint_flyweight_registry_get(reg, prim);
-  if (!fw.ops)
-    return YETTY_ERR(yetty_ypaint_core_primitive_iter, "unknown primitive type");
+  uint32_t prim_type = prim[0];
+  struct yetty_ypaint_prim_flyweight_ptr_result fw_res =
+      yetty_ypaint_flyweight_registry_get(reg, prim_type, prim);
+  if (YETTY_IS_ERR(fw_res))
+    return YETTY_ERR(yetty_ypaint_core_primitive_iter, fw_res.error.msg);
 
-  struct yetty_ypaint_core_primitive_iter iter = {.fw = fw};
+  struct yetty_ypaint_core_primitive_iter iter = {.fw = *fw_res.value};
   return YETTY_OK(yetty_ypaint_core_primitive_iter, iter);
 }
 
@@ -175,11 +177,13 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_nex
   if (offset >= buf_size)
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, "end of buffer");
 
-  struct yetty_ypaint_prim_flyweight fw = yetty_ypaint_flyweight_registry_get(reg, next);
-  if (!fw.ops)
-    return YETTY_ERR(yetty_ypaint_core_primitive_iter, "unknown primitive type");
+  uint32_t prim_type = next[0];
+  struct yetty_ypaint_prim_flyweight_ptr_result fw_res =
+      yetty_ypaint_flyweight_registry_get(reg, prim_type, next);
+  if (YETTY_IS_ERR(fw_res))
+    return YETTY_ERR(yetty_ypaint_core_primitive_iter, fw_res.error.msg);
 
-  struct yetty_ypaint_core_primitive_iter new_iter = {.fw = fw};
+  struct yetty_ypaint_core_primitive_iter new_iter = {.fw = *fw_res.value};
   return YETTY_OK(yetty_ypaint_core_primitive_iter, new_iter);
 }
 

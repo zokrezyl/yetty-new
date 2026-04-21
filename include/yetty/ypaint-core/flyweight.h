@@ -37,9 +37,12 @@ struct yetty_ypaint_prim_flyweight {
     const struct yetty_ypaint_prim_ops *ops;
 };
 
-// Handler function - takes primitive pointer, returns flyweight (ops=NULL if not handled)
-typedef struct yetty_ypaint_prim_flyweight (*yetty_ypaint_prim_handler_fn)(
-    const uint32_t *prim);
+YETTY_RESULT_DECLARE(yetty_ypaint_prim_ops_ptr, const struct yetty_ypaint_prim_ops *);
+YETTY_RESULT_DECLARE(yetty_ypaint_prim_flyweight_ptr, struct yetty_ypaint_prim_flyweight *);
+
+// Handler function - takes prim_type, returns ops pointer or error
+typedef struct yetty_ypaint_prim_ops_ptr_result (*yetty_ypaint_prim_handler_fn)(
+    uint32_t prim_type);
 
 // Flyweight registry instance (opaque)
 struct yetty_ypaint_flyweight_registry;
@@ -67,9 +70,10 @@ struct yetty_core_void_result yetty_ypaint_flyweight_registry_add(
     yetty_ypaint_prim_handler_fn handler);
 
 // Get flyweight for primitive (tries default first, then by type range)
-struct yetty_ypaint_prim_flyweight yetty_ypaint_flyweight_registry_get(
+struct yetty_ypaint_prim_flyweight_ptr_result yetty_ypaint_flyweight_registry_get(
     const struct yetty_ypaint_flyweight_registry *reg,
-    const uint32_t *prim);
+    uint32_t prim_type,
+    const uint32_t *prim_data);
 
 #ifdef __cplusplus
 }

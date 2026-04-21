@@ -188,8 +188,8 @@ uint32_t yetty_yplot_yplot_serialize_prim_header(struct yetty_yplot_yplot *plot,
 void yetty_yplot_register(void);
 
 // Flyweight handler for buffer iteration (register with buffer)
-#include <yetty/ypaint-core/buffer.h>
-struct yetty_ypaint_prim_flyweight yetty_yplot_handler(const uint32_t *prim);
+#include <yetty/ypaint-core/flyweight.h>
+struct yetty_ypaint_prim_ops_ptr_result yetty_yplot_handler(uint32_t prim_type);
 
 // Serialize yplot to wire format payload (returns payload size, or 0 on error)
 // If buffer is NULL, returns required size

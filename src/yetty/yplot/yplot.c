@@ -128,6 +128,19 @@ static void yplot_wire_destroy_cache(void *cache_ptr)
     free(cache_ptr);
 }
 
+static struct yetty_core_void_result
+yplot_wire_render(const uint8_t *data, uint32_t payload_size, void *cache,
+                  struct yetty_render_context *ctx, struct rectangle target_rect)
+{
+    (void)data;
+    (void)payload_size;
+    (void)cache;
+    (void)ctx;
+    (void)target_rect;
+    /* TODO: implement direct layer rendering */
+    return YETTY_OK_VOID();
+}
+
 //=============================================================================
 // Wire format ops tables
 //=============================================================================
@@ -138,6 +151,7 @@ static const struct yetty_ypaint_complex_prim_parse_ops yplot_parse_ops = {
 
 static const struct yetty_ypaint_complex_prim_runtime_ops yplot_runtime_ops = {
     .get_gpu_resource_set = yplot_wire_get_gpu_resource_set,
+    .render = yplot_wire_render,
     .destroy_cache = yplot_wire_destroy_cache,
 };
 
@@ -182,12 +196,11 @@ static const struct yetty_ypaint_prim_ops yplot_prim_ops = {
     .get_gpu_resource_set = yplot_prim_get_gpu_resource_set,
 };
 
-struct yetty_ypaint_prim_flyweight yetty_yplot_handler(const uint32_t *prim)
+struct yetty_ypaint_prim_ops_ptr_result yetty_yplot_handler(uint32_t prim_type)
 {
-    uint32_t type = prim[0];
-    if (type == YETTY_YPLOT_PRIM_TYPE_ID)
-        return (struct yetty_ypaint_prim_flyweight){.data = prim, .ops = &yplot_prim_ops};
-    return (struct yetty_ypaint_prim_flyweight){.data = NULL, .ops = NULL};
+    if (prim_type == YETTY_YPLOT_PRIM_TYPE_ID)
+        return YETTY_OK(yetty_ypaint_prim_ops_ptr, &yplot_prim_ops);
+    return YETTY_ERR(yetty_ypaint_prim_ops_ptr, "not a yplot type");
 }
 
 //=============================================================================
@@ -202,7 +215,8 @@ void yetty_yplot_register(void)
         .parse_ops = &yplot_parse_ops,
         .runtime_ops = &yplot_runtime_ops,
     };
-    yetty_ypaint_complex_prim_register(&info);
+    struct yetty_core_void_result res = yetty_ypaint_complex_prim_register(&info);
+    (void)res; /* Init-time registration - fails only on programming error */
 }
 
 //=============================================================================

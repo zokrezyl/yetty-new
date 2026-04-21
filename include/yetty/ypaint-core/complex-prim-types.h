@@ -13,6 +13,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <yetty/ycore/result.h>
 #include <yetty/ycore/types.h>
 #include <yetty/yrender/gpu-resource-set.h>
 
@@ -86,9 +87,17 @@ struct yetty_ypaint_complex_prim_parse_ops {
 // Runtime ops (needs cache for GPU resources)
 //=============================================================================
 
+struct yetty_render_context;
+
 struct yetty_ypaint_complex_prim_runtime_ops {
+	// Get shared GPU resources (shader, pipeline state)
 	struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(
 		const uint8_t *data, uint32_t payload_size, void **cache);
+
+	// Render to layer texture at target rectangle
+	struct yetty_core_void_result (*render)(
+		const uint8_t *data, uint32_t payload_size, void *cache,
+		struct yetty_render_context *ctx, struct rectangle target_rect);
 
 	void (*destroy_cache)(void *cache);
 };
@@ -104,15 +113,21 @@ struct yetty_ypaint_complex_prim_type_info {
 	const struct yetty_ypaint_complex_prim_runtime_ops *runtime_ops;
 };
 
+// Result types for ops lookup
+YETTY_RESULT_DECLARE(yetty_ypaint_complex_prim_parse_ops_ptr,
+	const struct yetty_ypaint_complex_prim_parse_ops *);
+YETTY_RESULT_DECLARE(yetty_ypaint_complex_prim_runtime_ops_ptr,
+	const struct yetty_ypaint_complex_prim_runtime_ops *);
+
 // Register a complex primitive type (call at init)
-void yetty_ypaint_complex_prim_register(
+struct yetty_core_void_result yetty_ypaint_complex_prim_register(
 	const struct yetty_ypaint_complex_prim_type_info *info);
 
-// Lookup ops by type ID (returns NULL if not registered)
-const struct yetty_ypaint_complex_prim_parse_ops *
+// Lookup ops by type ID
+struct yetty_ypaint_complex_prim_parse_ops_ptr_result
 yetty_ypaint_complex_prim_get_parse_ops(uint32_t type_id);
 
-const struct yetty_ypaint_complex_prim_runtime_ops *
+struct yetty_ypaint_complex_prim_runtime_ops_ptr_result
 yetty_ypaint_complex_prim_get_runtime_ops(uint32_t type_id);
 
 #ifdef __cplusplus

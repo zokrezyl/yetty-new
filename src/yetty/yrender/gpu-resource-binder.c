@@ -807,8 +807,11 @@ static struct yetty_core_void_result binder_finalize(struct yetty_render_gpu_res
 {
     struct gpu_resource_binder_impl *impl = (struct gpu_resource_binder_impl *)self;
 
-    if (impl->finalized)
+    if (impl->finalized) {
+        ydebug("GpuResourceBinder: finalize CACHE HIT (already finalized)");
         return YETTY_OK_VOID();
+    }
+    ydebug("GpuResourceBinder: finalize CACHE MISS - rebuilding pipeline");
 
     /* Release old GPU resources if re-finalizing */
     if (impl->pipeline) { wgpuRenderPipelineRelease(impl->pipeline); impl->pipeline = NULL; }
@@ -900,7 +903,8 @@ static struct yetty_core_void_result binder_update(struct yetty_render_gpu_resou
     for (size_t i = 0; i < impl->resource_set_count; i++)
         current_hash ^= compute_tree_shader_hash(impl->resource_sets[i]);
     if (current_hash != impl->last_shader_hash) {
-        ydebug("GpuResourceBinder: shader hash changed");
+        ydebug("GpuResourceBinder: shader hash changed 0x%llx -> 0x%llx",
+               (unsigned long long)impl->last_shader_hash, (unsigned long long)current_hash);
         need_refinalize = 1;
     }
 
@@ -933,11 +937,12 @@ static struct yetty_core_void_result binder_update(struct yetty_render_gpu_resou
     }
 
     if (need_refinalize) {
-        ydebug("GpuResourceBinder: structural change, re-finalizing");
+        ydebug("GpuResourceBinder: update CACHE MISS - structural change, re-finalizing");
         impl->finalized = 0;
         return binder_finalize(self);
     }
 
+    ydebug("GpuResourceBinder: update CACHE HIT - no structural change");
     /* No structural change — upload only dirty resources */
     int any_dirty = 0;
 
