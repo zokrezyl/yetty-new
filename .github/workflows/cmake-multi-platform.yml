@@ -86,74 +86,33 @@ jobs:
   build-linux-ytrace-release:
     needs: read-flags
     if: needs.read-flags.outputs.linux == 'true'
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
 
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-        build_type: [Release]
-        c_compiler: [gcc]
-        include:
-          - os: ubuntu-latest
-            c_compiler: gcc
-            cpp_compiler: g++
+    env:
+      BUILD_DIR: build-desktop-ytrace-release-nix
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build-desktop" >> "$GITHUB_OUTPUT"
+    - name: Install Nix
+      uses: cachix/install-nix-action@v27
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
 
-    - name: Install Linux dependencies
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          automake autoconf libtool \
-          meson ninja-build nasm \
-          brotli \
-          libfontconfig1-dev \
-          libxrandr-dev \
-          libxinerama-dev \
-          libxcursor-dev \
-          libxi-dev \
-          libxext-dev \
-          libx11-dev \
-          libgl1-mesa-dev \
-          libwayland-dev \
-          libxkbcommon-dev
-
-    - name: Configure CMake
-      run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        -S ${{ github.workspace }}
-
-    - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
-
-    # - name: Test
-    #   working-directory: ${{ steps.strings.outputs.build-output-dir }}
-    #   run: ctest --build-config ${{ matrix.build_type }} --output-on-failure
+    - name: Build Linux
+      run: make -f Makefile.2 build PLATFORM=desktop LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
 
     - name: Upload Linux artifacts
       uses: actions/upload-artifact@v4
       with:
         name: yetty-linux
         path: |
-          ${{ steps.strings.outputs.build-output-dir }}/yetty
-          ${{ steps.strings.outputs.build-output-dir }}/yettyc
-          ${{ steps.strings.outputs.build-output-dir }}/ycat
-          ${{ steps.strings.outputs.build-output-dir }}/yecho
+          ${{ env.BUILD_DIR }}/yetty
+          ${{ env.BUILD_DIR }}/yettyc
+          ${{ env.BUILD_DIR }}/ycat
+          ${{ env.BUILD_DIR }}/yecho
           demo/
         if-no-files-found: warn
-        # Note: fonts and shaders are embedded via incbin, no need to include separately
 
   # =============================================================================
   # Linux ASAN Build (AddressSanitizer)
@@ -163,36 +122,24 @@ jobs:
     if: needs.read-flags.outputs.linux_asan == 'true'
     runs-on: ubuntu-latest
 
+    env:
+      BUILD_DIR: build-desktop-ytrace-asan-nix
+
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install Linux dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          automake autoconf libtool \
-          meson ninja-build nasm \
-          brotli \
-          libfontconfig1-dev \
-          libxrandr-dev \
-          libxinerama-dev \
-          libxcursor-dev \
-          libxi-dev \
-          libxext-dev \
-          libx11-dev \
-          libgl1-mesa-dev \
-          libwayland-dev \
-          libxkbcommon-dev
+    - name: Install Nix
+      uses: cachix/install-nix-action@v27
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
 
     - name: Build with ASAN
-      run: make build-desktop-ytrace-asan
+      run: make -f Makefile.2 build PLATFORM=desktop LOGLEVEL=ytrace BUILDTYPE=asan USE_NIX=yes
 
     - name: Run ASAN smoke test
       run: |
-        # Run yetty with a simple command and capture ASAN output
         export ASAN_OPTIONS="detect_leaks=1:halt_on_error=0:log_path=asan_log"
-        timeout 10 ./build-desktop-ytrace-asan/yetty -e 'echo "ASAN smoke test"; exit 0' || true
-        # Check for ASAN errors
+        timeout 10 ./${{ env.BUILD_DIR }}/yetty -e 'echo "ASAN smoke test"; exit 0' || true
         if ls asan_log.* 1>/dev/null 2>&1; then
           echo "=== ASAN ERRORS DETECTED ==="
           cat asan_log.*
@@ -209,44 +156,36 @@ jobs:
     if: needs.read-flags.outputs.macos == 'true'
     runs-on: macos-15-intel
 
+    env:
+      BUILD_DIR: build-macos-ytrace-release
+
     steps:
     - uses: actions/checkout@v4
-
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build-macos" >> "$GITHUB_OUTPUT"
 
     - name: Install macOS dependencies
       run: brew install automake autoconf libtool meson ninja nasm brotli
 
     - name: Configure CMake
       run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        cmake -B ${{ env.BUILD_DIR }}
         -DCMAKE_BUILD_TYPE=Release
+        -DYETTY_ENABLE_TOOL_QA=OFF
         -S ${{ github.workspace }}
 
     - name: Build
-      # Limit parallelism to avoid "posix_spawn failed: Resource temporarily unavailable"
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release --parallel 4
-
-    # - name: Test
-    #   working-directory: ${{ steps.strings.outputs.build-output-dir }}
-    #   run: ctest --build-config Release --output-on-failure
+      run: cmake --build ${{ env.BUILD_DIR }} --config Release --parallel 4
 
     - name: Upload macOS artifacts
       uses: actions/upload-artifact@v4
       with:
         name: yetty-macos
         path: |
-          ${{ steps.strings.outputs.build-output-dir }}/yetty
-          ${{ steps.strings.outputs.build-output-dir }}/yettyc
-          ${{ steps.strings.outputs.build-output-dir }}/ycat
-          ${{ steps.strings.outputs.build-output-dir }}/yecho
+          ${{ env.BUILD_DIR }}/yetty
+          ${{ env.BUILD_DIR }}/yettyc
+          ${{ env.BUILD_DIR }}/ycat
+          ${{ env.BUILD_DIR }}/yecho
           demo/
         if-no-files-found: warn
-        # Note: fonts and shaders are embedded via incbin, no need to include separately
 
   # =============================================================================
   # Desktop Build (Windows)
@@ -256,14 +195,11 @@ jobs:
     if: needs.read-flags.outputs.windows == 'true'
     runs-on: windows-latest
 
+    env:
+      BUILD_DIR: build-windows-ytrace-release
+
     steps:
     - uses: actions/checkout@v4
-
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build-windows-dawn-release" >> "$GITHUB_OUTPUT"
 
     - name: Install Windows build dependencies
       shell: bash
@@ -271,79 +207,44 @@ jobs:
         choco install nasm -y
         choco install make -y
         pip install meson
-        # Note: brotli not available in chocolatey; build will use uncompressed assets
-        # (incbin.cmake gracefully falls back to uncompressed when brotli not found)
 
     - name: Configure CMake
       run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        cmake -B ${{ env.BUILD_DIR }}
         -DCMAKE_BUILD_TYPE=Release
         -DWEBGPU_BACKEND=dawn
+        -DYETTY_ENABLE_TOOL_QA=OFF
         -S ${{ github.workspace }}
 
     - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release --parallel
-
-    # - name: Test
-    #   working-directory: ${{ steps.strings.outputs.build-output-dir }}
-    #   run: ctest --build-config Release --output-on-failure
+      run: cmake --build ${{ env.BUILD_DIR }} --config Release --parallel
 
     - name: Stage Windows runtime
       shell: pwsh
       run: |
-        $BuildDir = "${{ steps.strings.outputs.build-output-dir }}"
+        $BuildDir = "${{ env.BUILD_DIR }}"
         $StageDir = "${{ github.workspace }}/yetty-windows"
         New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
 
-        # MSVC generator places executables in Release/, Ninja places them at root
         $ExeDir = if (Test-Path "$BuildDir/Release/yetty.exe") { "$BuildDir/Release" } else { $BuildDir }
-        Write-Host "Exe directory: $ExeDir"
+        Get-ChildItem "$ExeDir/*.exe" -ErrorAction SilentlyContinue | Copy-Item -Destination $StageDir
+        Get-ChildItem "$ExeDir/*.dll" -ErrorAction SilentlyContinue | Copy-Item -Destination $StageDir
 
-        # Copy executables
-        Get-ChildItem "$ExeDir/*.exe" -ErrorAction SilentlyContinue |
-            Copy-Item -Destination $StageDir
-
-        # Copy DLLs that cmake POST_BUILD placed next to the executable
-        Get-ChildItem "$ExeDir/*.dll" -ErrorAction SilentlyContinue |
-            Copy-Item -Destination $StageDir
-
-        # If dxil.dll or d3dcompiler_47.dll are missing, find them in Windows SDK
         foreach ($DllName in @("dxil.dll", "d3dcompiler_47.dll")) {
             if (-not (Test-Path "$StageDir/$DllName")) {
-                Write-Host "$DllName not found next to exe, searching Windows SDK..."
-                # Search in known locations: bin/<version>/x64 and Redist/<version>/x64
                 $SearchDirs = @(
                     Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory -ErrorAction SilentlyContinue |
-                        Where-Object { $_.Name -match '^\d+\.' } |
-                        ForEach-Object { "$($_.FullName)\x64" }
+                        Where-Object { $_.Name -match '^\d+\.' } | ForEach-Object { "$($_.FullName)\x64" }
                     "C:\Program Files (x86)\Windows Kits\10\Redist\D3D\x64"
-                    Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Redist" -Directory -ErrorAction SilentlyContinue |
-                        Where-Object { $_.Name -match '^\d+\.' } |
-                        ForEach-Object { "$($_.FullName)\x64" }
                 )
-                $Found = $SearchDirs |
-                    Where-Object { Test-Path "$_/$DllName" } |
-                    Sort-Object -Descending |
-                    Select-Object -First 1
-                if ($Found) {
-                    Write-Host "  Found: $Found/$DllName"
-                    Copy-Item "$Found/$DllName" -Destination "$StageDir/$DllName"
-                } else {
-                    Write-Warning "  Could not find $DllName in Windows SDK"
-                }
+                $Found = $SearchDirs | Where-Object { Test-Path "$_/$DllName" } | Sort-Object -Descending | Select-Object -First 1
+                if ($Found) { Copy-Item "$Found/$DllName" -Destination "$StageDir/$DllName" }
             }
         }
 
-        # Note: fonts and shaders are embedded via incbin, no need to copy assets/
-
-        # Copy demo content
         if (Test-Path "${{ github.workspace }}/demo") {
             Copy-Item "${{ github.workspace }}/demo" -Destination $StageDir -Recurse -Force
         }
-
-        # Report staged contents
-        Write-Host "=== Staged Windows runtime ==="
-        Get-ChildItem -Recurse $StageDir | Select-Object -ExpandProperty FullName
 
     - name: Upload Windows artifacts
       uses: actions/upload-artifact@v4
@@ -361,7 +262,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      ANDROID_BUILD_DIR: ${{ github.workspace }}/build-android-ytrace-release
+      BUILD_DIR: build-android-ytrace-release-nix
 
     steps:
     - uses: actions/checkout@v4
@@ -380,13 +281,13 @@ jobs:
           -dname "CN=Android Debug,O=Android,C=US"
 
     - name: Build Android APK
-      run: nix develop .#android --command make build-android-ytrace-release
+      run: make -f Makefile.2 build PLATFORM=android LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
 
     - name: Upload Android APK
       uses: actions/upload-artifact@v4
       with:
         name: yetty-android-apk
-        path: ${{ env.ANDROID_BUILD_DIR }}/app/outputs/apk/release/*.apk
+        path: ${{ env.BUILD_DIR }}/app/outputs/apk/release/*.apk
         if-no-files-found: warn
 
   # =============================================================================
@@ -398,7 +299,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      ANDROID_BUILD_DIR: ${{ github.workspace }}/build-android_x86_64-ytrace-release
+      BUILD_DIR: build-android_x86_64-ytrace-release-nix
 
     steps:
     - uses: actions/checkout@v4
@@ -417,13 +318,13 @@ jobs:
           -dname "CN=Android Debug,O=Android,C=US"
 
     - name: Build Android x86_64 APK
-      run: nix develop .#android --command make build-android_x86_64-ytrace-release
+      run: make -f Makefile.2 build PLATFORM=android_x86_64 LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
 
     - name: Upload Android x86_64 APK
       uses: actions/upload-artifact@v4
       with:
         name: yetty-android-x86_64-apk
-        path: ${{ env.ANDROID_BUILD_DIR }}/app/outputs/apk/release/*.apk
+        path: ${{ env.BUILD_DIR }}/app/outputs/apk/release/*.apk
         if-no-files-found: warn
 
   # =============================================================================
@@ -490,37 +391,35 @@ jobs:
     if: needs.read-flags.outputs.ios == 'true'
     runs-on: macos-latest
 
+    env:
+      BUILD_DIR: build-ios-ytrace-release
+
     steps:
     - uses: actions/checkout@v4
-
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build-ios-ytrace-release" >> "$GITHUB_OUTPUT"
 
     - name: Install macOS dependencies
       run: brew install automake autoconf libtool ninja nasm brotli meson
 
     - name: Configure CMake for iOS
       run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        cmake -B ${{ env.BUILD_DIR }}
         -G Ninja
         -DCMAKE_SYSTEM_NAME=iOS
         -DCMAKE_OSX_ARCHITECTURES=arm64
         -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
         -DCMAKE_BUILD_TYPE=Release
         -DYETTY_IOS=ON
+        -DYETTY_ENABLE_TOOL_QA=OFF
         -S ${{ github.workspace }}
 
     - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release --parallel 4
+      run: cmake --build ${{ env.BUILD_DIR }} --config Release --parallel 4
 
     - name: Upload iOS artifacts
       uses: actions/upload-artifact@v4
       with:
         name: yetty-ios
-        path: ${{ steps.strings.outputs.build-output-dir }}/yetty.app
+        path: ${{ env.BUILD_DIR }}/yetty.app
         if-no-files-found: warn
 
   # =============================================================================
@@ -531,21 +430,18 @@ jobs:
     if: needs.read-flags.outputs.ios_x86_64 == 'true'
     runs-on: macos-15-intel
 
+    env:
+      BUILD_DIR: build-ios_x86_64-ytrace-release
+
     steps:
     - uses: actions/checkout@v4
-
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build-ios_x86_64-ytrace-release" >> "$GITHUB_OUTPUT"
 
     - name: Install macOS dependencies
       run: brew install automake autoconf libtool ninja nasm brotli meson
 
     - name: Configure CMake for iOS Simulator
       run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        cmake -B ${{ env.BUILD_DIR }}
         -G Ninja
         -DCMAKE_SYSTEM_NAME=iOS
         -DCMAKE_OSX_ARCHITECTURES=x86_64
@@ -553,16 +449,17 @@ jobs:
         -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
         -DCMAKE_BUILD_TYPE=Release
         -DYETTY_IOS=ON
+        -DYETTY_ENABLE_TOOL_QA=OFF
         -S ${{ github.workspace }}
 
     - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config Release --parallel 4
+      run: cmake --build ${{ env.BUILD_DIR }} --config Release --parallel 4
 
     - name: Upload iOS Simulator artifacts
       uses: actions/upload-artifact@v4
       with:
         name: yetty-ios-x86_64
-        path: ${{ steps.strings.outputs.build-output-dir }}/yetty.app
+        path: ${{ env.BUILD_DIR }}/yetty.app
         if-no-files-found: warn
 
   # =============================================================================
@@ -573,6 +470,9 @@ jobs:
     if: needs.read-flags.outputs.web == 'true'
     runs-on: ubuntu-latest
 
+    env:
+      BUILD_DIR: build-webasm-ytrace-release-nix
+
     steps:
     - uses: actions/checkout@v4
 
@@ -582,18 +482,17 @@ jobs:
         nix_path: nixpkgs=channel:nixos-unstable
 
     - name: Build WebAssembly with Nix
-      run: |
-        nix develop .#web --command make build-webasm-ytrace-release
+      run: make -f Makefile.2 build PLATFORM=webasm LOGLEVEL=ytrace BUILDTYPE=release USE_NIX=yes
 
     - name: Prepare site directory
       run: |
         mkdir -p site
-        cp build-webasm-ytrace-release/index.html site/
-        cp build-webasm-ytrace-release/yetty.js site/
-        cp build-webasm-ytrace-release/yetty.wasm site/
-        cp build-webasm-ytrace-release/yetty.data site/
-        cp -r build-webasm-ytrace-release/jslinux site/
-        cp -r build-webasm-ytrace-release/vfsync site/
+        cp ${{ env.BUILD_DIR }}/index.html site/
+        cp ${{ env.BUILD_DIR }}/yetty.js site/
+        cp ${{ env.BUILD_DIR }}/yetty.wasm site/
+        cp ${{ env.BUILD_DIR }}/yetty.data site/
+        cp -r ${{ env.BUILD_DIR }}/jslinux site/
+        cp -r ${{ env.BUILD_DIR }}/vfsync site/
         ls -la site/
         ls -la site/vfsync/u/os/yetty-alpine/ || echo "vfsync structure check"
 

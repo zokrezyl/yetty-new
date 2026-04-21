@@ -24,15 +24,22 @@ $(if $(filter $(PLATFORM),$(VALID_PLATFORMS)),,$(error Invalid PLATFORM=$(PLATFO
 $(if $(filter $(LOGLEVEL),$(VALID_LOGLEVELS)),,$(error Invalid LOGLEVEL=$(LOGLEVEL). Valid: $(VALID_LOGLEVELS)))
 $(if $(filter $(BUILDTYPE),$(VALID_BUILDTYPES)),,$(error Invalid BUILDTYPE=$(BUILDTYPE). Valid: $(VALID_BUILDTYPES)))
 
-# Build directory (includes nix/nonix suffix)
+# Build directory. Suffix -nix/-nonix keeps nix and host builds separated:
+# CMakeCache.txt bakes absolute paths (nix store vs /usr/lib), so a single dir
+# cannot be reused when USE_NIX toggles without a full reconfigure/rebuild.
 ifeq ($(USE_NIX),yes)
 BUILD_DIR := build-$(PLATFORM)-$(LOGLEVEL)-$(BUILDTYPE)-nix
 else
 BUILD_DIR := build-$(PLATFORM)-$(LOGLEVEL)-$(BUILDTYPE)-nonix
 endif
 
-# Use system tools by default (no nix paths)
+# Path handling: when USE_NIX=yes, nix shell supplies PATH; else force host paths.
+ifeq ($(USE_NIX),yes)
+PATH_CMD :=
+else
 SYSTEM_PATH := /opt/emsdk:/opt/emsdk/upstream/emscripten:/usr/local/bin:/usr/bin:/bin
+PATH_CMD := PATH="$(SYSTEM_PATH)"
+endif
 
 # Android SDK
 export JAVA_HOME ?= /usr/lib/jvm/java-17-openjdk-amd64
@@ -119,7 +126,8 @@ NIX_WRAP := nix develop .\#android --command bash -c
 else ifeq ($(PLATFORM),android_x86_64)
 NIX_WRAP := nix develop .\#android --command bash -c
 else
-NIX_WRAP := bash -c
+# Desktop/iOS/macOS use default nix shell
+NIX_WRAP := nix develop --command bash -c
 endif
 else
 NIX_WRAP := bash -c
@@ -153,7 +161,11 @@ config: _config-$(PLATFORM)
 
 .PHONY: _config-desktop
 _config-desktop:
-	PATH="$(SYSTEM_PATH)" $(CMAKE) -B $(BUILD_DIR) $(CMAKE_GENERATOR) $(CMAKE_BUILDTYPE_FLAGS) $(CMAKE_LOGLEVEL_FLAGS) $(CMAKE_COMPILER_LAUNCHER)
+ifeq ($(USE_NIX),yes)
+	$(NIX_WRAP) '$(CMAKE) -B $(BUILD_DIR) $(CMAKE_GENERATOR) $(CMAKE_BUILDTYPE_FLAGS) $(CMAKE_LOGLEVEL_FLAGS) $(CMAKE_COMPILER_LAUNCHER)'
+else
+	$(PATH_CMD) $(CMAKE) -B $(BUILD_DIR) $(CMAKE_GENERATOR) $(CMAKE_BUILDTYPE_FLAGS) $(CMAKE_LOGLEVEL_FLAGS) $(CMAKE_COMPILER_LAUNCHER)
+endif
 	@ln -sfn $(BUILD_DIR)/compile_commands.json compile_commands.json
 
 .PHONY: _config-webasm
@@ -161,12 +173,12 @@ _config-webasm:
 ifeq ($(USE_NIX),yes)
 	$(NIX_WRAP) 'export EMCC_SKIP_SANITY_CHECK=1 && emcmake cmake -B $(BUILD_DIR) $(CMAKE_GENERATOR) $(CMAKE_BUILDTYPE_FLAGS) $(CMAKE_LOGLEVEL_FLAGS) $(CMAKE_COMPILER_LAUNCHER)'
 else
-	PATH="$(SYSTEM_PATH)" bash -c 'export EMCC_SKIP_SANITY_CHECK=1 && emcmake cmake -B $(BUILD_DIR) $(CMAKE_GENERATOR) $(CMAKE_BUILDTYPE_FLAGS) $(CMAKE_LOGLEVEL_FLAGS) $(CMAKE_COMPILER_LAUNCHER)'
+	$(PATH_CMD) bash -c 'export EMCC_SKIP_SANITY_CHECK=1 && emcmake cmake -B $(BUILD_DIR) $(CMAKE_GENERATOR) $(CMAKE_BUILDTYPE_FLAGS) $(CMAKE_LOGLEVEL_FLAGS) $(CMAKE_COMPILER_LAUNCHER)'
 endif
 
 .PHONY: _config-android _config-android_x86_64
 _config-android _config-android_x86_64:
-	@cd $(CURDIR) && ANDROID_ABI=$(ANDROID_ABI) ANDROID_BUILD_DIR=$(CURDIR)/$(BUILD_DIR) bash build-tools/android/build-dawn.sh
+	$(NIX_WRAP) 'cd $(CURDIR) && ANDROID_ABI=$(ANDROID_ABI) ANDROID_BUILD_DIR=$(CURDIR)/$(BUILD_DIR) bash build-tools/android/build-dawn.sh'
 
 .PHONY: _config-windows
 _config-windows:
@@ -191,7 +203,11 @@ build: _build-$(PLATFORM)
 .PHONY: _build-desktop
 _build-desktop:
 	@if [ ! -f "$(BUILD_DIR)/build.ninja" ]; then $(MAKE) -f Makefile.2 config PLATFORM=$(PLATFORM) LOGLEVEL=$(LOGLEVEL) BUILDTYPE=$(BUILDTYPE) USE_NIX=$(USE_NIX); fi
-	PATH="$(SYSTEM_PATH)" $(CMAKE) --build $(BUILD_DIR) $(CMAKE_PARALLEL)
+ifeq ($(USE_NIX),yes)
+	$(NIX_WRAP) '$(CMAKE) --build $(BUILD_DIR) $(CMAKE_PARALLEL)'
+else
+	$(PATH_CMD) $(CMAKE) --build $(BUILD_DIR) $(CMAKE_PARALLEL)
+endif
 
 .PHONY: _build-webasm
 _build-webasm:
@@ -199,7 +215,7 @@ _build-webasm:
 ifeq ($(USE_NIX),yes)
 	$(NIX_WRAP) 'cmake --build $(BUILD_DIR) --target yetty $(CMAKE_PARALLEL)'
 else
-	PATH="$(SYSTEM_PATH)" cmake --build $(BUILD_DIR) --target yetty $(CMAKE_PARALLEL)
+	$(PATH_CMD) cmake --build $(BUILD_DIR) --target yetty $(CMAKE_PARALLEL)
 endif
 	@cp build-tools/web/index.html build-tools/web/serve.py $(BUILD_DIR)/
 	@bash build-tools/jslinux/alpine/build-vfsync.sh $(BUILD_DIR)
@@ -292,7 +308,7 @@ test: _test-$(PLATFORM)
 .PHONY: _test-desktop
 _test-desktop:
 	@if [ ! -f "$(BUILD_DIR)/build.ninja" ]; then $(MAKE) -f Makefile.2 config PLATFORM=$(PLATFORM) LOGLEVEL=$(LOGLEVEL) BUILDTYPE=$(BUILDTYPE) USE_NIX=$(USE_NIX); fi
-	PATH="$(SYSTEM_PATH)" $(CMAKE) --build $(BUILD_DIR) --target yetty_tests $(CMAKE_PARALLEL)
+	$(PATH_CMD) $(CMAKE) --build $(BUILD_DIR) --target yetty_tests $(CMAKE_PARALLEL)
 	./$(BUILD_DIR)/test/ut/yetty_tests
 
 .PHONY: _test-webasm _test-windows _test-ios _test-ios_x86_64

@@ -119,6 +119,15 @@ option(YETTY_ENABLE_TOOL_YDOC            "ydoc tool"                         OFF
 option(YETTY_ENABLE_TOOL_YSPREADSHEET    "yspreadsheet tool"                 OFF)
 option(YETTY_ENABLE_TOOL_YSLIDES         "yslides tool"                      OFF)
 option(YETTY_ENABLE_TOOL_QA              "qa static analysis tools"          ON)
+
+# Auto-disable QA tools for cross-compilation (requires host LLVM/Clang libs)
+if(YETTY_ENABLE_TOOL_QA)
+    if(YETTY_ANDROID OR YETTY_IOS OR EMSCRIPTEN OR CMAKE_CROSSCOMPILING)
+        message(STATUS "Disabling QA tools for cross-compilation")
+        set(YETTY_ENABLE_TOOL_QA OFF CACHE BOOL "" FORCE)
+    endif()
+endif()
+
 option(YETTY_ENABLE_FEATURE_JSLINUX   "jslinux — JSLinux integration"        ON)
 
 # Desktop-only features
