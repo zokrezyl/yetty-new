@@ -105,7 +105,7 @@ option(YETTY_ENABLE_FEATURE_DEMO      "demo — demo programs"                 O
 option(YETTY_ENABLE_TOOL_GPU_INFO        "gpu-info tool"                     OFF)
 option(YETTY_ENABLE_TOOL_CARD_RUNNER     "card-runner tool"                  OFF)
 option(YETTY_ENABLE_TOOL_YDRAW_GENERATOR "ydraw-generator tool"              OFF)
-option(YETTY_ENABLE_TOOL_YPAINT_BENCH    "ypaint-bench tool"                 OFF)
+option(YETTY_ENABLE_TOOL_YPAINT_BENCH    "ypaint-bench tool"                 ON)
 option(YETTY_ENABLE_TOOL_YDRAW_MAZE      "ydraw-maze tool"                   OFF)
 option(YETTY_ENABLE_TOOL_YDRAW_ZOO       "ydraw-zoo tool"                    OFF)
 option(YETTY_ENABLE_TOOL_YMUX            "ymux tool"                         OFF)
