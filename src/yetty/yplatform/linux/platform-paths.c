@@ -4,11 +4,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <libgen.h>
+#include <limits.h>
 
 static char cache_dir_buf[512];
 static char data_dir_buf[512];
 static char runtime_dir_buf[512];
 static char config_dir_buf[512];
+static char assets_dir_buf[PATH_MAX];
 
 const char *yetty_platform_get_cache_dir(void)
 {
@@ -71,4 +74,27 @@ const char *yetty_platform_get_config_dir(void)
     }
 
     return "/tmp/yetty";
+}
+
+const char *yetty_platform_get_assets_dir(void)
+{
+    /* First check YETTY_ASSETS_DIR environment variable */
+    const char *env = getenv("YETTY_ASSETS_DIR");
+    if (env) {
+        snprintf(assets_dir_buf, sizeof(assets_dir_buf), "%s", env);
+        return assets_dir_buf;
+    }
+
+    /* Get directory containing the executable */
+    char exe_path[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len > 0) {
+        exe_path[len] = '\0';
+        char *dir = dirname(exe_path);
+        snprintf(assets_dir_buf, sizeof(assets_dir_buf), "%s/assets", dir);
+        return assets_dir_buf;
+    }
+
+    /* Fallback to current directory */
+    return "./assets";
 }

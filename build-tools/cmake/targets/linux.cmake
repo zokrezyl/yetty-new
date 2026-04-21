@@ -10,6 +10,15 @@ if(YETTY_ENABLE_LIB_LIBMAGIC)
     include(${YETTY_ROOT}/build-tools/cmake/Libmagic.cmake)
 endif()
 
+# TinyEMU - RISC-V emulator for --virtual flag
+if(YETTY_ENABLE_LIB_TINYEMU)
+    include(${YETTY_ROOT}/build-tools/cmake/tinyemu.cmake)
+    include(${YETTY_ROOT}/build-tools/cmake/tinyemu-runtime.cmake)
+    include(${YETTY_ROOT}/build-tools/cmake/opensbi.cmake)
+    include(${YETTY_ROOT}/build-tools/cmake/linux-kernel.cmake)
+    include(${YETTY_ROOT}/build-tools/cmake/alpine-rootfs.cmake)
+endif()
+
 # Desktop-specific subdirectories
 if(YETTY_ENABLE_FEATURE_GPU)
     add_subdirectory(${YETTY_ROOT}/src/yetty/gpu ${CMAKE_BINARY_DIR}/src/yetty/gpu)
@@ -39,6 +48,13 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/fs.c
 )
 
+# TinyEMU PTY source (for --virtual flag)
+if(YETTY_ENABLE_LIB_TINYEMU)
+    list(APPEND YETTY_PLATFORM_SOURCES
+        ${YETTY_ROOT}/src/yetty/yplatform/shared/tinyemu-pty.c
+    )
+endif()
+
 # Create executable with core sources + platform
 add_executable(yetty
     ${YETTY_SOURCES}
@@ -64,6 +80,7 @@ target_compile_definitions(yetty PRIVATE
     YETTY_USE_FONTCONFIG=1
     YETTY_USE_FORKPTY=1
     YETTY_HAS_VNC=1
+    $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:YETTY_HAS_TINYEMU=1>
 )
 
 set_target_properties(yetty PROPERTIES ENABLE_EXPORTS TRUE)
@@ -93,6 +110,7 @@ target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
     ${BROTLIDEC_LIBRARIES}
     ${FONTCONFIG_LINK_LIBS}
+    $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:tinyemu>
     rt
     util
 )
@@ -121,4 +139,29 @@ if(YETTY_ENABLE_FEATURE_ASSETS)
         COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=desktop -DCHECK_CDB=${YETTY_ENABLE_FEATURE_CDB_GEN} -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
         COMMENT "Verifying build assets..."
     )
+endif()
+
+# TinyEMU: Build kernel, download rootfs, copy assets
+if(YETTY_ENABLE_LIB_TINYEMU)
+    # Build OpenSBI firmware
+    opensbi_build()
+
+    # Build Linux kernel for RISC-V (requires cross-compiler)
+    linux_kernel_build()
+
+    # Download Alpine rootfs
+    alpine_rootfs_download()
+    alpine_rootfs_create_image()
+    alpine_rootfs_create_config()
+
+    # Copy TinyEMU runtime files to assets directory
+    tinyemu_copy_runtime_to_bundle(yetty)
+
+    # Add dependencies on opensbi and kernel
+    if(TARGET opensbi)
+        add_dependencies(yetty opensbi)
+    endif()
+    if(TARGET linux-kernel)
+        add_dependencies(yetty linux-kernel)
+    endif()
 endif()

@@ -288,7 +288,11 @@ static int virt_machine_parse_config(VirtMachineParams *p,
     if (str) {
         p->cmdline = cmdline_subst(str);
     }
-    
+
+    /* Number of CPUs (default 1) */
+    if (vm_get_int_opt(cfg, "ncpus", &p->ncpus, 1) < 0)
+        goto tag_fail;
+
     for(;;) {
         snprintf(buf1, sizeof(buf1), "drive%d", p->drive_count);
         obj = json_object_get(cfg, buf1);

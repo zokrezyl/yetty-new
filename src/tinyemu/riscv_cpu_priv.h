@@ -24,6 +24,8 @@
 #ifndef RISCV_CPU_PRIV_H
 #define RISCV_CPU_PRIV_H
 
+#include "smp.h"
+#include <stdatomic.h>
 #include "riscv_cpu.h"
 #include "cutils.h"
 
@@ -199,8 +201,8 @@ struct RISCVCPUState {
     uint8_t mxl; /* MXL field in MISA register */
     
     int32_t n_cycles; /* only used inside the CPU loop */
-    uint64_t insn_counter;
-    BOOL power_down_flag;
+    _Atomic uint64_t insn_counter;
+    _Atomic BOOL power_down_flag;
     int pending_exception; /* used during MMU exception handling */
     target_ulong pending_tval;
     
@@ -213,8 +215,8 @@ struct RISCVCPUState {
     target_ulong mtval;
     target_ulong mhartid; /* ro */
     uint32_t misa;
-    uint32_t mie;
-    uint32_t mip;
+    _Atomic uint32_t mie;
+    _Atomic uint32_t mip;
     uint32_t medeleg;
     uint32_t mideleg;
     uint32_t mcounteren;
@@ -231,9 +233,13 @@ struct RISCVCPUState {
 #endif
     uint32_t scounteren;
 
-    target_ulong load_res; /* for atomic LR/SC */
+    target_ulong load_res; /* for atomic LR/SC - address */
+    target_ulong load_val; /* for atomic LR/SC - value read by LR */
 
     PhysMemoryMap *mem_map;
+
+    SMPState *smp;
+    uint64_t tlb_gen;  /* Local TLB generation for SMP shootdown */
 
     TLBEntry tlb_read[TLB_SIZE];
     TLBEntry tlb_write[TLB_SIZE];

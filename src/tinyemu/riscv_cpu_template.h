@@ -215,13 +215,16 @@ static void no_inline glue(riscv_cpu_interp_x, XLEN)(RISCVCPUState *s,
 
     if (n_cycles1 == 0)
         return;
+    /* If CPU is in power-down state (waiting for HSM start), don't execute */
+    if (atomic_load(&s->power_down_flag))
+        return;
     insn_counter_addend = s->insn_counter + n_cycles1;
     s->n_cycles = n_cycles1;
 
     /* check pending interrupts */
-    if (unlikely((s->mip & s->mie) != 0)) {
+    if (unlikely((atomic_load(&s->mip) & atomic_load(&s->mie)) != 0)) {
         if (raise_interrupt(s)) {
-            s->n_cycles--; 
+            s->n_cycles--;
             goto done_interp;
         }
     }
@@ -249,13 +252,16 @@ static void no_inline glue(riscv_cpu_interp_x, XLEN)(RISCVCPUState *s,
                 goto the_end;
 
             /* check pending interrupts */
-            if (unlikely((s->mip & s->mie) != 0)) {
+            if (unlikely((atomic_load(&s->mip) & atomic_load(&s->mie)) != 0)) {
                 if (raise_interrupt(s)) {
-                    s->n_cycles--; 
+                    s->n_cycles--;
                     goto the_end;
                 }
             }
-    
+
+            /* Check for SMP TLB shootdown */
+            tlb_check_flush(s);
+
             addr = s->pc;
             tlb_idx = (addr >> PG_SHIFT) & (TLB_SIZE - 1);
             if (likely(s->tlb_code[tlb_idx].vaddr == (addr & ~PG_MASK))) {
@@ -1317,10 +1323,20 @@ static void no_inline glue(riscv_cpu_interp_x, XLEN)(RISCVCPUState *s,
                         goto illegal_insn;
                     /* go to power down if no enabled interrupts are
                        pending */
-                    if ((s->mip & s->mie) == 0) {
-                        s->power_down_flag = TRUE;
-                        s->pc = GET_PC() + 4;
-                        goto done_interp;
+                    {
+                        uint32_t mip_val = atomic_load(&s->mip);
+                        uint32_t mie_val = atomic_load(&s->mie);
+                        const uint32_t m_mode_irqs = MIP_MSIP | MIP_MTIP | MIP_MEIP;
+                        if ((mip_val & m_mode_irqs) == 0 && (mip_val & mie_val) == 0) {
+                            ydebug("SYNC: WFI cpu%d HALT mip=0x%x mie=0x%x",
+                                   (int)s->mhartid, mip_val, mie_val);
+                            atomic_store(&s->power_down_flag, TRUE);
+                            s->pc = GET_PC() + 4;
+                            goto done_interp;
+                        } else {
+                            ydebug("SYNC: WFI cpu%d SKIP mip=0x%x mie=0x%x",
+                                   (int)s->mhartid, mip_val, mie_val);
+                        }
                     }
                     break;
                 default:
@@ -1331,7 +1347,7 @@ static void no_inline glue(riscv_cpu_interp_x, XLEN)(RISCVCPUState *s,
                         if (s->priv == PRV_U)
                             goto illegal_insn;
                         if (rs1 == 0) {
-                            tlb_flush_all(s);
+                            tlb_flush_all_cpus(s);
                         } else {
                             tlb_flush_vaddr(s, s->reg[rs1]);
                         }
@@ -1354,6 +1370,8 @@ static void no_inline glue(riscv_cpu_interp_x, XLEN)(RISCVCPUState *s,
             case 0: /* fence */
                 if (insn & 0xf00fff80)
                     goto illegal_insn;
+                /* SMP: ensure memory visibility across CPU threads */
+                atomic_thread_fence(memory_order_seq_cst);
                 break;
             case 1: /* fence.i */
                 if (insn != 0x0000100f)
@@ -1375,9 +1393,12 @@ static void no_inline glue(riscv_cpu_interp_x, XLEN)(RISCVCPUState *s,
             NEXT_INSN;
         case 0x2f:
             funct3 = (insn >> 12) & 7;
+/* SMP-aware atomic operations */
 #define OP_A(size)                                                      \
             {                                                           \
                 uint ## size ##_t rval;                                 \
+                uint32_t tlb_idx;                                       \
+                uint ## size ## _t *pptr;                               \
                                                                         \
                 addr = s->reg[rs1];                                     \
                 funct3 = insn >> 27;                                    \
@@ -1389,17 +1410,25 @@ static void no_inline glue(riscv_cpu_interp_x, XLEN)(RISCVCPUState *s,
                         goto mmu_exception;                             \
                     val = (int## size ## _t)rval;                       \
                     s->load_res = addr;                                 \
+                    smp_reservation_set(&s->smp->reservations,          \
+                                        s->mhartid, addr);              \
                     break;                                              \
                 case 3: /* sc.w */                                      \
-                    if (s->load_res == addr) {                          \
+                    /* Atomically check and clear OUR reservation.      \
+                     * This ensures only one CPU can win the SC race. */\
+                    if (smp_reservation_check_and_clear(&s->smp->reservations, \
+                                              s->mhartid, addr)) {      \
                         if (target_write_u ## size(s, addr, s->reg[rs2])) \
                             goto mmu_exception;                         \
+                        /* Invalidate other CPUs' reservations for this addr */ \
+                        smp_reservation_invalidate(&s->smp->reservations, addr); \
                         val = 0;                                        \
                     } else {                                            \
                         val = 1;                                        \
                     }                                                   \
+                    s->load_res = -1;                                   \
                     break;                                              \
-                case 1: /* amiswap.w */                                 \
+                case 1: /* amoswap.w */                                 \
                 case 0: /* amoadd.w */                                  \
                 case 4: /* amoxor.w */                                  \
                 case 0xc: /* amoand.w */                                \
@@ -1408,46 +1437,41 @@ static void no_inline glue(riscv_cpu_interp_x, XLEN)(RISCVCPUState *s,
                 case 0x14: /* amomax.w */                               \
                 case 0x18: /* amominu.w */                              \
                 case 0x1c: /* amomaxu.w */                              \
-                    if (target_read_u ## size(s, &rval, addr))          \
-                        goto mmu_exception;                             \
-                    val = (int## size ## _t)rval;                       \
+                    /* Lock for AMO - ensures TLB hit/miss paths don't race */ \
+                    smp_amo_lock(s->smp);                               \
+                    /* Get physical pointer via TLB */                  \
+                    tlb_idx = (addr >> PG_SHIFT) & (TLB_SIZE - 1);      \
+                    if (likely(s->tlb_write[tlb_idx].vaddr ==           \
+                               (addr & ~(PG_MASK & ~((size / 8) - 1))))) { \
+                        pptr = (uint ## size ## _t *)                   \
+                            (s->tlb_write[tlb_idx].mem_addend + (uintptr_t)addr); \
+                    } else {                                            \
+                        /* TLB miss - fill via read, use tlb_read */    \
+                        if (target_read_u ## size(s, &rval, addr)) {    \
+                            smp_amo_unlock(s->smp);                     \
+                            goto mmu_exception;                         \
+                        }                                               \
+                        pptr = (uint ## size ## _t *)                   \
+                            (s->tlb_read[tlb_idx].mem_addend + (uintptr_t)addr); \
+                    }                                                   \
+                    /* Use atomic operations on physical memory */      \
                     val2 = s->reg[rs2];                                 \
                     switch(funct3) {                                    \
-                    case 1: /* amiswap.w */                             \
-                        break;                                          \
-                    case 0: /* amoadd.w */                              \
-                        val2 = (int## size ## _t)(val + val2);          \
-                        break;                                          \
-                    case 4: /* amoxor.w */                              \
-                        val2 = (int## size ## _t)(val ^ val2);          \
-                        break;                                          \
-                    case 0xc: /* amoand.w */                            \
-                        val2 = (int## size ## _t)(val & val2);          \
-                        break;                                          \
-                    case 0x8: /* amoor.w */                             \
-                        val2 = (int## size ## _t)(val | val2);          \
-                        break;                                          \
-                    case 0x10: /* amomin.w */                           \
-                        if ((int## size ## _t)val < (int## size ## _t)val2) \
-                            val2 = (int## size ## _t)val;               \
-                        break;                                          \
-                    case 0x14: /* amomax.w */                           \
-                        if ((int## size ## _t)val > (int## size ## _t)val2) \
-                            val2 = (int## size ## _t)val;               \
-                        break;                                          \
-                    case 0x18: /* amominu.w */                          \
-                        if ((uint## size ## _t)val < (uint## size ## _t)val2) \
-                            val2 = (int## size ## _t)val;               \
-                        break;                                          \
-                    case 0x1c: /* amomaxu.w */                          \
-                        if ((uint## size ## _t)val > (uint## size ## _t)val2) \
-                            val2 = (int## size ## _t)val;               \
-                        break;                                          \
+                    case 1: val = smp_atomic_swap ## size(pptr, val2); break; \
+                    case 0: val = smp_atomic_add ## size(pptr, val2); break; \
+                    case 4: val = smp_atomic_xor ## size(pptr, val2); break; \
+                    case 0xc: val = smp_atomic_and ## size(pptr, val2); break; \
+                    case 0x8: val = smp_atomic_or ## size(pptr, val2); break; \
+                    case 0x10: val = smp_atomic_min ## size((int## size ## _t *)pptr, val2); break; \
+                    case 0x14: val = smp_atomic_max ## size((int## size ## _t *)pptr, val2); break; \
+                    case 0x18: val = smp_atomic_minu ## size(pptr, val2); break; \
+                    case 0x1c: val = smp_atomic_maxu ## size(pptr, val2); break; \
                     default:                                            \
+                        smp_amo_unlock(s->smp);                         \
                         goto illegal_insn;                              \
                     }                                                   \
-                    if (target_write_u ## size(s, addr, val2))          \
-                        goto mmu_exception;                             \
+                    smp_amo_unlock(s->smp);                             \
+                    smp_reservation_invalidate(&s->smp->reservations, addr); \
                     break;                                              \
                 default:                                                \
                     goto illegal_insn;                                  \

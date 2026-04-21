@@ -788,12 +788,10 @@ static struct yetty_core_void_result binder_submit(struct yetty_render_gpu_resou
 {
     struct gpu_resource_binder_impl *impl = (struct gpu_resource_binder_impl *)self;
 
-    /* Don't re-add if already submitted (idempotent) */
-    if (impl->submitted) {
-        for (size_t i = 0; i < impl->resource_set_count; i++) {
-            if (impl->resource_sets[i] == rs)
-                return YETTY_OK_VOID();
-        }
+    /* Don't re-add if already in list (idempotent) */
+    for (size_t i = 0; i < impl->resource_set_count; i++) {
+        if (impl->resource_sets[i] == rs)
+            return YETTY_OK_VOID();
     }
 
     if (impl->resource_set_count >= MAX_RESOURCE_SETS)

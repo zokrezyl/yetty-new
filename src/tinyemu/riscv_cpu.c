@@ -28,10 +28,12 @@
 #include <inttypes.h>
 #include <assert.h>
 #include <fcntl.h>
+#include <time.h>
 
 #include "cutils.h"
 #include "iomem.h"
 #include "riscv_cpu.h"
+#include "ydebug.h"
 
 #ifndef MAX_XLEN
 #error MAX_XLEN must be defined
@@ -49,6 +51,28 @@
 //#define CONFIG_LOGFILE
 
 #include "riscv_cpu_priv.h"
+
+/* Timer frequency - must match riscv_machine.c RTC_FREQ */
+#define CPU_RTC_FREQ 10000000
+
+static _Atomic uint64_t cpu_rtc_start_time = 0;
+
+static uint64_t cpu_get_real_time(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * CPU_RTC_FREQ +
+           (ts.tv_nsec / (1000000000 / CPU_RTC_FREQ));
+}
+
+static uint64_t cpu_get_time(void) {
+    uint64_t start = atomic_load(&cpu_rtc_start_time);
+    if (start == 0) {
+        /* First call - initialize start time */
+        start = cpu_get_real_time();
+        atomic_store(&cpu_rtc_start_time, start);
+    }
+    return cpu_get_real_time() - start;
+}
 
 #if FLEN > 0
 #include "softfp.h"
@@ -233,7 +257,7 @@ static int get_phys_addr(RISCVCPUState *s,
         levels = mode - 8 + 3;
         pte_size_log2 = 3;
         vaddr_shift = MAX_XLEN - (PG_SHIFT + levels * 9);
-        if ((((target_long)vaddr << vaddr_shift) >> vaddr_shift) != vaddr)
+        if ((((target_long)vaddr << vaddr_shift) >> vaddr_shift) != (target_long)vaddr)
             return -1;
         pte_addr_bits = 44;
     }
@@ -600,9 +624,44 @@ static void tlb_flush_all(RISCVCPUState *s)
     tlb_init(s);
 }
 
+/* Per-vaddr flush not implemented - just flush all */
 static void tlb_flush_vaddr(RISCVCPUState *s, target_ulong vaddr)
 {
+    (void)vaddr;
     tlb_flush_all(s);
+}
+
+/* Request TLB flush for ALL CPUs via atomic generation counter.
+ * Each CPU checks the global generation vs its local generation
+ * at instruction fetch time and flushes if needed. */
+static void tlb_flush_all_cpus(RISCVCPUState *s)
+{
+    SMPState *smp = s->smp;
+
+    /* Always flush local TLB immediately */
+    tlb_flush_all(s);
+
+    if (!smp || smp->num_cpus <= 1) {
+        return;
+    }
+
+    /* Increment global TLB generation - other CPUs will see this
+     * and flush their TLBs when they next fetch an instruction */
+    uint64_t new_gen = atomic_fetch_add(&smp->tlb_flush_gen, 1) + 1;
+    s->tlb_gen = new_gen;  /* Update local gen so we don't re-flush */
+}
+
+/* Check if TLB needs flushing due to SMP shootdown */
+static inline void tlb_check_flush(RISCVCPUState *s)
+{
+    SMPState *smp = s->smp;
+    if (smp) {
+        uint64_t global_gen = atomic_load(&smp->tlb_flush_gen);
+        if (s->tlb_gen != global_gen) {
+            tlb_flush_all(s);
+            s->tlb_gen = global_gen;
+        }
+    }
 }
 
 /* XXX: inefficient but not critical as long as it is seldom used */
@@ -615,7 +674,7 @@ static void glue(riscv_cpu_flush_tlb_write_range_ram,
     
     ram_end = ram_ptr + ram_size;
     for(i = 0; i < TLB_SIZE; i++) {
-        if (s->tlb_write[i].vaddr != -1) {
+        if (s->tlb_write[i].vaddr != (target_ulong)-1) {
             ptr = (uint8_t *)(s->tlb_write[i].mem_addend +
                               (uintptr_t)s->tlb_write[i].vaddr);
             if (ptr >= ram_ptr && ptr < ram_end) {
@@ -644,8 +703,8 @@ static void glue(riscv_cpu_flush_tlb_write_range_ram,
                       MSTATUS_FS | \
                       MSTATUS_MPRV | MSTATUS_SUM | MSTATUS_MXR)
 
-/* cycle and insn counters */
-#define COUNTEREN_MASK ((1 << 0) | (1 << 2))
+/* cycle, time, and insn counters */
+#define COUNTEREN_MASK ((1 << 0) | (1 << 1) | (1 << 2))
 
 /* return the complete mstatus with the SD bit */
 static target_ulong get_mstatus(RISCVCPUState *s, target_ulong mask)
@@ -743,6 +802,20 @@ static int csr_read(RISCVCPUState *s, target_ulong *pval, uint32_t csr,
         }
         val = (int64_t)s->insn_counter;
         break;
+    case 0xc01: /* time - read as insn_counter / 16 to approximate mtime */
+        {
+            uint32_t counteren;
+            if (s->priv < PRV_M) {
+                if (s->priv < PRV_S)
+                    counteren = s->scounteren;
+                else
+                    counteren = s->mcounteren;
+                if (((counteren >> (csr & 0x1f)) & 1) == 0)
+                    goto invalid_csr;
+            }
+        }
+        val = (int64_t)cpu_get_time();
+        break;
     case 0xc80: /* mcycleh */
     case 0xc82: /* minstreth */
         if (s->cur_xlen != 32)
@@ -760,12 +833,28 @@ static int csr_read(RISCVCPUState *s, target_ulong *pval, uint32_t csr,
         }
         val = s->insn_counter >> 32;
         break;
-        
+    case 0xc81: /* timeh */
+        if (s->cur_xlen != 32)
+            goto invalid_csr;
+        {
+            uint32_t counteren;
+            if (s->priv < PRV_M) {
+                if (s->priv < PRV_S)
+                    counteren = s->scounteren;
+                else
+                    counteren = s->mcounteren;
+                if (((counteren >> (csr & 0x1f)) & 1) == 0)
+                    goto invalid_csr;
+            }
+        }
+        val = cpu_get_time() >> 32;
+        break;
+
     case 0x100:
         val = get_mstatus(s, SSTATUS_MASK);
         break;
     case 0x104: /* sie */
-        val = s->mie & s->mideleg;
+        val = atomic_load(&s->mie) & s->mideleg;
         break;
     case 0x105:
         val = s->stvec;
@@ -786,7 +875,7 @@ static int csr_read(RISCVCPUState *s, target_ulong *pval, uint32_t csr,
         val = s->stval;
         break;
     case 0x144: /* sip */
-        val = s->mip & s->mideleg;
+        val = atomic_load(&s->mip) & s->mideleg;
         break;
     case 0x180:
         val = s->satp;
@@ -805,7 +894,7 @@ static int csr_read(RISCVCPUState *s, target_ulong *pval, uint32_t csr,
         val = s->mideleg;
         break;
     case 0x304:
-        val = s->mie;
+        val = atomic_load(&s->mie);
         break;
     case 0x305:
         val = s->mtvec;
@@ -826,7 +915,7 @@ static int csr_read(RISCVCPUState *s, target_ulong *pval, uint32_t csr,
         val = s->mtval;
         break;
     case 0x344:
-        val = s->mip;
+        val = atomic_load(&s->mip);
         break;
     case 0xb00: /* mcycle */
     case 0xb02: /* minstret */
@@ -838,7 +927,16 @@ static int csr_read(RISCVCPUState *s, target_ulong *pval, uint32_t csr,
             goto invalid_csr;
         val = s->insn_counter >> 32;
         break;
-    case 0xf14:
+    case 0xf11: /* mvendorid */
+        val = 0;
+        break;
+    case 0xf12: /* marchid */
+        val = 0;
+        break;
+    case 0xf13: /* mimpid */
+        val = 0;
+        break;
+    case 0xf14: /* mhartid */
         val = s->mhartid;
         break;
     default:
@@ -908,7 +1006,10 @@ static int csr_write(RISCVCPUState *s, uint32_t csr, target_ulong val)
         break;
     case 0x104: /* sie */
         mask = s->mideleg;
-        s->mie = (s->mie & ~mask) | (val & mask);
+        {
+            uint32_t old_mie = atomic_load(&s->mie);
+            atomic_store(&s->mie, (old_mie & ~mask) | (val & mask));
+        }
         break;
     case 0x105:
         s->stvec = val & ~3;
@@ -930,7 +1031,10 @@ static int csr_write(RISCVCPUState *s, uint32_t csr, target_ulong val)
         break;
     case 0x144: /* sip */
         mask = s->mideleg;
-        s->mip = (s->mip & ~mask) | (val & mask);
+        {
+            uint32_t old_mip = atomic_load(&s->mip);
+            atomic_store(&s->mip, (old_mip & ~mask) | (val & mask));
+        }
         break;
     case 0x180:
         /* no ASID implemented */
@@ -985,7 +1089,10 @@ static int csr_write(RISCVCPUState *s, uint32_t csr, target_ulong val)
         break;
     case 0x304:
         mask = MIP_MSIP | MIP_MTIP | MIP_SSIP | MIP_STIP | MIP_SEIP;
-        s->mie = (s->mie & ~mask) | (val & mask);
+        {
+            uint32_t old_mie = atomic_load(&s->mie);
+            atomic_store(&s->mie, (old_mie & ~mask) | (val & mask));
+        }
         break;
     case 0x305:
         s->mtvec = val & ~3;
@@ -1007,7 +1114,10 @@ static int csr_write(RISCVCPUState *s, uint32_t csr, target_ulong val)
         break;
     case 0x344:
         mask = MIP_SSIP | MIP_STIP;
-        s->mip = (s->mip & ~mask) | (val & mask);
+        {
+            uint32_t old_mip = atomic_load(&s->mip);
+            atomic_store(&s->mip, (old_mip & ~mask) | (val & mask));
+        }
         break;
     default:
 #ifdef DUMP_INVALID_CSR
@@ -1160,7 +1270,7 @@ static inline uint32_t get_pending_irq_mask(RISCVCPUState *s)
 {
     uint32_t pending_ints, enabled_ints;
 
-    pending_ints = s->mip & s->mie;
+    pending_ints = atomic_load(&s->mip) & atomic_load(&s->mie);
     if (pending_ints == 0)
         return 0;
 
@@ -1234,7 +1344,7 @@ static void glue(riscv_cpu_interp, MAX_XLEN)(RISCVCPUState *s, int n_cycles)
     uint64_t timeout;
 
     timeout = s->insn_counter + n_cycles;
-    while (!s->power_down_flag &&
+    while (!atomic_load(&s->power_down_flag) &&
            (int)(timeout - s->insn_counter) > 0) {
         n_cycles = timeout - s->insn_counter;
         switch(s->cur_xlen) {
@@ -1260,30 +1370,49 @@ static void glue(riscv_cpu_interp, MAX_XLEN)(RISCVCPUState *s, int n_cycles)
 /* Note: the value is not accurate when called in riscv_cpu_interp() */
 static uint64_t glue(riscv_cpu_get_cycles, MAX_XLEN)(RISCVCPUState *s)
 {
-    return s->insn_counter;
+    return atomic_load(&s->insn_counter);
 }
 
 static void glue(riscv_cpu_set_mip, MAX_XLEN)(RISCVCPUState *s, uint32_t mask)
 {
-    s->mip |= mask;
-    /* exit from power down if an interrupt is pending */
-    if (s->power_down_flag && (s->mip & s->mie) != 0)
-        s->power_down_flag = FALSE;
+    uint32_t old_mip = atomic_fetch_or(&s->mip, mask);
+    ydebug("SYNC: SET_MIP cpu%d mask=0x%x mip 0x%x->0x%x",
+           (int)s->mhartid, mask, old_mip, old_mip | mask);
+    if (s->smp) {
+        smp_wakeup_cpu(s->smp, (int)s->mhartid);
+    }
 }
 
 static void glue(riscv_cpu_reset_mip, MAX_XLEN)(RISCVCPUState *s, uint32_t mask)
 {
-    s->mip &= ~mask;
+    uint32_t old_mip = atomic_fetch_and(&s->mip, ~mask);
+    ydebug("SYNC: RESET_MIP cpu%d mask=0x%x mip 0x%x->0x%x",
+           (int)s->mhartid, mask, old_mip, old_mip & ~mask);
 }
 
 static uint32_t glue(riscv_cpu_get_mip, MAX_XLEN)(RISCVCPUState *s)
 {
-    return s->mip;
+    return atomic_load(&s->mip);
+}
+
+static BOOL glue(riscv_cpu_has_pending_irq, MAX_XLEN)(RISCVCPUState *s)
+{
+    uint32_t mip_val;
+    /* M-mode interrupts (MSIP, MTIP, MEIP) always wake the CPU because they're
+     * handled by firmware (OpenSBI) and cannot be disabled by S-mode guest */
+    const uint32_t m_mode_irqs = MIP_MSIP | MIP_MTIP | MIP_MEIP;
+    mip_val = atomic_load(&s->mip);
+    return (mip_val & m_mode_irqs) || (mip_val & atomic_load(&s->mie)) != 0;
 }
 
 static BOOL glue(riscv_cpu_get_power_down, MAX_XLEN)(RISCVCPUState *s)
 {
-    return s->power_down_flag;
+    return atomic_load(&s->power_down_flag);
+}
+
+static void glue(riscv_cpu_set_power_down, MAX_XLEN)(RISCVCPUState *s, BOOL val)
+{
+    atomic_store(&s->power_down_flag, val);
 }
 
 static RISCVCPUState *glue(riscv_cpu_init, MAX_XLEN)(PhysMemoryMap *mem_map)
@@ -1324,12 +1453,29 @@ static void glue(riscv_cpu_end, MAX_XLEN)(RISCVCPUState *s)
 {
 #ifdef USE_GLOBAL_STATE
     free(s);
+#else
+    (void)s;
 #endif
 }
 
 static uint32_t glue(riscv_cpu_get_misa, MAX_XLEN)(RISCVCPUState *s)
 {
     return s->misa;
+}
+
+static void glue(riscv_cpu_set_mhartid, MAX_XLEN)(RISCVCPUState *s, uint64_t mhartid)
+{
+    s->mhartid = mhartid;
+}
+
+static void glue(riscv_cpu_set_smp, MAX_XLEN)(RISCVCPUState *s, struct SMPState *smp)
+{
+    s->smp = smp;
+}
+
+static struct SMPState *glue(riscv_cpu_get_smp, MAX_XLEN)(RISCVCPUState *s)
+{
+    return s->smp;
 }
 
 const RISCVCPUClass glue(riscv_cpu_class, MAX_XLEN) = {
@@ -1340,9 +1486,14 @@ const RISCVCPUClass glue(riscv_cpu_class, MAX_XLEN) = {
     glue(riscv_cpu_set_mip, MAX_XLEN),
     glue(riscv_cpu_reset_mip, MAX_XLEN),
     glue(riscv_cpu_get_mip, MAX_XLEN),
+    glue(riscv_cpu_has_pending_irq, MAX_XLEN),
     glue(riscv_cpu_get_power_down, MAX_XLEN),
+    glue(riscv_cpu_set_power_down, MAX_XLEN),
     glue(riscv_cpu_get_misa, MAX_XLEN),
     glue(riscv_cpu_flush_tlb_write_range_ram, MAX_XLEN),
+    glue(riscv_cpu_set_mhartid, MAX_XLEN),
+    glue(riscv_cpu_set_smp, MAX_XLEN),
+    glue(riscv_cpu_get_smp, MAX_XLEN),
 };
 
 #if CONFIG_RISCV_MAX_XLEN == MAX_XLEN
@@ -1373,5 +1524,6 @@ RISCVCPUState *riscv_cpu_init(PhysMemoryMap *mem_map, int max_xlen)
     }
     return c->riscv_cpu_init(mem_map);
 }
+
 #endif /* CONFIG_RISCV_MAX_XLEN == MAX_XLEN */
 

@@ -48,6 +48,9 @@ option(YETTY_ENABLE_LIB_THORVG      "thorvg — SVG/Lottie rendering"         OF
 option(YETTY_ENABLE_LIB_GLFW        "glfw — windowing (desktop only)"       ON)
 option(YETTY_ENABLE_LIB_LIBMAGIC    "libmagic — file type detection"         OFF)
 
+# Virtual machine (--virtual flag: run shell in RISC-V Linux VM)
+option(YETTY_ENABLE_LIB_TINYEMU     "tinyemu — RISC-V emulator for --virtual" ON)
+
 #-----------------------------------------------------------------------------
 # Features (internal source directories / modules)
 # All OFF by default — enable as they are ported to the new architecture
