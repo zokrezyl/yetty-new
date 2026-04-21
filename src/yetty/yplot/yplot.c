@@ -77,34 +77,95 @@ struct yplot_wire_cache {
 };
 
 //=============================================================================
-// Wire format ops implementation
+// Complex prim ops - new factory pattern
+//
+// Note: size() and aabb() are NOT in ops - they are generic functions
+// in complex-prim-types.c that read from FAM header and standard bounds offset.
+// The code generator ensures all complex prims have bounds at offset 0-15.
 //=============================================================================
 
-static struct rectangle_result
-yplot_wire_get_aabb(const uint8_t *data, uint32_t payload_size)
+// Get GPU resource set for instance
+static struct yetty_render_gpu_resource_set_result
+yplot_complex_get_gpu_resource_set(
+    struct yetty_ypaint_complex_prim_instance *instance)
 {
-    if (payload_size < YPLOT_WIRE_HEADER_SIZE)
-        return YETTY_ERR(rectangle, "payload too small");
+    if (!instance || !instance->shared)
+        return YETTY_ERR(yetty_render_gpu_resource_set, "invalid instance");
 
-    float x, y, w, h;
-    memcpy(&x, data + YPLOT_WIRE_BOUNDS_X_OFF, sizeof(float));
-    memcpy(&y, data + YPLOT_WIRE_BOUNDS_Y_OFF, sizeof(float));
-    memcpy(&w, data + YPLOT_WIRE_BOUNDS_W_OFF, sizeof(float));
-    memcpy(&h, data + YPLOT_WIRE_BOUNDS_H_OFF, sizeof(float));
+    /* yplot data (bytecode, colors) is stored inline in the primitive buffer.
+     * The shader reads it via prim_offset, so no separate buffers needed.
+     * Return the shared static resource set. */
 
-    struct rectangle rect = {
-        .min = { .x = x, .y = y },
-        .max = { .x = x + w, .y = y + h }
-    };
-    return YETTY_OK(rectangle, rect);
+    if (instance->shared->gpu_rs)
+        return YETTY_OK(yetty_render_gpu_resource_set, instance->shared->gpu_rs);
+
+    /* Fallback: return static shader RS */
+    return YETTY_OK(yetty_render_gpu_resource_set,
+        (struct yetty_render_gpu_resource_set *)yetty_yplot_get_shader_resource_set());
+}
+
+// Render instance to texture
+static struct yetty_core_void_result
+yplot_complex_render(struct yetty_ypaint_complex_prim_instance *instance,
+                     struct yetty_render_context *ctx)
+{
+    (void)instance;
+    (void)ctx;
+    /* TODO: implement direct layer rendering */
+    return YETTY_OK_VOID();
+}
+
+// Destroy instance-specific data
+static void yplot_complex_destroy_instance(
+    struct yetty_ypaint_complex_prim_instance *instance)
+{
+    if (!instance)
+        return;
+    /* instance_data is NULL for yplot - no extra cleanup needed */
+    (void)instance;
+}
+
+// Create shared GPU resource set (shader, pipeline)
+static struct yetty_render_gpu_resource_set *yplot_create_shared_gpu_rs(void)
+{
+    /* Return the static shader RS - it's already initialized lazily */
+    return (struct yetty_render_gpu_resource_set *)yetty_yplot_get_shader_resource_set();
+}
+
+// Ops table for new factory pattern (no base ops - size/aabb are generic)
+static const struct yetty_ypaint_complex_prim_ops yplot_complex_ops = {
+    .get_gpu_resource_set = yplot_complex_get_gpu_resource_set,
+    .render = yplot_complex_render,
+    .destroy_instance = yplot_complex_destroy_instance,
+};
+
+//=============================================================================
+// Flyweight handler for buffer iteration (legacy, for backward compatibility)
+//=============================================================================
+
+static struct yetty_core_size_result yplot_prim_size(const uint32_t *prim)
+{
+    /* FAM format: [type:u32][payload_size:u32][payload...] */
+    uint32_t payload_size = prim[1];
+    size_t total = sizeof(uint32_t) * 2 + payload_size;
+    return YETTY_OK(yetty_core_size, total);
+}
+
+static struct rectangle_result yplot_prim_aabb(const uint32_t *prim)
+{
+    /* Use generic aabb function - reads bounds from standard offset */
+    return yetty_ypaint_complex_prim_aabb(prim);
+}
+
+static void yplot_prim_destroy(void *cache)
+{
+    free(cache);
 }
 
 static struct yetty_render_gpu_resource_set_result
-yplot_wire_get_gpu_resource_set(const uint8_t *data, uint32_t payload_size,
-                                 void **cache_ptr)
+yplot_prim_get_gpu_resource_set(const uint32_t *prim, void **cache_ptr)
 {
-    (void)data;
-    (void)payload_size;
+    (void)prim;
 
     /* yplot data (bytecode, colors) is stored inline in the primitive buffer.
      * The shader reads it via prim_offset, so no separate buffers needed.
@@ -123,72 +184,6 @@ yplot_wire_get_gpu_resource_set(const uint8_t *data, uint32_t payload_size,
     return YETTY_OK(yetty_render_gpu_resource_set, &cache->rs);
 }
 
-static void yplot_wire_destroy_cache(void *cache_ptr)
-{
-    free(cache_ptr);
-}
-
-static struct yetty_core_void_result
-yplot_wire_render(const uint8_t *data, uint32_t payload_size, void *cache,
-                  struct yetty_render_context *ctx, struct rectangle target_rect)
-{
-    (void)data;
-    (void)payload_size;
-    (void)cache;
-    (void)ctx;
-    (void)target_rect;
-    /* TODO: implement direct layer rendering */
-    return YETTY_OK_VOID();
-}
-
-//=============================================================================
-// Wire format ops tables
-//=============================================================================
-
-static const struct yetty_ypaint_complex_prim_parse_ops yplot_parse_ops = {
-    .get_aabb = yplot_wire_get_aabb,
-};
-
-static const struct yetty_ypaint_complex_prim_runtime_ops yplot_runtime_ops = {
-    .get_gpu_resource_set = yplot_wire_get_gpu_resource_set,
-    .render = yplot_wire_render,
-    .destroy_cache = yplot_wire_destroy_cache,
-};
-
-//=============================================================================
-// Flyweight handler for buffer iteration
-//=============================================================================
-
-static struct yetty_core_size_result yplot_prim_size(const uint32_t *prim)
-{
-    // FAM format: [type:u32][payload_size:u32][payload...]
-    uint32_t payload_size = prim[1];
-    size_t total = sizeof(uint32_t) * 2 + payload_size;
-    return YETTY_OK(yetty_core_size, total);
-}
-
-static struct rectangle_result yplot_prim_aabb(const uint32_t *prim)
-{
-    // FAM format: payload starts at prim[2]
-    uint32_t payload_size = prim[1];
-    const uint8_t *payload = (const uint8_t *)&prim[2];
-    return yplot_wire_get_aabb(payload, payload_size);
-}
-
-static void yplot_prim_destroy(void *cache)
-{
-    yplot_wire_destroy_cache(cache);
-}
-
-static struct yetty_render_gpu_resource_set_result
-yplot_prim_get_gpu_resource_set(const uint32_t *prim, void **cache_ptr)
-{
-    // FAM format: [type:u32][payload_size:u32][payload...]
-    uint32_t payload_size = prim[1];
-    const uint8_t *payload = (const uint8_t *)&prim[2];
-    return yplot_wire_get_gpu_resource_set(payload, payload_size, cache_ptr);
-}
-
 static const struct yetty_ypaint_prim_ops yplot_prim_ops = {
     .size = yplot_prim_size,
     .aabb = yplot_prim_aabb,
@@ -204,7 +199,7 @@ struct yetty_ypaint_prim_ops_ptr_result yetty_yplot_handler(uint32_t prim_type)
 }
 
 //=============================================================================
-// Registration
+// Registration (new factory pattern)
 //=============================================================================
 
 void yetty_yplot_register(void)
@@ -212,11 +207,24 @@ void yetty_yplot_register(void)
     static const struct yetty_ypaint_complex_prim_type_info info = {
         .type_id = YETTY_YPLOT_PRIM_TYPE_ID,
         .name = "yplot",
-        .parse_ops = &yplot_parse_ops,
-        .runtime_ops = &yplot_runtime_ops,
+        .ops = &yplot_complex_ops,
+        .create_shared_gpu_rs = yplot_create_shared_gpu_rs,
     };
     struct yetty_core_void_result res = yetty_ypaint_complex_prim_register(&info);
     (void)res; /* Init-time registration - fails only on programming error */
+}
+
+// Register to specific factory instance
+struct yetty_core_void_result yetty_yplot_register_to_factory(
+    struct yetty_ypaint_complex_prim_factory *factory)
+{
+    static const struct yetty_ypaint_complex_prim_type_info info = {
+        .type_id = YETTY_YPLOT_PRIM_TYPE_ID,
+        .name = "yplot",
+        .ops = &yplot_complex_ops,
+        .create_shared_gpu_rs = yplot_create_shared_gpu_rs,
+    };
+    return yetty_ypaint_complex_prim_factory_register(factory, &info);
 }
 
 //=============================================================================

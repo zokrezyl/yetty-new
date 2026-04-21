@@ -184,10 +184,14 @@ uint32_t yetty_yplot_yplot_serialize_prim_header(struct yetty_yplot_yplot *plot,
 // Wire format (for complex prim buffer storage)
 //=============================================================================
 
-// Register yplot with complex prim type registry (call at init)
+// Register yplot with global complex prim type registry (call at init)
 void yetty_yplot_register(void);
 
-// Flyweight handler for buffer iteration (register with buffer)
+// Register yplot with a specific factory instance
+struct yetty_core_void_result yetty_yplot_register_to_factory(
+    struct yetty_ypaint_complex_prim_factory *factory);
+
+// Flyweight handler for buffer iteration (legacy, for backward compatibility)
 #include <yetty/ypaint-core/flyweight.h>
 struct yetty_ypaint_prim_ops_ptr_result yetty_yplot_handler(uint32_t prim_type);
 

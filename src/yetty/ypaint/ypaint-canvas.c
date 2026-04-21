@@ -16,6 +16,7 @@
 #include <yetty/ysdf/types.gen.h>
 #include <yetty/yconfig.h>
 #include <yetty/yetty.h>
+#include <yetty/yplot/yplot.h>
 #include <yetty/ytrace.h>
 
 /* Glyph primitive type (not in ysdf types.gen.h since not SDF) */
@@ -66,13 +67,8 @@ struct yetty_yetty_ypaint_canvas_font_entry {
   int32_t font_id;              // buffer-level font id
 };
 
-// Complex primitive reference (stored on last overlapping line)
-struct yetty_yetty_ypaint_canvas_complex_prim {
-  uint32_t *data;           // copied primitive data (owned)
-  uint32_t word_count;      // size in words
-  uint32_t rolling_row;     // rolling row at insertion
-  void *cache;              // runtime cache (for gpu_resource_set)
-};
+// Complex primitive stored on last overlapping line - uses factory instance
+// (replaces old canvas-specific struct with factory instance pointer)
 
 // A single row/line in the grid
 struct yetty_yetty_ypaint_canvas_grid_line {
@@ -88,7 +84,8 @@ struct yetty_yetty_ypaint_canvas_grid_line {
   uint32_t font_capacity;
 
   // Complex primitives whose BASE (last overlapping line) is this line
-  struct yetty_yetty_ypaint_canvas_complex_prim *complex_prims;
+  // Uses factory instances instead of canvas-specific struct
+  struct yetty_ypaint_complex_prim_instance **complex_prims;
   uint32_t complex_prim_count;
   uint32_t complex_prim_capacity;
 };
@@ -142,8 +139,11 @@ struct yetty_yetty_ypaint_canvas {
   // Shaders directory for creating fonts from buffers
   char shaders_dir[512];
 
-  // Flyweight registry for primitive handlers
+  // Flyweight registry for primitive handlers (SDF prims)
   struct yetty_ypaint_flyweight_registry *flyweight_registry;
+
+  // Factory for complex primitive ops (yplot, yimage, etc.)
+  struct yetty_ypaint_complex_prim_factory *complex_prim_factory;
 };
 
 #define DEFAULT_MAX_PRIMS_PER_CELL 16
@@ -265,19 +265,9 @@ grid_line_free(struct yetty_yetty_ypaint_canvas_grid_line *line,
   line->fonts = NULL;
   line->font_count = 0;
   line->font_capacity = 0;
-  /* Destroy complex prims owned by this line */
+  /* Destroy complex prim instances owned by this line */
   for (uint32_t i = 0; i < line->complex_prim_count; i++) {
-    struct yetty_yetty_ypaint_canvas_complex_prim *cp = &line->complex_prims[i];
-    if (cp->cache) {
-      uint32_t prim_type = cp->data[0];
-      struct yetty_ypaint_prim_flyweight_ptr_result fw_res =
-          yetty_ypaint_flyweight_registry_get(reg, prim_type, cp->data);
-      if (YETTY_IS_ERR(fw_res))
-        return YETTY_ERR(yetty_core_void, fw_res.error.msg);
-      if (fw_res.value->ops->destroy)
-        fw_res.value->ops->destroy(cp->cache);
-    }
-    free(cp->data);
+    yetty_ypaint_complex_prim_instance_destroy(line->complex_prims[i]);
   }
   free(line->complex_prims);
   line->complex_prims = NULL;
@@ -441,17 +431,40 @@ yetty_yetty_ypaint_canvas_create(bool scrolling_mode,
 
   line_buffer_init(&canvas->lines);
 
-  /* Create flyweight registry with all handlers */
+  /* Create flyweight registry with all handlers (for SDF prims) */
   struct yetty_ypaint_flyweight_registry_ptr_result fw_res =
       yetty_ypaint_flyweight_create();
   if (YETTY_IS_ERR(fw_res)) {
     yerror("ypaint_canvas: flyweight creation failed: %s", fw_res.error.msg);
-    /* lines buffer is empty here, no registry needed for cleanup */
     free(canvas->lines.lines);
     free(canvas);
     return NULL;
   }
   canvas->flyweight_registry = fw_res.value;
+
+  /* Create complex prim factory and register types */
+  struct yetty_ypaint_complex_prim_factory_ptr_result factory_res =
+      yetty_ypaint_complex_prim_factory_create();
+  if (YETTY_IS_ERR(factory_res)) {
+    yerror("ypaint_canvas: factory creation failed: %s", factory_res.error.msg);
+    yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
+    free(canvas->lines.lines);
+    free(canvas);
+    return NULL;
+  }
+  canvas->complex_prim_factory = factory_res.value;
+
+  /* Register yplot to factory */
+  struct yetty_core_void_result yplot_reg_res =
+      yetty_yplot_register_to_factory(canvas->complex_prim_factory);
+  if (YETTY_IS_ERR(yplot_reg_res)) {
+    yerror("ypaint_canvas: yplot registration failed: %s", yplot_reg_res.error.msg);
+    yetty_ypaint_complex_prim_factory_destroy(canvas->complex_prim_factory);
+    yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
+    free(canvas->lines.lines);
+    free(canvas);
+    return NULL;
+  }
 
   /* Create default MSDF font for text spans (font_id = -1) */
   struct yetty_config *config = context->app_context.config;
@@ -494,6 +507,7 @@ yetty_yetty_ypaint_canvas_destroy(struct yetty_yetty_ypaint_canvas *canvas) {
       line_buffer_free(&canvas->lines, canvas->flyweight_registry);
   if (YETTY_IS_ERR(res))
     return res;
+  yetty_ypaint_complex_prim_factory_destroy(canvas->complex_prim_factory);
   yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
   free(canvas->grid_staging);
   free(canvas->prim_staging);
@@ -689,31 +703,32 @@ add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
 
   // Track complex prims for resource set collection
   if (yetty_ypaint_is_complex_type(prim_type)) {
-    // Ensure capacity
+    /* Create factory instance for complex prim */
+    struct yetty_ypaint_complex_prim_instance_ptr_result inst_res =
+        yetty_ypaint_complex_prim_factory_create_instance(
+            canvas->complex_prim_factory,
+            iter->fw.data,
+            word_count * sizeof(uint32_t),
+            primitive_rolling_row);
+    if (YETTY_IS_ERR(inst_res))
+      return YETTY_ERR(uint32, inst_res.error.msg);
+
+    /* Ensure capacity for instance pointer array */
     if (base_line->complex_prim_count >= base_line->complex_prim_capacity) {
       uint32_t new_cap = base_line->complex_prim_capacity == 0
                              ? 4
                              : base_line->complex_prim_capacity * 2;
       base_line->complex_prims = realloc(
           base_line->complex_prims,
-          new_cap * sizeof(struct yetty_yetty_ypaint_canvas_complex_prim));
-      if (!base_line->complex_prims)
+          new_cap * sizeof(struct yetty_ypaint_complex_prim_instance *));
+      if (!base_line->complex_prims) {
+        yetty_ypaint_complex_prim_instance_destroy(inst_res.value);
         return YETTY_ERR(uint32, "realloc complex_prims failed");
+      }
       base_line->complex_prim_capacity = new_cap;
     }
 
-    // Copy primitive data (we need to own it for cache management)
-    uint32_t *data_copy = malloc(word_count * sizeof(uint32_t));
-    if (!data_copy)
-      return YETTY_ERR(uint32, "malloc complex prim data failed");
-    memcpy(data_copy, iter->fw.data, word_count * sizeof(uint32_t));
-
-    struct yetty_yetty_ypaint_canvas_complex_prim *cp =
-        &base_line->complex_prims[base_line->complex_prim_count++];
-    cp->data = data_copy;
-    cp->word_count = word_count;
-    cp->rolling_row = primitive_rolling_row;
-    cp->cache = NULL;
+    base_line->complex_prims[base_line->complex_prim_count++] = inst_res.value;
 
     ydebug("add_primitive_internal: added complex prim type=0x%08x to line %u",
            prim_type, primitive_grid_line);
@@ -1663,12 +1678,11 @@ uint32_t yetty_yetty_ypaint_canvas_complex_prim_count(
   return count;
 }
 
-struct yetty_ypaint_canvas_complex_prim_ref
+struct yetty_ypaint_complex_prim_instance *
 yetty_yetty_ypaint_canvas_get_complex_prim(
     struct yetty_yetty_ypaint_canvas *canvas, uint32_t index) {
-  struct yetty_ypaint_canvas_complex_prim_ref ref = {NULL, NULL};
   if (!canvas)
-    return ref;
+    return NULL;
 
   uint32_t visible_lines = canvas->grid_size.rows;
   if (visible_lines > canvas->lines.count)
@@ -1680,19 +1694,21 @@ yetty_yetty_ypaint_canvas_get_complex_prim(
         line_buffer_get(&canvas->lines, i);
     if (index < current + line->complex_prim_count) {
       uint32_t local_idx = index - current;
-      struct yetty_yetty_ypaint_canvas_complex_prim *cp =
-          &line->complex_prims[local_idx];
-      ref.data = cp->data;
-      ref.cache_ptr = &cp->cache;
-      return ref;
+      return line->complex_prims[local_idx];
     }
     current += line->complex_prim_count;
   }
-  return ref;
+  return NULL;
 }
 
 const struct yetty_ypaint_flyweight_registry *
 yetty_yetty_ypaint_canvas_get_flyweight_registry(
     struct yetty_yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->flyweight_registry : NULL;
+}
+
+struct yetty_ypaint_complex_prim_factory *
+yetty_yetty_ypaint_canvas_get_complex_prim_factory(
+    struct yetty_yetty_ypaint_canvas *canvas) {
+  return canvas ? canvas->complex_prim_factory : NULL;
 }

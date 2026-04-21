@@ -5,7 +5,7 @@
 #include <yetty/ycore/util.h>
 #include <yetty/yfont/font.h>
 #include <yetty/ypaint-core/buffer.h>
-#include <yetty/ypaint-core/flyweight.h>
+#include <yetty/ypaint-core/complex-prim-types.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/ypaint-yaml/ypaint-yaml.h>
@@ -475,28 +475,22 @@ ypaint_layer_get_gpu_resource_set(
         (struct yetty_render_gpu_resource_set *)yplot_shader_rs;
   }
 
-  /* Include complex prim resource sets as children */
-  const struct yetty_ypaint_flyweight_registry *reg =
-      yetty_yetty_ypaint_canvas_get_flyweight_registry(layer->canvas);
+  /* Include complex prim resource sets as children (using factory instances) */
   uint32_t complex_count =
       yetty_yetty_ypaint_canvas_complex_prim_count(layer->canvas);
 
   for (uint32_t i = 0; i < complex_count && child_idx < YETTY_RENDER_RS_MAX_CHILDREN; i++) {
-    struct yetty_ypaint_canvas_complex_prim_ref ref =
+    struct yetty_ypaint_complex_prim_instance *instance =
         yetty_yetty_ypaint_canvas_get_complex_prim(layer->canvas, i);
-    if (!ref.data)
+    if (!instance || !instance->shared || !instance->shared->ops)
       continue;
 
-    /* Get flyweight for ops */
-    uint32_t prim_type = ref.data[0];
-    struct yetty_ypaint_prim_flyweight_ptr_result fw_res =
-        yetty_ypaint_flyweight_registry_get(reg, prim_type, ref.data);
-    if (YETTY_IS_ERR(fw_res) || !fw_res.value->ops->get_gpu_resource_set)
+    /* Get resource set from factory instance ops */
+    if (!instance->shared->ops->get_gpu_resource_set)
       continue;
 
-    /* Get resource set (creates cache if needed) */
     struct yetty_render_gpu_resource_set_result rs_res =
-        fw_res.value->ops->get_gpu_resource_set(ref.data, ref.cache_ptr);
+        instance->shared->ops->get_gpu_resource_set(instance);
     if (YETTY_IS_OK(rs_res)) {
       layer->rs.children[child_idx++] =
           (struct yetty_render_gpu_resource_set *)rs_res.value;

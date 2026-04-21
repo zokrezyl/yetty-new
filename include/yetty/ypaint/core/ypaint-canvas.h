@@ -171,26 +171,27 @@ struct yetty_font_font *yetty_yetty_ypaint_canvas_get_default_font(
 // Complex primitive access (for atlas rendering)
 //=============================================================================
 
-// Complex prim reference - points to data in canvas, with cache for rendering
-struct yetty_ypaint_canvas_complex_prim_ref {
-    const uint32_t *data;  // FAM: [type][payload_size][payload...]
-    void **cache_ptr;      // Pointer to cache storage (in canvas)
-};
-
 // Get count of visible complex prims (on visible grid lines)
 uint32_t yetty_yetty_ypaint_canvas_complex_prim_count(
     struct yetty_yetty_ypaint_canvas *canvas);
 
-// Get complex prim reference by index (0 to count-1)
-// Returns {NULL, NULL} if index out of range
-struct yetty_ypaint_canvas_complex_prim_ref
+// Get complex prim instance by index (0 to count-1)
+// Returns NULL if index out of range
+struct yetty_ypaint_complex_prim_instance;
+struct yetty_ypaint_complex_prim_instance *
 yetty_yetty_ypaint_canvas_get_complex_prim(
     struct yetty_yetty_ypaint_canvas *canvas, uint32_t index);
 
-// Get flyweight registry (for ops lookup)
+// Get flyweight registry (for SDF ops lookup)
 struct yetty_ypaint_flyweight_registry;
 const struct yetty_ypaint_flyweight_registry *
 yetty_yetty_ypaint_canvas_get_flyweight_registry(
+    struct yetty_yetty_ypaint_canvas *canvas);
+
+// Get complex prim factory (for complex prim ops)
+struct yetty_ypaint_complex_prim_factory;
+struct yetty_ypaint_complex_prim_factory *
+yetty_yetty_ypaint_canvas_get_complex_prim_factory(
     struct yetty_yetty_ypaint_canvas *canvas);
 
 #ifdef __cplusplus
