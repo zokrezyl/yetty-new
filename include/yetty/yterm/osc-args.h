@@ -1,5 +1,5 @@
-#ifndef YETTY_TERM_OSC_ARGS_H
-#define YETTY_TERM_OSC_ARGS_H
+#ifndef YETTY_YTERM_OSC_ARGS_H
+#define YETTY_YTERM_OSC_ARGS_H
 
 #include <stddef.h>
 #include <yetty/ycore/result.h>
@@ -69,13 +69,13 @@ int yetty_term_osc_args_get_int(
     int default_val);
 
 /**
- * Get payload as a yetty_core_buffer_result.
+ * Get payload as a yetty_ycore_buffer_result.
  */
-struct yetty_core_buffer_result yetty_term_osc_args_get_payload_buffer(
+struct yetty_ycore_buffer_result yetty_term_osc_args_get_payload_buffer(
     const struct yetty_term_osc_args *args);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* YETTY_TERM_OSC_ARGS_H */
+#endif /* YETTY_YTERM_OSC_ARGS_H */

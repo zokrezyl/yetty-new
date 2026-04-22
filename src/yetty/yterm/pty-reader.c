@@ -20,12 +20,12 @@ enum osc_state {
 
 struct osc_sink {
     int vendor_id;
-    struct yetty_term_terminal_layer *layer;
+    struct yetty_yterm_terminal_layer *layer;
 };
 
 struct yetty_term_pty_reader {
     struct yetty_platform_pty *pty;
-    struct yetty_term_terminal_layer *default_sink;
+    struct yetty_yterm_terminal_layer *default_sink;
     struct osc_sink osc_sinks[MAX_OSC_SINKS];
     size_t osc_sink_count;
     enum osc_state state;
@@ -53,7 +53,7 @@ static int osc_buf_append(struct yetty_term_pty_reader *r, char c)
     return 1;
 }
 
-static struct yetty_term_terminal_layer *find_osc_sink(
+static struct yetty_yterm_terminal_layer *find_osc_sink(
     struct yetty_term_pty_reader *r, int vendor_id)
 {
     for (size_t i = 0; i < r->osc_sink_count; i++) {
@@ -89,7 +89,7 @@ static void dispatch_osc(struct yetty_term_pty_reader *r)
         return;
 
     /* Find sink and dispatch payload (after semicolon) */
-    struct yetty_term_terminal_layer *layer = find_osc_sink(r, (int)vendor_id);
+    struct yetty_yterm_terminal_layer *layer = find_osc_sink(r, (int)vendor_id);
     if (layer && layer->ops && layer->ops->write) {
         const char *payload = semi + 1;
         size_t payload_len = r->osc_buf_len - id_len - 1;
@@ -216,7 +216,7 @@ void yetty_term_pty_reader_destroy(struct yetty_term_pty_reader *reader)
 
 void yetty_term_pty_reader_register_default_sink(
     struct yetty_term_pty_reader *reader,
-    struct yetty_term_terminal_layer *layer)
+    struct yetty_yterm_terminal_layer *layer)
 {
     if (reader)
         reader->default_sink = layer;
@@ -225,7 +225,7 @@ void yetty_term_pty_reader_register_default_sink(
 void yetty_term_pty_reader_register_osc_sink(
     struct yetty_term_pty_reader *reader,
     int vendor_id,
-    struct yetty_term_terminal_layer *layer)
+    struct yetty_yterm_terminal_layer *layer)
 {
     if (!reader || reader->osc_sink_count >= MAX_OSC_SINKS)
         return;

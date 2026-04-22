@@ -500,10 +500,10 @@ uint32_t yetty_yfsvm_program_serialize(const struct yetty_yfsvm_program *prog,
  * Shader resource set (for ypaint integration)
  *===========================================================================*/
 
-static struct yetty_render_gpu_resource_set yfsvm_static_shader_rs;
+static struct yetty_yrender_gpu_resource_set yfsvm_static_shader_rs;
 static bool yfsvm_static_shader_rs_initialized = false;
 
-const struct yetty_render_gpu_resource_set *yetty_yfsvm_get_shader_resource_set(void)
+const struct yetty_yrender_gpu_resource_set *yetty_yfsvm_get_shader_resource_set(void)
 {
     if (!yfsvm_static_shader_rs_initialized) {
         memset(&yfsvm_static_shader_rs, 0, sizeof(yfsvm_static_shader_rs));

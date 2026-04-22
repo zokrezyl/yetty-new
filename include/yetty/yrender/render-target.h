@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 struct yetty_render_target;
-struct yetty_term_terminal_layer;
+struct yetty_yterm_terminal_layer;
 struct yetty_render_gpu_allocator;
 struct yetty_gpu_context;
 
@@ -43,7 +43,7 @@ struct yetty_render_target_ops {
 	/* Render single terminal layer to this target */
 	struct yetty_core_void_result (*render_layer)(
 		struct yetty_render_target *self,
-		struct yetty_term_terminal_layer *layer);
+		struct yetty_yterm_terminal_layer *layer);
 
 	/* Blend multiple source targets into this target */
 	struct yetty_core_void_result (*blend)(

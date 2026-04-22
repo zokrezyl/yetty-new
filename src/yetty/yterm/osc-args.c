@@ -170,16 +170,16 @@ int yetty_term_osc_args_get_int(
     return (int)v;
 }
 
-struct yetty_core_buffer_result yetty_term_osc_args_get_payload_buffer(
+struct yetty_ycore_buffer_result yetty_term_osc_args_get_payload_buffer(
     const struct yetty_term_osc_args *args)
 {
     if (!args || !args->payload || args->payload_len == 0)
-        return YETTY_ERR(yetty_core_buffer, "no payload");
+        return YETTY_ERR(yetty_ycore_buffer, "no payload");
 
-    struct yetty_core_buffer buf = {
+    struct yetty_ycore_buffer buf = {
         .data = (uint8_t *)args->payload,
         .size = args->payload_len,
         .capacity = args->payload_len
     };
-    return YETTY_OK(yetty_core_buffer, buf);
+    return YETTY_OK(yetty_ycore_buffer, buf);
 }

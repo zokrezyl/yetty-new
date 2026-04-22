@@ -72,7 +72,7 @@ See [Result Types](result.md) for the macro definitions and usage patterns.
 
 The terminal screen is a stack of render layers: text grid, selection, cursor, ypaint overlays, cards. Each layer:
 
-- Owns a `struct yetty_render_gpu_resource_set` describing its GPU needs
+- Owns a `struct yetty_yrender_gpu_resource_set` describing its GPU needs
 - Has a `dirty` flag — no re-render unless content changed
 - Implements the layer ops interface (`get_gpu_resource_set`, `write`, `resize`, `destroy`)
 

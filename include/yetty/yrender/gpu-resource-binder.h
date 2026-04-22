@@ -15,7 +15,7 @@ struct yetty_render_gpu_allocator;
 struct yetty_render_gpu_resource_binder_ops {
     void (*destroy)(struct yetty_render_gpu_resource_binder *self);
     struct yetty_core_void_result (*submit)(struct yetty_render_gpu_resource_binder *self,
-                                             const struct yetty_render_gpu_resource_set *rs);
+                                             const struct yetty_yrender_gpu_resource_set *rs);
     struct yetty_core_void_result (*finalize)(struct yetty_render_gpu_resource_binder *self);
     struct yetty_core_void_result (*update)(struct yetty_render_gpu_resource_binder *self);
     struct yetty_core_void_result (*bind)(struct yetty_render_gpu_resource_binder *self,

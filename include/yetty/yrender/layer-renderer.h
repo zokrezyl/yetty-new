@@ -22,7 +22,7 @@ struct yetty_render_layer_renderer_ops {
 
 	struct yetty_render_rendered_layer_result (*render)(
 		struct yetty_render_layer_renderer *self,
-		const struct yetty_render_gpu_resource_set *resource_set);
+		const struct yetty_yrender_gpu_resource_set *resource_set);
 };
 
 /* Layer renderer base - embed as first member in implementations */

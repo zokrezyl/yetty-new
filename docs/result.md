@@ -23,12 +23,12 @@ Each module declares its own result types in its header:
 
 ```c
 /* terminal.h */
-YETTY_RESULT_DECLARE(yetty_term_terminal, struct yetty_term_terminal *);
-YETTY_RESULT_DECLARE(yetty_term_terminal_layer, struct yetty_term_terminal_layer *);
+YETTY_RESULT_DECLARE(yetty_yterm_terminal, struct yetty_yterm_terminal *);
+YETTY_RESULT_DECLARE(yetty_yterm_terminal_layer, struct yetty_yterm_terminal_layer *);
 
 /* Generates:
- *   struct yetty_term_terminal_result
- *   struct yetty_term_terminal_layer_result
+ *   struct yetty_yterm_terminal_result
+ *   struct yetty_yterm_terminal_layer_result
  */
 ```
 
@@ -46,24 +46,24 @@ YETTY_RESULT_DECLARE(yetty_core_size, size_t);
 
 ```c
 /* Success */
-return YETTY_OK(yetty_term_terminal, terminal);
+return YETTY_OK(yetty_yterm_terminal, terminal);
 
 /* Success (void) */
 return YETTY_OK_VOID();
 
 /* Error */
-return YETTY_ERR(yetty_term_terminal, "failed to allocate");
+return YETTY_ERR(yetty_yterm_terminal, "failed to allocate");
 ```
 
 ## Checking and Propagating
 
 ```c
-struct yetty_term_terminal_result res = yetty_term_terminal_create(80, 24);
+struct yetty_yterm_terminal_result res = yetty_yterm_terminal_create(80, 24);
 if (YETTY_IS_ERR(res)) {
     yerror("terminal: %s", res.error.msg);
     return YETTY_ERR(yetty_core_void, res.error.msg);
 }
-struct yetty_term_terminal *terminal = res.value;
+struct yetty_yterm_terminal *terminal = res.value;
 ```
 
 Error propagation is explicit — each caller decides whether to handle, wrap, or forward the error.

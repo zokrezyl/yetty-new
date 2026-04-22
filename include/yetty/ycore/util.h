@@ -17,7 +17,7 @@ extern "C" {
  * @param path File path
  * @return Result containing buffer or error
  */
-struct yetty_core_buffer_result yetty_core_read_file(const char *path);
+struct yetty_ycore_buffer_result yetty_core_read_file(const char *path);
 
 /**
  * Decode base64 data.

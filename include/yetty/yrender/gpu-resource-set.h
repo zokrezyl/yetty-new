@@ -15,7 +15,7 @@ extern "C" {
 #define YETTY_RENDER_RS_MAX_CHILDREN  4
 
 /* GPU resource set - collection of resources a provider needs */
-struct yetty_render_gpu_resource_set {
+struct yetty_yrender_gpu_resource_set {
     char namespace[YETTY_RENDER_NAME_MAX];
     struct pixel_size pixel_size;
 
@@ -30,11 +30,11 @@ struct yetty_render_gpu_resource_set {
 
     struct yetty_render_shader_code shader;
 
-    struct yetty_render_gpu_resource_set *children[YETTY_RENDER_RS_MAX_CHILDREN];
+    struct yetty_yrender_gpu_resource_set *children[YETTY_RENDER_RS_MAX_CHILDREN];
     size_t children_count;
 };
 
-YETTY_RESULT_DECLARE(yetty_render_gpu_resource_set, const struct yetty_render_gpu_resource_set *);
+YETTY_RESULT_DECLARE(yetty_yrender_gpu_resource_set, const struct yetty_yrender_gpu_resource_set *);
 
 #ifdef __cplusplus
 }

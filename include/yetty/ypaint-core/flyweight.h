@@ -18,8 +18,8 @@ extern "C" {
 #endif
 
 // Forward declare gpu_resource_set result (defined in yrender/gpu-resource-set.h)
-struct yetty_render_gpu_resource_set;
-struct yetty_render_gpu_resource_set_result;
+struct yetty_yrender_gpu_resource_set;
+struct yetty_yrender_gpu_resource_set_result;
 
 //=============================================================================
 // Base ops - for ALL primitives (SDF and complex)
@@ -48,7 +48,7 @@ struct yetty_ypaint_prim_ops {
 
     // Get GPU resources for rendering (optional, NULL for simple SDF prims)
     // cache_ptr: pointer to cache storage (caller provides, callee allocates)
-    struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(
+    struct yetty_yrender_gpu_resource_set_result (*get_gpu_resource_set)(
         const uint32_t *prim, void **cache_ptr);
 };
 

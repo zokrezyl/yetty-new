@@ -55,7 +55,7 @@ struct yetty_font_font_ops {
 	int (*is_dirty)(const struct yetty_font_font *self);
 
 	/* GPU resources — clears dirty internally */
-	struct yetty_render_gpu_resource_set_result
+	struct yetty_yrender_gpu_resource_set_result
 	(*get_gpu_resource_set)(struct yetty_font_font *self);
 };
 

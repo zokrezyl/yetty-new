@@ -95,7 +95,7 @@ void yetty_yimage_set_filter(struct yetty_yimage *img, uint32_t filter);
  * GPU Resource Set
  *===========================================================================*/
 
-struct yetty_render_gpu_resource_set_result
+struct yetty_yrender_gpu_resource_set_result
 yetty_yimage_get_gpu_resource_set(struct yetty_yimage *img);
 
 bool yetty_yimage_is_dirty(const struct yetty_yimage *img);

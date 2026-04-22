@@ -299,7 +299,7 @@ text_factory(struct yetty_ypaint_core_buffer *buffer,
     }
 
     if (content[0] != 0) {
-        struct yetty_core_buffer text_buf = {
+        struct yetty_ycore_buffer text_buf = {
             .data = (uint8_t *)content,
             .size = strlen(content),
             .capacity = strlen(content)

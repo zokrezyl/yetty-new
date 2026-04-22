@@ -44,7 +44,7 @@ struct yetty_primitive_gpu_binder {
 	WGPURenderPipeline pipeline;
 
 	// Collected resource sets
-	const struct yetty_render_gpu_resource_set *resource_sets[MAX_RESOURCE_SETS];
+	const struct yetty_yrender_gpu_resource_set *resource_sets[MAX_RESOURCE_SETS];
 	size_t resource_set_count;
 
 	// Flattened resources
@@ -169,7 +169,7 @@ yetty_primitive_gpu_binder_set_pipeline(struct yetty_primitive_gpu_binder *binde
 //=============================================================================
 
 static void collect_resources_recursive(struct yetty_primitive_gpu_binder *binder,
-	const struct yetty_render_gpu_resource_set *rs)
+	const struct yetty_yrender_gpu_resource_set *rs)
 {
 	if (!rs)
 		return;
@@ -207,7 +207,7 @@ static void collect_resources_recursive(struct yetty_primitive_gpu_binder *binde
 
 struct yetty_core_void_result
 yetty_primitive_gpu_binder_add_resource_set(struct yetty_primitive_gpu_binder *binder,
-	const struct yetty_render_gpu_resource_set *rs)
+	const struct yetty_yrender_gpu_resource_set *rs)
 {
 	if (!binder)
 		return YETTY_ERR(yetty_core_void, "binder is NULL");

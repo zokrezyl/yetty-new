@@ -13,7 +13,7 @@ struct yetty_font_font_ops {
     void (*set_cell_size)(struct yetty_font_font *self, float cell_width, float cell_height);
     int (*is_dirty)(const struct yetty_font_font *self);
     void (*clear_dirty)(struct yetty_font_font *self);
-    struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(const struct yetty_font_font *self);
+    struct yetty_yrender_gpu_resource_set_result (*get_gpu_resource_set)(const struct yetty_font_font *self);
 };
 ```
 
@@ -53,7 +53,7 @@ Four faces loaded from font files: Regular, Bold, Oblique, BoldOblique. If a sty
 
 ### GPU Resource Set
 
-The font provides a `yetty_render_gpu_resource_set` with:
+The font provides a `yetty_yrender_gpu_resource_set` with:
 - `textures[0]` — R8 atlas texture
 - `buffers[0]` — glyph UV buffer (`array<f32>`, 2 floats per glyph)
 - No uniforms, no shader code, no children

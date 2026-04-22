@@ -316,10 +316,10 @@ yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
 		/* Fallback: create default single pane with terminal */
 		tile_res = yetty_yui_pane_create();
 		if (YETTY_IS_OK(tile_res)) {
-			struct yetty_term_terminal_result term_res;
+			struct yetty_yterm_terminal_result term_res;
 			struct grid_size grid_size = {.rows = 24, .cols = 80};
 
-			term_res = yetty_term_terminal_create(grid_size,
+			term_res = yetty_yterm_terminal_create(grid_size,
 							      yetty_ctx);
 			if (YETTY_IS_ERR(term_res)) {
 				yetty_yui_tile_destroy(tile_res.value);
@@ -329,7 +329,7 @@ yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
 
 			yetty_yui_pane_push_view(
 			    tile_res.value,
-			    yetty_term_terminal_as_view(term_res.value));
+			    yetty_yterm_terminal_as_view(term_res.value));
 			yetty_yui_pane_set_focused(tile_res.value, 1);
 		}
 	}

@@ -762,13 +762,13 @@ yetty_yui_tile_create_from_config(const struct yetty_config *config,
 	/* Create view based on config */
 	{
 		const char *view_type;
-		struct yetty_term_terminal_result term_res;
+		struct yetty_yterm_terminal_result term_res;
 		struct grid_size grid_size = {.rows = 24, .cols = 80};
 
 		view_type = config->ops->get_string(config, "view", "terminal");
 
 		if (strcmp(view_type, "terminal") == 0) {
-			term_res = yetty_term_terminal_create(grid_size,
+			term_res = yetty_yterm_terminal_create(grid_size,
 							      yetty_ctx);
 			if (YETTY_IS_ERR(term_res)) {
 				yetty_yui_tile_destroy(res.value);
@@ -778,7 +778,7 @@ yetty_yui_tile_create_from_config(const struct yetty_config *config,
 
 			yetty_yui_pane_push_view(
 			    res.value,
-			    yetty_term_terminal_as_view(term_res.value));
+			    yetty_yterm_terminal_as_view(term_res.value));
 		}
 		/* Future: handle other view types */
 	}

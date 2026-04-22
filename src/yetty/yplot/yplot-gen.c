@@ -14,7 +14,7 @@ extern const unsigned int gyplot_shaderSize;
 
 struct yplot_factory {
     struct yetty_ypaint_concrete_factory base;
-    struct yetty_render_gpu_resource_set rs;
+    struct yetty_yrender_gpu_resource_set rs;
     struct yetty_render_gpu_resource_binder *binder;
 };
 
@@ -77,17 +77,17 @@ struct yetty_core_size_result yetty_yplot_serialize(
 
 static void yplot_init_rs(struct yplot_factory *factory)
 {
-    struct yetty_render_gpu_resource_set *rs = &factory->rs;
+    struct yetty_yrender_gpu_resource_set *rs = &factory->rs;
     memset(rs, 0, sizeof(*rs));
     strncpy(rs->namespace, "yplot", YETTY_RENDER_NAME_MAX - 1);
     yetty_render_shader_code_set(&rs->shader,
         (const char *)gyplot_shaderData, gyplot_shaderSize);
 
     // Library: yfsvm
-    const struct yetty_render_gpu_resource_set *yfsvm_rs =
+    const struct yetty_yrender_gpu_resource_set *yfsvm_rs =
         yetty_yfsvm_get_shader_resource_set();
     if (yfsvm_rs) {
-        rs->children[0] = (struct yetty_render_gpu_resource_set *)yfsvm_rs;
+        rs->children[0] = (struct yetty_yrender_gpu_resource_set *)yfsvm_rs;
         rs->children_count = 1;
     }
 
@@ -170,7 +170,7 @@ yplot_instance_render(struct yetty_ypaint_complex_prim_instance *self,
     if (!factory->binder)
         return YETTY_ERR(yetty_core_void, "binder not initialized");
 
-    struct yetty_render_gpu_resource_set *rs = &factory->rs;
+    struct yetty_yrender_gpu_resource_set *rs = &factory->rs;
 
     // Parse wire format: [type_id][payload_size][uniforms...][buffer_lens...][buffer_data...]
     const uint32_t *data = (const uint32_t *)self->buffer_data;
@@ -311,7 +311,7 @@ static void yplot_destroy_instance(struct yetty_ypaint_concrete_factory *self,
     free(instance);
 }
 
-static struct yetty_render_gpu_resource_set *yplot_get_shared_rs(
+static struct yetty_yrender_gpu_resource_set *yplot_get_shared_rs(
     struct yetty_ypaint_concrete_factory *self)
 {
     struct yplot_factory *factory = yplot_factory_from_base(self);

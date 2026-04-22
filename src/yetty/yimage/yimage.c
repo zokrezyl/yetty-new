@@ -22,7 +22,7 @@ struct yetty_yimage {
 	uint32_t filter;
 
 	/* GPU resource set */
-	struct yetty_render_gpu_resource_set rs;
+	struct yetty_yrender_gpu_resource_set rs;
 	bool dirty;
 };
 
@@ -199,11 +199,11 @@ void yetty_yimage_set_filter(struct yetty_yimage *img, uint32_t filter)
  * GPU Resource Set
  *===========================================================================*/
 
-struct yetty_render_gpu_resource_set_result
+struct yetty_yrender_gpu_resource_set_result
 yetty_yimage_get_gpu_resource_set(struct yetty_yimage *img)
 {
 	if (!img)
-		return YETTY_ERR(yetty_render_gpu_resource_set, "img is NULL");
+		return YETTY_ERR(yetty_yrender_gpu_resource_set, "img is NULL");
 
 	if (img->dirty) {
 		/* Update texture */
@@ -228,7 +228,7 @@ yetty_yimage_get_gpu_resource_set(struct yetty_yimage *img)
 		img->rs.uniforms[3].vec2[1] = img->center_y;
 	}
 
-	return YETTY_OK(yetty_render_gpu_resource_set, &img->rs);
+	return YETTY_OK(yetty_yrender_gpu_resource_set, &img->rs);
 }
 
 bool yetty_yimage_is_dirty(const struct yetty_yimage *img)

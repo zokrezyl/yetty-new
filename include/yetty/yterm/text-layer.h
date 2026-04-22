@@ -1,5 +1,5 @@
-#ifndef YETTY_TERM_TEXT_LAYER_H
-#define YETTY_TERM_TEXT_LAYER_H
+#ifndef YETTY_YTERM_TEXT_LAYER_H
+#define YETTY_YTERM_TEXT_LAYER_H
 
 #include <stdint.h>
 #include <yetty/yterm/terminal.h>
@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 /* Text layer - renders terminal text via libvterm */
-struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
+struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
     uint32_t cols, uint32_t rows,
     const struct yetty_context *context,
     yetty_term_pty_write_fn pty_write_fn,
@@ -25,4 +25,4 @@ struct yetty_term_terminal_layer_result yetty_term_terminal_text_layer_create(
 }
 #endif
 
-#endif /* YETTY_TERM_TEXT_LAYER_H */
+#endif /* YETTY_YTERM_TEXT_LAYER_H */

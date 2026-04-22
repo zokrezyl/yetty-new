@@ -2,19 +2,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct yetty_core_buffer_result yetty_core_buffer_create(size_t initial_capacity)
+struct yetty_ycore_buffer_result yetty_ycore_buffer_create(size_t initial_capacity)
 {
-	struct yetty_core_buffer buf = {0};
+	struct yetty_ycore_buffer buf = {0};
 	if (initial_capacity > 0) {
 		buf.data = malloc(initial_capacity);
 		if (!buf.data)
-			return YETTY_ERR(yetty_core_buffer, "malloc failed");
+			return YETTY_ERR(yetty_ycore_buffer, "malloc failed");
 		buf.capacity = initial_capacity;
 	}
-	return YETTY_OK(yetty_core_buffer, buf);
+	return YETTY_OK(yetty_ycore_buffer, buf);
 }
 
-void yetty_core_buffer_destroy(struct yetty_core_buffer *buf)
+void yetty_ycore_buffer_destroy(struct yetty_ycore_buffer *buf)
 {
 	if (!buf)
 		return;
@@ -24,14 +24,14 @@ void yetty_core_buffer_destroy(struct yetty_core_buffer *buf)
 	buf->capacity = 0;
 }
 
-void yetty_core_buffer_clear(struct yetty_core_buffer *buf)
+void yetty_ycore_buffer_clear(struct yetty_ycore_buffer *buf)
 {
 	if (buf)
 		buf->size = 0;
 }
 
-struct yetty_core_void_result yetty_core_buffer_append(
-    struct yetty_core_buffer *buf, const struct yetty_core_buffer *src)
+struct yetty_core_void_result yetty_ycore_buffer_append(
+    struct yetty_ycore_buffer *buf, const struct yetty_ycore_buffer *src)
 {
 	if (!buf)
 		return YETTY_ERR(yetty_core_void, "buf is NULL");

@@ -22,7 +22,7 @@ struct yetty_ypaint_core_buffer {
 };
 
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
-    const struct yetty_core_buffer *base64_buf) {
+    const struct yetty_ycore_buffer *base64_buf) {
   if (!base64_buf || !base64_buf->data || base64_buf->size == 0)
     return YETTY_ERR(yetty_ypaint_core_buffer, "null or empty base64 buffer");
 
@@ -193,7 +193,7 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_nex
 
 struct yetty_core_int_result
 yetty_ypaint_core_buffer_add_font(struct yetty_ypaint_core_buffer *buf,
-                                  const struct yetty_core_buffer *ttf_data,
+                                  const struct yetty_ycore_buffer *ttf_data,
                                   const char *name)
 {
   if (!buf)
@@ -245,7 +245,7 @@ const struct yetty_font_blob *yetty_ypaint_core_buffer_get_font(
 struct yetty_core_void_result
 yetty_ypaint_core_buffer_add_text(struct yetty_ypaint_core_buffer *buf,
                                   float x, float y,
-                                  const struct yetty_core_buffer *text,
+                                  const struct yetty_ycore_buffer *text,
                                   float font_size, uint32_t color,
                                   uint32_t layer, int32_t font_id,
                                   float rotation)

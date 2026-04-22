@@ -63,11 +63,11 @@ struct raster_font {
     FT_Face ft_faces[4];
 
     /* Shader code (owned) */
-    struct yetty_core_buffer shader_code;
+    struct yetty_ycore_buffer shader_code;
 
     /* GPU resource set — returned directly.
      * rs.textures[0] = atlas, rs.buffers[0] = glyph UVs */
-    struct yetty_render_gpu_resource_set rs;
+    struct yetty_yrender_gpu_resource_set rs;
     int next_slot_idx;
 
     /* Shelf packer state */
@@ -92,7 +92,7 @@ static struct yetty_core_void_result raster_font_resize(struct yetty_font_ms_fon
 static struct yetty_core_void_result raster_font_load_glyphs(struct yetty_font_ms_font *self, const uint32_t *codepoints, size_t count);
 static struct yetty_core_void_result raster_font_load_basic_latin(struct yetty_font_ms_font *self);
 static int raster_font_is_dirty(const struct yetty_font_ms_font *self);
-static struct yetty_render_gpu_resource_set_result raster_font_get_gpu_resource_set(struct yetty_font_ms_font *self);
+static struct yetty_yrender_gpu_resource_set_result raster_font_get_gpu_resource_set(struct yetty_font_ms_font *self);
 
 static void raster_font_update_font_size(struct raster_font *font);
 static void raster_font_rasterize_all(struct raster_font *font);
@@ -478,7 +478,7 @@ struct yetty_font_ms_font_result yetty_font_ms_raster_font_create(
     /* Load shader from file */
     char shader_path[RASTER_FONT_MAX_PATH];
     snprintf(shader_path, sizeof(shader_path), "%s/raster-font.wgsl", shaders_dir);
-    struct yetty_core_buffer_result shader_res = yetty_core_read_file(shader_path);
+    struct yetty_ycore_buffer_result shader_res = yetty_core_read_file(shader_path);
     if (YETTY_IS_ERR(shader_res))
         return YETTY_ERR(yetty_font_ms_font, shader_res.error.msg);
 
@@ -728,7 +728,7 @@ static int raster_font_is_dirty(const struct yetty_font_ms_font *self)
     return font->dirty;
 }
 
-static struct yetty_render_gpu_resource_set_result raster_font_get_gpu_resource_set(struct yetty_font_ms_font *self)
+static struct yetty_yrender_gpu_resource_set_result raster_font_get_gpu_resource_set(struct yetty_font_ms_font *self)
 {
     struct raster_font *font = container_of(self, struct raster_font, base);
 
@@ -754,5 +754,5 @@ static struct yetty_render_gpu_resource_set_result raster_font_get_gpu_resource_
         font->dirty = 0;
     }
 
-    return YETTY_OK(yetty_render_gpu_resource_set, &font->rs);
+    return YETTY_OK(yetty_yrender_gpu_resource_set, &font->rs);
 }

@@ -244,7 +244,7 @@ render_target_texture_get_view(const struct yetty_render_target *self)
 
 static struct yetty_core_void_result
 render_target_texture_render_layer(struct yetty_render_target *self,
-				   struct yetty_term_terminal_layer *layer)
+				   struct yetty_yterm_terminal_layer *layer)
 {
 	struct render_target_texture *rt = (struct render_target_texture *)self;
 
@@ -253,12 +253,12 @@ render_target_texture_render_layer(struct yetty_render_target *self,
 		return YETTY_OK_VOID();
 
 	/* Get gpu_resource_set from layer */
-	struct yetty_render_gpu_resource_set_result rs_res =
+	struct yetty_yrender_gpu_resource_set_result rs_res =
 		layer->ops->get_gpu_resource_set(layer);
 	if (!YETTY_IS_OK(rs_res))
 		return YETTY_ERR(yetty_core_void, rs_res.error.msg);
 
-	const struct yetty_render_gpu_resource_set *rs = rs_res.value;
+	const struct yetty_yrender_gpu_resource_set *rs = rs_res.value;
 
 	/* Submit to binder */
 	struct yetty_core_void_result res = rt->binder->ops->submit(rt->binder, rs);

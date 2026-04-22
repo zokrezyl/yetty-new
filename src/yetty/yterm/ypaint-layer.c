@@ -25,27 +25,27 @@
 #define U_COUNT 4
 
 /* Setters */
-static inline void set_grid_size(struct yetty_render_gpu_resource_set *rs,
+static inline void set_grid_size(struct yetty_yrender_gpu_resource_set *rs,
                                  float cols, float rows) {
   rs->uniforms[U_GRID_SIZE].vec2[0] = cols;
   rs->uniforms[U_GRID_SIZE].vec2[1] = rows;
 }
-static inline void set_cell_size(struct yetty_render_gpu_resource_set *rs,
+static inline void set_cell_size(struct yetty_yrender_gpu_resource_set *rs,
                                  float w, float h) {
   rs->uniforms[U_CELL_SIZE].vec2[0] = w;
   rs->uniforms[U_CELL_SIZE].vec2[1] = h;
 }
-static inline void set_rolling_row_0(struct yetty_render_gpu_resource_set *rs,
+static inline void set_rolling_row_0(struct yetty_yrender_gpu_resource_set *rs,
                                      uint32_t row_origin) {
   rs->uniforms[U_ROLLING_ROW_0].u32 = row_origin;
 }
-static inline void set_prim_count(struct yetty_render_gpu_resource_set *rs,
+static inline void set_prim_count(struct yetty_yrender_gpu_resource_set *rs,
                                   uint32_t count) {
   rs->uniforms[U_PRIM_COUNT].u32 = count;
 }
 
 /* Init uniforms */
-static void init_uniforms(struct yetty_render_gpu_resource_set *rs) {
+static void init_uniforms(struct yetty_yrender_gpu_resource_set *rs) {
   rs->uniform_count = U_COUNT;
 
   rs->uniforms[U_GRID_SIZE] = (struct yetty_render_uniform){
@@ -63,11 +63,11 @@ static void init_uniforms(struct yetty_render_gpu_resource_set *rs) {
 
 /* YPaint layer - embeds base as first member */
 struct yetty_term_ypaint_layer {
-  struct yetty_term_terminal_layer base;
-  struct yetty_yetty_ypaint_canvas *canvas;
+  struct yetty_yterm_terminal_layer base;
+  struct yetty_ypaint_canvas *canvas;
   int scrolling_mode;
-  struct yetty_render_gpu_resource_set rs;
-  struct yetty_core_buffer shader_code;
+  struct yetty_yrender_gpu_resource_set rs;
+  struct yetty_ycore_buffer shader_code;
 
   /* Staging buffers - point to canvas data */
   uint8_t *grid_staging;
@@ -77,23 +77,23 @@ struct yetty_term_ypaint_layer {
 };
 
 /* Forward declarations */
-static void ypaint_layer_destroy(struct yetty_term_terminal_layer *self);
+static void ypaint_layer_destroy(struct yetty_yterm_terminal_layer *self);
 static struct yetty_core_void_result
-ypaint_layer_write(struct yetty_term_terminal_layer *self,
+ypaint_layer_write(struct yetty_yterm_terminal_layer *self,
                    const char *data, size_t len);
 static struct yetty_core_void_result
-ypaint_layer_resize_grid(struct yetty_term_terminal_layer *self,
+ypaint_layer_resize_grid(struct yetty_yterm_terminal_layer *self,
                          struct grid_size grid_size);
-static struct yetty_render_gpu_resource_set_result
-ypaint_layer_get_gpu_resource_set(const struct yetty_term_terminal_layer *self);
-static int ypaint_layer_on_key(struct yetty_term_terminal_layer *self, int key,
+static struct yetty_yrender_gpu_resource_set_result
+ypaint_layer_get_gpu_resource_set(const struct yetty_yterm_terminal_layer *self);
+static int ypaint_layer_on_key(struct yetty_yterm_terminal_layer *self, int key,
                                int mods);
-static int ypaint_layer_on_char(struct yetty_term_terminal_layer *self,
+static int ypaint_layer_on_char(struct yetty_yterm_terminal_layer *self,
                                 uint32_t codepoint, int mods);
-static int ypaint_layer_is_empty(const struct yetty_term_terminal_layer *self);
+static int ypaint_layer_is_empty(const struct yetty_yterm_terminal_layer *self);
 static struct yetty_core_void_result ypaint_layer_scroll(
-    struct yetty_term_terminal_layer *self, int lines);
-static void ypaint_layer_set_cursor(struct yetty_term_terminal_layer *self,
+    struct yetty_yterm_terminal_layer *self, int lines);
+static void ypaint_layer_set_cursor(struct yetty_yterm_terminal_layer *self,
                                     int col, int row);
 
 /* Canvas scroll callback - propagate to other layers */
@@ -144,7 +144,7 @@ on_canvas_cursor_set(struct yetty_core_void_result *user_data,
 }
 
 /* Ops */
-static const struct yetty_term_terminal_layer_ops ypaint_layer_ops = {
+static const struct yetty_yterm_terminal_layer_ops ypaint_layer_ops = {
     .destroy = ypaint_layer_destroy,
     .write = ypaint_layer_write,
     .resize_grid = ypaint_layer_resize_grid,
@@ -157,7 +157,7 @@ static const struct yetty_term_terminal_layer_ops ypaint_layer_ops = {
 };
 
 /* Create */
-struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
+struct yetty_yterm_terminal_layer_result yetty_term_ypaint_layer_create(
     uint32_t cols, uint32_t rows, float cell_width, float cell_height,
     int scrolling_mode, const struct yetty_context *context,
     yetty_term_request_render_fn request_render_fn,
@@ -171,14 +171,14 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
   const char *shaders_dir = config->ops->get_string(config, "paths/shaders", "");
   char shader_path[512];
   snprintf(shader_path, sizeof(shader_path), "%s/ypaint-layer.wgsl", shaders_dir);
-  struct yetty_core_buffer_result shader_res = yetty_core_read_file(shader_path);
+  struct yetty_ycore_buffer_result shader_res = yetty_core_read_file(shader_path);
   if (YETTY_IS_ERR(shader_res))
-    return YETTY_ERR(yetty_term_terminal_layer, shader_res.error.msg);
+    return YETTY_ERR(yetty_yterm_terminal_layer, shader_res.error.msg);
 
   layer = calloc(1, sizeof(struct yetty_term_ypaint_layer));
   if (!layer) {
     free(shader_res.value.data);
-    return YETTY_ERR(yetty_term_terminal_layer,
+    return YETTY_ERR(yetty_yterm_terminal_layer,
                      "failed to allocate ypaint layer");
   }
   layer->shader_code = shader_res.value;
@@ -203,27 +203,27 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
   /* Create canvas (passes context for default font creation) */
   if (!context) {
     free(layer);
-    return YETTY_ERR(yetty_term_terminal_layer, "context is NULL");
+    return YETTY_ERR(yetty_yterm_terminal_layer, "context is NULL");
   }
   layer->canvas =
-      yetty_yetty_ypaint_canvas_create(scrolling_mode ? true : false, context);
+      yetty_ypaint_canvas_create(scrolling_mode ? true : false, context);
   if (!layer->canvas) {
     free(layer);
-    return YETTY_ERR(yetty_term_terminal_layer,
+    return YETTY_ERR(yetty_yterm_terminal_layer,
                      "failed to create ypaint canvas");
   }
 
   /* Configure canvas grid/cell dimensions */
-  yetty_yetty_ypaint_canvas_set_cell_size(
+  yetty_ypaint_canvas_set_cell_size(
       layer->canvas,
       (struct pixel_size){.width = cell_width, .height = cell_height});
-  yetty_yetty_ypaint_canvas_set_grid_size(
+  yetty_ypaint_canvas_set_grid_size(
       layer->canvas, (struct grid_size){.cols = cols, .rows = rows});
 
   /* Register scroll/cursor callbacks for propagation to other layers */
-  yetty_yetty_ypaint_canvas_set_scroll_callback(
+  yetty_ypaint_canvas_set_scroll_callback(
       layer->canvas, on_canvas_scroll, (struct yetty_core_void_result *)layer);
-  yetty_yetty_ypaint_canvas_set_cursor_callback(
+  yetty_ypaint_canvas_set_cursor_callback(
       layer->canvas, on_canvas_cursor_set,
       (struct yetty_core_void_result *)layer);
 
@@ -262,16 +262,16 @@ struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
          scrolling_mode ? "scrolling" : "overlay", cols, rows, cell_width,
          cell_height);
 
-  return YETTY_OK(yetty_term_terminal_layer, &layer->base);
+  return YETTY_OK(yetty_yterm_terminal_layer, &layer->base);
 }
 
 /* Destroy */
-static void ypaint_layer_destroy(struct yetty_term_terminal_layer *self) {
+static void ypaint_layer_destroy(struct yetty_yterm_terminal_layer *self) {
   struct yetty_term_ypaint_layer *layer =
       (struct yetty_term_ypaint_layer *)self;
 
   if (layer->canvas)
-    yetty_yetty_ypaint_canvas_destroy(layer->canvas);
+    yetty_ypaint_canvas_destroy(layer->canvas);
 
   free(layer->shader_code.data);
   free(layer);
@@ -279,7 +279,7 @@ static void ypaint_layer_destroy(struct yetty_term_terminal_layer *self) {
 
 /* Write - receives ypaint data in format "args;payload" (base64 encoded) */
 static struct yetty_core_void_result
-ypaint_layer_write(struct yetty_term_terminal_layer *self,
+ypaint_layer_write(struct yetty_yterm_terminal_layer *self,
                    const char *data, size_t len) {
   struct yetty_term_ypaint_layer *layer =
       (struct yetty_term_ypaint_layer *)self;
@@ -295,7 +295,7 @@ ypaint_layer_write(struct yetty_term_terminal_layer *self,
   /* Handle --clear */
   if (yetty_term_osc_args_has(&args, "clear")) {
     ydebug("ypaint_layer_write: clearing canvas");
-    yetty_yetty_ypaint_canvas_clear(layer->canvas);
+    yetty_ypaint_canvas_clear(layer->canvas);
     yetty_term_osc_args_free(&args);
     layer->base.dirty = 1;
     if (layer->base.request_render_fn)
@@ -350,7 +350,7 @@ ypaint_layer_write(struct yetty_term_terminal_layer *self,
     }
   } else if (yetty_term_osc_args_has(&args, "bin")) {
     /* Binary format: pass base64 payload directly to create_from_base64 */
-    struct yetty_core_buffer_result payload = yetty_term_osc_args_get_payload_buffer(&args);
+    struct yetty_ycore_buffer_result payload = yetty_term_osc_args_get_payload_buffer(&args);
     if (YETTY_IS_ERR(payload)) {
       yetty_term_osc_args_free(&args);
       return YETTY_ERR(yetty_core_void, payload.error.msg);
@@ -386,7 +386,7 @@ ypaint_layer_write(struct yetty_term_terminal_layer *self,
 
 /* Resize */
 static struct yetty_core_void_result
-ypaint_layer_resize_grid(struct yetty_term_terminal_layer *self,
+ypaint_layer_resize_grid(struct yetty_yterm_terminal_layer *self,
                          struct grid_size grid_size) {
   struct yetty_term_ypaint_layer *layer =
       (struct yetty_term_ypaint_layer *)self;
@@ -395,7 +395,7 @@ ypaint_layer_resize_grid(struct yetty_term_terminal_layer *self,
     return YETTY_ERR(yetty_core_void, "canvas is NULL");
 
   self->grid_size = grid_size;
-  yetty_yetty_ypaint_canvas_set_grid_size(layer->canvas, grid_size);
+  yetty_ypaint_canvas_set_grid_size(layer->canvas, grid_size);
   self->dirty = 1;
 
   ydebug("ypaint_layer_resize_grid: %ux%u", grid_size.cols, grid_size.rows);
@@ -403,20 +403,20 @@ ypaint_layer_resize_grid(struct yetty_term_terminal_layer *self,
 }
 
 /* Get GPU resource set */
-static struct yetty_render_gpu_resource_set_result
+static struct yetty_yrender_gpu_resource_set_result
 ypaint_layer_get_gpu_resource_set(
-    const struct yetty_term_terminal_layer *self) {
+    const struct yetty_yterm_terminal_layer *self) {
   struct yetty_term_ypaint_layer *layer =
       (struct yetty_term_ypaint_layer *)self;
 
-  if (layer->base.dirty || yetty_yetty_ypaint_canvas_is_dirty(layer->canvas)) {
+  if (layer->base.dirty || yetty_ypaint_canvas_is_dirty(layer->canvas)) {
     /* Rebuild grid staging */
-    yetty_yetty_ypaint_canvas_rebuild_grid(layer->canvas);
+    yetty_ypaint_canvas_rebuild_grid(layer->canvas);
 
     const uint32_t *grid_data =
-        yetty_yetty_ypaint_canvas_grid_data(layer->canvas);
+        yetty_ypaint_canvas_grid_data(layer->canvas);
     uint32_t grid_word_count =
-        yetty_yetty_ypaint_canvas_grid_word_count(layer->canvas);
+        yetty_ypaint_canvas_grid_word_count(layer->canvas);
 
     layer->rs.buffers[0].data = (uint8_t *)grid_data;
     layer->rs.buffers[0].size = grid_word_count * sizeof(uint32_t);
@@ -424,7 +424,7 @@ ypaint_layer_get_gpu_resource_set(
 
     /* Build primitive staging */
     uint32_t prim_word_count = 0;
-    const uint32_t *prim_data = yetty_yetty_ypaint_canvas_build_prim_staging(
+    const uint32_t *prim_data = yetty_ypaint_canvas_build_prim_staging(
         layer->canvas, &prim_word_count);
 
     layer->rs.buffers[1].data = (uint8_t *)prim_data;
@@ -433,15 +433,15 @@ ypaint_layer_get_gpu_resource_set(
 
     /* Update ALL uniforms from canvas - single source of truth */
     struct grid_size gs =
-        yetty_yetty_ypaint_canvas_get_grid_size(layer->canvas);
+        yetty_ypaint_canvas_get_grid_size(layer->canvas);
     struct pixel_size cs =
-        yetty_yetty_ypaint_canvas_cell_get_pixel_size(layer->canvas);
+        yetty_ypaint_canvas_cell_get_pixel_size(layer->canvas);
     set_grid_size(&layer->rs, (float)gs.cols, (float)gs.rows);
     set_cell_size(&layer->rs, cs.width, cs.height);
     set_rolling_row_0(&layer->rs,
-                      yetty_yetty_ypaint_canvas_rolling_row_0(layer->canvas));
+                      yetty_ypaint_canvas_rolling_row_0(layer->canvas));
     uint32_t prim_count =
-        yetty_yetty_ypaint_canvas_primitive_count(layer->canvas);
+        yetty_ypaint_canvas_primitive_count(layer->canvas);
     set_prim_count(&layer->rs, prim_count);
 
     /* Set pixel size for render target */
@@ -457,25 +457,25 @@ ypaint_layer_get_gpu_resource_set(
   /* Include default font as child resource set for glyph rendering */
   size_t child_idx = 0;
   struct yetty_font_font *font =
-      yetty_yetty_ypaint_canvas_get_default_font(layer->canvas);
+      yetty_ypaint_canvas_get_default_font(layer->canvas);
   if (font && font->ops && font->ops->get_gpu_resource_set) {
-    struct yetty_render_gpu_resource_set_result font_rs =
+    struct yetty_yrender_gpu_resource_set_result font_rs =
         font->ops->get_gpu_resource_set(font);
     if (YETTY_IS_OK(font_rs)) {
       layer->rs.children[child_idx++] =
-          (struct yetty_render_gpu_resource_set *)font_rs.value;
+          (struct yetty_yrender_gpu_resource_set *)font_rs.value;
     }
   }
 
   /* Include yplot shared RS (shader + compiled pipeline).
    * yplot data is inline in the prim buffer - no per-instance RS needed. */
   struct yetty_ypaint_complex_prim_factory *abstract_factory =
-      yetty_yetty_ypaint_canvas_get_complex_prim_factory(layer->canvas);
+      yetty_ypaint_canvas_get_complex_prim_factory(layer->canvas);
   if (abstract_factory) {
     struct yetty_ypaint_concrete_factory *yplot_factory =
         yetty_ypaint_complex_prim_factory_get(abstract_factory, YETTY_YPAINT_TYPE_YPLOT);
     if (yplot_factory && yplot_factory->get_shared_rs) {
-      struct yetty_render_gpu_resource_set *yplot_rs =
+      struct yetty_yrender_gpu_resource_set *yplot_rs =
           yplot_factory->get_shared_rs(yplot_factory);
       if (yplot_rs && child_idx < YETTY_RENDER_RS_MAX_CHILDREN) {
         layer->rs.children[child_idx++] = yplot_rs;
@@ -490,11 +490,11 @@ ypaint_layer_get_gpu_resource_set(
 
   layer->rs.children_count = child_idx;
 
-  return YETTY_OK(yetty_render_gpu_resource_set, &layer->rs);
+  return YETTY_OK(yetty_yrender_gpu_resource_set, &layer->rs);
 }
 
 /* Keyboard input - ypaint layer doesn't handle keyboard */
-static int ypaint_layer_on_key(struct yetty_term_terminal_layer *self, int key,
+static int ypaint_layer_on_key(struct yetty_yterm_terminal_layer *self, int key,
                                int mods) {
   (void)self;
   (void)key;
@@ -502,7 +502,7 @@ static int ypaint_layer_on_key(struct yetty_term_terminal_layer *self, int key,
   return 0; /* Not handled */
 }
 
-static int ypaint_layer_on_char(struct yetty_term_terminal_layer *self,
+static int ypaint_layer_on_char(struct yetty_yterm_terminal_layer *self,
                                 uint32_t codepoint, int mods) {
   (void)self;
   (void)codepoint;
@@ -511,19 +511,19 @@ static int ypaint_layer_on_char(struct yetty_term_terminal_layer *self,
 }
 
 /* YPaint layer is empty if there are no primitives */
-static int ypaint_layer_is_empty(const struct yetty_term_terminal_layer *self) {
+static int ypaint_layer_is_empty(const struct yetty_yterm_terminal_layer *self) {
   const struct yetty_term_ypaint_layer *layer =
       (const struct yetty_term_ypaint_layer *)self;
 
   if (!layer->canvas)
     return 1;
 
-  return yetty_yetty_ypaint_canvas_primitive_count(layer->canvas) == 0;
+  return yetty_ypaint_canvas_primitive_count(layer->canvas) == 0;
 }
 
 /* Scroll - called when another layer scrolls */
 static struct yetty_core_void_result ypaint_layer_scroll(
-    struct yetty_term_terminal_layer *self, int lines) {
+    struct yetty_yterm_terminal_layer *self, int lines) {
   struct yetty_term_ypaint_layer *layer =
       (struct yetty_term_ypaint_layer *)self;
 
@@ -536,7 +536,7 @@ static struct yetty_core_void_result ypaint_layer_scroll(
     return YETTY_OK_VOID();
 
   struct yetty_core_void_result res =
-      yetty_yetty_ypaint_canvas_scroll_lines(layer->canvas, (uint16_t)lines);
+      yetty_ypaint_canvas_scroll_lines(layer->canvas, (uint16_t)lines);
   if (YETTY_IS_ERR(res))
     return res;
 
@@ -551,7 +551,7 @@ static struct yetty_core_void_result ypaint_layer_scroll(
 }
 
 /* Set cursor - called when another layer moves cursor */
-static void ypaint_layer_set_cursor(struct yetty_term_terminal_layer *self,
+static void ypaint_layer_set_cursor(struct yetty_yterm_terminal_layer *self,
                                     int col, int row) {
   struct yetty_term_ypaint_layer *layer =
       (struct yetty_term_ypaint_layer *)self;
@@ -559,7 +559,7 @@ static void ypaint_layer_set_cursor(struct yetty_term_terminal_layer *self,
   if (!layer->canvas)
     return;
 
-  yetty_yetty_ypaint_canvas_set_cursor_pos(
+  yetty_ypaint_canvas_set_cursor_pos(
       layer->canvas,
       (struct grid_cursor_pos){.cols = (uint32_t)col, .rows = (uint32_t)row});
   ydebug("ypaint_layer_set_cursor: col=%d row=%d", col, row);

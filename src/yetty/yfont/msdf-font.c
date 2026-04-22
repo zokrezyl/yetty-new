@@ -61,9 +61,9 @@ struct msdf_font {
 	float pixel_range;
 
 	/* Shader code (owned) */
-	struct yetty_core_buffer shader_code;
+	struct yetty_ycore_buffer shader_code;
 
-	struct yetty_render_gpu_resource_set rs;
+	struct yetty_yrender_gpu_resource_set rs;
 	int dirty;
 };
 
@@ -254,11 +254,11 @@ static int msdf_is_dirty(const struct yetty_font_font *self)
 	return ((const struct msdf_font *)self)->dirty;
 }
 
-static struct yetty_render_gpu_resource_set_result
+static struct yetty_yrender_gpu_resource_set_result
 msdf_get_gpu_resource_set(struct yetty_font_font *self)
 {
 	struct msdf_font *f = (struct msdf_font *)self;
-	if (!f) return YETTY_ERR(yetty_render_gpu_resource_set, "font is NULL");
+	if (!f) return YETTY_ERR(yetty_yrender_gpu_resource_set, "font is NULL");
 
 	if (f->dirty) {
 		f->rs.textures[0].data = f->atlas_pixels;
@@ -278,7 +278,7 @@ msdf_get_gpu_resource_set(struct yetty_font_font *self)
 		f->dirty = 0;
 	}
 
-	return YETTY_OK(yetty_render_gpu_resource_set, &f->rs);
+	return YETTY_OK(yetty_yrender_gpu_resource_set, &f->rs);
 }
 
 static const struct yetty_font_font_ops msdf_font_ops = {
@@ -309,7 +309,7 @@ yetty_font_msdf_font_create(const char *cdb_path, const char *shader_path)
 	ydebug("msdf_font: opening %s, shader %s", cdb_path, shader_path);
 
 	/* Load shader from file */
-	struct yetty_core_buffer_result shader_res = yetty_core_read_file(shader_path);
+	struct yetty_ycore_buffer_result shader_res = yetty_core_read_file(shader_path);
 	if (YETTY_IS_ERR(shader_res))
 		return YETTY_ERR(yetty_font_font, shader_res.error.msg);
 

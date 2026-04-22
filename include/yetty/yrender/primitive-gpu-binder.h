@@ -49,7 +49,7 @@ yetty_primitive_gpu_binder_set_pipeline(struct yetty_primitive_gpu_binder *binde
 // Does NOT compile anything - just collects resources for bind group
 struct yetty_core_void_result
 yetty_primitive_gpu_binder_add_resource_set(struct yetty_primitive_gpu_binder *binder,
-	const struct yetty_render_gpu_resource_set *rs);
+	const struct yetty_yrender_gpu_resource_set *rs);
 
 // Finalize - create bind group from collected resources
 // Uses pre-set pipeline's bind group layout

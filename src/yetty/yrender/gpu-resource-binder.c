@@ -44,7 +44,7 @@ struct gpu_resource_binder_impl {
     struct yetty_render_gpu_allocator *allocator;
 
     /* Submitted resource sets (persistent pointers, submitted once) */
-    struct yetty_render_gpu_resource_set *resource_sets[MAX_RESOURCE_SETS];
+    struct yetty_yrender_gpu_resource_set *resource_sets[MAX_RESOURCE_SETS];
     size_t resource_set_count;
     int submitted;  /* resource sets already submitted */
 
@@ -95,14 +95,14 @@ struct gpu_resource_binder_impl {
     uint32_t last_tex_height[MAX_FLAT_TEXTURES];
 
     /* Visited resource sets during collection (to avoid duplicates) */
-    const struct yetty_render_gpu_resource_set *visited_rs[MAX_RESOURCE_SETS * 4];
+    const struct yetty_yrender_gpu_resource_set *visited_rs[MAX_RESOURCE_SETS * 4];
     size_t visited_rs_count;
 };
 
 /* Forward declarations */
 static void binder_destroy(struct yetty_render_gpu_resource_binder *self);
 static struct yetty_core_void_result binder_submit(struct yetty_render_gpu_resource_binder *self,
-                                                    const struct yetty_render_gpu_resource_set *rs);
+                                                    const struct yetty_yrender_gpu_resource_set *rs);
 static struct yetty_core_void_result binder_finalize(struct yetty_render_gpu_resource_binder *self);
 static struct yetty_core_void_result binder_update(struct yetty_render_gpu_resource_binder *self);
 static struct yetty_core_void_result binder_bind(struct yetty_render_gpu_resource_binder *self,
@@ -143,7 +143,7 @@ static void append_shader(struct gpu_resource_binder_impl *impl,
 }
 
 /* Compute combined hash of entire resource set tree */
-static uint64_t compute_tree_shader_hash(const struct yetty_render_gpu_resource_set *rs)
+static uint64_t compute_tree_shader_hash(const struct yetty_yrender_gpu_resource_set *rs)
 {
     uint64_t h = rs->shader.hash;
     for (size_t i = 0; i < rs->children_count; i++) {
@@ -156,7 +156,7 @@ static uint64_t compute_tree_shader_hash(const struct yetty_render_gpu_resource_
 /* Collect all resources from a resource set and its children recursively.
  * Children first (they define functions), parent last (calls them). */
 static void collect_resources(struct gpu_resource_binder_impl *impl,
-                              struct yetty_render_gpu_resource_set *rs)
+                              struct yetty_yrender_gpu_resource_set *rs)
 {
     /* Check if already visited (avoid duplicating shared children) */
     for (size_t i = 0; i < impl->visited_rs_count; i++) {
@@ -784,7 +784,7 @@ static void binder_destroy(struct yetty_render_gpu_resource_binder *self)
 }
 
 static struct yetty_core_void_result binder_submit(struct yetty_render_gpu_resource_binder *self,
-                                                    const struct yetty_render_gpu_resource_set *rs)
+                                                    const struct yetty_yrender_gpu_resource_set *rs)
 {
     struct gpu_resource_binder_impl *impl = (struct gpu_resource_binder_impl *)self;
 
@@ -799,7 +799,7 @@ static struct yetty_core_void_result binder_submit(struct yetty_render_gpu_resou
     if (impl->resource_set_count >= MAX_RESOURCE_SETS)
         return YETTY_ERR(yetty_core_void, "max resource sets reached");
 
-    impl->resource_sets[impl->resource_set_count++] = (struct yetty_render_gpu_resource_set *)rs;
+    impl->resource_sets[impl->resource_set_count++] = (struct yetty_yrender_gpu_resource_set *)rs;
     return YETTY_OK_VOID();
 }
 

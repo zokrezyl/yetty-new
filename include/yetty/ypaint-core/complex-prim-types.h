@@ -123,7 +123,7 @@ struct yetty_ypaint_concrete_factory {
 		struct yetty_ypaint_complex_prim_instance *instance);
 
 	// Get shared RS (for buffer data access)
-	struct yetty_render_gpu_resource_set *(*get_shared_rs)(
+	struct yetty_yrender_gpu_resource_set *(*get_shared_rs)(
 		struct yetty_ypaint_concrete_factory *self);
 };
 

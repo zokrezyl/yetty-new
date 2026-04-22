@@ -81,7 +81,7 @@ struct yetty_render_layer_renderer_ops {
 
     struct yetty_render_rendered_layer_result (*render)(
         struct yetty_render_layer_renderer *self,
-        struct yetty_term_terminal_layer *layer);
+        struct yetty_yterm_terminal_layer *layer);
 
     void (*resize)(struct yetty_render_layer_renderer *self,
                    uint32_t width, uint32_t height);
@@ -135,9 +135,9 @@ Target ownership:
 ## terminal.c Integration
 
 ```c
-struct yetty_term_terminal {
+struct yetty_yterm_terminal {
     /* layers and their renderers (1:1) */
-    struct yetty_term_terminal_layer *layers[MAX_LAYERS];
+    struct yetty_yterm_terminal_layer *layers[MAX_LAYERS];
     struct yetty_render_layer_renderer *renderers[MAX_LAYERS];
     size_t layer_count;
 
@@ -146,7 +146,7 @@ struct yetty_term_terminal {
 };
 
 static struct yetty_core_void_result terminal_render_frame(
-    struct yetty_term_terminal *terminal)
+    struct yetty_yterm_terminal *terminal)
 {
     struct yetty_render_rendered_layer *rendered[MAX_LAYERS];
     size_t rendered_count = 0;
