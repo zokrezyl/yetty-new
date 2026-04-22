@@ -15,8 +15,8 @@ struct yetty_config;
 struct yetty_platform_input_pipe;
 struct yetty_clipboard_manager;
 struct yetty_platform_pty_factory;
-struct yetty_core_event_loop;
-struct yetty_render_gpu_allocator;
+struct yetty_ycore_event_loop;
+struct yetty_yrender_gpu_allocator;
 
 /* App GPU context - platform-owned GPU objects */
 struct yetty_app_gpu_context {
@@ -42,14 +42,14 @@ struct yetty_gpu_context {
     WGPUDevice device;
     WGPUQueue queue;
     WGPUTextureFormat surface_format;
-    struct yetty_render_gpu_allocator *allocator;
+    struct yetty_yrender_gpu_allocator *allocator;
 };
 
 /* Yetty context - passed down the hierarchy to terminals */
 struct yetty_context {
     struct yetty_app_context app_context;
     struct yetty_gpu_context gpu_context;
-    struct yetty_core_event_loop *event_loop;
+    struct yetty_ycore_event_loop *event_loop;
 };
 
 /* Result type */
@@ -62,7 +62,7 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
 void yetty_destroy(struct yetty_yetty *yetty);
 
 /* Run yetty (main loop integration) */
-struct yetty_core_void_result yetty_run(struct yetty_yetty *yetty);
+struct yetty_ycore_void_result yetty_run(struct yetty_yetty *yetty);
 
 #ifdef __cplusplus
 }

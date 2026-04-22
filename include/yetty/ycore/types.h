@@ -1,5 +1,5 @@
-#ifndef YETTY_CORE_TYPES_H
-#define YETTY_CORE_TYPES_H
+#ifndef YETTY_YCORETYPES_H
+#define YETTY_YCORETYPES_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -13,9 +13,9 @@ extern "C" {
 #define container_of(ptr, type, member)                                        \
   ((type *)((char *)(ptr) - offsetof(type, member)))
 
-typedef uint64_t yetty_core_object_id;
+typedef uint64_t yetty_ycore_object_id;
 
-#define YETTY_CORE_OBJECT_ID_NONE 0
+#define YETTY_YCOREOBJECT_ID_NONE 0
 
 /*=============================================================================
  * Color
@@ -29,7 +29,7 @@ struct yetty_color_rgba {
  * Buffer hierarchy
  *===========================================================================*/
 
-#define YETTY_CORE_NAMED_BUFFER_MAX_NAME_LENGTH 32
+#define YETTY_YCORENAMED_BUFFER_MAX_NAME_LENGTH 32
 
 struct yetty_ycore_buffer {
   uint8_t *data;
@@ -43,12 +43,12 @@ YETTY_RESULT_DECLARE(yetty_ycore_buffer, struct yetty_ycore_buffer);
 struct yetty_ycore_buffer_result yetty_ycore_buffer_create(size_t initial_capacity);
 void yetty_ycore_buffer_destroy(struct yetty_ycore_buffer *buf);
 void yetty_ycore_buffer_clear(struct yetty_ycore_buffer *buf);
-struct yetty_core_void_result yetty_ycore_buffer_append(
+struct yetty_ycore_void_result yetty_ycore_buffer_append(
     struct yetty_ycore_buffer *buf, const struct yetty_ycore_buffer *src);
 
-struct yetty_core_named_buffer {
+struct yetty_ycore_named_buffer {
   struct yetty_ycore_buffer buf;
-  char name[YETTY_CORE_NAMED_BUFFER_MAX_NAME_LENGTH];
+  char name[YETTY_YCORENAMED_BUFFER_MAX_NAME_LENGTH];
 };
 
 /*=============================================================================
@@ -56,7 +56,7 @@ struct yetty_core_named_buffer {
  *===========================================================================*/
 
 struct yetty_font_blob {
-  struct yetty_core_named_buffer named_buf;
+  struct yetty_ycore_named_buffer named_buf;
   int32_t font_id;
 };
 
@@ -65,7 +65,7 @@ struct yetty_font_blob {
  *===========================================================================*/
 
 struct yetty_image_data {
-  struct yetty_core_named_buffer named_buf;
+  struct yetty_ycore_named_buffer named_buf;
   float x, y, w, h;
   uint32_t pixel_width;
   uint32_t pixel_height;
@@ -78,7 +78,7 @@ struct yetty_image_data {
  *===========================================================================*/
 
 struct yetty_text_span {
-  struct yetty_core_named_buffer named_buf;
+  struct yetty_ycore_named_buffer named_buf;
   float x, y;
   float font_size;
   float rotation;
@@ -120,4 +120,4 @@ YETTY_RESULT_DECLARE(rectangle, struct rectangle);
 }
 #endif
 
-#endif /* YETTY_CORE_TYPES_H */
+#endif /* YETTY_YCORETYPES_H */

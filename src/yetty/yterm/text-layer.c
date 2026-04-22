@@ -58,15 +58,15 @@ static void init_uniforms(struct yetty_yrender_gpu_resource_set *rs)
 {
     rs->uniform_count = U_COUNT;
 
-    rs->uniforms[U_GRID_SIZE]      = (struct yetty_render_uniform){"grid_size",      YETTY_RENDER_UNIFORM_VEC2};
-    rs->uniforms[U_CELL_SIZE]      = (struct yetty_render_uniform){"cell_size",      YETTY_RENDER_UNIFORM_VEC2};
-    rs->uniforms[U_CURSOR_POS]     = (struct yetty_render_uniform){"cursor_pos",     YETTY_RENDER_UNIFORM_VEC2};
-    rs->uniforms[U_CURSOR_VISIBLE] = (struct yetty_render_uniform){"cursor_visible", YETTY_RENDER_UNIFORM_F32};
-    rs->uniforms[U_CURSOR_SHAPE]   = (struct yetty_render_uniform){"cursor_shape",   YETTY_RENDER_UNIFORM_F32};
-    rs->uniforms[U_SCALE]          = (struct yetty_render_uniform){"scale",          YETTY_RENDER_UNIFORM_F32};
-    rs->uniforms[U_DEFAULT_FG]     = (struct yetty_render_uniform){"default_fg",     YETTY_RENDER_UNIFORM_U32};
-    rs->uniforms[U_DEFAULT_BG]     = (struct yetty_render_uniform){"default_bg",     YETTY_RENDER_UNIFORM_U32};
-    rs->uniforms[U_FONT_TYPE]     = (struct yetty_render_uniform){"font_type",     YETTY_RENDER_UNIFORM_U32};
+    rs->uniforms[U_GRID_SIZE]      = (struct yetty_yrender_uniform){"grid_size",      YETTY_YRENDER_UNIFORM_VEC2};
+    rs->uniforms[U_CELL_SIZE]      = (struct yetty_yrender_uniform){"cell_size",      YETTY_YRENDER_UNIFORM_VEC2};
+    rs->uniforms[U_CURSOR_POS]     = (struct yetty_yrender_uniform){"cursor_pos",     YETTY_YRENDER_UNIFORM_VEC2};
+    rs->uniforms[U_CURSOR_VISIBLE] = (struct yetty_yrender_uniform){"cursor_visible", YETTY_YRENDER_UNIFORM_F32};
+    rs->uniforms[U_CURSOR_SHAPE]   = (struct yetty_yrender_uniform){"cursor_shape",   YETTY_YRENDER_UNIFORM_F32};
+    rs->uniforms[U_SCALE]          = (struct yetty_yrender_uniform){"scale",          YETTY_YRENDER_UNIFORM_F32};
+    rs->uniforms[U_DEFAULT_FG]     = (struct yetty_yrender_uniform){"default_fg",     YETTY_YRENDER_UNIFORM_U32};
+    rs->uniforms[U_DEFAULT_BG]     = (struct yetty_yrender_uniform){"default_bg",     YETTY_YRENDER_UNIFORM_U32};
+    rs->uniforms[U_FONT_TYPE]     = (struct yetty_yrender_uniform){"font_type",     YETTY_YRENDER_UNIFORM_U32};
 
     set_scale(rs, 1.0f);
     set_cursor_shape(rs, 1.0f);
@@ -83,15 +83,15 @@ struct yetty_yterm_terminal_text_layer {
     uint32_t font_type; /* 0=msdf, 6=raster */
     struct yetty_ycore_buffer shader_code;
     struct yetty_yrender_gpu_resource_set rs;
-    struct yetty_core_void_result pending_error; /* Error from vterm callbacks */
+    struct yetty_ycore_void_result pending_error; /* Error from vterm callbacks */
 };
 
 /* Forward declarations */
 static void text_layer_destroy(struct yetty_yterm_terminal_layer *self);
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 text_layer_write(struct yetty_yterm_terminal_layer *self,
                  const char *data, size_t len);
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 text_layer_resize_grid(struct yetty_yterm_terminal_layer *self,
                        struct grid_size grid_size);
 static struct yetty_yrender_gpu_resource_set_result text_layer_get_gpu_resource_set(
@@ -136,7 +136,7 @@ static int text_layer_is_empty(const struct yetty_yterm_terminal_layer *self)
 }
 
 /* Receive scroll from other layers (e.g., ypaint) */
-static struct yetty_core_void_result text_layer_scroll(
+static struct yetty_ycore_void_result text_layer_scroll(
     struct yetty_yterm_terminal_layer *self, int lines)
 {
     struct yetty_yterm_terminal_text_layer *text_layer =
@@ -145,7 +145,7 @@ static struct yetty_core_void_result text_layer_scroll(
     ydebug("text_layer_scroll ENTER: lines=%d screen=%p", lines, (void*)text_layer->screen);
 
     if (!text_layer->screen)
-        return YETTY_ERR(yetty_core_void, "screen is NULL");
+        return YETTY_ERR(yetty_ycore_void, "screen is NULL");
     if (lines <= 0)
         return YETTY_OK_VOID();
 
@@ -214,13 +214,13 @@ static void vterm_output_callback(const char *data, size_t len, void *user)
 struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
     uint32_t cols, uint32_t rows,
     const struct yetty_context *context,
-    yetty_term_pty_write_fn pty_write_fn,
+    yetty_yterm_pty_write_fn pty_write_fn,
     void *pty_write_userdata,
-    yetty_term_request_render_fn request_render_fn,
+    yetty_yterm_request_render_fn request_render_fn,
     void *request_render_userdata,
-    yetty_term_scroll_fn scroll_fn,
+    yetty_yterm_scroll_fn scroll_fn,
     void *scroll_userdata,
-    yetty_term_cursor_fn cursor_fn,
+    yetty_yterm_cursor_fn cursor_fn,
     void *cursor_userdata)
 {
     struct yetty_yterm_terminal_text_layer *text_layer;
@@ -230,7 +230,7 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
     const char *shaders_dir = config->ops->get_string(config, "paths/shaders", "");
     char shader_path[512];
     snprintf(shader_path, sizeof(shader_path), "%s/text-layer.wgsl", shaders_dir);
-    struct yetty_ycore_buffer_result shader_res = yetty_core_read_file(shader_path);
+    struct yetty_ycore_buffer_result shader_res = yetty_ycore_read_file(shader_path);
     if (YETTY_IS_ERR(shader_res))
         return YETTY_ERR(yetty_yterm_terminal_layer, shader_res.error.msg);
 
@@ -319,11 +319,11 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
     vterm_output_set_callback(text_layer->vterm, vterm_output_callback, text_layer);
 
     /* Resource set */
-    strncpy(text_layer->rs.namespace, "text_grid", YETTY_RENDER_NAME_MAX - 1);
+    strncpy(text_layer->rs.namespace, "text_grid", YETTY_YRENDER_NAME_MAX - 1);
 
     text_layer->rs.buffer_count = 1;
-    strncpy(text_layer->rs.buffers[0].name, "buffer", YETTY_RENDER_NAME_MAX - 1);
-    strncpy(text_layer->rs.buffers[0].wgsl_type, "array<u32>", YETTY_RENDER_WGSL_TYPE_MAX - 1);
+    strncpy(text_layer->rs.buffers[0].name, "buffer", YETTY_YRENDER_NAME_MAX - 1);
+    strncpy(text_layer->rs.buffers[0].wgsl_type, "array<u32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
     text_layer->rs.buffers[0].readonly = 1;
 
     init_uniforms(&text_layer->rs);
@@ -335,7 +335,7 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
     text_layer->rs.pixel_size.width = (float)cols * text_layer->base.cell_size.width;
     text_layer->rs.pixel_size.height = (float)rows * text_layer->base.cell_size.height;
 
-    yetty_render_shader_code_set(&text_layer->rs.shader,
+    yetty_yrender_shader_code_set(&text_layer->rs.shader,
         (const char *)text_layer->shader_code.data, text_layer->shader_code.size);
 
     if (text_layer->font)
@@ -369,7 +369,7 @@ static void text_layer_destroy(struct yetty_yterm_terminal_layer *self)
     free(text_layer);
 }
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 text_layer_write(struct yetty_yterm_terminal_layer *self,
                  const char *data, size_t len)
 {
@@ -377,7 +377,7 @@ text_layer_write(struct yetty_yterm_terminal_layer *self,
         container_of(self, struct yetty_yterm_terminal_text_layer, base);
 
     if (!text_layer->vterm)
-        return YETTY_ERR(yetty_core_void, "vterm is NULL");
+        return YETTY_ERR(yetty_ycore_void, "vterm is NULL");
 
     if (len > 0)
         vterm_input_write(text_layer->vterm, data, len);
@@ -385,14 +385,14 @@ text_layer_write(struct yetty_yterm_terminal_layer *self,
     return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 text_layer_resize_grid(struct yetty_yterm_terminal_layer *self,
                        struct grid_size grid_size) {
   struct yetty_yterm_terminal_text_layer *text_layer =
       container_of(self, struct yetty_yterm_terminal_text_layer, base);
 
   if (!text_layer->vterm)
-    return YETTY_ERR(yetty_core_void, "vterm is NULL");
+    return YETTY_ERR(yetty_ycore_void, "vterm is NULL");
 
   vterm_set_size(text_layer->vterm, (int)grid_size.rows, (int)grid_size.cols);
   self->grid_size = grid_size;
@@ -550,7 +550,7 @@ static int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
      * BUT: if in_external_scroll is set, this scroll was triggered by another
      * layer and we should NOT propagate back to avoid double-scroll loop */
     if (text_layer->base.scroll_fn && !text_layer->base.in_external_scroll) {
-        struct yetty_core_void_result res = text_layer->base.scroll_fn(
+        struct yetty_ycore_void_result res = text_layer->base.scroll_fn(
             &text_layer->base, 1, text_layer->base.scroll_userdata);
         if (YETTY_IS_ERR(res)) {
             yerror("on_sb_pushline: scroll_fn failed: %s", res.error.msg);

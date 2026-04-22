@@ -64,8 +64,8 @@ yetty_ypaint_complex_prim_handler(uint32_t prim_type);
 
 struct yetty_ypaint_concrete_factory;
 struct yetty_ypaint_complex_prim_instance;
-struct yetty_render_target;
-struct yetty_render_gpu_allocator;
+struct yetty_yrender_target;
+struct yetty_yrender_gpu_allocator;
 
 //=============================================================================
 // Instance - per primitive occurrence, stored in grid
@@ -81,9 +81,9 @@ struct yetty_ypaint_complex_prim_instance {
 	void *instance_data;  // type-specific, managed by concrete factory
 
 	// Render to target at x,y (canvas provides x,y for scrolling)
-	struct yetty_core_void_result (*render)(
+	struct yetty_ycore_void_result (*render)(
 		struct yetty_ypaint_complex_prim_instance *self,
-		struct yetty_render_target *target,
+		struct yetty_yrender_target *target,
 		float x, float y);
 };
 
@@ -101,11 +101,11 @@ struct yetty_ypaint_concrete_factory {
 	uint32_t type_id;
 
 	// Compile pipeline (called once during registration)
-	struct yetty_core_void_result (*compile_pipeline)(
+	struct yetty_ycore_void_result (*compile_pipeline)(
 		struct yetty_ypaint_concrete_factory *self,
 		WGPUDevice device, WGPUQueue queue,
 		WGPUTextureFormat target_format,
-		struct yetty_render_gpu_allocator *allocator);
+		struct yetty_yrender_gpu_allocator *allocator);
 
 	// Get pre-compiled pipeline
 	WGPURenderPipeline (*get_pipeline)(
@@ -140,13 +140,13 @@ YETTY_RESULT_DECLARE(yetty_ypaint_complex_prim_factory_ptr,
 struct yetty_ypaint_complex_prim_factory_ptr_result
 yetty_ypaint_complex_prim_factory_create(WGPUDevice device, WGPUQueue queue,
 	WGPUTextureFormat target_format,
-	struct yetty_render_gpu_allocator *allocator);
+	struct yetty_yrender_gpu_allocator *allocator);
 
 void yetty_ypaint_complex_prim_factory_destroy(
 	struct yetty_ypaint_complex_prim_factory *factory);
 
 // Register concrete factory
-struct yetty_core_void_result yetty_ypaint_complex_prim_factory_register(
+struct yetty_ycore_void_result yetty_ypaint_complex_prim_factory_register(
 	struct yetty_ypaint_complex_prim_factory *factory,
 	struct yetty_ypaint_concrete_factory *concrete);
 

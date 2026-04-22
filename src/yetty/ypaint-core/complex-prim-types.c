@@ -16,7 +16,7 @@ struct yetty_ypaint_complex_prim_factory {
 	WGPUDevice device;
 	WGPUQueue queue;
 	WGPUTextureFormat target_format;
-	struct yetty_render_gpu_allocator *allocator;
+	struct yetty_yrender_gpu_allocator *allocator;
 	struct yetty_ypaint_concrete_factory *factories[MAX_CONCRETE_FACTORIES];
 	uint32_t count;
 };
@@ -34,11 +34,11 @@ bool yetty_ypaint_is_complex_type(uint32_t type)
 // Base ops wrappers for flyweight compatibility
 //=============================================================================
 
-static struct yetty_core_size_result
+static struct yetty_ycore_size_result
 complex_prim_size_wrapper(const uint32_t *prim)
 {
 	size_t size = yetty_ypaint_complex_prim_size(prim);
-	return YETTY_OK(yetty_core_size, size);
+	return YETTY_OK(yetty_ycore_size, size);
 }
 
 static struct rectangle_result
@@ -103,7 +103,7 @@ struct rectangle_result yetty_ypaint_complex_prim_aabb(const void *data)
 struct yetty_ypaint_complex_prim_factory_ptr_result
 yetty_ypaint_complex_prim_factory_create(WGPUDevice device, WGPUQueue queue,
 	WGPUTextureFormat target_format,
-	struct yetty_render_gpu_allocator *allocator)
+	struct yetty_yrender_gpu_allocator *allocator)
 {
 	struct yetty_ypaint_complex_prim_factory *factory =
 		calloc(1, sizeof(struct yetty_ypaint_complex_prim_factory));
@@ -132,26 +132,26 @@ void yetty_ypaint_complex_prim_factory_destroy(
 // Abstract factory registration
 //=============================================================================
 
-struct yetty_core_void_result yetty_ypaint_complex_prim_factory_register(
+struct yetty_ycore_void_result yetty_ypaint_complex_prim_factory_register(
 	struct yetty_ypaint_complex_prim_factory *factory,
 	struct yetty_ypaint_concrete_factory *concrete)
 {
 	if (!factory)
-		return YETTY_ERR(yetty_core_void, "factory is NULL");
+		return YETTY_ERR(yetty_ycore_void, "factory is NULL");
 	if (!concrete)
-		return YETTY_ERR(yetty_core_void, "concrete is NULL");
+		return YETTY_ERR(yetty_ycore_void, "concrete is NULL");
 	if (factory->count >= MAX_CONCRETE_FACTORIES)
-		return YETTY_ERR(yetty_core_void, "max factories reached");
+		return YETTY_ERR(yetty_ycore_void, "max factories reached");
 
 	// Check for duplicate
 	for (uint32_t i = 0; i < factory->count; i++) {
 		if (factory->factories[i]->type_id == concrete->type_id)
-			return YETTY_ERR(yetty_core_void, "type already registered");
+			return YETTY_ERR(yetty_ycore_void, "type already registered");
 	}
 
 	// Compile pipeline for this concrete factory
 	if (concrete->compile_pipeline) {
-		struct yetty_core_void_result res = concrete->compile_pipeline(
+		struct yetty_ycore_void_result res = concrete->compile_pipeline(
 			concrete, factory->device, factory->queue, factory->target_format,
 			factory->allocator);
 		if (YETTY_IS_ERR(res)) {

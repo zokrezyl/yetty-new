@@ -42,18 +42,18 @@ void yetty_ypaint_flyweight_registry_set_default(
         reg->default_handler = handler;
 }
 
-struct yetty_core_void_result yetty_ypaint_flyweight_registry_add(
+struct yetty_ycore_void_result yetty_ypaint_flyweight_registry_add(
     struct yetty_ypaint_flyweight_registry *reg,
     uint32_t type_min,
     uint32_t type_max,
     yetty_ypaint_prim_handler_fn handler)
 {
     if (!reg)
-        return YETTY_ERR(yetty_core_void, "reg is NULL");
+        return YETTY_ERR(yetty_ycore_void, "reg is NULL");
     if (reg->handler_count >= FLYWEIGHT_MAX_HANDLERS)
-        return YETTY_ERR(yetty_core_void, "max handlers reached");
+        return YETTY_ERR(yetty_ycore_void, "max handlers reached");
     if (!handler)
-        return YETTY_ERR(yetty_core_void, "handler is NULL");
+        return YETTY_ERR(yetty_ycore_void, "handler is NULL");
     reg->handlers[reg->handler_count].type_min = type_min;
     reg->handlers[reg->handler_count].type_max = type_max;
     reg->handlers[reg->handler_count].handler = handler;

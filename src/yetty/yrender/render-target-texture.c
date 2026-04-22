@@ -21,11 +21,11 @@ extern const unsigned int gblend_shaderSize;
 #define MAX_BLEND_SOURCES 4
 
 struct render_target_texture {
-	struct yetty_render_target base;  /* viewport stored here */
+	struct yetty_yrender_target base;  /* viewport stored here */
 	WGPUDevice device;
 	WGPUQueue queue;
 	WGPUTextureFormat format;
-	struct yetty_render_gpu_allocator *allocator;
+	struct yetty_yrender_gpu_allocator *allocator;
 
 	/* Owned texture (size from base.viewport.w/h) */
 	WGPUTexture texture;
@@ -35,7 +35,7 @@ struct render_target_texture {
 	WGPUSurface surface;
 
 	/* Binder for render_layer */
-	struct yetty_render_gpu_resource_binder *binder;
+	struct yetty_yrender_gpu_resource_binder *binder;
 
 	/* Blend pipeline resources (also used for present) */
 	WGPUShaderModule blend_shader;
@@ -52,7 +52,7 @@ struct render_target_texture {
  * Destroy
  *===========================================================================*/
 
-static void render_target_texture_destroy(struct yetty_render_target *self)
+static void render_target_texture_destroy(struct yetty_yrender_target *self)
 {
 	struct render_target_texture *rt = (struct render_target_texture *)self;
 
@@ -111,15 +111,15 @@ static void render_target_texture_destroy(struct yetty_render_target *self)
  * Clear
  *===========================================================================*/
 
-static struct yetty_core_void_result
-render_target_texture_clear(struct yetty_render_target *self)
+static struct yetty_ycore_void_result
+render_target_texture_clear(struct yetty_yrender_target *self)
 {
 	struct render_target_texture *rt = (struct render_target_texture *)self;
 
 	WGPUCommandEncoderDescriptor enc_desc = {0};
 	WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(rt->device, &enc_desc);
 	if (!encoder)
-		return YETTY_ERR(yetty_core_void, "failed to create encoder");
+		return YETTY_ERR(yetty_ycore_void, "failed to create encoder");
 
 	WGPURenderPassColorAttachment color_attachment = {0};
 	color_attachment.view = rt->view;
@@ -135,7 +135,7 @@ render_target_texture_clear(struct yetty_render_target *self)
 	WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc);
 	if (!pass) {
 		wgpuCommandEncoderRelease(encoder);
-		return YETTY_ERR(yetty_core_void, "failed to begin render pass");
+		return YETTY_ERR(yetty_ycore_void, "failed to begin render pass");
 	}
 
 	wgpuRenderPassEncoderEnd(pass);
@@ -154,9 +154,9 @@ render_target_texture_clear(struct yetty_render_target *self)
  * Resize
  *===========================================================================*/
 
-static struct yetty_core_void_result
-render_target_texture_resize(struct yetty_render_target *self,
-			     struct yetty_render_viewport viewport)
+static struct yetty_ycore_void_result
+render_target_texture_resize(struct yetty_yrender_target *self,
+			     struct yetty_yrender_viewport viewport)
 {
 	struct render_target_texture *rt = (struct render_target_texture *)self;
 	uint32_t width = (uint32_t)viewport.w;
@@ -207,7 +207,7 @@ render_target_texture_resize(struct yetty_render_target *self,
 		rt->texture = wgpuDeviceCreateTexture(rt->device, &tex_desc);
 
 	if (!rt->texture)
-		return YETTY_ERR(yetty_core_void, "failed to create texture");
+		return YETTY_ERR(yetty_ycore_void, "failed to create texture");
 
 	rt->view = wgpuTextureCreateView(rt->texture, NULL);
 	if (!rt->view) {
@@ -218,7 +218,7 @@ render_target_texture_resize(struct yetty_render_target *self,
 			wgpuTextureRelease(rt->texture);
 		}
 		rt->texture = NULL;
-		return YETTY_ERR(yetty_core_void, "failed to create view");
+		return YETTY_ERR(yetty_ycore_void, "failed to create view");
 	}
 
 	ydebug("render_target_texture: resized to %ux%u", width, height);
@@ -230,7 +230,7 @@ render_target_texture_resize(struct yetty_render_target *self,
  *===========================================================================*/
 
 static WGPUTextureView
-render_target_texture_get_view(const struct yetty_render_target *self)
+render_target_texture_get_view(const struct yetty_yrender_target *self)
 {
 	const struct render_target_texture *rt =
 		(const struct render_target_texture *)self;
@@ -242,8 +242,8 @@ render_target_texture_get_view(const struct yetty_render_target *self)
  * render_layer - render a terminal layer to this target
  *===========================================================================*/
 
-static struct yetty_core_void_result
-render_target_texture_render_layer(struct yetty_render_target *self,
+static struct yetty_ycore_void_result
+render_target_texture_render_layer(struct yetty_yrender_target *self,
 				   struct yetty_yterm_terminal_layer *layer)
 {
 	struct render_target_texture *rt = (struct render_target_texture *)self;
@@ -256,12 +256,12 @@ render_target_texture_render_layer(struct yetty_render_target *self,
 	struct yetty_yrender_gpu_resource_set_result rs_res =
 		layer->ops->get_gpu_resource_set(layer);
 	if (!YETTY_IS_OK(rs_res))
-		return YETTY_ERR(yetty_core_void, rs_res.error.msg);
+		return YETTY_ERR(yetty_ycore_void, rs_res.error.msg);
 
 	const struct yetty_yrender_gpu_resource_set *rs = rs_res.value;
 
 	/* Submit to binder */
-	struct yetty_core_void_result res = rt->binder->ops->submit(rt->binder, rs);
+	struct yetty_ycore_void_result res = rt->binder->ops->submit(rt->binder, rs);
 	if (!YETTY_IS_OK(res))
 		return res;
 
@@ -279,7 +279,7 @@ render_target_texture_render_layer(struct yetty_render_target *self,
 	WGPUCommandEncoderDescriptor enc_desc = {0};
 	WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(rt->device, &enc_desc);
 	if (!encoder)
-		return YETTY_ERR(yetty_core_void, "failed to create encoder");
+		return YETTY_ERR(yetty_ycore_void, "failed to create encoder");
 
 	/* Begin render pass */
 	WGPURenderPassColorAttachment color_attachment = {0};
@@ -296,7 +296,7 @@ render_target_texture_render_layer(struct yetty_render_target *self,
 	WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc);
 	if (!pass) {
 		wgpuCommandEncoderRelease(encoder);
-		return YETTY_ERR(yetty_core_void, "failed to begin render pass");
+		return YETTY_ERR(yetty_ycore_void, "failed to begin render pass");
 	}
 
 	/* Bind and draw */
@@ -331,14 +331,14 @@ render_target_texture_render_layer(struct yetty_render_target *self,
  * blend - blend multiple source targets into this target
  *===========================================================================*/
 
-static struct yetty_core_void_result create_blend_pipeline(struct render_target_texture *rt)
+static struct yetty_ycore_void_result create_blend_pipeline(struct render_target_texture *rt)
 {
 	/* Shader module */
 	WGPUShaderSourceWGSL wgsl_src = {0};
 	wgsl_src.chain.sType = WGPUSType_ShaderSourceWGSL;
 #ifdef __EMSCRIPTEN__
-	struct yetty_render_shader_code blend_code = {0};
-	yetty_render_shader_code_load_file(&blend_code, "/assets/shaders/blend.wgsl");
+	struct yetty_yrender_shader_code blend_code = {0};
+	yetty_yrender_shader_code_load_file(&blend_code, "/assets/shaders/blend.wgsl");
 	wgsl_src.code = (WGPUStringView){
 		.data = blend_code.data,
 		.length = blend_code.size
@@ -355,7 +355,7 @@ static struct yetty_core_void_result create_blend_pipeline(struct render_target_
 
 	rt->blend_shader = wgpuDeviceCreateShaderModule(rt->device, &shader_desc);
 	if (!rt->blend_shader)
-		return YETTY_ERR(yetty_core_void, "failed to create blend shader");
+		return YETTY_ERR(yetty_ycore_void, "failed to create blend shader");
 
 	/* Bind group layout */
 	WGPUBindGroupLayoutEntry entries[MAX_BLEND_SOURCES + 2] = {0};
@@ -381,7 +381,7 @@ static struct yetty_core_void_result create_blend_pipeline(struct render_target_
 
 	rt->blend_layout = wgpuDeviceCreateBindGroupLayout(rt->device, &bgl_desc);
 	if (!rt->blend_layout)
-		return YETTY_ERR(yetty_core_void, "failed to create blend layout");
+		return YETTY_ERR(yetty_ycore_void, "failed to create blend layout");
 
 	/* Pipeline layout */
 	WGPUPipelineLayoutDescriptor pl_desc = {0};
@@ -390,7 +390,7 @@ static struct yetty_core_void_result create_blend_pipeline(struct render_target_
 
 	WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(rt->device, &pl_desc);
 	if (!layout)
-		return YETTY_ERR(yetty_core_void, "failed to create pipeline layout");
+		return YETTY_ERR(yetty_ycore_void, "failed to create pipeline layout");
 
 	/* Render pipeline */
 	WGPURenderPipelineDescriptor rp_desc = {0};
@@ -419,7 +419,7 @@ static struct yetty_core_void_result create_blend_pipeline(struct render_target_
 	wgpuPipelineLayoutRelease(layout);
 
 	if (!rt->blend_pipeline)
-		return YETTY_ERR(yetty_core_void, "failed to create blend pipeline");
+		return YETTY_ERR(yetty_ycore_void, "failed to create blend pipeline");
 
 	/* Sampler */
 	WGPUSamplerDescriptor sampler_desc = {0};
@@ -431,7 +431,7 @@ static struct yetty_core_void_result create_blend_pipeline(struct render_target_
 
 	rt->sampler = wgpuDeviceCreateSampler(rt->device, &sampler_desc);
 	if (!rt->sampler)
-		return YETTY_ERR(yetty_core_void, "failed to create sampler");
+		return YETTY_ERR(yetty_ycore_void, "failed to create sampler");
 
 	/* Uniform buffer */
 	WGPUBufferDescriptor buf_desc = {0};
@@ -440,7 +440,7 @@ static struct yetty_core_void_result create_blend_pipeline(struct render_target_
 
 	rt->uniform_buffer = wgpuDeviceCreateBuffer(rt->device, &buf_desc);
 	if (!rt->uniform_buffer)
-		return YETTY_ERR(yetty_core_void, "failed to create uniform buffer");
+		return YETTY_ERR(yetty_ycore_void, "failed to create uniform buffer");
 
 	/* Placeholder texture */
 	WGPUTextureDescriptor tex_desc = {0};
@@ -455,19 +455,19 @@ static struct yetty_core_void_result create_blend_pipeline(struct render_target_
 
 	rt->placeholder_texture = wgpuDeviceCreateTexture(rt->device, &tex_desc);
 	if (!rt->placeholder_texture)
-		return YETTY_ERR(yetty_core_void, "failed to create placeholder texture");
+		return YETTY_ERR(yetty_ycore_void, "failed to create placeholder texture");
 
 	rt->placeholder_view = wgpuTextureCreateView(rt->placeholder_texture, NULL);
 	if (!rt->placeholder_view)
-		return YETTY_ERR(yetty_core_void, "failed to create placeholder view");
+		return YETTY_ERR(yetty_ycore_void, "failed to create placeholder view");
 
 	ydebug("render_target_texture: blend pipeline created");
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result
-render_target_texture_blend(struct yetty_render_target *self,
-			    struct yetty_render_target **sources,
+static struct yetty_ycore_void_result
+render_target_texture_blend(struct yetty_yrender_target *self,
+			    struct yetty_yrender_target **sources,
 			    size_t count)
 {
 	struct render_target_texture *rt = (struct render_target_texture *)self;
@@ -482,7 +482,7 @@ render_target_texture_blend(struct yetty_render_target *self,
 
 	/* Create blend pipeline on first use */
 	if (!rt->blend_pipeline) {
-		struct yetty_core_void_result res = create_blend_pipeline(rt);
+		struct yetty_ycore_void_result res = create_blend_pipeline(rt);
 		if (!YETTY_IS_OK(res))
 			return res;
 	}
@@ -519,14 +519,14 @@ render_target_texture_blend(struct yetty_render_target *self,
 
 	WGPUBindGroup bind_group = wgpuDeviceCreateBindGroup(rt->device, &bg_desc);
 	if (!bind_group)
-		return YETTY_ERR(yetty_core_void, "failed to create bind group");
+		return YETTY_ERR(yetty_ycore_void, "failed to create bind group");
 
 	/* Create encoder */
 	WGPUCommandEncoderDescriptor enc_desc = {0};
 	WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(rt->device, &enc_desc);
 	if (!encoder) {
 		wgpuBindGroupRelease(bind_group);
-		return YETTY_ERR(yetty_core_void, "failed to create encoder");
+		return YETTY_ERR(yetty_ycore_void, "failed to create encoder");
 	}
 
 	/* Render pass - use Load to preserve existing content (for tiled rendering) */
@@ -544,14 +544,14 @@ render_target_texture_blend(struct yetty_render_target *self,
 	if (!pass) {
 		wgpuCommandEncoderRelease(encoder);
 		wgpuBindGroupRelease(bind_group);
-		return YETTY_ERR(yetty_core_void, "failed to begin render pass");
+		return YETTY_ERR(yetty_ycore_void, "failed to begin render pass");
 	}
 
 	wgpuRenderPassEncoderSetPipeline(pass, rt->blend_pipeline);
 	wgpuRenderPassEncoderSetBindGroup(pass, 0, bind_group, 0, NULL);
 
 	/* Set viewport and scissor from target's viewport */
-	struct yetty_render_viewport vp = self->viewport;
+	struct yetty_yrender_viewport vp = self->viewport;
 	wgpuRenderPassEncoderSetViewport(pass, vp.x, vp.y, vp.w, vp.h, 0.0f, 1.0f);
 	wgpuRenderPassEncoderSetScissorRect(pass, (uint32_t)vp.x, (uint32_t)vp.y,
 					    (uint32_t)vp.w, (uint32_t)vp.h);
@@ -578,13 +578,13 @@ render_target_texture_blend(struct yetty_render_target *self,
  * present - blit texture to surface (if surface was provided at creation)
  *===========================================================================*/
 
-static struct yetty_core_void_result
-render_target_texture_present(struct yetty_render_target *self)
+static struct yetty_ycore_void_result
+render_target_texture_present(struct yetty_yrender_target *self)
 {
 	struct render_target_texture *rt = (struct render_target_texture *)self;
 
 	if (!rt->surface)
-		return YETTY_ERR(yetty_core_void, "no surface configured for present");
+		return YETTY_ERR(yetty_ycore_void, "no surface configured for present");
 
 	/* Acquire surface texture */
 	WGPUSurfaceTexture surface_texture;
@@ -592,15 +592,15 @@ render_target_texture_present(struct yetty_render_target *self)
 
 	if (surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
 	    surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)
-		return YETTY_ERR(yetty_core_void, "surface not ready");
+		return YETTY_ERR(yetty_ycore_void, "surface not ready");
 
 	WGPUTextureView surface_view = wgpuTextureCreateView(surface_texture.texture, NULL);
 	if (!surface_view)
-		return YETTY_ERR(yetty_core_void, "failed to create surface view");
+		return YETTY_ERR(yetty_ycore_void, "failed to create surface view");
 
 	/* Create blend pipeline if needed (reuse for present) */
 	if (!rt->blend_pipeline) {
-		struct yetty_core_void_result res = create_blend_pipeline(rt);
+		struct yetty_ycore_void_result res = create_blend_pipeline(rt);
 		if (!YETTY_IS_OK(res)) {
 			wgpuTextureViewRelease(surface_view);
 			return res;
@@ -636,7 +636,7 @@ render_target_texture_present(struct yetty_render_target *self)
 	WGPUBindGroup bind_group = wgpuDeviceCreateBindGroup(rt->device, &bg_desc);
 	if (!bind_group) {
 		wgpuTextureViewRelease(surface_view);
-		return YETTY_ERR(yetty_core_void, "failed to create bind group");
+		return YETTY_ERR(yetty_ycore_void, "failed to create bind group");
 	}
 
 	/* Create encoder */
@@ -645,7 +645,7 @@ render_target_texture_present(struct yetty_render_target *self)
 	if (!encoder) {
 		wgpuBindGroupRelease(bind_group);
 		wgpuTextureViewRelease(surface_view);
-		return YETTY_ERR(yetty_core_void, "failed to create encoder");
+		return YETTY_ERR(yetty_ycore_void, "failed to create encoder");
 	}
 
 	/* Render pass to surface */
@@ -665,7 +665,7 @@ render_target_texture_present(struct yetty_render_target *self)
 		wgpuCommandEncoderRelease(encoder);
 		wgpuBindGroupRelease(bind_group);
 		wgpuTextureViewRelease(surface_view);
-		return YETTY_ERR(yetty_core_void, "failed to begin render pass");
+		return YETTY_ERR(yetty_ycore_void, "failed to begin render pass");
 	}
 
 	wgpuRenderPassEncoderSetPipeline(pass, rt->blend_pipeline);
@@ -697,7 +697,7 @@ render_target_texture_present(struct yetty_render_target *self)
  * vtable and create
  *===========================================================================*/
 
-static const struct yetty_render_target_ops render_target_texture_ops = {
+static const struct yetty_yrender_target_ops render_target_texture_ops = {
 	.destroy = render_target_texture_destroy,
 	.clear = render_target_texture_clear,
 	.render_layer = render_target_texture_render_layer,
@@ -707,16 +707,16 @@ static const struct yetty_render_target_ops render_target_texture_ops = {
 	.resize = render_target_texture_resize,
 };
 
-struct yetty_render_target_ptr_result
-yetty_render_target_texture_create(WGPUDevice device, WGPUQueue queue,
+struct yetty_yrender_target_ptr_result
+yetty_yrender_target_texture_create(WGPUDevice device, WGPUQueue queue,
 				   WGPUTextureFormat format,
-				   struct yetty_render_gpu_allocator *allocator,
+				   struct yetty_yrender_gpu_allocator *allocator,
 				   WGPUSurface surface,
-				   struct yetty_render_viewport viewport)
+				   struct yetty_yrender_viewport viewport)
 {
 	struct render_target_texture *rt = calloc(1, sizeof(*rt));
 	if (!rt)
-		return YETTY_ERR(yetty_render_target_ptr, "failed to allocate render target");
+		return YETTY_ERR(yetty_yrender_target_ptr, "failed to allocate render target");
 
 	rt->base.ops = &render_target_texture_ops;
 	rt->device = device;
@@ -726,23 +726,23 @@ yetty_render_target_texture_create(WGPUDevice device, WGPUQueue queue,
 	rt->surface = surface;  /* NULL for layer/terminal targets */
 
 	/* Create binder */
-	struct yetty_render_gpu_resource_binder_result binder_res =
-		yetty_render_gpu_resource_binder_create(device, queue, format, allocator);
+	struct yetty_yrender_gpu_resource_binder_result binder_res =
+		yetty_yrender_gpu_resource_binder_create(device, queue, format, allocator);
 	if (!YETTY_IS_OK(binder_res)) {
 		free(rt);
-		return YETTY_ERR(yetty_render_target_ptr, binder_res.error.msg);
+		return YETTY_ERR(yetty_yrender_target_ptr, binder_res.error.msg);
 	}
 	rt->binder = binder_res.value;
 
 	/* Create initial texture */
-	struct yetty_core_void_result res = render_target_texture_resize(&rt->base, viewport);
+	struct yetty_ycore_void_result res = render_target_texture_resize(&rt->base, viewport);
 	if (!YETTY_IS_OK(res)) {
 		rt->binder->ops->destroy(rt->binder);
 		free(rt);
-		return YETTY_ERR(yetty_render_target_ptr, res.error.msg);
+		return YETTY_ERR(yetty_yrender_target_ptr, res.error.msg);
 	}
 
-	ydebug("yetty_render_target_texture_create: %.0fx%.0f at (%.0f,%.0f) format=%d surface=%p",
+	ydebug("yetty_yrender_target_texture_create: %.0fx%.0f at (%.0f,%.0f) format=%d surface=%p",
 	       viewport.w, viewport.h, viewport.x, viewport.y, format, (void *)surface);
-	return YETTY_OK(yetty_render_target_ptr, &rt->base);
+	return YETTY_OK(yetty_yrender_target_ptr, &rt->base);
 }

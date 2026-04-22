@@ -81,7 +81,7 @@ void yetty_vnc_client_destroy(struct yetty_vnc_client *client)
 	free(client);
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_connect(struct yetty_vnc_client *client, const char *host,
 			 uint16_t port)
 {
@@ -89,10 +89,10 @@ yetty_vnc_client_connect(struct yetty_vnc_client *client, const char *host,
 	(void)client;
 	(void)host;
 	(void)port;
-	return YETTY_ERR(yetty_core_void, "not implemented");
+	return YETTY_ERR(yetty_ycore_void, "not implemented");
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_disconnect(struct yetty_vnc_client *client)
 {
 	if (!client)
@@ -123,7 +123,7 @@ uint16_t yetty_vnc_client_height(const struct yetty_vnc_client *client)
 	return client ? client->height : 0;
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_update_texture(struct yetty_vnc_client *client)
 {
 	/* TODO: implement */
@@ -131,7 +131,7 @@ yetty_vnc_client_update_texture(struct yetty_vnc_client *client)
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_render(struct yetty_vnc_client *client,
 			WGPURenderPassEncoder pass, uint32_t render_target_w,
 			uint32_t render_target_h)
@@ -150,7 +150,7 @@ yetty_vnc_client_get_texture_view(const struct yetty_vnc_client *client)
 	return client ? client->texture_view : NULL;
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_mouse_move(struct yetty_vnc_client *client, int16_t x,
 				 int16_t y, uint8_t mods)
 {
@@ -162,7 +162,7 @@ yetty_vnc_client_send_mouse_move(struct yetty_vnc_client *client, int16_t x,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_mouse_button(struct yetty_vnc_client *client, int16_t x,
 				   int16_t y, uint8_t button, int pressed,
 				   uint8_t mods)
@@ -177,7 +177,7 @@ yetty_vnc_client_send_mouse_button(struct yetty_vnc_client *client, int16_t x,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_mouse_scroll(struct yetty_vnc_client *client, int16_t x,
 				   int16_t y, int16_t delta_x, int16_t delta_y,
 				   uint8_t mods)
@@ -192,7 +192,7 @@ yetty_vnc_client_send_mouse_scroll(struct yetty_vnc_client *client, int16_t x,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_key_down(struct yetty_vnc_client *client,
 			       uint32_t keycode, uint32_t scancode,
 			       uint8_t mods)
@@ -205,7 +205,7 @@ yetty_vnc_client_send_key_down(struct yetty_vnc_client *client,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_key_up(struct yetty_vnc_client *client, uint32_t keycode,
 			     uint32_t scancode, uint8_t mods)
 {
@@ -217,7 +217,7 @@ yetty_vnc_client_send_key_up(struct yetty_vnc_client *client, uint32_t keycode,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_char_with_mods(struct yetty_vnc_client *client,
 				     uint32_t codepoint, uint8_t mods)
 {
@@ -228,7 +228,7 @@ yetty_vnc_client_send_char_with_mods(struct yetty_vnc_client *client,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_text_input(struct yetty_vnc_client *client,
 				 const char *text, size_t len)
 {
@@ -239,7 +239,7 @@ yetty_vnc_client_send_text_input(struct yetty_vnc_client *client,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_resize(struct yetty_vnc_client *client, uint16_t width,
 			     uint16_t height)
 {
@@ -250,7 +250,7 @@ yetty_vnc_client_send_resize(struct yetty_vnc_client *client, uint16_t width,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_cell_size(struct yetty_vnc_client *client,
 				uint8_t cell_height)
 {
@@ -260,7 +260,7 @@ yetty_vnc_client_send_cell_size(struct yetty_vnc_client *client,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_frame_ack(struct yetty_vnc_client *client)
 {
 	/* TODO: implement */
@@ -268,7 +268,7 @@ yetty_vnc_client_send_frame_ack(struct yetty_vnc_client *client)
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_compression_config(struct yetty_vnc_client *client,
 					 int force_raw, uint8_t quality,
 					 int always_full, uint8_t codec)
@@ -332,13 +332,13 @@ void yetty_vnc_client_set_reconnect_params(struct yetty_vnc_client *client,
 	client->reconnect_port = port;
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_reconnect(struct yetty_vnc_client *client)
 {
 	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+		return YETTY_ERR(yetty_ycore_void, "null client");
 	if (!client->reconnect_host)
-		return YETTY_ERR(yetty_core_void, "no reconnect params set");
+		return YETTY_ERR(yetty_ycore_void, "no reconnect params set");
 	return yetty_vnc_client_connect(client, client->reconnect_host,
 					client->reconnect_port);
 }

@@ -37,17 +37,17 @@ struct timer_handle {
 	int timeout_ms;
 	int active;
 	double last_fire;
-	struct yetty_core_event_listener *listener;
+	struct yetty_ycore_event_listener *listener;
 	struct webasm_event_loop *impl;
 };
 
 struct prioritized_listener {
-	struct yetty_core_event_listener *listener;
+	struct yetty_ycore_event_listener *listener;
 	int priority;
 };
 
 struct webasm_event_loop {
-	struct yetty_core_event_loop base;
+	struct yetty_ycore_event_loop base;
 
 	struct prioritized_listener listeners[YETTY_EVENT_COUNT][MAX_LISTENERS_PER_TYPE];
 	int listener_counts[YETTY_EVENT_COUNT];
@@ -62,43 +62,43 @@ struct webasm_event_loop {
 };
 
 /* Forward declarations */
-static void webasm_destroy(struct yetty_core_event_loop *self);
-static struct yetty_core_void_result webasm_start(struct yetty_core_event_loop *self);
-static struct yetty_core_void_result webasm_stop(struct yetty_core_event_loop *self);
-static struct yetty_core_void_result webasm_register_listener(
-	struct yetty_core_event_loop *self, enum yetty_core_event_type type,
-	struct yetty_core_event_listener *listener, int priority);
-static struct yetty_core_void_result webasm_deregister_listener(
-	struct yetty_core_event_loop *self, enum yetty_core_event_type type,
-	struct yetty_core_event_listener *listener);
-static struct yetty_core_int_result webasm_dispatch(
-	struct yetty_core_event_loop *self, const struct yetty_core_event *event);
-static struct yetty_core_void_result webasm_broadcast(
-	struct yetty_core_event_loop *self, const struct yetty_core_event *event);
-static struct yetty_core_pipe_id_result webasm_register_pty_pipe(
-	struct yetty_core_event_loop *self,
+static void webasm_destroy(struct yetty_ycore_event_loop *self);
+static struct yetty_ycore_void_result webasm_start(struct yetty_ycore_event_loop *self);
+static struct yetty_ycore_void_result webasm_stop(struct yetty_ycore_event_loop *self);
+static struct yetty_ycore_void_result webasm_register_listener(
+	struct yetty_ycore_event_loop *self, enum yetty_ycore_event_type type,
+	struct yetty_ycore_event_listener *listener, int priority);
+static struct yetty_ycore_void_result webasm_deregister_listener(
+	struct yetty_ycore_event_loop *self, enum yetty_ycore_event_type type,
+	struct yetty_ycore_event_listener *listener);
+static struct yetty_ycore_int_result webasm_dispatch(
+	struct yetty_ycore_event_loop *self, const struct yetty_ycore_event *event);
+static struct yetty_ycore_void_result webasm_broadcast(
+	struct yetty_ycore_event_loop *self, const struct yetty_ycore_event *event);
+static struct yetty_ycore_pipe_id_result webasm_register_pty_pipe(
+	struct yetty_ycore_event_loop *self,
 	struct yetty_platform_pty_pipe_source *source,
 	yetty_pipe_alloc_cb alloc_cb,
 	yetty_pipe_read_cb read_cb,
 	void *cb_ctx);
-static struct yetty_core_void_result webasm_unregister_pty_pipe(
-	struct yetty_core_event_loop *self, yetty_core_pipe_id id);
-static struct yetty_core_timer_id_result webasm_create_timer(struct yetty_core_event_loop *self);
-static struct yetty_core_void_result webasm_config_timer(
-	struct yetty_core_event_loop *self, yetty_core_timer_id id, int timeout_ms);
-static struct yetty_core_void_result webasm_start_timer(
-	struct yetty_core_event_loop *self, yetty_core_timer_id id);
-static struct yetty_core_void_result webasm_stop_timer(
-	struct yetty_core_event_loop *self, yetty_core_timer_id id);
-static struct yetty_core_void_result webasm_destroy_timer(
-	struct yetty_core_event_loop *self, yetty_core_timer_id id);
-static struct yetty_core_void_result webasm_register_timer_listener(
-	struct yetty_core_event_loop *self, yetty_core_timer_id id,
-	struct yetty_core_event_listener *listener);
-static void webasm_request_render(struct yetty_core_event_loop *self);
+static struct yetty_ycore_void_result webasm_unregister_pty_pipe(
+	struct yetty_ycore_event_loop *self, yetty_ycore_pipe_id id);
+static struct yetty_ycore_timer_id_result webasm_create_timer(struct yetty_ycore_event_loop *self);
+static struct yetty_ycore_void_result webasm_config_timer(
+	struct yetty_ycore_event_loop *self, yetty_ycore_timer_id id, int timeout_ms);
+static struct yetty_ycore_void_result webasm_start_timer(
+	struct yetty_ycore_event_loop *self, yetty_ycore_timer_id id);
+static struct yetty_ycore_void_result webasm_stop_timer(
+	struct yetty_ycore_event_loop *self, yetty_ycore_timer_id id);
+static struct yetty_ycore_void_result webasm_destroy_timer(
+	struct yetty_ycore_event_loop *self, yetty_ycore_timer_id id);
+static struct yetty_ycore_void_result webasm_register_timer_listener(
+	struct yetty_ycore_event_loop *self, yetty_ycore_timer_id id,
+	struct yetty_ycore_event_listener *listener);
+static void webasm_request_render(struct yetty_ycore_event_loop *self);
 static void process_pty_data(struct pty_pipe_handle *ph);
 
-static const struct yetty_core_event_loop_ops webasm_ops = {
+static const struct yetty_ycore_event_loop_ops webasm_ops = {
 	.destroy = webasm_destroy,
 	.start = webasm_start,
 	.stop = webasm_stop,
@@ -151,7 +151,7 @@ static void main_loop_tick(void *arg)
 
 		elapsed = now - th->last_fire;
 		if (elapsed >= th->timeout_ms) {
-			struct yetty_core_event event = {0};
+			struct yetty_ycore_event event = {0};
 
 			th->last_fire = now;
 			event.type = YETTY_EVENT_TIMER;
@@ -165,7 +165,7 @@ static void main_loop_tick(void *arg)
 
 /* Lifecycle */
 
-static void webasm_destroy(struct yetty_core_event_loop *self)
+static void webasm_destroy(struct yetty_ycore_event_loop *self)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 
@@ -173,7 +173,7 @@ static void webasm_destroy(struct yetty_core_event_loop *self)
 	free(impl);
 }
 
-static struct yetty_core_void_result webasm_start(struct yetty_core_event_loop *self)
+static struct yetty_ycore_void_result webasm_start(struct yetty_ycore_event_loop *self)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 
@@ -190,7 +190,7 @@ static struct yetty_core_void_result webasm_start(struct yetty_core_event_loop *
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result webasm_stop(struct yetty_core_event_loop *self)
+static struct yetty_ycore_void_result webasm_stop(struct yetty_ycore_event_loop *self)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 
@@ -207,19 +207,19 @@ static struct yetty_core_void_result webasm_stop(struct yetty_core_event_loop *s
 
 /* Listeners */
 
-static struct yetty_core_void_result webasm_register_listener(
-	struct yetty_core_event_loop *self, enum yetty_core_event_type type,
-	struct yetty_core_event_listener *listener, int priority)
+static struct yetty_ycore_void_result webasm_register_listener(
+	struct yetty_ycore_event_loop *self, enum yetty_ycore_event_type type,
+	struct yetty_ycore_event_listener *listener, int priority)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 	int count, i;
 
 	if (type < 0 || type >= YETTY_EVENT_COUNT || !listener)
-		return YETTY_ERR(yetty_core_void, "invalid event type or listener");
+		return YETTY_ERR(yetty_ycore_void, "invalid event type or listener");
 
 	count = impl->listener_counts[type];
 	if (count >= MAX_LISTENERS_PER_TYPE)
-		return YETTY_ERR(yetty_core_void, "too many listeners");
+		return YETTY_ERR(yetty_ycore_void, "too many listeners");
 
 	/* Insert sorted by priority (descending) */
 	for (i = count; i > 0 && impl->listeners[type][i - 1].priority < priority; i--)
@@ -232,15 +232,15 @@ static struct yetty_core_void_result webasm_register_listener(
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result webasm_deregister_listener(
-	struct yetty_core_event_loop *self, enum yetty_core_event_type type,
-	struct yetty_core_event_listener *listener)
+static struct yetty_ycore_void_result webasm_deregister_listener(
+	struct yetty_ycore_event_loop *self, enum yetty_ycore_event_type type,
+	struct yetty_ycore_event_listener *listener)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 	int count, i;
 
 	if (type < 0 || type >= YETTY_EVENT_COUNT || !listener)
-		return YETTY_ERR(yetty_core_void, "invalid event type or listener");
+		return YETTY_ERR(yetty_ycore_void, "invalid event type or listener");
 
 	count = impl->listener_counts[type];
 	for (i = 0; i < count; i++) {
@@ -253,35 +253,35 @@ static struct yetty_core_void_result webasm_deregister_listener(
 		}
 	}
 
-	return YETTY_ERR(yetty_core_void, "listener not found");
+	return YETTY_ERR(yetty_ycore_void, "listener not found");
 }
 
-static struct yetty_core_int_result webasm_dispatch(
-	struct yetty_core_event_loop *self, const struct yetty_core_event *event)
+static struct yetty_ycore_int_result webasm_dispatch(
+	struct yetty_ycore_event_loop *self, const struct yetty_ycore_event *event)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 	int type = event->type;
 	int count, i;
 
 	if (type < 0 || type >= YETTY_EVENT_COUNT)
-		return YETTY_ERR(yetty_core_int, "invalid event type");
+		return YETTY_ERR(yetty_ycore_int, "invalid event type");
 
 	count = impl->listener_counts[type];
 	for (i = 0; i < count; i++) {
-		struct yetty_core_event_listener *listener = impl->listeners[type][i].listener;
-		struct yetty_core_int_result res = listener->handler(listener, event);
+		struct yetty_ycore_event_listener *listener = impl->listeners[type][i].listener;
+		struct yetty_ycore_int_result res = listener->handler(listener, event);
 
 		if (YETTY_IS_ERR(res))
 			return res;
 		if (res.value)
-			return YETTY_OK(yetty_core_int, 1);
+			return YETTY_OK(yetty_ycore_int, 1);
 	}
 
-	return YETTY_OK(yetty_core_int, 0);
+	return YETTY_OK(yetty_ycore_int, 0);
 }
 
-static struct yetty_core_void_result webasm_broadcast(
-	struct yetty_core_event_loop *self, const struct yetty_core_event *event)
+static struct yetty_ycore_void_result webasm_broadcast(
+	struct yetty_ycore_event_loop *self, const struct yetty_ycore_event *event)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 	int t, count, i;
@@ -289,11 +289,11 @@ static struct yetty_core_void_result webasm_broadcast(
 	for (t = 0; t < YETTY_EVENT_COUNT; t++) {
 		count = impl->listener_counts[t];
 		for (i = 0; i < count; i++) {
-			struct yetty_core_event_listener *listener = impl->listeners[t][i].listener;
-			struct yetty_core_int_result res = listener->handler(listener, event);
+			struct yetty_ycore_event_listener *listener = impl->listeners[t][i].listener;
+			struct yetty_ycore_int_result res = listener->handler(listener, event);
 
 			if (!YETTY_IS_OK(res))
-				return YETTY_ERR(yetty_core_void, res.error.msg);
+				return YETTY_ERR(yetty_ycore_void, res.error.msg);
 		}
 	}
 
@@ -321,7 +321,7 @@ static void process_pty_data(struct pty_pipe_handle *ph)
 {
 	char *buf = NULL;
 	size_t buflen = 0;
-	struct yetty_core_size_result read_res;
+	struct yetty_ycore_size_result read_res;
 	struct webasm_pty *pty;
 
 	if (!ph->active || !ph->data_pending || !ph->alloc_cb || !ph->read_cb || !ph->source)
@@ -348,8 +348,8 @@ static void process_pty_data(struct pty_pipe_handle *ph)
 	ph->read_cb(ph->cb_ctx, buf, (long)read_res.value);
 }
 
-static struct yetty_core_pipe_id_result webasm_register_pty_pipe(
-	struct yetty_core_event_loop *self,
+static struct yetty_ycore_pipe_id_result webasm_register_pty_pipe(
+	struct yetty_ycore_event_loop *self,
 	struct yetty_platform_pty_pipe_source *source,
 	yetty_pipe_alloc_cb alloc_cb,
 	yetty_pipe_read_cb read_cb,
@@ -366,7 +366,7 @@ static struct yetty_core_pipe_id_result webasm_register_pty_pipe(
 			break;
 	}
 	if (id >= MAX_PTY_PIPES)
-		return YETTY_ERR(yetty_core_pipe_id, "too many pty pipes");
+		return YETTY_ERR(yetty_ycore_pipe_id, "too many pty pipes");
 
 	ph = &impl->pty_pipes[id];
 	memset(ph, 0, sizeof(*ph));
@@ -383,16 +383,16 @@ static struct yetty_core_pipe_id_result webasm_register_pty_pipe(
 
 	ydebug("webasm_event_loop: register_pty_pipe id=%d", id);
 
-	return YETTY_OK(yetty_core_pipe_id, id);
+	return YETTY_OK(yetty_ycore_pipe_id, id);
 }
 
-static struct yetty_core_void_result webasm_unregister_pty_pipe(
-	struct yetty_core_event_loop *self, yetty_core_pipe_id id)
+static struct yetty_ycore_void_result webasm_unregister_pty_pipe(
+	struct yetty_ycore_event_loop *self, yetty_ycore_pipe_id id)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 
 	if (id < 0 || id >= MAX_PTY_PIPES)
-		return YETTY_ERR(yetty_core_void, "invalid pipe id");
+		return YETTY_ERR(yetty_ycore_void, "invalid pipe id");
 
 	if (impl->pty_pipes[id].active) {
 		if (impl->pty_pipes[id].source)
@@ -407,14 +407,14 @@ static struct yetty_core_void_result webasm_unregister_pty_pipe(
 
 /* Timer */
 
-static struct yetty_core_timer_id_result webasm_create_timer(struct yetty_core_event_loop *self)
+static struct yetty_ycore_timer_id_result webasm_create_timer(struct yetty_ycore_event_loop *self)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 	int id = impl->next_timer_id++;
 	struct timer_handle *th;
 
 	if (id >= MAX_TIMERS)
-		return YETTY_ERR(yetty_core_timer_id, "too many timers");
+		return YETTY_ERR(yetty_ycore_timer_id, "too many timers");
 
 	th = &impl->timers[id];
 	memset(th, 0, sizeof(*th));
@@ -423,17 +423,17 @@ static struct yetty_core_timer_id_result webasm_create_timer(struct yetty_core_e
 
 	ydebug("webasm_event_loop: create_timer id=%d", id);
 
-	return YETTY_OK(yetty_core_timer_id, id);
+	return YETTY_OK(yetty_ycore_timer_id, id);
 }
 
-static struct yetty_core_void_result webasm_config_timer(
-	struct yetty_core_event_loop *self, yetty_core_timer_id id, int timeout_ms)
+static struct yetty_ycore_void_result webasm_config_timer(
+	struct yetty_ycore_event_loop *self, yetty_ycore_timer_id id, int timeout_ms)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 	struct timer_handle *th;
 
 	if (id < 0 || id >= MAX_TIMERS)
-		return YETTY_ERR(yetty_core_void, "invalid timer id");
+		return YETTY_ERR(yetty_ycore_void, "invalid timer id");
 
 	th = &impl->timers[id];
 	th->timeout_ms = timeout_ms;
@@ -441,14 +441,14 @@ static struct yetty_core_void_result webasm_config_timer(
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result webasm_start_timer(
-	struct yetty_core_event_loop *self, yetty_core_timer_id id)
+static struct yetty_ycore_void_result webasm_start_timer(
+	struct yetty_ycore_event_loop *self, yetty_ycore_timer_id id)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 	struct timer_handle *th;
 
 	if (id < 0 || id >= MAX_TIMERS)
-		return YETTY_ERR(yetty_core_void, "invalid timer id");
+		return YETTY_ERR(yetty_ycore_void, "invalid timer id");
 
 	th = &impl->timers[id];
 	th->active = 1;
@@ -459,26 +459,26 @@ static struct yetty_core_void_result webasm_start_timer(
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result webasm_stop_timer(
-	struct yetty_core_event_loop *self, yetty_core_timer_id id)
+static struct yetty_ycore_void_result webasm_stop_timer(
+	struct yetty_ycore_event_loop *self, yetty_ycore_timer_id id)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 
 	if (id < 0 || id >= MAX_TIMERS)
-		return YETTY_ERR(yetty_core_void, "invalid timer id");
+		return YETTY_ERR(yetty_ycore_void, "invalid timer id");
 
 	impl->timers[id].active = 0;
 
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result webasm_destroy_timer(
-	struct yetty_core_event_loop *self, yetty_core_timer_id id)
+static struct yetty_ycore_void_result webasm_destroy_timer(
+	struct yetty_ycore_event_loop *self, yetty_ycore_timer_id id)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 
 	if (id < 0 || id >= MAX_TIMERS)
-		return YETTY_ERR(yetty_core_void, "invalid timer id");
+		return YETTY_ERR(yetty_ycore_void, "invalid timer id");
 
 	impl->timers[id].active = 0;
 	impl->timers[id].listener = NULL;
@@ -486,14 +486,14 @@ static struct yetty_core_void_result webasm_destroy_timer(
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result webasm_register_timer_listener(
-	struct yetty_core_event_loop *self, yetty_core_timer_id id,
-	struct yetty_core_event_listener *listener)
+static struct yetty_ycore_void_result webasm_register_timer_listener(
+	struct yetty_ycore_event_loop *self, yetty_ycore_timer_id id,
+	struct yetty_ycore_event_listener *listener)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
 
 	if (id < 0 || id >= MAX_TIMERS || !listener)
-		return YETTY_ERR(yetty_core_void, "invalid timer id or listener");
+		return YETTY_ERR(yetty_ycore_void, "invalid timer id or listener");
 
 	impl->timers[id].listener = listener;
 
@@ -502,10 +502,10 @@ static struct yetty_core_void_result webasm_register_timer_listener(
 
 /* Render request */
 
-static void webasm_request_render(struct yetty_core_event_loop *self)
+static void webasm_request_render(struct yetty_ycore_event_loop *self)
 {
 	struct webasm_event_loop *impl = container_of(self, struct webasm_event_loop, base);
-	struct yetty_core_event event = {0};
+	struct yetty_ycore_event event = {0};
 
 	event.type = YETTY_EVENT_RENDER;
 	webasm_dispatch(self, &event);
@@ -515,14 +515,14 @@ static void webasm_request_render(struct yetty_core_event_loop *self)
 
 /* Factory */
 
-struct yetty_core_event_loop_result yetty_core_event_loop_create(
+struct yetty_ycore_event_loop_result yetty_ycore_event_loop_create(
 	struct yetty_platform_input_pipe *pipe)
 {
 	struct webasm_event_loop *impl;
 
 	impl = calloc(1, sizeof(struct webasm_event_loop));
 	if (!impl)
-		return YETTY_ERR(yetty_core_event_loop, "failed to allocate webasm event loop");
+		return YETTY_ERR(yetty_ycore_event_loop, "failed to allocate webasm event loop");
 
 	impl->base.ops = &webasm_ops;
 	impl->platform_input_pipe = pipe;
@@ -534,5 +534,5 @@ struct yetty_core_event_loop_result yetty_core_event_loop_create(
 
 	ydebug("webasm_event_loop: created at %p", (void *)impl);
 
-	return YETTY_OK(yetty_core_event_loop, &impl->base);
+	return YETTY_OK(yetty_ycore_event_loop, &impl->base);
 }

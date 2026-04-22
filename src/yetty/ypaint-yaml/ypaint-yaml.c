@@ -42,17 +42,17 @@ void yetty_ypaint_yaml_parser_destroy(struct yetty_ypaint_yaml_parser *parser)
     free(parser);
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_yaml_parser_register(struct yetty_ypaint_yaml_parser *parser,
                                    const char *primitive_type_name,
                                    yetty_ypaint_yaml_factory_fn factory)
 {
     if (!parser)
-        return YETTY_ERR(yetty_core_void, "null parser");
+        return YETTY_ERR(yetty_ycore_void, "null parser");
     if (!primitive_type_name || !factory)
-        return YETTY_ERR(yetty_core_void, "null primitive_type_name or factory");
+        return YETTY_ERR(yetty_ycore_void, "null primitive_type_name or factory");
     if (parser->count >= MAX_FACTORIES)
-        return YETTY_ERR(yetty_core_void, "max factories reached");
+        return YETTY_ERR(yetty_ycore_void, "max factories reached");
 
     strncpy(parser->entries[parser->count].primitive_type_name,
             primitive_type_name, PRIMITIVE_TYPE_NAME_LEN - 1);
@@ -74,13 +74,13 @@ find_factory(struct yetty_ypaint_yaml_parser *parser,
     return NULL;
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_yaml_parser_parse(struct yetty_ypaint_yaml_parser *parser,
                                 struct yetty_ypaint_core_buffer *buffer,
                                 const char *yaml, size_t len)
 {
     if (!parser || !buffer || !yaml)
-        return YETTY_ERR(yetty_core_void, "null argument");
+        return YETTY_ERR(yetty_ycore_void, "null argument");
 
     yaml_parser_t yaml_parser;
     yaml_event_t event;
@@ -92,7 +92,7 @@ yetty_ypaint_yaml_parser_parse(struct yetty_ypaint_yaml_parser *parser,
     char prop_key[PRIMITIVE_TYPE_NAME_LEN] = {0};
 
     if (!yaml_parser_initialize(&yaml_parser))
-        return YETTY_ERR(yetty_core_void, "yaml_parser_initialize failed");
+        return YETTY_ERR(yetty_ycore_void, "yaml_parser_initialize failed");
 
     yaml_parser_set_input_string(&yaml_parser, (const unsigned char *)yaml, len);
 
@@ -153,7 +153,7 @@ yetty_ypaint_yaml_parser_parse(struct yetty_ypaint_yaml_parser *parser,
                     find_factory(parser, primitive_type_name);
                 if (factory) {
                     ydebug("ypaint_yaml: calling factory for '%s'", primitive_type_name);
-                    struct yetty_core_void_result res =
+                    struct yetty_ycore_void_result res =
                         factory(buffer, &yaml_parser, primitive_type_name);
                     if (YETTY_IS_ERR(res)) {
                         ydebug("ypaint_yaml: factory for '%s' failed: %s",
@@ -167,7 +167,7 @@ yetty_ypaint_yaml_parser_parse(struct yetty_ypaint_yaml_parser *parser,
                     ydebug("ypaint_yaml: unknown type '%s' (registered=%zu)", primitive_type_name, parser->count);
                     yaml_event_delete(&event);
                     yaml_parser_delete(&yaml_parser);
-                    return YETTY_ERR(yetty_core_void, "unknown primitive type");
+                    return YETTY_ERR(yetty_ycore_void, "unknown primitive type");
                 }
             } else if (depth == 1) {
                 strncpy(prop_key, val, PRIMITIVE_TYPE_NAME_LEN - 1);
@@ -184,7 +184,7 @@ yetty_ypaint_yaml_parser_parse(struct yetty_ypaint_yaml_parser *parser,
 
     yaml_parser_delete(&yaml_parser);
 
-    return err ? YETTY_ERR(yetty_core_void, "yaml parse error")
+    return err ? YETTY_ERR(yetty_ycore_void, "yaml parse error")
                : YETTY_OK_VOID();
 }
 
@@ -226,7 +226,7 @@ static uint32_t parse_text_color(const char *str) {
     return (a << 24) | (b << 16) | (g << 8) | r;
 }
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 text_factory(struct yetty_ypaint_core_buffer *buffer,
              yaml_parser_t *yaml_parser,
              const char *primitive_type_name)
@@ -249,7 +249,7 @@ text_factory(struct yetty_ypaint_core_buffer *buffer,
 
     while (!done) {
         if (!yaml_parser_parse(yaml_parser, &event))
-            return YETTY_ERR(yetty_core_void, "yaml parse error in text");
+            return YETTY_ERR(yetty_ycore_void, "yaml parse error in text");
 
         switch (event.type) {
         case YAML_MAPPING_START_EVENT:
@@ -304,7 +304,7 @@ text_factory(struct yetty_ypaint_core_buffer *buffer,
             .size = strlen(content),
             .capacity = strlen(content)
         };
-        struct yetty_core_void_result res = yetty_ypaint_core_buffer_add_text(
+        struct yetty_ycore_void_result res = yetty_ypaint_core_buffer_add_text(
             buffer, x, y, &text_buf, font_size, color, 0, -1, 0.0f);
         if (YETTY_IS_ERR(res)) {
             ydebug("ypaint_yaml: failed to add text: %s", res.error.msg);
@@ -344,7 +344,7 @@ yetty_ypaint_yaml_parse(const char *yaml, size_t len)
         return YETTY_ERR(yetty_ypaint_core_buffer, "failed to create parser");
     }
 
-    struct yetty_core_void_result reg_res = yetty_ysdf_register_yaml_factories(parser);
+    struct yetty_ycore_void_result reg_res = yetty_ysdf_register_yaml_factories(parser);
     if (YETTY_IS_ERR(reg_res)) {
         ydebug("ypaint_yaml: ysdf registration failed: %s", reg_res.error.msg);
     } else {
@@ -354,7 +354,7 @@ yetty_ypaint_yaml_parse(const char *yaml, size_t len)
     yetty_yplot_register_yaml_factory(parser);
     ydebug("ypaint_yaml: text+yplot factories registered, total count=%zu", parser->count);
 
-    struct yetty_core_void_result parse_res =
+    struct yetty_ycore_void_result parse_res =
         yetty_ypaint_yaml_parser_parse(parser, buffer, yaml, len);
 
     yetty_ypaint_yaml_parser_destroy(parser);

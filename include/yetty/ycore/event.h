@@ -1,5 +1,5 @@
-#ifndef YETTY_CORE_EVENT_H
-#define YETTY_CORE_EVENT_H
+#ifndef YETTY_YCOREEVENT_H
+#define YETTY_YCOREEVENT_H
 
 #include <stdint.h>
 #include <yetty/ycore/types.h>
@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-enum yetty_core_event_type {
+enum yetty_ycore_event_type {
     YETTY_EVENT_NONE = 0,
     /* Input events */
     YETTY_EVENT_KEY_DOWN,
@@ -60,25 +60,25 @@ enum yetty_core_event_type {
     YETTY_EVENT_COUNT
 };
 
-struct yetty_core_event_key {
+struct yetty_ycore_event_key {
     int key;
     int mods;
     int scancode;
 };
 
-struct yetty_core_event_char {
+struct yetty_ycore_event_char {
     uint32_t codepoint;
     int mods;
 };
 
-struct yetty_core_event_mouse {
+struct yetty_ycore_event_mouse {
     float x;
     float y;
     int button;
     int mods;
 };
 
-struct yetty_core_event_scroll {
+struct yetty_ycore_event_scroll {
     float x;
     float y;
     float dx;
@@ -86,39 +86,39 @@ struct yetty_core_event_scroll {
     int mods;
 };
 
-struct yetty_core_event_set_focus {
-    yetty_core_object_id object_id;
+struct yetty_ycore_event_set_focus {
+    yetty_ycore_object_id object_id;
 };
 
-struct yetty_core_event_resize {
+struct yetty_ycore_event_resize {
     float width;
     float height;
 };
 
-struct yetty_core_event_poll {
+struct yetty_ycore_event_poll {
     int fd;
 };
 
-struct yetty_core_event_timer {
+struct yetty_ycore_event_timer {
     int timer_id;
 };
 
-struct yetty_core_event_context_menu_action {
-    yetty_core_object_id object_id;
+struct yetty_ycore_event_context_menu_action {
+    yetty_ycore_object_id object_id;
     int row;
     int col;
     char action[32];
 };
 
-struct yetty_core_event_card_mouse {
-    yetty_core_object_id target_id;
+struct yetty_ycore_event_card_mouse {
+    yetty_ycore_object_id target_id;
     float x;
     float y;
     int button;
 };
 
-struct yetty_core_event_card_scroll {
-    yetty_core_object_id target_id;
+struct yetty_ycore_event_card_scroll {
+    yetty_ycore_object_id target_id;
     float x;
     float y;
     float dx;
@@ -126,68 +126,68 @@ struct yetty_core_event_card_scroll {
     int mods;
 };
 
-struct yetty_core_event_card_key {
-    yetty_core_object_id target_id;
+struct yetty_ycore_event_card_key {
+    yetty_ycore_object_id target_id;
     int key;
     int mods;
     int scancode;
 };
 
-struct yetty_core_event_card_char {
-    yetty_core_object_id target_id;
+struct yetty_ycore_event_card_char {
+    yetty_ycore_object_id target_id;
     uint32_t codepoint;
     int mods;
 };
 
-struct yetty_core_event_close {
-    yetty_core_object_id object_id;
+struct yetty_ycore_event_close {
+    yetty_ycore_object_id object_id;
 };
 
-struct yetty_core_event_split_pane {
-    yetty_core_object_id object_id;
+struct yetty_ycore_event_split_pane {
+    yetty_ycore_object_id object_id;
     uint8_t orientation;
 };
 
-struct yetty_core_event_command_key {
+struct yetty_ycore_event_command_key {
     int key;
     uint32_t codepoint;
     int mods;
 };
 
-struct yetty_core_event_set_cursor {
+struct yetty_ycore_event_set_cursor {
     int shape;
 };
 
-struct yetty_core_event_card_repack {
-    yetty_core_object_id target_id;
+struct yetty_ycore_event_card_repack {
+    yetty_ycore_object_id target_id;
 };
 
-struct yetty_core_event_set_frame_rate {
+struct yetty_ycore_event_set_frame_rate {
     uint32_t fps;
 };
 
-struct yetty_core_event {
-    enum yetty_core_event_type type;
+struct yetty_ycore_event {
+    enum yetty_ycore_event_type type;
     union {
-        struct yetty_core_event_key key;
-        struct yetty_core_event_char chr;
-        struct yetty_core_event_mouse mouse;
-        struct yetty_core_event_scroll scroll;
-        struct yetty_core_event_set_focus set_focus;
-        struct yetty_core_event_resize resize;
-        struct yetty_core_event_poll poll;
-        struct yetty_core_event_timer timer;
-        struct yetty_core_event_context_menu_action ctx_menu;
-        struct yetty_core_event_card_mouse card_mouse;
-        struct yetty_core_event_card_scroll card_scroll;
-        struct yetty_core_event_card_key card_key;
-        struct yetty_core_event_card_char card_char;
-        struct yetty_core_event_close close;
-        struct yetty_core_event_split_pane split_pane;
-        struct yetty_core_event_command_key cmd_key;
-        struct yetty_core_event_set_cursor set_cursor;
-        struct yetty_core_event_card_repack card_repack;
-        struct yetty_core_event_set_frame_rate set_frame_rate;
+        struct yetty_ycore_event_key key;
+        struct yetty_ycore_event_char chr;
+        struct yetty_ycore_event_mouse mouse;
+        struct yetty_ycore_event_scroll scroll;
+        struct yetty_ycore_event_set_focus set_focus;
+        struct yetty_ycore_event_resize resize;
+        struct yetty_ycore_event_poll poll;
+        struct yetty_ycore_event_timer timer;
+        struct yetty_ycore_event_context_menu_action ctx_menu;
+        struct yetty_ycore_event_card_mouse card_mouse;
+        struct yetty_ycore_event_card_scroll card_scroll;
+        struct yetty_ycore_event_card_key card_key;
+        struct yetty_ycore_event_card_char card_char;
+        struct yetty_ycore_event_close close;
+        struct yetty_ycore_event_split_pane split_pane;
+        struct yetty_ycore_event_command_key cmd_key;
+        struct yetty_ycore_event_set_cursor set_cursor;
+        struct yetty_ycore_event_card_repack card_repack;
+        struct yetty_ycore_event_set_frame_rate set_frame_rate;
     };
     void *payload;  /* optional heap-allocated data (copy/paste text) */
 };
@@ -196,4 +196,4 @@ struct yetty_core_event {
 }
 #endif
 
-#endif /* YETTY_CORE_EVENT_H */
+#endif /* YETTY_YCOREEVENT_H */

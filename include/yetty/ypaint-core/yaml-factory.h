@@ -16,7 +16,7 @@ extern "C" {
 // Factory callback: reads from yaml_parser, writes to buffer
 // primitive_type_name: e.g., "circle", "box", "text"
 // yaml_parser: positioned to read the value (mapping content)
-typedef struct yetty_core_void_result
+typedef struct yetty_ycore_void_result
 (*yetty_ypaint_yaml_factory_fn)(struct yetty_ypaint_core_buffer *buffer,
                                  yaml_parser_t *yaml_parser,
                                  const char *primitive_type_name);

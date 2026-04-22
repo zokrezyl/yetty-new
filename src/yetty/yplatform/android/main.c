@@ -228,7 +228,7 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event)
     int32_t type;
     int32_t action;
     float x, y;
-    struct yetty_core_event ev = {0};
+    struct yetty_ycore_event ev = {0};
 
     if (!state->pipe)
         return 0;
@@ -290,7 +290,7 @@ static void handle_cmd(struct android_app *app, int32_t cmd)
         if (state->pipe && state->window) {
             int32_t w = ANativeWindow_getWidth(state->window);
             int32_t h = ANativeWindow_getHeight(state->window);
-            struct yetty_core_event ev = {0};
+            struct yetty_ycore_event ev = {0};
             ev.type = YETTY_EVENT_RESIZE;
             ev.resize.width = (float)w;
             ev.resize.height = (float)h;

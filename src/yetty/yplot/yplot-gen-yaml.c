@@ -39,7 +39,7 @@ static const uint32_t YPLOT_COLOR_PALETTE[8] = {
     0xFFF38181, 0xFFAA96DA, 0xFF72D6C9, 0xFFFCBF49,
 };
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 yplot_yaml_factory(struct yetty_ypaint_core_buffer *buffer,
                     yaml_parser_t *yaml_parser,
                     const char *primitive_type_name)
@@ -72,7 +72,7 @@ yplot_yaml_factory(struct yetty_ypaint_core_buffer *buffer,
 
     while (!done) {
         if (!yaml_parser_parse(yaml_parser, &event))
-            return YETTY_ERR(yetty_core_void, "yaml parse error");
+            return YETTY_ERR(yetty_ycore_void, "yaml parse error");
 
         switch (event.type) {
         case YAML_MAPPING_START_EVENT:
@@ -188,13 +188,13 @@ yplot_yaml_factory(struct yetty_ypaint_core_buffer *buffer,
     size_t required = yetty_yplot_serialized_size(&uniforms, &bufs);
     uint8_t *prim_buf = malloc(required);
     if (!prim_buf)
-        return YETTY_ERR(yetty_core_void, "malloc failed");
+        return YETTY_ERR(yetty_ycore_void, "malloc failed");
 
-    struct yetty_core_size_result ser_res =
+    struct yetty_ycore_size_result ser_res =
         yetty_yplot_serialize(&uniforms, &bufs, prim_buf, required);
     if (YETTY_IS_ERR(ser_res)) {
         free(prim_buf);
-        return YETTY_ERR(yetty_core_void, ser_res.error.msg);
+        return YETTY_ERR(yetty_ycore_void, ser_res.error.msg);
     }
 
     struct yetty_ypaint_id_result id_res =
@@ -202,7 +202,7 @@ yplot_yaml_factory(struct yetty_ypaint_core_buffer *buffer,
     free(prim_buf);
 
     if (id_res.error)
-        return YETTY_ERR(yetty_core_void, "add_prim failed");
+        return YETTY_ERR(yetty_ycore_void, "add_prim failed");
 
     return YETTY_OK_VOID();
 }

@@ -144,39 +144,39 @@ struct yetty_ipc_socket_result yetty_ipc_socket_accept(yetty_ipc_socket_t sock)
 	return YETTY_OK(yetty_ipc_socket, client);
 }
 
-struct yetty_core_size_result yetty_ipc_socket_send(yetty_ipc_socket_t sock,
+struct yetty_ycore_size_result yetty_ipc_socket_send(yetty_ipc_socket_t sock,
 						    const void *data,
 						    size_t len)
 {
 	DWORD written = 0;
 
 	if (!sock)
-		return YETTY_ERR(yetty_core_size, "invalid socket");
+		return YETTY_ERR(yetty_ycore_size, "invalid socket");
 
 	if (!WriteFile(sock->handle, data, (DWORD)len, &written, NULL))
-		return YETTY_ERR(yetty_core_size, "WriteFile failed");
+		return YETTY_ERR(yetty_ycore_size, "WriteFile failed");
 
-	return YETTY_OK(yetty_core_size, (size_t)written);
+	return YETTY_OK(yetty_ycore_size, (size_t)written);
 }
 
-struct yetty_core_size_result yetty_ipc_socket_recv(yetty_ipc_socket_t sock,
+struct yetty_ycore_size_result yetty_ipc_socket_recv(yetty_ipc_socket_t sock,
 						    void *buf, size_t max_len)
 {
 	DWORD bytes_read = 0;
 	DWORD available = 0;
 
 	if (!sock)
-		return YETTY_ERR(yetty_core_size, "invalid socket");
+		return YETTY_ERR(yetty_ycore_size, "invalid socket");
 
 	/* Check if data available (non-blocking) */
 	if (!PeekNamedPipe(sock->handle, NULL, 0, NULL, &available, NULL) ||
 	    available == 0)
-		return YETTY_OK(yetty_core_size, 0);
+		return YETTY_OK(yetty_ycore_size, 0);
 
 	if (!ReadFile(sock->handle, buf, (DWORD)max_len, &bytes_read, NULL))
-		return YETTY_ERR(yetty_core_size, "ReadFile failed");
+		return YETTY_ERR(yetty_ycore_size, "ReadFile failed");
 
-	return YETTY_OK(yetty_core_size, (size_t)bytes_read);
+	return YETTY_OK(yetty_ycore_size, (size_t)bytes_read);
 }
 
 int yetty_ipc_socket_would_block(void)

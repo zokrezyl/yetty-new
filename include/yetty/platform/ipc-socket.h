@@ -61,7 +61,7 @@ struct yetty_ipc_socket_result yetty_ipc_socket_accept(yetty_ipc_socket_t sock);
  * Send data on a connected socket.
  * Returns number of bytes sent, or 0 if would block.
  */
-struct yetty_core_size_result yetty_ipc_socket_send(yetty_ipc_socket_t sock,
+struct yetty_ycore_size_result yetty_ipc_socket_send(yetty_ipc_socket_t sock,
 						    const void *data,
 						    size_t len);
 
@@ -69,7 +69,7 @@ struct yetty_core_size_result yetty_ipc_socket_send(yetty_ipc_socket_t sock,
  * Receive data from a connected socket.
  * Returns number of bytes received, or 0 if would block or EOF.
  */
-struct yetty_core_size_result yetty_ipc_socket_recv(yetty_ipc_socket_t sock,
+struct yetty_ycore_size_result yetty_ipc_socket_recv(yetty_ipc_socket_t sock,
 						    void *buf, size_t max_len);
 
 /*

@@ -177,13 +177,13 @@ Window close → SHUTDOWN event → event_loop stops → caller destroys termina
 
 **Rule: Any C function that can error must return a Result type, even if the success value is void.**
 
-For void functions that can fail, use `struct yetty_core_void_result`:
+For void functions that can fail, use `struct yetty_ycore_void_result`:
 
 ```c
-struct yetty_core_void_result yetty_thing_init(struct yetty_thing *thing)
+struct yetty_ycore_void_result yetty_thing_init(struct yetty_thing *thing)
 {
     if (!thing)
-        return YETTY_ERR(yetty_core_void, "thing is NULL");
+        return YETTY_ERR(yetty_ycore_void, "thing is NULL");
 
     /* ... initialization ... */
 

@@ -41,7 +41,7 @@ struct render_thread_args {
 static int render_thread_func(void *arg)
 {
     struct render_thread_args *args = arg;
-    struct yetty_core_void_result res = yetty_run(args->yetty);
+    struct yetty_ycore_void_result res = yetty_run(args->yetty);
 
     args->result = YETTY_IS_OK(res) ? 0 : 1;
     *(args->running) = 0;
@@ -206,7 +206,7 @@ int main(int argc, char **argv)
 
     /* Initial resize event */
     yetty_platform_get_framebuffer_size(window, &fb_width, &fb_height);
-    struct yetty_core_event event = {
+    struct yetty_ycore_event event = {
         .type = YETTY_EVENT_RESIZE,
         .resize = {
             .width = (float)fb_width,

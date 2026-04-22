@@ -30,11 +30,11 @@ void yetty_ycore_buffer_clear(struct yetty_ycore_buffer *buf)
 		buf->size = 0;
 }
 
-struct yetty_core_void_result yetty_ycore_buffer_append(
+struct yetty_ycore_void_result yetty_ycore_buffer_append(
     struct yetty_ycore_buffer *buf, const struct yetty_ycore_buffer *src)
 {
 	if (!buf)
-		return YETTY_ERR(yetty_core_void, "buf is NULL");
+		return YETTY_ERR(yetty_ycore_void, "buf is NULL");
 	if (!src || src->size == 0)
 		return YETTY_OK_VOID();
 
@@ -45,7 +45,7 @@ struct yetty_core_void_result yetty_ycore_buffer_append(
 			new_cap *= 2;
 		uint8_t *new_data = realloc(buf->data, new_cap);
 		if (!new_data)
-			return YETTY_ERR(yetty_core_void, "realloc failed");
+			return YETTY_ERR(yetty_ycore_void, "realloc failed");
 		buf->data = new_data;
 		buf->capacity = new_cap;
 	}

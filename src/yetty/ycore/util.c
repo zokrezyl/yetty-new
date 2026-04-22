@@ -24,7 +24,7 @@ static const signed char b64_table[256] = {
     -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
 };
 
-size_t yetty_core_base64_decode(const char *in, size_t in_len, char *out, size_t out_cap)
+size_t yetty_ycore_base64_decode(const char *in, size_t in_len, char *out, size_t out_cap)
 {
     size_t out_len = 0;
     int val = 0, valb = -8;
@@ -43,7 +43,7 @@ size_t yetty_core_base64_decode(const char *in, size_t in_len, char *out, size_t
     return out_len;
 }
 
-struct yetty_ycore_buffer_result yetty_core_read_file(const char *path)
+struct yetty_ycore_buffer_result yetty_ycore_read_file(const char *path)
 {
     FILE *file;
     long len;

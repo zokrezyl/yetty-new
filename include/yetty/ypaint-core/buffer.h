@@ -62,7 +62,7 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_nex
  *===========================================================================*/
 
 /* Add font TTF data to buffer. Returns fontId for use in text spans. */
-struct yetty_core_int_result
+struct yetty_ycore_int_result
 yetty_ypaint_core_buffer_add_font(struct yetty_ypaint_core_buffer *buf,
                                   const struct yetty_ycore_buffer *ttf_data,
                                   const char *name);
@@ -77,7 +77,7 @@ const struct yetty_font_blob *yetty_ypaint_core_buffer_get_font(
  * Text span storage
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_core_buffer_add_text(struct yetty_ypaint_core_buffer *buf,
                                   float x, float y,
                                   const struct yetty_ycore_buffer *text,

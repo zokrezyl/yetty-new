@@ -52,7 +52,7 @@ static const char *config_get_string(const struct yetty_config *self, const char
 static int config_get_int(const struct yetty_config *self, const char *path, int default_value);
 static int config_get_bool(const struct yetty_config *self, const char *path, int default_value);
 static int config_has(const struct yetty_config *self, const char *path);
-static struct yetty_core_void_result config_set_string(struct yetty_config *self, const char *path, const char *value);
+static struct yetty_ycore_void_result config_set_string(struct yetty_config *self, const char *path, const char *value);
 static int config_use_damage_tracking(const struct yetty_config *self);
 static int config_show_fps(const struct yetty_config *self);
 static int config_debug_damage_rects(const struct yetty_config *self);
@@ -385,14 +385,14 @@ static int config_has(const struct yetty_config *self, const char *path)
     return node_find_child(parent, key) != NULL;
 }
 
-static struct yetty_core_void_result config_set_string(struct yetty_config *self, const char *path, const char *value)
+static struct yetty_ycore_void_result config_set_string(struct yetty_config *self, const char *path, const char *value)
 {
     struct config_impl *impl = container_of(self, struct config_impl, base);
     char key[MAX_KEY_LEN] = {0};
 
     struct config_node *parent = navigate_or_create(impl->root, path, key);
     if (!parent)
-        return YETTY_ERR(yetty_core_void, "failed to create config path");
+        return YETTY_ERR(yetty_ycore_void, "failed to create config path");
 
     node_set_value(parent, key, value);
     return YETTY_OK_VOID();
@@ -497,14 +497,14 @@ static int subnode_has(const struct yetty_config *self, const char *path)
     return node_find_child(parent, key) != NULL;
 }
 
-static struct yetty_core_void_result subnode_set_string(struct yetty_config *self,
+static struct yetty_ycore_void_result subnode_set_string(struct yetty_config *self,
                                                         const char *path,
                                                         const char *value)
 {
     (void)self;
     (void)path;
     (void)value;
-    return YETTY_ERR(yetty_core_void, "cannot set on subnode");
+    return YETTY_ERR(yetty_ycore_void, "cannot set on subnode");
 }
 
 static struct yetty_config *subnode_get_node(const struct yetty_config *self,

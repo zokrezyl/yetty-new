@@ -33,10 +33,10 @@ struct unix_pty {
 
 /* Forward declarations */
 static void unix_pty_destroy(struct yetty_platform_pty *self);
-static struct yetty_core_size_result unix_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len);
-static struct yetty_core_size_result unix_pty_write(struct yetty_platform_pty *self, const char *data, size_t len);
-static struct yetty_core_void_result unix_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
-static struct yetty_core_void_result unix_pty_stop(struct yetty_platform_pty *self);
+static struct yetty_ycore_size_result unix_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len);
+static struct yetty_ycore_size_result unix_pty_write(struct yetty_platform_pty *self, const char *data, size_t len);
+static struct yetty_ycore_void_result unix_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
+static struct yetty_ycore_void_result unix_pty_stop(struct yetty_platform_pty *self);
 static struct yetty_platform_pty_pipe_source *unix_pty_pipe_source(struct yetty_platform_pty *self);
 
 /* Ops table */
@@ -76,40 +76,40 @@ static void unix_pty_destroy(struct yetty_platform_pty *self)
     free(pty);
 }
 
-static struct yetty_core_size_result unix_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len)
+static struct yetty_ycore_size_result unix_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len)
 {
     struct unix_pty *pty = container_of(self, struct unix_pty, base);
     ssize_t n;
 
     if (pty->pty_master < 0)
-        return YETTY_ERR(yetty_core_size, "pty master not open");
+        return YETTY_ERR(yetty_ycore_size, "pty master not open");
 
     n = read(pty->pty_master, buf, max_len);
     if (n < 0)
-        return YETTY_ERR(yetty_core_size, "read from pty failed");
+        return YETTY_ERR(yetty_ycore_size, "read from pty failed");
 
-    return YETTY_OK(yetty_core_size, (size_t)n);
+    return YETTY_OK(yetty_ycore_size, (size_t)n);
 }
 
-static struct yetty_core_size_result unix_pty_write(struct yetty_platform_pty *self, const char *data, size_t len)
+static struct yetty_ycore_size_result unix_pty_write(struct yetty_platform_pty *self, const char *data, size_t len)
 {
     struct unix_pty *pty = container_of(self, struct unix_pty, base);
     ssize_t written;
 
     if (pty->pty_master < 0)
-        return YETTY_ERR(yetty_core_size, "pty master not open");
+        return YETTY_ERR(yetty_ycore_size, "pty master not open");
 
     if (len == 0)
-        return YETTY_OK(yetty_core_size, 0);
+        return YETTY_OK(yetty_ycore_size, 0);
 
     written = write(pty->pty_master, data, len);
     if (written < 0)
-        return YETTY_ERR(yetty_core_size, "write to pty failed");
+        return YETTY_ERR(yetty_ycore_size, "write to pty failed");
 
-    return YETTY_OK(yetty_core_size, (size_t)written);
+    return YETTY_OK(yetty_ycore_size, (size_t)written);
 }
 
-static struct yetty_core_void_result unix_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows)
+static struct yetty_ycore_void_result unix_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows)
 {
     struct unix_pty *pty = container_of(self, struct unix_pty, base);
     struct winsize ws;
@@ -118,7 +118,7 @@ static struct yetty_core_void_result unix_pty_resize(struct yetty_platform_pty *
     pty->rows = rows;
 
     if (pty->pty_master < 0)
-        return YETTY_ERR(yetty_core_void, "pty master not open");
+        return YETTY_ERR(yetty_ycore_void, "pty master not open");
 
     ws.ws_row = (unsigned short)rows;
     ws.ws_col = (unsigned short)cols;
@@ -126,12 +126,12 @@ static struct yetty_core_void_result unix_pty_resize(struct yetty_platform_pty *
     ws.ws_ypixel = 0;
 
     if (ioctl(pty->pty_master, TIOCSWINSZ, &ws) < 0)
-        return YETTY_ERR(yetty_core_void, "ioctl TIOCSWINSZ failed");
+        return YETTY_ERR(yetty_ycore_void, "ioctl TIOCSWINSZ failed");
 
     return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result unix_pty_stop(struct yetty_platform_pty *self)
+static struct yetty_ycore_void_result unix_pty_stop(struct yetty_platform_pty *self)
 {
     struct unix_pty *pty = container_of(self, struct unix_pty, base);
     int status;

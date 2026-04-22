@@ -28,7 +28,7 @@ struct webasm_pty {
 };
 
 /* Initialize the PTY */
-struct yetty_core_void_result webasm_pty_init(struct webasm_pty *pty,
+struct yetty_ycore_void_result webasm_pty_init(struct webasm_pty *pty,
 					      struct yetty_config *config);
 
 #ifdef __cplusplus

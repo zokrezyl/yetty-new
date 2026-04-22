@@ -67,17 +67,17 @@ void yetty_rpc_write_buffer_init(struct yetty_rpc_write_buffer *buf,
 void yetty_rpc_write_buffer_reset(struct yetty_rpc_write_buffer *buf);
 
 /* Serialize success response: [1, msgid, nil, result] */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_write_response_ok(struct yetty_rpc_write_buffer *buf, uint32_t msgid,
 			    const uint8_t *result, size_t result_len);
 
 /* Serialize error response: [1, msgid, error_msg, nil] */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_write_response_error(struct yetty_rpc_write_buffer *buf,
 			       uint32_t msgid, const char *error_msg);
 
 /* Serialize bool result (common case) */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_write_response_bool(struct yetty_rpc_write_buffer *buf,
 			      uint32_t msgid, int value);
 

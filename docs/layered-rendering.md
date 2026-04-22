@@ -44,12 +44,12 @@ terminal.c (simple orchestrator)
 Abstraction for render output. Owned by blender.
 
 ```c
-struct yetty_render_target_ops {
-    void (*destroy)(struct yetty_render_target *self);
-    WGPUTextureView (*acquire)(struct yetty_render_target *self);
-    void (*present)(struct yetty_render_target *self);
-    uint32_t (*get_width)(const struct yetty_render_target *self);
-    uint32_t (*get_height)(const struct yetty_render_target *self);
+struct yetty_yrender_target_ops {
+    void (*destroy)(struct yetty_yrender_target *self);
+    WGPUTextureView (*acquire)(struct yetty_yrender_target *self);
+    void (*present)(struct yetty_yrender_target *self);
+    uint32_t (*get_width)(const struct yetty_yrender_target *self);
+    uint32_t (*get_height)(const struct yetty_yrender_target *self);
 };
 ```
 
@@ -63,11 +63,11 @@ Implementations:
 Opaque handle for a layer rendered to texture.
 
 ```c
-struct yetty_render_rendered_layer_ops {
-    void (*release)(struct yetty_render_rendered_layer *self);
-    WGPUTextureView (*get_view)(const struct yetty_render_rendered_layer *self);
-    uint32_t (*get_width)(const struct yetty_render_rendered_layer *self);
-    uint32_t (*get_height)(const struct yetty_render_rendered_layer *self);
+struct yetty_yrender_rendered_layer_ops {
+    void (*release)(struct yetty_yrender_rendered_layer *self);
+    WGPUTextureView (*get_view)(const struct yetty_yrender_rendered_layer *self);
+    uint32_t (*get_width)(const struct yetty_yrender_rendered_layer *self);
+    uint32_t (*get_height)(const struct yetty_yrender_rendered_layer *self);
 };
 ```
 
@@ -76,19 +76,19 @@ struct yetty_render_rendered_layer_ops {
 Renders a terminal_layer to texture. **Created with a layer reference (1:1 coupling).**
 
 ```c
-struct yetty_render_layer_renderer_ops {
-    void (*destroy)(struct yetty_render_layer_renderer *self);
+struct yetty_yrender_layer_renderer_ops {
+    void (*destroy)(struct yetty_yrender_layer_renderer *self);
 
-    struct yetty_render_rendered_layer_result (*render)(
-        struct yetty_render_layer_renderer *self,
+    struct yetty_yrender_rendered_layer_result (*render)(
+        struct yetty_yrender_layer_renderer *self,
         struct yetty_yterm_terminal_layer *layer);
 
-    void (*resize)(struct yetty_render_layer_renderer *self,
+    void (*resize)(struct yetty_yrender_layer_renderer *self,
                    uint32_t width, uint32_t height);
 };
 
 /* Create renderer with layer reference */
-struct yetty_render_layer_renderer_result yetty_render_layer_renderer_create(
+struct yetty_yrender_layer_renderer_result yetty_yrender_layer_renderer_create(
     WGPUDevice device,
     WGPUQueue queue,
     WGPUTextureFormat format,
@@ -111,17 +111,17 @@ struct yetty_render_layer_renderer_result yetty_render_layer_renderer_create(
 Composites layers to target. **Owns the render target.**
 
 ```c
-struct yetty_render_blender_ops {
-    void (*destroy)(struct yetty_render_blender *self);
+struct yetty_yrender_blender_ops {
+    void (*destroy)(struct yetty_yrender_blender *self);
 
-    struct yetty_core_void_result (*blend)(
-        struct yetty_render_blender *self,
-        struct yetty_render_rendered_layer **layers,
+    struct yetty_ycore_void_result (*blend)(
+        struct yetty_yrender_blender *self,
+        struct yetty_yrender_rendered_layer **layers,
         size_t layer_count);
 
     void (*set_target)(
-        struct yetty_render_blender *self,
-        struct yetty_render_target *target);
+        struct yetty_yrender_blender *self,
+        struct yetty_yrender_target *target);
 };
 ```
 
@@ -138,22 +138,22 @@ Target ownership:
 struct yetty_yterm_terminal {
     /* layers and their renderers (1:1) */
     struct yetty_yterm_terminal_layer *layers[MAX_LAYERS];
-    struct yetty_render_layer_renderer *renderers[MAX_LAYERS];
+    struct yetty_yrender_layer_renderer *renderers[MAX_LAYERS];
     size_t layer_count;
 
     /* compositor */
-    struct yetty_render_blender *blender;
+    struct yetty_yrender_blender *blender;
 };
 
-static struct yetty_core_void_result terminal_render_frame(
+static struct yetty_ycore_void_result terminal_render_frame(
     struct yetty_yterm_terminal *terminal)
 {
-    struct yetty_render_rendered_layer *rendered[MAX_LAYERS];
+    struct yetty_yrender_rendered_layer *rendered[MAX_LAYERS];
     size_t rendered_count = 0;
 
     /* Render each layer to texture (skips if not dirty) */
     for (size_t i = 0; i < terminal->layer_count; i++) {
-        struct yetty_render_rendered_layer_result res =
+        struct yetty_yrender_rendered_layer_result res =
             terminal->renderers[i]->ops->render(
                 terminal->renderers[i],
                 terminal->layers[i]);
@@ -262,8 +262,8 @@ fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 
 ```c
 /* Switch from screen to VNC */
-struct yetty_render_target *vnc_target =
-    yetty_render_target_vnc_create(vnc_context);
+struct yetty_yrender_target *vnc_target =
+    yetty_yrender_target_vnc_create(vnc_context);
 
 terminal->blender->ops->set_target(terminal->blender, vnc_target);
 /* Old target destroyed, VNC target now owned by blender */

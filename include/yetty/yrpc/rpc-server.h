@@ -11,7 +11,7 @@ extern "C" {
 #endif
 
 struct yetty_rpc_server;
-struct yetty_core_event_loop;
+struct yetty_ycore_event_loop;
 
 /* Result types */
 YETTY_RESULT_DECLARE(yetty_rpc_server_ptr, struct yetty_rpc_server *);
@@ -60,7 +60,7 @@ typedef struct yetty_rpc_handler_result (*yetty_rpc_handler_fn)(
  * Registers built-in handlers for EventLoop channel automatically.
  */
 struct yetty_rpc_server_ptr_result
-yetty_rpc_server_create(struct yetty_core_event_loop *event_loop);
+yetty_rpc_server_create(struct yetty_ycore_event_loop *event_loop);
 
 /*
  * Destroy RPC server.
@@ -73,7 +73,7 @@ void yetty_rpc_server_destroy(struct yetty_rpc_server *server);
  * Host is the bind address (e.g., "127.0.0.1" or "0.0.0.0").
  * Port is the TCP port number.
  */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_server_start(struct yetty_rpc_server *server,
 		       const char *host, int port);
 
@@ -87,7 +87,7 @@ int yetty_rpc_server_get_port(const struct yetty_rpc_server *server);
  * Stop RPC server.
  * Closes listening socket and all client connections.
  */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_server_stop(struct yetty_rpc_server *server);
 
 /*
@@ -100,7 +100,7 @@ int yetty_rpc_server_is_running(const struct yetty_rpc_server *server);
  * Only one handler per (channel, method) pair.
  * Returns error if handler already registered.
  */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_server_register_handler(struct yetty_rpc_server *server,
 				  uint32_t channel, const char *method,
 				  yetty_rpc_handler_fn handler, void *userdata);
@@ -108,7 +108,7 @@ yetty_rpc_server_register_handler(struct yetty_rpc_server *server,
 /*
  * Unregister a handler.
  */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_server_unregister_handler(struct yetty_rpc_server *server,
 				    uint32_t channel, const char *method);
 

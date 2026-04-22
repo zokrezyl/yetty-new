@@ -52,7 +52,7 @@ struct yetty_ymsdf_gen_config {
  * API
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ymsdf_gen_cpu_generate(const struct yetty_ymsdf_gen_config *config);
 
 #ifdef __cplusplus

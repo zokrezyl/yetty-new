@@ -12,13 +12,13 @@ extern "C" {
 struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
     uint32_t cols, uint32_t rows,
     const struct yetty_context *context,
-    yetty_term_pty_write_fn pty_write_fn,
+    yetty_yterm_pty_write_fn pty_write_fn,
     void *pty_write_userdata,
-    yetty_term_request_render_fn request_render_fn,
+    yetty_yterm_request_render_fn request_render_fn,
     void *request_render_userdata,
-    yetty_term_scroll_fn scroll_fn,
+    yetty_yterm_scroll_fn scroll_fn,
     void *scroll_userdata,
-    yetty_term_cursor_fn cursor_fn,
+    yetty_yterm_cursor_fn cursor_fn,
     void *cursor_userdata);
 
 #ifdef __cplusplus

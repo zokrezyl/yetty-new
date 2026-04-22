@@ -12,7 +12,7 @@ Generates a type-specific result struct containing a tagged union of value or er
         int ok; \
         union { \
             value_type value; \
-            struct yetty_core_error error; \
+            struct yetty_ycore_error error; \
         }; \
     }
 ```
@@ -37,9 +37,9 @@ YETTY_RESULT_DECLARE(yetty_yterm_terminal_layer, struct yetty_yterm_terminal_lay
 Defined in `include/yetty/core/result.h`:
 
 ```c
-YETTY_RESULT_DECLARE(yetty_core_void, int);   /* void result — success/failure only */
-YETTY_RESULT_DECLARE(yetty_core_int, int);
-YETTY_RESULT_DECLARE(yetty_core_size, size_t);
+YETTY_RESULT_DECLARE(yetty_ycore_void, int);   /* void result — success/failure only */
+YETTY_RESULT_DECLARE(yetty_ycore_int, int);
+YETTY_RESULT_DECLARE(yetty_ycore_size, size_t);
 ```
 
 ## Creating Results
@@ -61,7 +61,7 @@ return YETTY_ERR(yetty_yterm_terminal, "failed to allocate");
 struct yetty_yterm_terminal_result res = yetty_yterm_terminal_create(80, 24);
 if (YETTY_IS_ERR(res)) {
     yerror("terminal: %s", res.error.msg);
-    return YETTY_ERR(yetty_core_void, res.error.msg);
+    return YETTY_ERR(yetty_ycore_void, res.error.msg);
 }
 struct yetty_yterm_terminal *terminal = res.value;
 ```

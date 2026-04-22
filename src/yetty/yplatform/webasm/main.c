@@ -129,7 +129,7 @@ static int wheel_mods_to_glfw(const EmscriptenWheelEvent *e)
 static EM_BOOL on_key_down(int event_type, const EmscriptenKeyboardEvent *e, void *user_data)
 {
 	struct yetty_platform_input_pipe *pipe = user_data;
-	struct yetty_core_event event = {0};
+	struct yetty_ycore_event event = {0};
 	int key, mods;
 
 	(void)event_type;
@@ -176,7 +176,7 @@ static EM_BOOL on_key_down(int event_type, const EmscriptenKeyboardEvent *e, voi
 static EM_BOOL on_key_up(int event_type, const EmscriptenKeyboardEvent *e, void *user_data)
 {
 	struct yetty_platform_input_pipe *pipe = user_data;
-	struct yetty_core_event event = {0};
+	struct yetty_ycore_event event = {0};
 	int key, mods;
 
 	(void)event_type;
@@ -199,7 +199,7 @@ static EM_BOOL on_key_up(int event_type, const EmscriptenKeyboardEvent *e, void 
 static EM_BOOL on_mouse_down(int event_type, const EmscriptenMouseEvent *e, void *user_data)
 {
 	struct yetty_platform_input_pipe *pipe = user_data;
-	struct yetty_core_event event = {0};
+	struct yetty_ycore_event event = {0};
 
 	(void)event_type;
 
@@ -219,7 +219,7 @@ static EM_BOOL on_mouse_down(int event_type, const EmscriptenMouseEvent *e, void
 static EM_BOOL on_mouse_up(int event_type, const EmscriptenMouseEvent *e, void *user_data)
 {
 	struct yetty_platform_input_pipe *pipe = user_data;
-	struct yetty_core_event event = {0};
+	struct yetty_ycore_event event = {0};
 
 	(void)event_type;
 
@@ -239,7 +239,7 @@ static EM_BOOL on_mouse_up(int event_type, const EmscriptenMouseEvent *e, void *
 static EM_BOOL on_mouse_move(int event_type, const EmscriptenMouseEvent *e, void *user_data)
 {
 	struct yetty_platform_input_pipe *pipe = user_data;
-	struct yetty_core_event event = {0};
+	struct yetty_ycore_event event = {0};
 
 	(void)event_type;
 
@@ -258,7 +258,7 @@ static EM_BOOL on_mouse_move(int event_type, const EmscriptenMouseEvent *e, void
 static EM_BOOL on_wheel(int event_type, const EmscriptenWheelEvent *e, void *user_data)
 {
 	struct yetty_platform_input_pipe *pipe = user_data;
-	struct yetty_core_event event = {0};
+	struct yetty_ycore_event event = {0};
 	float dx, dy;
 
 	(void)event_type;
@@ -283,7 +283,7 @@ static EM_BOOL on_wheel(int event_type, const EmscriptenWheelEvent *e, void *use
 static EM_BOOL on_resize(int event_type, const EmscriptenUiEvent *e, void *user_data)
 {
 	struct yetty_platform_input_pipe *pipe = user_data;
-	struct yetty_core_event event = {0};
+	struct yetty_ycore_event event = {0};
 	int width, height;
 
 	(void)event_type;
@@ -339,9 +339,9 @@ int main(int argc, char **argv)
 	struct yetty_app_context app_context;
 	struct yetty_yetty_result yetty_result;
 	struct yetty_yetty *yetty;
-	struct yetty_core_event event = {0};
+	struct yetty_ycore_event event = {0};
 	int fb_width, fb_height;
-	struct yetty_core_void_result run_result;
+	struct yetty_ycore_void_result run_result;
 
 	ydebug("main: WebASM starting");
 

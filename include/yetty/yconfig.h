@@ -38,7 +38,7 @@ struct yetty_config_ops {
     int (*has)(const struct yetty_config *self, const char *path);
 
     /* Set string value */
-    struct yetty_core_void_result (*set_string)(struct yetty_config *self,
+    struct yetty_ycore_void_result (*set_string)(struct yetty_config *self,
                                                  const char *path, const char *value);
 
     /* Get sub-config at path (returns NULL if not found, no ownership transfer) */

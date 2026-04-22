@@ -21,12 +21,12 @@
 
 /* Forward declarations for view ops */
 static void terminal_view_destroy(struct yetty_yui_view *view);
-static struct yetty_core_void_result terminal_view_render(
-    struct yetty_yui_view *view, struct yetty_render_target *render_target);
+static struct yetty_ycore_void_result terminal_view_render(
+    struct yetty_yui_view *view, struct yetty_yrender_target *render_target);
 static void terminal_view_set_bounds(struct yetty_yui_view *view,
                                      struct yetty_yui_rect bounds);
-static struct yetty_core_int_result terminal_view_on_event(
-    struct yetty_yui_view *view, const struct yetty_core_event *event);
+static struct yetty_ycore_int_result terminal_view_on_event(
+    struct yetty_yui_view *view, const struct yetty_ycore_event *event);
 
 static const struct yetty_yui_view_ops terminal_view_ops = {
     .destroy = terminal_view_destroy,
@@ -37,24 +37,24 @@ static const struct yetty_yui_view_ops terminal_view_ops = {
 
 struct yetty_yterm_terminal {
     struct yetty_yui_view view;  /* MUST be first - allows cast to view */
-    struct yetty_core_event_listener listener;
+    struct yetty_ycore_event_listener listener;
     struct yetty_yterm_terminal_context context;
     uint32_t cols;
     uint32_t rows;
     struct yetty_yterm_terminal_layer *layers[YETTY_YTERM_TERMINAL_MAX_LAYERS];
     size_t layer_count;
-    yetty_core_pipe_id pty_pipe_id;
+    yetty_ycore_pipe_id pty_pipe_id;
     /* Render targets - one per layer for render_layer */
-    struct yetty_render_target *layer_targets[YETTY_YTERM_TERMINAL_MAX_LAYERS];
+    struct yetty_yrender_target *layer_targets[YETTY_YTERM_TERMINAL_MAX_LAYERS];
     int shutting_down;
-    struct yetty_term_pty_reader *pty_reader;
+    struct yetty_yterm_pty_reader *pty_reader;
 };
 
 /* Forward declarations */
 static void terminal_read_pty(struct yetty_yterm_terminal *terminal);
-static struct yetty_core_void_result terminal_render_frame(
+static struct yetty_ycore_void_result terminal_render_frame(
     struct yetty_yterm_terminal *terminal,
-    struct yetty_render_target *target);
+    struct yetty_yrender_target *target);
 
 /* PTY pipe alloc callback — provides buffer for uv_pipe_t reads */
 static void terminal_pty_pipe_alloc(void *ctx, size_t suggested_size,
@@ -73,7 +73,7 @@ static void terminal_pty_pipe_read(void *ctx, const char *buf, long nread)
     struct yetty_yterm_terminal *terminal = ctx;
 
     if (nread > 0 && terminal->pty_reader) {
-        yetty_term_pty_reader_feed(terminal->pty_reader, buf, (size_t)nread);
+        yetty_yterm_pty_reader_feed(terminal->pty_reader, buf, (size_t)nread);
         if (terminal->layer_count > 0) {
             struct yetty_yterm_terminal_layer *layer = terminal->layers[0];
             if (layer && layer->dirty) {
@@ -107,7 +107,7 @@ static void terminal_request_render_callback(void *userdata)
 }
 
 /* Scroll callback - propagate scroll from source layer to all other layers */
-static struct yetty_core_void_result terminal_scroll_callback(
+static struct yetty_ycore_void_result terminal_scroll_callback(
     struct yetty_yterm_terminal_layer *source, int lines, void *userdata)
 {
     struct yetty_yterm_terminal *terminal = userdata;
@@ -121,7 +121,7 @@ static struct yetty_core_void_result terminal_scroll_callback(
         if (layer->ops && layer->ops->scroll) {
             ydebug("terminal_scroll_callback: calling layer[%zu]=%p scroll(%d)", i, (void*)layer, lines);
             layer->in_external_scroll = 1;
-            struct yetty_core_void_result res = layer->ops->scroll(layer, lines);
+            struct yetty_ycore_void_result res = layer->ops->scroll(layer, lines);
             layer->in_external_scroll = 0;
             if (YETTY_IS_ERR(res)) {
                 yerror("terminal_scroll_callback: layer[%zu] scroll failed: %s", i, res.error.msg);
@@ -159,9 +159,9 @@ static void terminal_cursor_callback(struct yetty_yterm_terminal_layer *source,
 }
 
 /* Event handler - only for PTY poll events registered directly with event loop */
-static struct yetty_core_int_result terminal_event_handler(
-    struct yetty_core_event_listener *listener,
-    const struct yetty_core_event *event)
+static struct yetty_ycore_int_result terminal_event_handler(
+    struct yetty_ycore_event_listener *listener,
+    const struct yetty_ycore_event *event)
 {
     struct yetty_yterm_terminal *terminal =
         container_of(listener, struct yetty_yterm_terminal, listener);
@@ -170,13 +170,13 @@ static struct yetty_core_int_result terminal_event_handler(
     (void)terminal;
     (void)event;
 
-    return YETTY_OK(yetty_core_int, 0);
+    return YETTY_OK(yetty_ycore_int, 0);
 }
 
 /* Render a frame using layered rendering */
-static struct yetty_core_void_result terminal_render_frame(
+static struct yetty_ycore_void_result terminal_render_frame(
     struct yetty_yterm_terminal *terminal,
-    struct yetty_render_target *target)
+    struct yetty_yrender_target *target)
 {
     if (terminal->shutting_down) {
         ydebug("terminal_render_frame: shutting down, skipping render");
@@ -185,7 +185,7 @@ static struct yetty_core_void_result terminal_render_frame(
 
     if (!target) {
         yerror("terminal_render_frame: no target provided");
-        return YETTY_ERR(yetty_core_void, "no target provided");
+        return YETTY_ERR(yetty_ycore_void, "no target provided");
     }
 
     ydebug("terminal_render_frame: starting");
@@ -193,12 +193,12 @@ static struct yetty_core_void_result terminal_render_frame(
     /* Render each layer to its target */
     for (size_t i = 0; i < terminal->layer_count; i++) {
         struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
-        struct yetty_render_target *layer_target = terminal->layer_targets[i];
+        struct yetty_yrender_target *layer_target = terminal->layer_targets[i];
 
         if (!layer || !layer_target)
             continue;
 
-        struct yetty_core_void_result res =
+        struct yetty_ycore_void_result res =
             layer_target->ops->render_layer(layer_target, layer);
 
         if (!YETTY_IS_OK(res)) {
@@ -209,7 +209,7 @@ static struct yetty_core_void_result terminal_render_frame(
     }
 
     /* Blend all layer targets into the provided target (big_target from yetty) */
-    struct yetty_core_void_result res =
+    struct yetty_ycore_void_result res =
         target->ops->blend(target, terminal->layer_targets, terminal->layer_count);
 
     if (!YETTY_IS_OK(res)) {
@@ -227,7 +227,7 @@ static void terminal_read_pty(struct yetty_yterm_terminal *terminal)
     if (!terminal->pty_reader)
         return;
 
-    int bytes_read = yetty_term_pty_reader_read(terminal->pty_reader);
+    int bytes_read = yetty_yterm_pty_reader_read(terminal->pty_reader);
     if (bytes_read > 0 && terminal->layer_count > 0) {
         struct yetty_yterm_terminal_layer *layer = terminal->layers[0];
         if (layer && layer->dirty) {
@@ -281,8 +281,8 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
             ydebug("terminal_create: PTY created at %p", (void *)terminal->context.pty);
 
             /* Create PTY reader */
-            struct yetty_term_pty_reader_result reader_res =
-                yetty_term_pty_reader_create(terminal->context.pty);
+            struct yetty_yterm_pty_reader_result reader_res =
+                yetty_yterm_pty_reader_create(terminal->context.pty);
             if (YETTY_IS_OK(reader_res)) {
                 terminal->pty_reader = reader_res.value;
                 ydebug("terminal_create: pty_reader created");
@@ -292,7 +292,7 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
             struct yetty_platform_pty_pipe_source *pipe_source =
                 terminal->context.pty->ops->pipe_source(terminal->context.pty);
             if (pipe_source && terminal->pty_reader) {
-                struct yetty_core_pipe_id_result pipe_res =
+                struct yetty_ycore_pipe_id_result pipe_res =
                     terminal->context.yetty_context.event_loop->ops->register_pty_pipe(
                         terminal->context.yetty_context.event_loop, pipe_source,
                         terminal_pty_pipe_alloc, terminal_pty_pipe_read, terminal);
@@ -315,7 +315,7 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
         terminal_cursor_callback, terminal);
     if (!YETTY_IS_OK(text_layer_res)) {
         yerror("terminal_create: failed to create text layer: %s", text_layer_res.error.msg);
-        yetty_term_pty_reader_destroy(terminal->pty_reader);
+        yetty_yterm_pty_reader_destroy(terminal->pty_reader);
         if (terminal->context.pty)
             terminal->context.pty->ops->destroy(terminal->context.pty);
         free(terminal);
@@ -326,14 +326,14 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
 
     /* Register text layer as default sink for pty_reader */
     if (terminal->pty_reader) {
-        yetty_term_pty_reader_register_default_sink(terminal->pty_reader, text_layer_res.value);
+        yetty_yterm_pty_reader_register_default_sink(terminal->pty_reader, text_layer_res.value);
         ydebug("terminal_create: text_layer registered as default sink");
     }
 
     /* Create ypaint scrolling layer (overlay on top of text) */
     {
         struct yetty_yterm_terminal_layer *text_layer = text_layer_res.value;
-        struct yetty_yterm_terminal_layer_result ypaint_res = yetty_term_ypaint_layer_create(
+        struct yetty_yterm_terminal_layer_result ypaint_res = yetty_yterm_ypaint_layer_create(
             cols, rows,
             text_layer->cell_size.width, text_layer->cell_size.height,
             1,  /* scrolling_mode = true */
@@ -347,7 +347,7 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
 
             /* Register ypaint layer for OSC 666674 */
             if (terminal->pty_reader) {
-                yetty_term_pty_reader_register_osc_sink(
+                yetty_yterm_pty_reader_register_osc_sink(
                     terminal->pty_reader, YETTY_OSC_YPAINT_SCROLL, ypaint_res.value);
                 ydebug("terminal_create: ypaint layer registered for OSC 666674");
             }
@@ -359,13 +359,13 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
 
     /* Create render targets for each layer */
     const struct yetty_app_gpu_context *app_gpu = &yetty_context->gpu_context.app_gpu_context;
-    struct yetty_render_viewport layer_vp = {
+    struct yetty_yrender_viewport layer_vp = {
         .x = 0, .y = 0,
         .w = (float)app_gpu->surface_width,
         .h = (float)app_gpu->surface_height
     };
     for (size_t i = 0; i < terminal->layer_count; i++) {
-        struct yetty_render_target_ptr_result target_res = yetty_render_target_texture_create(
+        struct yetty_yrender_target_ptr_result target_res = yetty_yrender_target_texture_create(
             yetty_context->gpu_context.device,
             yetty_context->gpu_context.queue,
             yetty_context->gpu_context.surface_format,
@@ -430,7 +430,7 @@ void yetty_yterm_terminal_destroy(struct yetty_yterm_terminal *terminal)
     /* Destroy PTY reader */
     if (terminal->pty_reader) {
         ydebug("terminal_destroy: destroying pty_reader");
-        yetty_term_pty_reader_destroy(terminal->pty_reader);
+        yetty_yterm_pty_reader_destroy(terminal->pty_reader);
     }
 
     ydebug("terminal_destroy: freeing terminal struct");
@@ -546,8 +546,8 @@ static void terminal_view_destroy(struct yetty_yui_view *view)
     yetty_yterm_terminal_destroy(terminal);
 }
 
-static struct yetty_core_void_result terminal_view_render(
-    struct yetty_yui_view *view, struct yetty_render_target *render_target)
+static struct yetty_ycore_void_result terminal_view_render(
+    struct yetty_yui_view *view, struct yetty_yrender_target *render_target)
 {
     struct yetty_yterm_terminal *terminal =
         container_of(view, struct yetty_yterm_terminal, view);
@@ -572,8 +572,8 @@ static void terminal_view_set_bounds(struct yetty_yui_view *view,
     (void)terminal;
 }
 
-static struct yetty_core_int_result terminal_view_on_event(
-    struct yetty_yui_view *view, const struct yetty_core_event *event)
+static struct yetty_ycore_int_result terminal_view_on_event(
+    struct yetty_yui_view *view, const struct yetty_ycore_event *event)
 {
     struct yetty_yterm_terminal *terminal =
         container_of(view, struct yetty_yterm_terminal, view);
@@ -585,10 +585,10 @@ static struct yetty_core_int_result terminal_view_on_event(
             struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
             if (layer && layer->ops && layer->ops->on_key) {
                 if (layer->ops->on_key(layer, event->key.key, event->key.mods))
-                    return YETTY_OK(yetty_core_int, 1);
+                    return YETTY_OK(yetty_ycore_int, 1);
             }
         }
-        return YETTY_OK(yetty_core_int, 1);
+        return YETTY_OK(yetty_ycore_int, 1);
 
     case YETTY_EVENT_CHAR:
         ydebug("terminal: CHAR codepoint=U+%04X mods=%d", event->chr.codepoint, event->chr.mods);
@@ -596,10 +596,10 @@ static struct yetty_core_int_result terminal_view_on_event(
             struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
             if (layer && layer->ops && layer->ops->on_char) {
                 if (layer->ops->on_char(layer, event->chr.codepoint, event->chr.mods))
-                    return YETTY_OK(yetty_core_int, 1);
+                    return YETTY_OK(yetty_ycore_int, 1);
             }
         }
-        return YETTY_OK(yetty_core_int, 1);
+        return YETTY_OK(yetty_ycore_int, 1);
 
     case YETTY_EVENT_RESIZE: {
         float width = event->resize.width;
@@ -607,10 +607,10 @@ static struct yetty_core_int_result terminal_view_on_event(
         ydebug("terminal: RESIZE %.0fx%.0f", width, height);
 
         if (width <= 0 || height <= 0)
-            return YETTY_OK(yetty_core_int, 1);
+            return YETTY_OK(yetty_ycore_int, 1);
 
         /* Resize layer targets - yetty handles surface reconfiguration */
-        struct yetty_render_viewport vp = {
+        struct yetty_yrender_viewport vp = {
             .x = 0, .y = 0,
             .w = width, .h = height
         };
@@ -638,20 +638,20 @@ static struct yetty_core_int_result terminal_view_on_event(
                 }
             }
         }
-        return YETTY_OK(yetty_core_int, 1);
+        return YETTY_OK(yetty_ycore_int, 1);
     }
 
     case YETTY_EVENT_SHUTDOWN:
         ydebug("terminal: SHUTDOWN received");
         terminal->shutting_down = 1;
-        return YETTY_OK(yetty_core_int, 1);
+        return YETTY_OK(yetty_ycore_int, 1);
 
     case YETTY_EVENT_POLL_READABLE:
         ydebug("terminal: POLL_READABLE");
         terminal_read_pty(terminal);
-        return YETTY_OK(yetty_core_int, 1);
+        return YETTY_OK(yetty_ycore_int, 1);
 
     default:
-        return YETTY_OK(yetty_core_int, 0);
+        return YETTY_OK(yetty_ycore_int, 0);
     }
 }

@@ -17,17 +17,17 @@ extern "C" {
 struct yetty_yterm_terminal;
 struct yetty_yterm_terminal_layer;
 struct yetty_yterm_terminal_layer_ops;
-struct yetty_core_event_loop;
+struct yetty_ycore_event_loop;
 struct yetty_platform_pty;
 struct yetty_yui_view;
-struct yetty_render_gpu_resource_binder;
+struct yetty_yrender_gpu_resource_binder;
 
 /* Render layer function - stateless, renders layer to target texture.
  * Returns early with OK if layer is not dirty. */
-typedef struct yetty_core_void_result (*yetty_render_layer_fn)(
+typedef struct yetty_ycore_void_result (*yetty_yrender_layer_fn)(
     struct yetty_yterm_terminal_layer *layer,
     WGPUTextureView target,
-    struct yetty_render_gpu_resource_binder *binder,
+    struct yetty_yrender_gpu_resource_binder *binder,
     struct yetty_gpu_context *gpu);
 
 /* Result types */
@@ -36,29 +36,29 @@ YETTY_RESULT_DECLARE(yetty_yterm_terminal_layer,
                      struct yetty_yterm_terminal_layer *);
 
 /* PTY write callback - called when layer needs to send data to PTY */
-typedef void (*yetty_term_pty_write_fn)(const char *data, size_t len,
+typedef void (*yetty_yterm_pty_write_fn)(const char *data, size_t len,
                                         void *userdata);
 
 /* Request render callback - called when layer needs a render frame */
-typedef void (*yetty_term_request_render_fn)(void *userdata);
+typedef void (*yetty_yterm_request_render_fn)(void *userdata);
 
 /* Scroll callback - called when layer scrolls, passes source layer and line
  * count */
-typedef struct yetty_core_void_result (*yetty_term_scroll_fn)(
+typedef struct yetty_ycore_void_result (*yetty_yterm_scroll_fn)(
     struct yetty_yterm_terminal_layer *source, int lines, void *userdata);
 
 /* Cursor callback - called when layer moves cursor, passes source layer and
  * position */
-typedef void (*yetty_term_cursor_fn)(struct yetty_yterm_terminal_layer *source,
+typedef void (*yetty_yterm_cursor_fn)(struct yetty_yterm_terminal_layer *source,
                                      struct grid_cursor_pos cursor_pos,
                                      void *userdata);
 
 /* Layer ops */
 struct yetty_yterm_terminal_layer_ops {
   void (*destroy)(struct yetty_yterm_terminal_layer *self);
-  struct yetty_core_void_result (*write)(struct yetty_yterm_terminal_layer *self,
+  struct yetty_ycore_void_result (*write)(struct yetty_yterm_terminal_layer *self,
                                          const char *data, size_t len);
-  struct yetty_core_void_result (*resize_grid)(
+  struct yetty_ycore_void_result (*resize_grid)(
       struct yetty_yterm_terminal_layer *self, struct grid_size grid_size);
   struct yetty_yrender_gpu_resource_set_result (*get_gpu_resource_set)(
       const struct yetty_yterm_terminal_layer *self);
@@ -70,7 +70,7 @@ struct yetty_yterm_terminal_layer_ops {
   int (*on_char)(struct yetty_yterm_terminal_layer *self, uint32_t codepoint,
                  int mods);
   /* Scroll - called when another layer scrolls, lines > 0 = scroll down */
-  struct yetty_core_void_result (*scroll)(struct yetty_yterm_terminal_layer *self, int lines);
+  struct yetty_ycore_void_result (*scroll)(struct yetty_yterm_terminal_layer *self, int lines);
   /* Cursor - called when another layer moves cursor */
   void (*set_cursor)(struct yetty_yterm_terminal_layer *self, int col, int row);
 };
@@ -84,16 +84,16 @@ struct yetty_yterm_terminal_layer {
   int dirty;
   int in_external_scroll; /* Set when receiving scroll from another layer */
   /* PTY write callback - set by creator */
-  yetty_term_pty_write_fn pty_write_fn;
+  yetty_yterm_pty_write_fn pty_write_fn;
   void *pty_write_userdata;
   /* Request render callback - set by creator */
-  yetty_term_request_render_fn request_render_fn;
+  yetty_yterm_request_render_fn request_render_fn;
   void *request_render_userdata;
   /* Scroll callback - set by creator */
-  yetty_term_scroll_fn scroll_fn;
+  yetty_yterm_scroll_fn scroll_fn;
   void *scroll_userdata;
   /* Cursor callback - set by creator */
-  yetty_term_cursor_fn cursor_fn;
+  yetty_yterm_cursor_fn cursor_fn;
   void *cursor_userdata;
 };
 

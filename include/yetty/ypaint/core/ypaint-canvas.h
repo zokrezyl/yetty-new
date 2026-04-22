@@ -22,7 +22,7 @@ struct yetty_ypaint_canvas *yetty_ypaint_canvas_create(
     bool scrolling_mode, const struct yetty_context *context);
 
 // Destroy a canvas
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_canvas_destroy(struct yetty_ypaint_canvas *canvas);
 
 //=============================================================================
@@ -30,11 +30,11 @@ yetty_ypaint_canvas_destroy(struct yetty_ypaint_canvas *canvas);
 //=============================================================================
 
 // Set grid cell size (pixels)
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_canvas_set_cell_size(struct yetty_ypaint_canvas *canvas,
                             struct pixel_size pixel_size);
 // Set grid dimensions (cols/rows)
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_canvas_set_grid_size(struct yetty_ypaint_canvas *canvas,
                             struct grid_size grid_size);
 
@@ -55,7 +55,7 @@ uint32_t yetty_ypaint_canvas_line_count(struct yetty_ypaint_canvas *canvas);
 // Cursor (scrolling mode only)
 //=============================================================================
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_canvas_set_cursor_pos(struct yetty_ypaint_canvas *canvas,
                              struct grid_cursor_pos grid_cursor_pos);
 
@@ -77,7 +77,7 @@ struct yetty_ypaint_core_buffer;
 // Computes AABB for each primitive, tracks max_row, handles scrolling
 // In scrolling mode: primitives positioned relative to cursor
 // In non-scrolling mode: primitives positioned at absolute scene coordinates
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
                          struct yetty_ypaint_core_buffer *buffer);
 
@@ -88,31 +88,31 @@ yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
 // Scroll callback: called when primitive insertion requires scrolling
 // @param user_data User data pointer
 // @param num_lines Number of lines to scroll
-typedef struct yetty_core_void_result (*yetty_ypaint_canvas_scroll_callback)(
-    struct yetty_core_void_result *user_data, uint16_t num_lines);
+typedef struct yetty_ycore_void_result (*yetty_ypaint_canvas_scroll_callback)(
+    struct yetty_ycore_void_result *user_data, uint16_t num_lines);
 
 // Cursor set callback: called when cursor moves WITHOUT scrolling
 // @param user_data User data pointer
 // @param new_row New cursor row position
-typedef struct yetty_core_void_result (*yetty_ypaint_canvas_cursor_set_callback)(
-    struct yetty_core_void_result *user_data, uint16_t new_row);
+typedef struct yetty_ycore_void_result (*yetty_ypaint_canvas_cursor_set_callback)(
+    struct yetty_ycore_void_result *user_data, uint16_t new_row);
 
 // Set scroll callback (called when add_buffer triggers scroll)
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_canvas_set_scroll_callback(struct yetty_ypaint_canvas *canvas,
                                   yetty_ypaint_canvas_scroll_callback callback,
-                                  struct yetty_core_void_result *user_data);
+                                  struct yetty_ycore_void_result *user_data);
 
 // Set cursor callback (called when cursor moves without scroll)
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_canvas_set_cursor_callback(struct yetty_ypaint_canvas *canvas,
                                   yetty_ypaint_canvas_cursor_set_callback callback,
-                                  struct yetty_core_void_result *user_data);
+                                  struct yetty_ycore_void_result *user_data);
 
 // Remove N lines from the top - primitives in those lines are deleted
 // Only valid in scrolling mode
 // O(1) for offset update, O(n) only for deleting the actual lines
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_canvas_scroll_lines(struct yetty_ypaint_canvas *canvas, uint16_t num_lines);
 
 //=============================================================================
@@ -120,14 +120,14 @@ yetty_ypaint_canvas_scroll_lines(struct yetty_ypaint_canvas *canvas, uint16_t nu
 //=============================================================================
 
 // Mark grid as dirty (needs rebuild)
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_canvas_mark_dirty(struct yetty_ypaint_canvas *canvas);
 
 // Check if grid needs rebuild
 bool yetty_ypaint_canvas_is_dirty(struct yetty_ypaint_canvas *canvas);
 
 // Rebuild packed grid format for GPU upload
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_canvas_rebuild_grid(struct yetty_ypaint_canvas *canvas);
 
 // Get packed grid data for GPU upload
@@ -135,7 +135,7 @@ const uint32_t *yetty_ypaint_canvas_grid_data(struct yetty_ypaint_canvas *canvas
 uint32_t yetty_ypaint_canvas_grid_word_count(struct yetty_ypaint_canvas *canvas);
 
 // Clear packed grid staging
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_canvas_clear_staging(struct yetty_ypaint_canvas *canvas);
 
 //=============================================================================
@@ -155,7 +155,7 @@ uint32_t yetty_ypaint_canvas_prim_gpu_size(struct yetty_ypaint_canvas *canvas);
 //=============================================================================
 
 // Clear all lines and primitives
-struct yetty_core_void_result yetty_ypaint_canvas_clear(struct yetty_ypaint_canvas *canvas);
+struct yetty_ycore_void_result yetty_ypaint_canvas_clear(struct yetty_ypaint_canvas *canvas);
 
 // Check if canvas has any content
 bool yetty_ypaint_canvas_empty(struct yetty_ypaint_canvas *canvas);

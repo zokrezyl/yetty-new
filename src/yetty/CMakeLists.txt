@@ -46,13 +46,13 @@ add_subdirectory(ywebgpu)
 add_subdirectory(yui)
 
 # Core sources (src/yetty/core/*.cpp)
-set(YETTY_CORE_SOURCES "")
+set(YETTY_YCORESOURCES "")
 
 # Term subsystem
 add_subdirectory(yterm)
 
 set(YETTY_SOURCES ${YETTY_SOURCES} PARENT_SCOPE)
-set(YETTY_CORE_SOURCES ${YETTY_CORE_SOURCES} PARENT_SCOPE)
+set(YETTY_YCORESOURCES ${YETTY_YCORESOURCES} PARENT_SCOPE)
 
 # Desktop-only sources (Linux, macOS - NOT Windows)
 set(YETTY_DESKTOP_SOURCES "" PARENT_SCOPE)

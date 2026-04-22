@@ -41,7 +41,7 @@ size_t yetty_yplot_serialized_size(
     const struct yetty_yplot_uniforms *uniforms,
     const struct yetty_yplot_buffers *buffers);
 
-struct yetty_core_size_result yetty_yplot_serialize(
+struct yetty_ycore_size_result yetty_yplot_serialize(
     const struct yetty_yplot_uniforms *uniforms,
     const struct yetty_yplot_buffers *buffers,
     uint8_t *out, size_t out_capacity);

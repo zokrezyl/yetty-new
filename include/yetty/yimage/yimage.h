@@ -56,7 +56,7 @@ void yetty_yimage_destroy(struct yetty_yimage *img);
  * pixels: raw RGBA8 bytes, 4 bytes per pixel
  * width/height: pixel dimensions
  */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yimage_set_pixels(struct yetty_yimage *img,
 			const uint8_t *pixels,
 			uint32_t width, uint32_t height);

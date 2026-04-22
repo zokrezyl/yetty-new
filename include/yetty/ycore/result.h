@@ -1,5 +1,5 @@
-#ifndef YETTY_CORE_RESULT_H
-#define YETTY_CORE_RESULT_H
+#ifndef YETTY_YCORERESULT_H
+#define YETTY_YCORERESULT_H
 
 #include <stddef.h>
 
@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 /* Error info */
-struct yetty_core_error {
+struct yetty_ycore_error {
     const char *msg;
 };
 
@@ -18,18 +18,18 @@ struct yetty_core_error {
         int ok; \
         union { \
             value_type value; \
-            struct yetty_core_error error; \
+            struct yetty_ycore_error error; \
         }; \
     }
 
 /* Common result types in core namespace */
-YETTY_RESULT_DECLARE(yetty_core_void, int);
-YETTY_RESULT_DECLARE(yetty_core_int, int);
-YETTY_RESULT_DECLARE(yetty_core_size, size_t);
+YETTY_RESULT_DECLARE(yetty_ycore_void, int);
+YETTY_RESULT_DECLARE(yetty_ycore_int, int);
+YETTY_RESULT_DECLARE(yetty_ycore_size, size_t);
 
 /* Create success result (void) */
 #define YETTY_OK_VOID() \
-    ((struct yetty_core_void_result){.ok = 1, .value = 0})
+    ((struct yetty_ycore_void_result){.ok = 1, .value = 0})
 
 /* Create success result with value */
 #define YETTY_OK(name, val) \
@@ -49,12 +49,12 @@ YETTY_RESULT_DECLARE(yetty_core_size, size_t);
 }
 
 /* C++ helper — compound literals are a C-only feature */
-inline struct yetty_core_void_result yetty_cpp_err(const char *msg) {
-    struct yetty_core_void_result r = {};
+inline struct yetty_ycore_void_result yetty_cpp_err(const char *msg) {
+    struct yetty_ycore_void_result r = {};
     r.ok = 0;
     r.error.msg = msg;
     return r;
 }
 #endif
 
-#endif /* YETTY_CORE_RESULT_H */
+#endif /* YETTY_YCORERESULT_H */

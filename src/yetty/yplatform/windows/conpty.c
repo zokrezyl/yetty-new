@@ -34,10 +34,10 @@ struct win_conpty {
 
 /* Forward declarations */
 static void win_conpty_destroy(struct yetty_platform_pty *self);
-static struct yetty_core_size_result win_conpty_read(struct yetty_platform_pty *self, char *buf, size_t max_len);
-static struct yetty_core_size_result win_conpty_write(struct yetty_platform_pty *self, const char *data, size_t len);
-static struct yetty_core_void_result win_conpty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
-static struct yetty_core_void_result win_conpty_stop(struct yetty_platform_pty *self);
+static struct yetty_ycore_size_result win_conpty_read(struct yetty_platform_pty *self, char *buf, size_t max_len);
+static struct yetty_ycore_size_result win_conpty_write(struct yetty_platform_pty *self, const char *data, size_t len);
+static struct yetty_ycore_void_result win_conpty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
+static struct yetty_ycore_void_result win_conpty_stop(struct yetty_platform_pty *self);
 static struct yetty_platform_pty_pipe_source *win_conpty_pipe_source(struct yetty_platform_pty *self);
 
 /* Ops table */
@@ -77,43 +77,43 @@ static void win_conpty_destroy(struct yetty_platform_pty *self)
     free(pty);
 }
 
-static struct yetty_core_size_result win_conpty_read(struct yetty_platform_pty *self, char *buf, size_t max_len)
+static struct yetty_ycore_size_result win_conpty_read(struct yetty_platform_pty *self, char *buf, size_t max_len)
 {
     struct win_conpty *pty = container_of(self, struct win_conpty, base);
     DWORD bytes_read = 0;
     DWORD available = 0;
 
     if (pty->pipe_out == INVALID_HANDLE_VALUE)
-        return YETTY_ERR(yetty_core_size, "conpty output pipe not open");
+        return YETTY_ERR(yetty_ycore_size, "conpty output pipe not open");
 
     /* Check if data is available (non-blocking) */
     if (!PeekNamedPipe(pty->pipe_out, NULL, 0, NULL, &available, NULL) || available == 0)
-        return YETTY_OK(yetty_core_size, 0);
+        return YETTY_OK(yetty_ycore_size, 0);
 
     if (!ReadFile(pty->pipe_out, buf, (DWORD)max_len, &bytes_read, NULL))
-        return YETTY_ERR(yetty_core_size, "ReadFile from conpty failed");
+        return YETTY_ERR(yetty_ycore_size, "ReadFile from conpty failed");
 
-    return YETTY_OK(yetty_core_size, (size_t)bytes_read);
+    return YETTY_OK(yetty_ycore_size, (size_t)bytes_read);
 }
 
-static struct yetty_core_size_result win_conpty_write(struct yetty_platform_pty *self, const char *data, size_t len)
+static struct yetty_ycore_size_result win_conpty_write(struct yetty_platform_pty *self, const char *data, size_t len)
 {
     struct win_conpty *pty = container_of(self, struct win_conpty, base);
     DWORD bytes_written = 0;
 
     if (pty->pipe_in == INVALID_HANDLE_VALUE)
-        return YETTY_ERR(yetty_core_size, "conpty input pipe not open");
+        return YETTY_ERR(yetty_ycore_size, "conpty input pipe not open");
 
     if (len == 0)
-        return YETTY_OK(yetty_core_size, 0);
+        return YETTY_OK(yetty_ycore_size, 0);
 
     if (!WriteFile(pty->pipe_in, data, (DWORD)len, &bytes_written, NULL))
-        return YETTY_ERR(yetty_core_size, "WriteFile to conpty failed");
+        return YETTY_ERR(yetty_ycore_size, "WriteFile to conpty failed");
 
-    return YETTY_OK(yetty_core_size, (size_t)bytes_written);
+    return YETTY_OK(yetty_ycore_size, (size_t)bytes_written);
 }
 
-static struct yetty_core_void_result win_conpty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows)
+static struct yetty_ycore_void_result win_conpty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows)
 {
     struct win_conpty *pty = container_of(self, struct win_conpty, base);
     COORD size;
@@ -123,19 +123,19 @@ static struct yetty_core_void_result win_conpty_resize(struct yetty_platform_pty
     pty->rows = rows;
 
     if (pty->hpc == NULL)
-        return YETTY_ERR(yetty_core_void, "conpty not initialized");
+        return YETTY_ERR(yetty_ycore_void, "conpty not initialized");
 
     size.X = (SHORT)cols;
     size.Y = (SHORT)rows;
 
     hr = ResizePseudoConsole(pty->hpc, size);
     if (FAILED(hr))
-        return YETTY_ERR(yetty_core_void, "ResizePseudoConsole failed");
+        return YETTY_ERR(yetty_ycore_void, "ResizePseudoConsole failed");
 
     return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result win_conpty_stop(struct yetty_platform_pty *self)
+static struct yetty_ycore_void_result win_conpty_stop(struct yetty_platform_pty *self)
 {
     struct win_conpty *pty = container_of(self, struct win_conpty, base);
 

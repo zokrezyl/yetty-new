@@ -31,16 +31,16 @@ extern "C" {
  * @param request_render_fn: callback to request re-render
  * @param request_render_userdata: userdata for callback
  */
-struct yetty_yterm_terminal_layer_result yetty_term_ypaint_layer_create(
+struct yetty_yterm_terminal_layer_result yetty_yterm_ypaint_layer_create(
     uint32_t cols, uint32_t rows,
     float cell_width, float cell_height,
     int scrolling_mode,
     const struct yetty_context *context,
-    yetty_term_request_render_fn request_render_fn,
+    yetty_yterm_request_render_fn request_render_fn,
     void *request_render_userdata,
-    yetty_term_scroll_fn scroll_fn,
+    yetty_yterm_scroll_fn scroll_fn,
     void *scroll_userdata,
-    yetty_term_cursor_fn cursor_fn,
+    yetty_yterm_cursor_fn cursor_fn,
     void *cursor_userdata);
 
 #ifdef __cplusplus

@@ -507,7 +507,7 @@ const struct yetty_yrender_gpu_resource_set *yetty_yfsvm_get_shader_resource_set
 {
     if (!yfsvm_static_shader_rs_initialized) {
         memset(&yfsvm_static_shader_rs, 0, sizeof(yfsvm_static_shader_rs));
-        yetty_render_shader_code_set(&yfsvm_static_shader_rs.shader,
+        yetty_yrender_shader_code_set(&yfsvm_static_shader_rs.shader,
             (const char *)gyfsvm_shaderData, gyfsvm_shaderSize);
         yfsvm_static_shader_rs_initialized = true;
     }

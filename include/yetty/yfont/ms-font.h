@@ -44,14 +44,14 @@ struct yetty_font_ms_font_ops {
 						       enum yetty_font_ms_style style);
 
 	/* Resize — changes font size, recalculates cell size */
-	struct yetty_core_void_result (*resize)(struct yetty_font_ms_font *self,
+	struct yetty_ycore_void_result (*resize)(struct yetty_font_ms_font *self,
 						float font_size);
 
 	/* Glyph loading */
-	struct yetty_core_void_result (*load_glyphs)(struct yetty_font_ms_font *self,
+	struct yetty_ycore_void_result (*load_glyphs)(struct yetty_font_ms_font *self,
 						     const uint32_t *codepoints,
 						     size_t count);
-	struct yetty_core_void_result (*load_basic_latin)(struct yetty_font_ms_font *self);
+	struct yetty_ycore_void_result (*load_basic_latin)(struct yetty_font_ms_font *self);
 
 	/* Dirty tracking */
 	int (*is_dirty)(const struct yetty_font_ms_font *self);

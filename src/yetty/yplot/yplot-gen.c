@@ -15,7 +15,7 @@ extern const unsigned int gyplot_shaderSize;
 struct yplot_factory {
     struct yetty_ypaint_concrete_factory base;
     struct yetty_yrender_gpu_resource_set rs;
-    struct yetty_render_gpu_resource_binder *binder;
+    struct yetty_yrender_gpu_resource_binder *binder;
 };
 
 static struct yplot_factory *yplot_factory_from_base(struct yetty_ypaint_concrete_factory *base)
@@ -37,20 +37,20 @@ size_t yetty_yplot_serialized_size(
     return (2 + 18 + 1 + total_buf_words) * sizeof(uint32_t);
 }
 
-struct yetty_core_size_result yetty_yplot_serialize(
+struct yetty_ycore_size_result yetty_yplot_serialize(
     const struct yetty_yplot_uniforms *uniforms,
     const struct yetty_yplot_buffers *buffers,
     uint8_t *out, size_t out_capacity)
 {
     if (!uniforms || !buffers)
-        return YETTY_ERR(yetty_core_size, "null argument");
+        return YETTY_ERR(yetty_ycore_size, "null argument");
     if (!out)
-        return YETTY_ERR(yetty_core_size, "out is NULL");
+        return YETTY_ERR(yetty_ycore_size, "out is NULL");
 
     size_t total_buf_words = buffers->bytecode_len;
     size_t required = (2 + 18 + 1 + total_buf_words) * sizeof(uint32_t);
     if (out_capacity < required)
-        return YETTY_ERR(yetty_core_size, "buffer too small");
+        return YETTY_ERR(yetty_ycore_size, "buffer too small");
 
     uint32_t *p = (uint32_t *)out;
     *p++ = YETTY_YPLOT_TYPE_ID;
@@ -68,7 +68,7 @@ struct yetty_core_size_result yetty_yplot_serialize(
         memcpy(p, buffers->bytecode, buffers->bytecode_len * sizeof(uint32_t));
     p += buffers->bytecode_len;
 
-    return YETTY_OK(yetty_core_size, required);
+    return YETTY_OK(yetty_ycore_size, required);
 }
 
 //=============================================================================
@@ -79,8 +79,8 @@ static void yplot_init_rs(struct yplot_factory *factory)
 {
     struct yetty_yrender_gpu_resource_set *rs = &factory->rs;
     memset(rs, 0, sizeof(*rs));
-    strncpy(rs->namespace, "yplot", YETTY_RENDER_NAME_MAX - 1);
-    yetty_render_shader_code_set(&rs->shader,
+    strncpy(rs->namespace, "yplot", YETTY_YRENDER_NAME_MAX - 1);
+    yetty_yrender_shader_code_set(&rs->shader,
         (const char *)gyplot_shaderData, gyplot_shaderSize);
 
     // Library: yfsvm
@@ -92,66 +92,66 @@ static void yplot_init_rs(struct yplot_factory *factory)
     }
 
     // Setup uniforms (values set later during render)
-    strncpy(rs->uniforms[0].name, "bounds_x", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[0].type = YETTY_RENDER_UNIFORM_F32;
+    strncpy(rs->uniforms[0].name, "bounds_x", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[0].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[0].u32 = 0;
-    strncpy(rs->uniforms[1].name, "bounds_y", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[1].type = YETTY_RENDER_UNIFORM_F32;
+    strncpy(rs->uniforms[1].name, "bounds_y", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[1].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[1].u32 = 0;
-    strncpy(rs->uniforms[2].name, "bounds_w", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[2].type = YETTY_RENDER_UNIFORM_F32;
+    strncpy(rs->uniforms[2].name, "bounds_w", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[2].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[2].u32 = 0;
-    strncpy(rs->uniforms[3].name, "bounds_h", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[3].type = YETTY_RENDER_UNIFORM_F32;
+    strncpy(rs->uniforms[3].name, "bounds_h", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[3].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[3].u32 = 0;
-    strncpy(rs->uniforms[4].name, "x_min", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[4].type = YETTY_RENDER_UNIFORM_F32;
+    strncpy(rs->uniforms[4].name, "x_min", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[4].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[4].u32 = 0;
-    strncpy(rs->uniforms[5].name, "x_max", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[5].type = YETTY_RENDER_UNIFORM_F32;
+    strncpy(rs->uniforms[5].name, "x_max", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[5].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[5].u32 = 0;
-    strncpy(rs->uniforms[6].name, "y_min", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[6].type = YETTY_RENDER_UNIFORM_F32;
+    strncpy(rs->uniforms[6].name, "y_min", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[6].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[6].u32 = 0;
-    strncpy(rs->uniforms[7].name, "y_max", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[7].type = YETTY_RENDER_UNIFORM_F32;
+    strncpy(rs->uniforms[7].name, "y_max", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[7].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[7].u32 = 0;
-    strncpy(rs->uniforms[8].name, "flags", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[8].type = YETTY_RENDER_UNIFORM_U32;
+    strncpy(rs->uniforms[8].name, "flags", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[8].type = YETTY_YRENDER_UNIFORM_U32;
     rs->uniforms[8].u32 = 0;
-    strncpy(rs->uniforms[9].name, "function_count", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[9].type = YETTY_RENDER_UNIFORM_U32;
+    strncpy(rs->uniforms[9].name, "function_count", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[9].type = YETTY_YRENDER_UNIFORM_U32;
     rs->uniforms[9].u32 = 0;
-    strncpy(rs->uniforms[10].name, "colors_0", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[10].type = YETTY_RENDER_UNIFORM_U32;
+    strncpy(rs->uniforms[10].name, "colors_0", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[10].type = YETTY_YRENDER_UNIFORM_U32;
     rs->uniforms[10].u32 = 0;
-    strncpy(rs->uniforms[11].name, "colors_1", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[11].type = YETTY_RENDER_UNIFORM_U32;
+    strncpy(rs->uniforms[11].name, "colors_1", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[11].type = YETTY_YRENDER_UNIFORM_U32;
     rs->uniforms[11].u32 = 0;
-    strncpy(rs->uniforms[12].name, "colors_2", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[12].type = YETTY_RENDER_UNIFORM_U32;
+    strncpy(rs->uniforms[12].name, "colors_2", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[12].type = YETTY_YRENDER_UNIFORM_U32;
     rs->uniforms[12].u32 = 0;
-    strncpy(rs->uniforms[13].name, "colors_3", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[13].type = YETTY_RENDER_UNIFORM_U32;
+    strncpy(rs->uniforms[13].name, "colors_3", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[13].type = YETTY_YRENDER_UNIFORM_U32;
     rs->uniforms[13].u32 = 0;
-    strncpy(rs->uniforms[14].name, "colors_4", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[14].type = YETTY_RENDER_UNIFORM_U32;
+    strncpy(rs->uniforms[14].name, "colors_4", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[14].type = YETTY_YRENDER_UNIFORM_U32;
     rs->uniforms[14].u32 = 0;
-    strncpy(rs->uniforms[15].name, "colors_5", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[15].type = YETTY_RENDER_UNIFORM_U32;
+    strncpy(rs->uniforms[15].name, "colors_5", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[15].type = YETTY_YRENDER_UNIFORM_U32;
     rs->uniforms[15].u32 = 0;
-    strncpy(rs->uniforms[16].name, "colors_6", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[16].type = YETTY_RENDER_UNIFORM_U32;
+    strncpy(rs->uniforms[16].name, "colors_6", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[16].type = YETTY_YRENDER_UNIFORM_U32;
     rs->uniforms[16].u32 = 0;
-    strncpy(rs->uniforms[17].name, "colors_7", YETTY_RENDER_NAME_MAX - 1);
-    rs->uniforms[17].type = YETTY_RENDER_UNIFORM_U32;
+    strncpy(rs->uniforms[17].name, "colors_7", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[17].type = YETTY_YRENDER_UNIFORM_U32;
     rs->uniforms[17].u32 = 0;
     rs->uniform_count = 18;
 
     // Setup storage buffer for buffer data
     rs->buffer_count = 1;
-    strncpy(rs->buffers[0].name, "buffer", YETTY_RENDER_NAME_MAX - 1);
-    strncpy(rs->buffers[0].wgsl_type, "array<u32>", YETTY_RENDER_WGSL_TYPE_MAX - 1);
+    strncpy(rs->buffers[0].name, "buffer", YETTY_YRENDER_NAME_MAX - 1);
+    strncpy(rs->buffers[0].wgsl_type, "array<u32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
     rs->buffers[0].readonly = 1;
 }
 
@@ -159,16 +159,16 @@ static void yplot_init_rs(struct yplot_factory *factory)
 // Instance Rendering
 //=============================================================================
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 yplot_instance_render(struct yetty_ypaint_complex_prim_instance *self,
-                       struct yetty_render_target *target, float x, float y)
+                       struct yetty_yrender_target *target, float x, float y)
 {
     if (!self || !self->buffer_data || !self->factory)
-        return YETTY_ERR(yetty_core_void, "invalid instance");
+        return YETTY_ERR(yetty_ycore_void, "invalid instance");
 
     struct yplot_factory *factory = yplot_factory_from_base(self->factory);
     if (!factory->binder)
-        return YETTY_ERR(yetty_core_void, "binder not initialized");
+        return YETTY_ERR(yetty_ycore_void, "binder not initialized");
 
     struct yetty_yrender_gpu_resource_set *rs = &factory->rs;
 
@@ -209,7 +209,7 @@ yplot_instance_render(struct yetty_ypaint_complex_prim_instance *self,
     (void)x;
     (void)y;
 
-    struct yetty_core_void_result res = factory->binder->ops->update(factory->binder);
+    struct yetty_ycore_void_result res = factory->binder->ops->update(factory->binder);
     if (YETTY_IS_ERR(res))
         return res;
 
@@ -220,7 +220,7 @@ yplot_instance_render(struct yetty_ypaint_complex_prim_instance *self,
 // Factory Implementation
 //=============================================================================
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 yplot_compile_pipeline(struct yetty_ypaint_concrete_factory *self,
                         WGPUDevice device, WGPUQueue queue,
                         WGPUTextureFormat target_format)
@@ -234,14 +234,14 @@ yplot_compile_pipeline(struct yetty_ypaint_concrete_factory *self,
 
     yplot_init_rs(factory);
 
-    struct yetty_render_gpu_resource_binder_result binder_res =
-        yetty_render_gpu_resource_binder_create(device, queue, target_format, NULL);
+    struct yetty_yrender_gpu_resource_binder_result binder_res =
+        yetty_yrender_gpu_resource_binder_create(device, queue, target_format, NULL);
     if (YETTY_IS_ERR(binder_res))
-        return YETTY_ERR(yetty_core_void, binder_res.error.msg);
+        return YETTY_ERR(yetty_ycore_void, binder_res.error.msg);
 
     factory->binder = binder_res.value;
 
-    struct yetty_core_void_result submit_res =
+    struct yetty_ycore_void_result submit_res =
         factory->binder->ops->submit(factory->binder, &factory->rs);
     if (YETTY_IS_ERR(submit_res)) {
         factory->binder->ops->destroy(factory->binder);
@@ -249,7 +249,7 @@ yplot_compile_pipeline(struct yetty_ypaint_concrete_factory *self,
         return submit_res;
     }
 
-    struct yetty_core_void_result finalize_res =
+    struct yetty_ycore_void_result finalize_res =
         factory->binder->ops->finalize(factory->binder);
     if (YETTY_IS_ERR(finalize_res)) {
         factory->binder->ops->destroy(factory->binder);

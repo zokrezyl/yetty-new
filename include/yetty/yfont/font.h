@@ -43,10 +43,10 @@ struct yetty_font_font_ops {
 						       enum yetty_font_style style);
 
 	/* Glyph loading */
-	struct yetty_core_void_result (*load_glyphs)(struct yetty_font_font *self,
+	struct yetty_ycore_void_result (*load_glyphs)(struct yetty_font_font *self,
 						     const uint32_t *codepoints,
 						     size_t count);
-	struct yetty_core_void_result (*load_basic_latin)(struct yetty_font_font *self);
+	struct yetty_ycore_void_result (*load_basic_latin)(struct yetty_font_font *self);
 
 	/* Base size the CDB was generated at */
 	float (*get_base_size)(const struct yetty_font_font *self);

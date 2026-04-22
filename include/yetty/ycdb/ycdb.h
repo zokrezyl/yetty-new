@@ -32,7 +32,7 @@ void yetty_ycdb_reader_close(struct yetty_ycdb_reader *r);
  * Caller must free *out_data with free().
  * Returns OK with out_data=NULL if key not found.
  */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ycdb_reader_get(struct yetty_ycdb_reader *r,
 		      const void *key, size_t key_len,
 		      void **out_data, size_t *out_len);
@@ -48,13 +48,13 @@ YETTY_RESULT_DECLARE(yetty_ycdb_writer, struct yetty_ycdb_writer *);
 struct yetty_ycdb_writer_result
 yetty_ycdb_writer_create(const char *path);
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ycdb_writer_add(struct yetty_ycdb_writer *w,
 		      const void *key, size_t key_len,
 		      const void *value, size_t value_len);
 
 /* Finalize and close. Writer is freed. */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ycdb_writer_finish(struct yetty_ycdb_writer *w);
 
 #ifdef __cplusplus

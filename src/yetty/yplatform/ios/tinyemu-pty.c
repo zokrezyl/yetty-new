@@ -49,10 +49,10 @@ extern const char *yetty_platform_get_bundle_dir(void);
 
 /* Forward declarations */
 static void tinyemu_pty_destroy(struct yetty_platform_pty *self);
-static struct yetty_core_size_result tinyemu_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len);
-static struct yetty_core_size_result tinyemu_pty_write(struct yetty_platform_pty *self, const char *data, size_t len);
-static struct yetty_core_void_result tinyemu_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
-static struct yetty_core_void_result tinyemu_pty_stop(struct yetty_platform_pty *self);
+static struct yetty_ycore_size_result tinyemu_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len);
+static struct yetty_ycore_size_result tinyemu_pty_write(struct yetty_platform_pty *self, const char *data, size_t len);
+static struct yetty_ycore_void_result tinyemu_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
+static struct yetty_ycore_void_result tinyemu_pty_stop(struct yetty_platform_pty *self);
 static struct yetty_platform_pty_pipe_source *tinyemu_pty_pipe_source(struct yetty_platform_pty *self);
 
 /* Ops table */
@@ -388,37 +388,37 @@ static void tinyemu_pty_destroy(struct yetty_platform_pty *self)
     if (g_pty == pty) g_pty = NULL;
 }
 
-static struct yetty_core_size_result tinyemu_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len)
+static struct yetty_ycore_size_result tinyemu_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len)
 {
     struct tinyemu_pty *pty = container_of(self, struct tinyemu_pty, base);
 
     if (!pty->running || max_len == 0)
-        return YETTY_OK(yetty_core_size, 0);
+        return YETTY_OK(yetty_ycore_size, 0);
 
     /* Read from pty_pipe[0] - VM output */
     ssize_t n = read(pty->pty_pipe[0], buf, max_len);
     if (n < 0)
         n = 0;
 
-    return YETTY_OK(yetty_core_size, (size_t)n);
+    return YETTY_OK(yetty_ycore_size, (size_t)n);
 }
 
-static struct yetty_core_size_result tinyemu_pty_write(struct yetty_platform_pty *self, const char *data, size_t len)
+static struct yetty_ycore_size_result tinyemu_pty_write(struct yetty_platform_pty *self, const char *data, size_t len)
 {
     struct tinyemu_pty *pty = container_of(self, struct tinyemu_pty, base);
 
     if (!pty->running || len == 0)
-        return YETTY_OK(yetty_core_size, 0);
+        return YETTY_OK(yetty_ycore_size, 0);
 
     /* Write to os_input_pipe[1] - keyboard input to VM */
     ssize_t n = write(pty->os_input_pipe[1], data, len);
     if (n < 0)
         n = 0;
 
-    return YETTY_OK(yetty_core_size, (size_t)n);
+    return YETTY_OK(yetty_ycore_size, (size_t)n);
 }
 
-static struct yetty_core_void_result tinyemu_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows)
+static struct yetty_ycore_void_result tinyemu_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows)
 {
     struct tinyemu_pty *pty = container_of(self, struct tinyemu_pty, base);
     pty->cols = cols;
@@ -427,7 +427,7 @@ static struct yetty_core_void_result tinyemu_pty_resize(struct yetty_platform_pt
     return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result tinyemu_pty_stop(struct yetty_platform_pty *self)
+static struct yetty_ycore_void_result tinyemu_pty_stop(struct yetty_platform_pty *self)
 {
     struct tinyemu_pty *pty = container_of(self, struct tinyemu_pty, base);
 

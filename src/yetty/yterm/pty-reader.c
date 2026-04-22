@@ -23,7 +23,7 @@ struct osc_sink {
     struct yetty_yterm_terminal_layer *layer;
 };
 
-struct yetty_term_pty_reader {
+struct yetty_yterm_pty_reader {
     struct yetty_platform_pty *pty;
     struct yetty_yterm_terminal_layer *default_sink;
     struct osc_sink osc_sinks[MAX_OSC_SINKS];
@@ -34,7 +34,7 @@ struct yetty_term_pty_reader {
     size_t osc_buf_cap;
 };
 
-static int osc_buf_append(struct yetty_term_pty_reader *r, char c)
+static int osc_buf_append(struct yetty_yterm_pty_reader *r, char c)
 {
     if (r->osc_buf_len >= OSC_BUF_MAX)
         return 0;
@@ -54,7 +54,7 @@ static int osc_buf_append(struct yetty_term_pty_reader *r, char c)
 }
 
 static struct yetty_yterm_terminal_layer *find_osc_sink(
-    struct yetty_term_pty_reader *r, int vendor_id)
+    struct yetty_yterm_pty_reader *r, int vendor_id)
 {
     for (size_t i = 0; i < r->osc_sink_count; i++) {
         if (r->osc_sinks[i].vendor_id == vendor_id)
@@ -63,7 +63,7 @@ static struct yetty_yterm_terminal_layer *find_osc_sink(
     return NULL;
 }
 
-static void dispatch_osc(struct yetty_term_pty_reader *r)
+static void dispatch_osc(struct yetty_yterm_pty_reader *r)
 {
     if (r->osc_buf_len == 0)
         return;
@@ -101,7 +101,7 @@ static void dispatch_osc(struct yetty_term_pty_reader *r)
     }
 }
 
-static void process_data(struct yetty_term_pty_reader *r, const char *data, size_t len)
+static void process_data(struct yetty_yterm_pty_reader *r, const char *data, size_t len)
 {
     size_t i = 0;
     size_t normal_start = 0;
@@ -188,25 +188,25 @@ static void process_data(struct yetty_term_pty_reader *r, const char *data, size
     }
 }
 
-struct yetty_term_pty_reader_result yetty_term_pty_reader_create(
+struct yetty_yterm_pty_reader_result yetty_yterm_pty_reader_create(
     struct yetty_platform_pty *pty)
 {
-    struct yetty_term_pty_reader *r;
+    struct yetty_yterm_pty_reader *r;
 
     if (!pty)
-        return YETTY_ERR(yetty_term_pty_reader, "null pty");
+        return YETTY_ERR(yetty_yterm_pty_reader, "null pty");
 
-    r = calloc(1, sizeof(struct yetty_term_pty_reader));
+    r = calloc(1, sizeof(struct yetty_yterm_pty_reader));
     if (!r)
-        return YETTY_ERR(yetty_term_pty_reader, "alloc failed");
+        return YETTY_ERR(yetty_yterm_pty_reader, "alloc failed");
 
     r->pty = pty;
     r->state = OSC_STATE_NORMAL;
 
-    return YETTY_OK(yetty_term_pty_reader, r);
+    return YETTY_OK(yetty_yterm_pty_reader, r);
 }
 
-void yetty_term_pty_reader_destroy(struct yetty_term_pty_reader *reader)
+void yetty_yterm_pty_reader_destroy(struct yetty_yterm_pty_reader *reader)
 {
     if (!reader)
         return;
@@ -214,16 +214,16 @@ void yetty_term_pty_reader_destroy(struct yetty_term_pty_reader *reader)
     free(reader);
 }
 
-void yetty_term_pty_reader_register_default_sink(
-    struct yetty_term_pty_reader *reader,
+void yetty_yterm_pty_reader_register_default_sink(
+    struct yetty_yterm_pty_reader *reader,
     struct yetty_yterm_terminal_layer *layer)
 {
     if (reader)
         reader->default_sink = layer;
 }
 
-void yetty_term_pty_reader_register_osc_sink(
-    struct yetty_term_pty_reader *reader,
+void yetty_yterm_pty_reader_register_osc_sink(
+    struct yetty_yterm_pty_reader *reader,
     int vendor_id,
     struct yetty_yterm_terminal_layer *layer)
 {
@@ -235,7 +235,7 @@ void yetty_term_pty_reader_register_osc_sink(
     reader->osc_sink_count++;
 }
 
-void yetty_term_pty_reader_feed(struct yetty_term_pty_reader *reader,
+void yetty_yterm_pty_reader_feed(struct yetty_yterm_pty_reader *reader,
                                 const char *data, size_t len)
 {
     if (!reader || !data || len == 0)
@@ -243,7 +243,7 @@ void yetty_term_pty_reader_feed(struct yetty_term_pty_reader *reader,
     process_data(reader, data, len);
 }
 
-int yetty_term_pty_reader_read(struct yetty_term_pty_reader *reader)
+int yetty_yterm_pty_reader_read(struct yetty_yterm_pty_reader *reader)
 {
     char buf[PTY_READ_BUF_SIZE];
     size_t total = 0;
@@ -251,7 +251,7 @@ int yetty_term_pty_reader_read(struct yetty_term_pty_reader *reader)
     if (!reader || !reader->pty || !reader->pty->ops || !reader->pty->ops->read)
         return -1;
 
-    struct yetty_core_size_result res;
+    struct yetty_ycore_size_result res;
     while ((res = reader->pty->ops->read(reader->pty, buf, sizeof(buf))),
            YETTY_IS_OK(res) && res.value > 0) {
         process_data(reader, buf, res.value);

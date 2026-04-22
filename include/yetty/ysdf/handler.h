@@ -8,12 +8,12 @@
 extern "C" {
 #endif
 
-static inline struct yetty_core_size_result
+static inline struct yetty_ycore_size_result
 yetty_ysdf_prim_size(const uint32_t *prim) {
   size_t size = yetty_ysdf_primitive_size(prim[0]);
   if (size == 0)
-    return YETTY_ERR(yetty_core_size, "unknown SDF type");
-  return YETTY_OK(yetty_core_size, size);
+    return YETTY_ERR(yetty_ycore_size, "unknown SDF type");
+  return YETTY_OK(yetty_ycore_size, size);
 }
 
 static inline struct rectangle_result

@@ -211,41 +211,41 @@ struct yetty_ipc_socket_result yetty_ipc_socket_accept(yetty_ipc_socket_t sock)
 	return YETTY_OK(yetty_ipc_socket, client);
 }
 
-struct yetty_core_size_result yetty_ipc_socket_send(yetty_ipc_socket_t sock,
+struct yetty_ycore_size_result yetty_ipc_socket_send(yetty_ipc_socket_t sock,
 						    const void *data,
 						    size_t len)
 {
 	ssize_t sent;
 
 	if (!sock)
-		return YETTY_ERR(yetty_core_size, "invalid socket");
+		return YETTY_ERR(yetty_ycore_size, "invalid socket");
 
 	sent = send(sock->fd, data, len, MSG_NOSIGNAL);
 	if (sent < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK)
-			return YETTY_OK(yetty_core_size, 0);
-		return YETTY_ERR(yetty_core_size, "send failed");
+			return YETTY_OK(yetty_ycore_size, 0);
+		return YETTY_ERR(yetty_ycore_size, "send failed");
 	}
 
-	return YETTY_OK(yetty_core_size, (size_t)sent);
+	return YETTY_OK(yetty_ycore_size, (size_t)sent);
 }
 
-struct yetty_core_size_result yetty_ipc_socket_recv(yetty_ipc_socket_t sock,
+struct yetty_ycore_size_result yetty_ipc_socket_recv(yetty_ipc_socket_t sock,
 						    void *buf, size_t max_len)
 {
 	ssize_t received;
 
 	if (!sock)
-		return YETTY_ERR(yetty_core_size, "invalid socket");
+		return YETTY_ERR(yetty_ycore_size, "invalid socket");
 
 	received = recv(sock->fd, buf, max_len, 0);
 	if (received < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK)
-			return YETTY_OK(yetty_core_size, 0);
-		return YETTY_ERR(yetty_core_size, "recv failed");
+			return YETTY_OK(yetty_ycore_size, 0);
+		return YETTY_ERR(yetty_ycore_size, "recv failed");
 	}
 
-	return YETTY_OK(yetty_core_size, (size_t)received);
+	return YETTY_OK(yetty_ycore_size, (size_t)received);
 }
 
 int yetty_ipc_socket_would_block(void)

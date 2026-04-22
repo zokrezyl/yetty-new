@@ -63,7 +63,7 @@ struct ms_msdf_font {
 	uint32_t next_slot;
 
 	/* Codepoint -> slot */
-	struct yetty_core_map glyph_map;
+	struct yetty_ycore_map glyph_map;
 
 	/* Font sizing */
 	float base_size;       /* CDB generation font size */
@@ -102,7 +102,7 @@ static void atlas_grow(struct ms_msdf_font *f)
 
 static struct uint32_result load_one(struct ms_msdf_font *f, uint32_t cp)
 {
-	const uint32_t *existing = yetty_core_map_get(&f->glyph_map, cp);
+	const uint32_t *existing = yetty_ycore_map_get(&f->glyph_map, cp);
 	if (existing)
 		return YETTY_OK(uint32, *existing);
 
@@ -111,7 +111,7 @@ static struct uint32_result load_one(struct ms_msdf_font *f, uint32_t cp)
 	void *data = NULL;
 	size_t data_len = 0;
 
-	struct yetty_core_void_result res =
+	struct yetty_ycore_void_result res =
 		yetty_ycdb_reader_get(f->cdb, &key, sizeof(key), &data, &data_len);
 	if (YETTY_IS_ERR(res))
 		return YETTY_ERR(uint32, res.error.msg);
@@ -167,7 +167,7 @@ static struct uint32_result load_one(struct ms_msdf_font *f, uint32_t cp)
 		m->advance = hdr.advance;
 		f->next_slot++;
 
-		if (yetty_core_map_put(&f->glyph_map, cp, slot) < 0) {
+		if (yetty_ycore_map_put(&f->glyph_map, cp, slot) < 0) {
 			free(data);
 			return YETTY_ERR(uint32, "map full");
 		}
@@ -219,7 +219,7 @@ static struct uint32_result load_one(struct ms_msdf_font *f, uint32_t cp)
 
 	f->next_slot++;
 
-	if (yetty_core_map_put(&f->glyph_map, cp, slot) < 0) {
+	if (yetty_ycore_map_put(&f->glyph_map, cp, slot) < 0) {
 		free(data);
 		return YETTY_ERR(uint32, "map full");
 	}
@@ -240,7 +240,7 @@ static void ms_msdf_destroy(struct yetty_font_ms_font *self)
 	free(font->atlas_pixels);
 	free(font->meta);
 	free(font->shader_code.data);
-	yetty_core_map_destroy(&font->glyph_map);
+	yetty_ycore_map_destroy(&font->glyph_map);
 	yetty_ycdb_reader_close(font->cdb);
 	free(font);
 }
@@ -275,33 +275,33 @@ ms_msdf_get_glyph_index_styled(struct yetty_font_ms_font *self,
 	return ms_msdf_get_glyph_index(self, cp);
 }
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 ms_msdf_resize(struct yetty_font_ms_font *self, float font_size)
 {
 	struct ms_msdf_font *f = (struct ms_msdf_font *)self;
 	if (!f)
-		return YETTY_ERR(yetty_core_void, "font is NULL");
+		return YETTY_ERR(yetty_ycore_void, "font is NULL");
 	f->requested_size = font_size;
 	f->dirty = 1;
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 ms_msdf_load_glyphs(struct yetty_font_ms_font *self,
 		    const uint32_t *cps, size_t count)
 {
 	struct ms_msdf_font *f = (struct ms_msdf_font *)self;
-	if (!f) return YETTY_ERR(yetty_core_void, "font is NULL");
+	if (!f) return YETTY_ERR(yetty_ycore_void, "font is NULL");
 	for (size_t i = 0; i < count; i++)
 		load_one(f, cps[i]);
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 ms_msdf_load_basic_latin(struct yetty_font_ms_font *self)
 {
 	struct ms_msdf_font *f = (struct ms_msdf_font *)self;
-	if (!f) return YETTY_ERR(yetty_core_void, "font is NULL");
+	if (!f) return YETTY_ERR(yetty_ycore_void, "font is NULL");
 	for (uint32_t cp = 0x20; cp <= 0x7E; cp++)
 		load_one(f, cp);
 	return YETTY_OK_VOID();
@@ -371,7 +371,7 @@ yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
 	ydebug("ms_msdf_font: opening %s, shader %s", cdb_path, shader_path);
 
 	/* Load shader from file */
-	struct yetty_ycore_buffer_result shader_res = yetty_core_read_file(shader_path);
+	struct yetty_ycore_buffer_result shader_res = yetty_ycore_read_file(shader_path);
 	if (YETTY_IS_ERR(shader_res))
 		return YETTY_ERR(yetty_font_ms_font, shader_res.error.msg);
 
@@ -426,7 +426,7 @@ yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
 	font->next_slot = 1; /* slot 0 = empty/space */
 
 	/* Init glyph map */
-	if (yetty_core_map_init(&font->glyph_map, MAP_CAPACITY) < 0) {
+	if (yetty_ycore_map_init(&font->glyph_map, MAP_CAPACITY) < 0) {
 		free(font->meta);
 		free(font->atlas_pixels);
 		free(font->shader_code.data);
@@ -436,35 +436,35 @@ yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
 	}
 
 	/* GPU resource set */
-	strncpy(font->rs.namespace, "ms_msdf_font", YETTY_RENDER_NAME_MAX - 1);
+	strncpy(font->rs.namespace, "ms_msdf_font", YETTY_YRENDER_NAME_MAX - 1);
 
 	/* Texture: RGBA8 atlas */
 	font->rs.texture_count = 1;
-	struct yetty_render_texture *tex = &font->rs.textures[0];
-	strncpy(tex->name, "texture", YETTY_RENDER_NAME_MAX - 1);
-	strncpy(tex->wgsl_type, "texture_2d<f32>", YETTY_RENDER_WGSL_TYPE_MAX - 1);
-	strncpy(tex->sampler_name, "sampler", YETTY_RENDER_NAME_MAX - 1);
+	struct yetty_yrender_texture *tex = &font->rs.textures[0];
+	strncpy(tex->name, "texture", YETTY_YRENDER_NAME_MAX - 1);
+	strncpy(tex->wgsl_type, "texture_2d<f32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
+	strncpy(tex->sampler_name, "sampler", YETTY_YRENDER_NAME_MAX - 1);
 	tex->format = WGPUTextureFormat_RGBA8Unorm;
 	tex->sampler_filter = WGPUFilterMode_Linear;
 
 	/* Buffer: per-glyph metadata */
 	font->rs.buffer_count = 1;
-	struct yetty_render_buffer *buf = &font->rs.buffers[0];
-	strncpy(buf->name, "buffer", YETTY_RENDER_NAME_MAX - 1);
-	strncpy(buf->wgsl_type, "array<f32>", YETTY_RENDER_WGSL_TYPE_MAX - 1);
+	struct yetty_yrender_buffer *buf = &font->rs.buffers[0];
+	strncpy(buf->name, "buffer", YETTY_YRENDER_NAME_MAX - 1);
+	strncpy(buf->wgsl_type, "array<f32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
 	buf->readonly = 1;
 
 	/* Uniforms for shader */
 	font->rs.uniform_count = 2;
-	strncpy(font->rs.uniforms[0].name, "pixel_range", YETTY_RENDER_NAME_MAX - 1);
-	font->rs.uniforms[0].type = YETTY_RENDER_UNIFORM_F32;
+	strncpy(font->rs.uniforms[0].name, "pixel_range", YETTY_YRENDER_NAME_MAX - 1);
+	font->rs.uniforms[0].type = YETTY_YRENDER_UNIFORM_F32;
 	font->rs.uniforms[0].f32 = font->pixel_range;
 
-	strncpy(font->rs.uniforms[1].name, "scale", YETTY_RENDER_NAME_MAX - 1);
-	font->rs.uniforms[1].type = YETTY_RENDER_UNIFORM_F32;
+	strncpy(font->rs.uniforms[1].name, "scale", YETTY_YRENDER_NAME_MAX - 1);
+	font->rs.uniforms[1].type = YETTY_YRENDER_UNIFORM_F32;
 	font->rs.uniforms[1].f32 = font->requested_size / font->base_size;
 
-	yetty_render_shader_code_set(&font->rs.shader,
+	yetty_yrender_shader_code_set(&font->rs.shader,
 		(const char *)font->shader_code.data, font->shader_code.size);
 
 	/* Load a glyph to determine hw_ratio */
@@ -473,7 +473,7 @@ yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
 		free(font->meta);
 		free(font->atlas_pixels);
 		free(font->shader_code.data);
-		yetty_core_map_destroy(&font->glyph_map);
+		yetty_ycore_map_destroy(&font->glyph_map);
 		yetty_ycdb_reader_close(font->cdb);
 		free(font);
 		return YETTY_ERR(yetty_font_ms_font, "failed to determine hw_ratio");

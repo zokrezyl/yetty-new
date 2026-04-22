@@ -59,7 +59,7 @@ YETTY_RESULT_DECLARE(yetty_font_font, struct yetty_font_font *);
 struct yetty_font_font_result res = yetty_font_raster_font_create(config, 10, 20);
 if (YETTY_IS_ERR(res)) {
     yerror("font: %s", res.error.msg);
-    return YETTY_ERR(yetty_core_void, res.error.msg);
+    return YETTY_ERR(yetty_ycore_void, res.error.msg);
 }
 struct yetty_font_font *font = res.value;
 ```

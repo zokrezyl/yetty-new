@@ -161,7 +161,7 @@ static int buffer_write(void *data, const char *buf, size_t len)
 	return 0;
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_write_response_ok(struct yetty_rpc_write_buffer *buf, uint32_t msgid,
 			    const uint8_t *result, size_t result_len)
 {
@@ -179,7 +179,7 @@ yetty_rpc_write_response_ok(struct yetty_rpc_write_buffer *buf, uint32_t msgid,
 	if (result && result_len > 0) {
 		/* Write raw msgpack result */
 		if (buf->len + result_len > buf->capacity)
-			return YETTY_ERR(yetty_core_void, "buffer overflow");
+			return YETTY_ERR(yetty_ycore_void, "buffer overflow");
 		memcpy(buf->data + buf->len, result, result_len);
 		buf->len += result_len;
 	} else {
@@ -189,7 +189,7 @@ yetty_rpc_write_response_ok(struct yetty_rpc_write_buffer *buf, uint32_t msgid,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_write_response_error(struct yetty_rpc_write_buffer *buf,
 			       uint32_t msgid, const char *error_msg)
 {
@@ -213,7 +213,7 @@ yetty_rpc_write_response_error(struct yetty_rpc_write_buffer *buf,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_write_response_bool(struct yetty_rpc_write_buffer *buf,
 			      uint32_t msgid, int value)
 {

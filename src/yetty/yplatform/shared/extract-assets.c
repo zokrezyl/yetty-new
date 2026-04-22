@@ -17,7 +17,7 @@ int yetty_incbin_assets_needs_extraction(struct yetty_incbin_assets *assets, con
 int yetty_incbin_assets_extract_data_to(struct yetty_incbin_assets *assets, const char *data_dir);
 int yetty_incbin_assets_extract_config_to(struct yetty_incbin_assets *assets, const char *config_dir);
 
-struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config *config)
+struct yetty_ycore_void_result yetty_platform_extract_assets(struct yetty_config *config)
 {
     const char *data_dir;
     const char *config_dir;
@@ -41,7 +41,7 @@ struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config 
     if (needs_extract) {
         if (!yetty_incbin_assets_extract_data_to(assets, data_dir)) {
             yetty_incbin_assets_destroy(assets);
-            return YETTY_ERR(yetty_core_void, "failed to extract data assets");
+            return YETTY_ERR(yetty_ycore_void, "failed to extract data assets");
         }
     }
 
@@ -51,7 +51,7 @@ struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config 
         if (needs_extract) {
             if (!yetty_incbin_assets_extract_config_to(assets, config_dir)) {
                 yetty_incbin_assets_destroy(assets);
-                return YETTY_ERR(yetty_core_void, "failed to extract config assets");
+                return YETTY_ERR(yetty_ycore_void, "failed to extract config assets");
             }
         }
     }

@@ -17,14 +17,14 @@
 
 /* Flat buffer entry — one per buffer across all resource sets */
 struct flat_buffer {
-    struct yetty_render_buffer *src;   /* mutable to clear dirty */
+    struct yetty_yrender_buffer *src;   /* mutable to clear dirty */
     const char *ns;       /* namespace for WGSL name */
     size_t mega_offset;   /* byte offset in mega buffer */
 };
 
 /* Flat texture entry — one per texture across all resource sets */
 struct flat_texture {
-    struct yetty_render_texture *src;  /* mutable to clear dirty */
+    struct yetty_yrender_texture *src;  /* mutable to clear dirty */
     const char *ns;
     uint32_t atlas_x, atlas_y;  /* position in atlas */
     size_t atlas_index;          /* which atlas (by format) */
@@ -32,16 +32,16 @@ struct flat_texture {
 
 /* Flat uniform entry — one per uniform across all resource sets */
 struct flat_uniform {
-    const struct yetty_render_uniform *src;
+    const struct yetty_yrender_uniform *src;
     const char *ns;
 };
 
 struct gpu_resource_binder_impl {
-    struct yetty_render_gpu_resource_binder base;
+    struct yetty_yrender_gpu_resource_binder base;
     WGPUDevice device;
     WGPUQueue queue;
     WGPUTextureFormat surface_format;
-    struct yetty_render_gpu_allocator *allocator;
+    struct yetty_yrender_gpu_allocator *allocator;
 
     /* Submitted resource sets (persistent pointers, submitted once) */
     struct yetty_yrender_gpu_resource_set *resource_sets[MAX_RESOURCE_SETS];
@@ -60,7 +60,7 @@ struct gpu_resource_binder_impl {
     size_t flat_uniform_count;
 
     /* Merged shader code from all providers */
-    struct yetty_render_buffer shader_code;
+    struct yetty_yrender_buffer shader_code;
 
     /* Fixed atlas slots — one per format, always bound */
     struct texture_atlas {
@@ -100,17 +100,17 @@ struct gpu_resource_binder_impl {
 };
 
 /* Forward declarations */
-static void binder_destroy(struct yetty_render_gpu_resource_binder *self);
-static struct yetty_core_void_result binder_submit(struct yetty_render_gpu_resource_binder *self,
+static void binder_destroy(struct yetty_yrender_gpu_resource_binder *self);
+static struct yetty_ycore_void_result binder_submit(struct yetty_yrender_gpu_resource_binder *self,
                                                     const struct yetty_yrender_gpu_resource_set *rs);
-static struct yetty_core_void_result binder_finalize(struct yetty_render_gpu_resource_binder *self);
-static struct yetty_core_void_result binder_update(struct yetty_render_gpu_resource_binder *self);
-static struct yetty_core_void_result binder_bind(struct yetty_render_gpu_resource_binder *self,
+static struct yetty_ycore_void_result binder_finalize(struct yetty_yrender_gpu_resource_binder *self);
+static struct yetty_ycore_void_result binder_update(struct yetty_yrender_gpu_resource_binder *self);
+static struct yetty_ycore_void_result binder_bind(struct yetty_yrender_gpu_resource_binder *self,
                                                   WGPURenderPassEncoder pass, uint32_t group_index);
-static WGPURenderPipeline binder_get_pipeline(const struct yetty_render_gpu_resource_binder *self);
-static WGPUBuffer binder_get_quad_vertex_buffer(const struct yetty_render_gpu_resource_binder *self);
+static WGPURenderPipeline binder_get_pipeline(const struct yetty_yrender_gpu_resource_binder *self);
+static WGPUBuffer binder_get_quad_vertex_buffer(const struct yetty_yrender_gpu_resource_binder *self);
 
-static const struct yetty_render_gpu_resource_binder_ops binder_ops = {
+static const struct yetty_yrender_gpu_resource_binder_ops binder_ops = {
     .destroy = binder_destroy,
     .submit = binder_submit,
     .finalize = binder_finalize,
@@ -122,7 +122,7 @@ static const struct yetty_render_gpu_resource_binder_ops binder_ops = {
 
 /* Append shader code to merged buffer */
 static void append_shader(struct gpu_resource_binder_impl *impl,
-                           const struct yetty_render_shader_code *sc,
+                           const struct yetty_yrender_shader_code *sc,
                            const char *ns)
 {
     if (!sc->data || sc->size == 0) return;
@@ -280,7 +280,7 @@ static int atlas_has_textures(struct gpu_resource_binder_impl *impl, size_t ai)
     return 0;
 }
 
-static struct yetty_core_void_result create_atlas(struct gpu_resource_binder_impl *impl, size_t ai)
+static struct yetty_ycore_void_result create_atlas(struct gpu_resource_binder_impl *impl, size_t ai)
 {
     pack_one_atlas(impl, ai);
     struct texture_atlas *a = &impl->atlases[ai];
@@ -299,7 +299,7 @@ static struct yetty_core_void_result create_atlas(struct gpu_resource_binder_imp
 
     a->texture = impl->allocator->ops->create_texture(impl->allocator, &tex_desc);
     if (!a->texture)
-        return YETTY_ERR(yetty_core_void, "failed to create atlas texture");
+        return YETTY_ERR(yetty_ycore_void, "failed to create atlas texture");
 
     WGPUTextureViewDescriptor view_desc = {0};
     view_desc.format = atlas_formats[ai];
@@ -323,7 +323,7 @@ static struct yetty_core_void_result create_atlas(struct gpu_resource_binder_imp
 }
 
 /* Create GPU resources */
-static struct yetty_core_void_result create_gpu_resources(struct gpu_resource_binder_impl *impl)
+static struct yetty_ycore_void_result create_gpu_resources(struct gpu_resource_binder_impl *impl)
 {
     /* Storage buffer */
     if (impl->storage_buffer_size > 0) {
@@ -335,14 +335,14 @@ static struct yetty_core_void_result create_gpu_resources(struct gpu_resource_bi
         desc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
         impl->storage_buffer = impl->allocator->ops->create_buffer(impl->allocator, &desc);
         if (!impl->storage_buffer)
-            return YETTY_ERR(yetty_core_void, "failed to create storage buffer");
+            return YETTY_ERR(yetty_ycore_void, "failed to create storage buffer");
         ydebug("GpuResourceBinder: storage_buffer %zu bytes", impl->storage_buffer_size);
     }
 
     /* Per-format atlases */
     for (size_t ai = 0; ai < ATLAS_COUNT; ai++) {
         if (atlas_has_textures(impl, ai)) {
-            struct yetty_core_void_result res = create_atlas(impl, ai);
+            struct yetty_ycore_void_result res = create_atlas(impl, ai);
             if (!YETTY_IS_OK(res)) return res;
         }
     }
@@ -351,9 +351,9 @@ static struct yetty_core_void_result create_gpu_resources(struct gpu_resource_bi
     if (impl->flat_uniform_count > 0) {
         impl->uniform_buffer_size = 0;
         for (size_t i = 0; i < impl->flat_uniform_count; i++) {
-            size_t align = yetty_render_uniform_type_align(impl->flat_uniforms[i].src->type);
+            size_t align = yetty_yrender_uniform_type_align(impl->flat_uniforms[i].src->type);
             impl->uniform_buffer_size = (impl->uniform_buffer_size + align - 1) & ~(align - 1);
-            impl->uniform_buffer_size += yetty_render_uniform_type_size(impl->flat_uniforms[i].src->type);
+            impl->uniform_buffer_size += yetty_yrender_uniform_type_size(impl->flat_uniforms[i].src->type);
         }
         impl->uniform_buffer_size = (impl->uniform_buffer_size + 15) & ~(size_t)15;
 
@@ -365,14 +365,14 @@ static struct yetty_core_void_result create_gpu_resources(struct gpu_resource_bi
         desc.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
         impl->uniform_buffer = impl->allocator->ops->create_buffer(impl->allocator, &desc);
         if (!impl->uniform_buffer)
-            return YETTY_ERR(yetty_core_void, "failed to create uniform buffer");
+            return YETTY_ERR(yetty_ycore_void, "failed to create uniform buffer");
     }
 
     return YETTY_OK_VOID();
 }
 
 /* Upload all data to GPU */
-static struct yetty_core_void_result upload_all(struct gpu_resource_binder_impl *impl)
+static struct yetty_ycore_void_result upload_all(struct gpu_resource_binder_impl *impl)
 {
     /* Upload buffers into mega buffer at their offsets */
     for (size_t i = 0; i < impl->flat_buffer_count; i++) {
@@ -407,7 +407,7 @@ static struct yetty_core_void_result upload_all(struct gpu_resource_binder_impl 
             continue;
         }
 
-        size_t tex_size = yetty_render_texture_get_size(ft->src);
+        size_t tex_size = yetty_yrender_texture_get_size(ft->src);
         if (tex_size == 0) {
             ydebug("GpuResourceBinder: SKIP texture '%s_%s' tex_size=0", ft->ns, ft->src->name);
             continue;
@@ -440,19 +440,19 @@ static struct yetty_core_void_result upload_all(struct gpu_resource_binder_impl 
         memset(packed, 0, sizeof(packed));
         size_t offset = 0;
         for (size_t i = 0; i < impl->flat_uniform_count; i++) {
-            const struct yetty_render_uniform *u = impl->flat_uniforms[i].src;
-            size_t align = yetty_render_uniform_type_align(u->type);
+            const struct yetty_yrender_uniform *u = impl->flat_uniforms[i].src;
+            size_t align = yetty_yrender_uniform_type_align(u->type);
             offset = (offset + align - 1) & ~(align - 1);
-            size_t sz = yetty_render_uniform_type_size(u->type);
+            size_t sz = yetty_yrender_uniform_type_size(u->type);
             if (offset + sz > sizeof(packed)) break;
             memcpy(packed + offset, &u->f32, sz);  /* union starts at f32 */
-            if (u->type == YETTY_RENDER_UNIFORM_VEC2)
+            if (u->type == YETTY_YRENDER_UNIFORM_VEC2)
                 ydebug("GpuResourceBinder: uniform[%zu] '%s_%s' vec2(%.1f, %.1f) at offset %zu",
                        i, impl->flat_uniforms[i].ns, u->name, u->vec2[0], u->vec2[1], offset);
-            else if (u->type == YETTY_RENDER_UNIFORM_F32)
+            else if (u->type == YETTY_YRENDER_UNIFORM_F32)
                 ydebug("GpuResourceBinder: uniform[%zu] '%s_%s' f32=%.3f at offset %zu",
                        i, impl->flat_uniforms[i].ns, u->name, u->f32, offset);
-            else if (u->type == YETTY_RENDER_UNIFORM_U32)
+            else if (u->type == YETTY_YRENDER_UNIFORM_U32)
                 ydebug("GpuResourceBinder: uniform[%zu] '%s_%s' u32=0x%08x at offset %zu",
                        i, impl->flat_uniforms[i].ns, u->name, u->u32, offset);
             offset += sz;
@@ -479,7 +479,7 @@ static void generate_wgsl_bindings(struct gpu_resource_binder_impl *impl, char *
 
         for (size_t i = 0; i < impl->flat_uniform_count; i++) {
             const struct flat_uniform *fu = &impl->flat_uniforms[i];
-            const char *wgsl_type = yetty_render_uniform_type_wgsl(fu->src->type);
+            const char *wgsl_type = yetty_yrender_uniform_type_wgsl(fu->src->type);
             n = snprintf(p, rem, "    %s_%s: %s,\n", fu->ns, fu->src->name, wgsl_type);
             if (n > 0 && (size_t)n < rem) { p += n; rem -= n; }
         }
@@ -531,7 +531,7 @@ static void generate_wgsl_bindings(struct gpu_resource_binder_impl *impl, char *
 }
 
 /* Create bind group */
-static struct yetty_core_void_result create_bind_group(struct gpu_resource_binder_impl *impl)
+static struct yetty_ycore_void_result create_bind_group(struct gpu_resource_binder_impl *impl)
 {
     /* max: 1 uniform + ATLAS_COUNT*(texture+sampler) + 1 storage = 1+4+1 = 6 */
     WGPUBindGroupLayoutEntry layout_entries[8];
@@ -600,14 +600,14 @@ static struct yetty_core_void_result create_bind_group(struct gpu_resource_binde
     }
 
     if (count == 0)
-        return YETTY_ERR(yetty_core_void, "no bindings");
+        return YETTY_ERR(yetty_ycore_void, "no bindings");
 
     WGPUBindGroupLayoutDescriptor layout_desc = {0};
     layout_desc.entryCount = count;
     layout_desc.entries = layout_entries;
     impl->bind_group_layout = wgpuDeviceCreateBindGroupLayout(impl->device, &layout_desc);
     if (!impl->bind_group_layout)
-        return YETTY_ERR(yetty_core_void, "failed to create bind group layout");
+        return YETTY_ERR(yetty_ycore_void, "failed to create bind group layout");
 
     WGPUBindGroupDescriptor group_desc = {0};
     group_desc.layout = impl->bind_group_layout;
@@ -615,16 +615,16 @@ static struct yetty_core_void_result create_bind_group(struct gpu_resource_binde
     group_desc.entries = group_entries;
     impl->bind_group = wgpuDeviceCreateBindGroup(impl->device, &group_desc);
     if (!impl->bind_group)
-        return YETTY_ERR(yetty_core_void, "failed to create bind group");
+        return YETTY_ERR(yetty_ycore_void, "failed to create bind group");
 
     return YETTY_OK_VOID();
 }
 
 /* Compile shader and create pipeline */
-static struct yetty_core_void_result compile_and_create_pipeline(struct gpu_resource_binder_impl *impl)
+static struct yetty_ycore_void_result compile_and_create_pipeline(struct gpu_resource_binder_impl *impl)
 {
     if (impl->shader_code.size == 0)
-        return YETTY_ERR(yetty_core_void, "no shader code");
+        return YETTY_ERR(yetty_ycore_void, "no shader code");
 
     char bindings[MAX_BINDING_CODE];
     generate_wgsl_bindings(impl, bindings, sizeof(bindings));
@@ -633,7 +633,7 @@ static struct yetty_core_void_result compile_and_create_pipeline(struct gpu_reso
     size_t total_len = bindings_len + impl->shader_code.size + 2;
     char *merged = malloc(total_len);
     if (!merged)
-        return YETTY_ERR(yetty_core_void, "failed to allocate merged shader");
+        return YETTY_ERR(yetty_ycore_void, "failed to allocate merged shader");
 
     memcpy(merged, bindings, bindings_len);
     merged[bindings_len] = '\n';
@@ -667,7 +667,7 @@ static struct yetty_core_void_result compile_and_create_pipeline(struct gpu_reso
     free(merged);
 
     if (!impl->shader_module || yetty_webgpu_error_check())
-        return YETTY_ERR(yetty_core_void, yetty_webgpu_error.has_error
+        return YETTY_ERR(yetty_ycore_void, yetty_webgpu_error.has_error
                          ? yetty_webgpu_error.message
                          : "failed to compile shader");
 
@@ -685,7 +685,7 @@ static struct yetty_core_void_result compile_and_create_pipeline(struct gpu_reso
         quad_desc.mappedAtCreation = 1;
         impl->quad_vertex_buffer = impl->allocator->ops->create_buffer(impl->allocator, &quad_desc);
         if (!impl->quad_vertex_buffer)
-            return YETTY_ERR(yetty_core_void, "failed to create quad buffer");
+            return YETTY_ERR(yetty_ycore_void, "failed to create quad buffer");
 
         void *mapped = wgpuBufferGetMappedRange(impl->quad_vertex_buffer, 0, sizeof(quad_vertices));
         memcpy(mapped, quad_vertices, sizeof(quad_vertices));
@@ -698,7 +698,7 @@ static struct yetty_core_void_result compile_and_create_pipeline(struct gpu_reso
     pl_desc.bindGroupLayouts = &impl->bind_group_layout;
     impl->pipeline_layout = wgpuDeviceCreatePipelineLayout(impl->device, &pl_desc);
     if (!impl->pipeline_layout)
-        return YETTY_ERR(yetty_core_void, "failed to create pipeline layout");
+        return YETTY_ERR(yetty_ycore_void, "failed to create pipeline layout");
 
     WGPUVertexAttribute pos_attr = {0};
     pos_attr.format = WGPUVertexFormat_Float32x2;
@@ -749,7 +749,7 @@ static struct yetty_core_void_result compile_and_create_pipeline(struct gpu_reso
 
     impl->pipeline = wgpuDeviceCreateRenderPipeline(impl->device, &pipe_desc);
     if (!impl->pipeline)
-        return YETTY_ERR(yetty_core_void, "failed to create pipeline");
+        return YETTY_ERR(yetty_ycore_void, "failed to create pipeline");
 
     ydebug("GpuResourceBinder: pipeline created");
     return YETTY_OK_VOID();
@@ -757,7 +757,7 @@ static struct yetty_core_void_result compile_and_create_pipeline(struct gpu_reso
 
 /* === Public API === */
 
-static void binder_destroy(struct yetty_render_gpu_resource_binder *self)
+static void binder_destroy(struct yetty_yrender_gpu_resource_binder *self)
 {
     struct gpu_resource_binder_impl *impl = (struct gpu_resource_binder_impl *)self;
 
@@ -783,7 +783,7 @@ static void binder_destroy(struct yetty_render_gpu_resource_binder *self)
     free(impl);
 }
 
-static struct yetty_core_void_result binder_submit(struct yetty_render_gpu_resource_binder *self,
+static struct yetty_ycore_void_result binder_submit(struct yetty_yrender_gpu_resource_binder *self,
                                                     const struct yetty_yrender_gpu_resource_set *rs)
 {
     struct gpu_resource_binder_impl *impl = (struct gpu_resource_binder_impl *)self;
@@ -797,13 +797,13 @@ static struct yetty_core_void_result binder_submit(struct yetty_render_gpu_resou
     }
 
     if (impl->resource_set_count >= MAX_RESOURCE_SETS)
-        return YETTY_ERR(yetty_core_void, "max resource sets reached");
+        return YETTY_ERR(yetty_ycore_void, "max resource sets reached");
 
     impl->resource_sets[impl->resource_set_count++] = (struct yetty_yrender_gpu_resource_set *)rs;
     return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result binder_finalize(struct yetty_render_gpu_resource_binder *self)
+static struct yetty_ycore_void_result binder_finalize(struct yetty_yrender_gpu_resource_binder *self)
 {
     struct gpu_resource_binder_impl *impl = (struct gpu_resource_binder_impl *)self;
 
@@ -852,7 +852,7 @@ static struct yetty_core_void_result binder_finalize(struct yetty_render_gpu_res
         collect_resources(impl, impl->resource_sets[i]);
 
     /* Create GPU resources */
-    struct yetty_core_void_result res = create_gpu_resources(impl);
+    struct yetty_ycore_void_result res = create_gpu_resources(impl);
     if (!YETTY_IS_OK(res)) return res;
 
     /* Upload data */
@@ -888,12 +888,12 @@ static struct yetty_core_void_result binder_finalize(struct yetty_render_gpu_res
  * If any buffer size or texture dimension changed, the entire layout is invalid
  * and we must re-finalize (recreate GPU resources from scratch).
  * Same if shader hash changed. */
-static struct yetty_core_void_result binder_update(struct yetty_render_gpu_resource_binder *self)
+static struct yetty_ycore_void_result binder_update(struct yetty_yrender_gpu_resource_binder *self)
 {
     struct gpu_resource_binder_impl *impl = (struct gpu_resource_binder_impl *)self;
 
     if (!impl->finalized)
-        return YETTY_ERR(yetty_core_void, "not finalized");
+        return YETTY_ERR(yetty_ycore_void, "not finalized");
 
     /* Check if anything structural changed — requires full re-finalize */
     int need_refinalize = 0;
@@ -968,7 +968,7 @@ static struct yetty_core_void_result binder_update(struct yetty_render_gpu_resou
 
         struct texture_atlas *a = &impl->atlases[ft->atlas_index];
         if (!ft->src->data || !a->texture) { ft->src->dirty = 0; continue; }
-        size_t tex_size = yetty_render_texture_get_size(ft->src);
+        size_t tex_size = yetty_yrender_texture_get_size(ft->src);
         if (tex_size == 0) { ft->src->dirty = 0; continue; }
 
         uint32_t bpp = (ft->src->format == WGPUTextureFormat_R8Unorm) ? 1 : 4;
@@ -997,10 +997,10 @@ static struct yetty_core_void_result binder_update(struct yetty_render_gpu_resou
         memset(packed, 0, sizeof(packed));
         size_t offset = 0;
         for (size_t i = 0; i < impl->flat_uniform_count; i++) {
-            const struct yetty_render_uniform *u = impl->flat_uniforms[i].src;
-            size_t align = yetty_render_uniform_type_align(u->type);
+            const struct yetty_yrender_uniform *u = impl->flat_uniforms[i].src;
+            size_t align = yetty_yrender_uniform_type_align(u->type);
             offset = (offset + align - 1) & ~(align - 1);
-            size_t sz = yetty_render_uniform_type_size(u->type);
+            size_t sz = yetty_yrender_uniform_type_size(u->type);
             if (offset + sz > sizeof(packed)) break;
             memcpy(packed + offset, &u->f32, sz);
             offset += sz;
@@ -1014,42 +1014,42 @@ static struct yetty_core_void_result binder_update(struct yetty_render_gpu_resou
     return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result binder_bind(struct yetty_render_gpu_resource_binder *self,
+static struct yetty_ycore_void_result binder_bind(struct yetty_yrender_gpu_resource_binder *self,
                                                   WGPURenderPassEncoder pass, uint32_t group_index)
 {
     struct gpu_resource_binder_impl *impl = (struct gpu_resource_binder_impl *)self;
 
     if (!impl->finalized)
-        return YETTY_ERR(yetty_core_void, "not finalized");
+        return YETTY_ERR(yetty_ycore_void, "not finalized");
     if (!impl->bind_group)
-        return YETTY_ERR(yetty_core_void, "bind group is null");
+        return YETTY_ERR(yetty_ycore_void, "bind group is null");
 
     wgpuRenderPassEncoderSetBindGroup(pass, group_index, impl->bind_group, 0, NULL);
     return YETTY_OK_VOID();
 }
 
-static WGPURenderPipeline binder_get_pipeline(const struct yetty_render_gpu_resource_binder *self)
+static WGPURenderPipeline binder_get_pipeline(const struct yetty_yrender_gpu_resource_binder *self)
 {
     return ((const struct gpu_resource_binder_impl *)self)->pipeline;
 }
 
-static WGPUBuffer binder_get_quad_vertex_buffer(const struct yetty_render_gpu_resource_binder *self)
+static WGPUBuffer binder_get_quad_vertex_buffer(const struct yetty_yrender_gpu_resource_binder *self)
 {
     return ((const struct gpu_resource_binder_impl *)self)->quad_vertex_buffer;
 }
 
-struct yetty_render_gpu_resource_binder_result yetty_render_gpu_resource_binder_create(
+struct yetty_yrender_gpu_resource_binder_result yetty_yrender_gpu_resource_binder_create(
     WGPUDevice device,
     WGPUQueue queue,
     WGPUTextureFormat surface_format,
-    struct yetty_render_gpu_allocator *allocator)
+    struct yetty_yrender_gpu_allocator *allocator)
 {
-    if (!device) return YETTY_ERR(yetty_render_gpu_resource_binder, "device is null");
-    if (!queue) return YETTY_ERR(yetty_render_gpu_resource_binder, "queue is null");
-    if (!allocator) return YETTY_ERR(yetty_render_gpu_resource_binder, "allocator is null");
+    if (!device) return YETTY_ERR(yetty_yrender_gpu_resource_binder, "device is null");
+    if (!queue) return YETTY_ERR(yetty_yrender_gpu_resource_binder, "queue is null");
+    if (!allocator) return YETTY_ERR(yetty_yrender_gpu_resource_binder, "allocator is null");
 
     struct gpu_resource_binder_impl *impl = calloc(1, sizeof(struct gpu_resource_binder_impl));
-    if (!impl) return YETTY_ERR(yetty_render_gpu_resource_binder, "failed to allocate");
+    if (!impl) return YETTY_ERR(yetty_yrender_gpu_resource_binder, "failed to allocate");
 
     impl->base.ops = &binder_ops;
     impl->device = device;
@@ -1057,5 +1057,5 @@ struct yetty_render_gpu_resource_binder_result yetty_render_gpu_resource_binder_
     impl->surface_format = surface_format;
     impl->allocator = allocator;
 
-    return YETTY_OK(yetty_render_gpu_resource_binder, &impl->base);
+    return YETTY_OK(yetty_yrender_gpu_resource_binder, &impl->base);
 }
