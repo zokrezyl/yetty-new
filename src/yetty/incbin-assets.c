@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <errno.h>
 
 #ifndef YETTY_BUILD_VERSION
@@ -37,6 +38,10 @@ struct yetty_incbin_assets {
 
 #ifdef HAS_CONFIG_MANIFEST
 #include "yetty_config_manifest.h"
+#endif
+
+#ifdef HAS_TINYEMU_MANIFEST
+#include "yetty_tinyemu_manifest.h"
 #endif
 
 
@@ -84,6 +89,11 @@ struct yetty_incbin_assets *yetty_incbin_assets_create(void)
 #ifdef HAS_CONFIG_MANIFEST
     register_config_assets_c(register_asset_callback);
     ydebug("Registered config assets from manifest");
+#endif
+
+#ifdef HAS_TINYEMU_MANIFEST
+    register_tinyemu_assets_c(register_asset_callback);
+    ydebug("Registered tinyemu assets from manifest");
 #endif
 
     g_current_assets = NULL;
@@ -338,4 +348,74 @@ int yetty_incbin_assets_extract_config_to(struct yetty_incbin_assets *assets,
     write_marker(config_dir);
     ydebug("Config asset extraction complete");
     return 1;
+}
+
+/* Extract a tarball to a directory */
+static int extract_tarball(const char *tar_path, const char *dest_dir)
+{
+    char cmd[MAX_PATH_LEN * 2 + 64];
+
+    if (mkdir_p(dest_dir) != 0)
+        return 0;
+
+    snprintf(cmd, sizeof(cmd), "tar xf '%s' -C '%s'", tar_path, dest_dir);
+    ydebug("extract_tarball: running: %s", cmd);
+
+    int ret = system(cmd);
+    if (ret != 0) {
+        ydebug("extract_tarball: tar command failed with %d", ret);
+        return 0;
+    }
+
+    return 1;
+}
+
+/* Extract tinyemu assets to data directory */
+int yetty_incbin_assets_extract_tinyemu_to(struct yetty_incbin_assets *assets,
+                                            const char *data_dir)
+{
+    char tinyemu_dir[MAX_PATH_LEN];
+    char rootfs_tar[MAX_PATH_LEN];
+    char rootfs_dir[MAX_PATH_LEN];
+
+    snprintf(tinyemu_dir, sizeof(tinyemu_dir), "%s/tinyemu", data_dir);
+    ydebug("extract_tinyemu_to: starting extraction to %s", tinyemu_dir);
+
+    if (mkdir_p(tinyemu_dir) != 0) {
+        ydebug("Failed to create tinyemu directory: %s", tinyemu_dir);
+        return 0;
+    }
+
+    if (!extract_with_prefix(assets, "tinyemu/", tinyemu_dir))
+        return 0;
+
+    /* Extract alpine-rootfs.tar if present */
+    snprintf(rootfs_tar, sizeof(rootfs_tar), "%s/alpine-rootfs.tar", tinyemu_dir);
+    snprintf(rootfs_dir, sizeof(rootfs_dir), "%s/alpine-rootfs", tinyemu_dir);
+
+    struct stat st;
+    if (stat(rootfs_tar, &st) == 0) {
+        ydebug("extract_tinyemu_to: extracting rootfs tarball");
+        if (!extract_tarball(rootfs_tar, rootfs_dir)) {
+            ydebug("Failed to extract rootfs tarball");
+            return 0;
+        }
+        /* Remove tarball after extraction */
+        unlink(rootfs_tar);
+    }
+
+    ydebug("TinyEMU asset extraction complete");
+    return 1;
+}
+
+/* Check if tinyemu assets are available */
+int yetty_incbin_assets_has_tinyemu(struct yetty_incbin_assets *assets)
+{
+    size_t i;
+
+    for (i = 0; i < assets->count; i++) {
+        if (strncmp(assets->entries[i].name, "tinyemu/", 8) == 0)
+            return 1;
+    }
+    return 0;
 }

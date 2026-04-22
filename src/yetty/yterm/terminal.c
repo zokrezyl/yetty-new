@@ -72,11 +72,14 @@ static void terminal_pty_pipe_read(void *ctx, const char *buf, long nread)
 {
     struct yetty_term_terminal *terminal = ctx;
 
+    ydebug("terminal_pty_pipe_read: nread=%ld pty_reader=%p", nread, (void*)terminal->pty_reader);
+
     if (nread > 0 && terminal->pty_reader) {
         yetty_term_pty_reader_feed(terminal->pty_reader, buf, (size_t)nread);
         if (terminal->layer_count > 0) {
             struct yetty_term_terminal_layer *layer = terminal->layers[0];
             if (layer && layer->dirty) {
+                ydebug("terminal_pty_pipe_read: layer dirty, requesting render");
                 terminal->context.yetty_context.event_loop->ops->request_render(
                     terminal->context.yetty_context.event_loop);
             }
@@ -331,7 +334,8 @@ yetty_term_terminal_create(struct grid_size grid_size,
     }
 
     /* Create ypaint scrolling layer (overlay on top of text) */
-    {
+    /* DISABLED: yplot_render not implemented yet */
+    if (0) {
         struct yetty_term_terminal_layer *text_layer = text_layer_res.value;
         struct yetty_term_terminal_layer_result ypaint_res = yetty_term_ypaint_layer_create(
             cols, rows,

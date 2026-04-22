@@ -27,9 +27,14 @@
 #include <inttypes.h>
 #include <assert.h>
 #include <stdarg.h>
+#if defined(__APPLE__)
+#include <sys/param.h>
+#include <sys/mount.h>
+#else
 #include <sys/statfs.h>
-#include <sys/stat.h>
 #include <sys/sysmacros.h>
+#endif
+#include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -236,11 +241,13 @@ static int fs_open(FSDevice *fs, FSQID *qid, FSFile *f, uint32_t flags,
     struct stat st;
     fs_close(fs, f);
 
-    if (stat(f->path, &st) != 0) 
+    if (stat(f->path, &st) != 0)
         return -errno_to_p9(errno);
     stat_to_qid(qid, &st);
-    
-    if (flags & P9_O_DIRECTORY) {
+
+    /* Open as directory if P9_O_DIRECTORY set OR path is actually a directory.
+     * Newer kernels (7.x) don't always send P9_O_DIRECTORY flag. */
+    if ((flags & P9_O_DIRECTORY) || S_ISDIR(st.st_mode)) {
         DIR *dirp;
         dirp = opendir(f->path);
         if (!dirp)
@@ -400,12 +407,21 @@ static int fs_stat(FSDevice *fs, FSFile *f, FSStat *st)
     st->st_size = st1.st_size;
     st->st_blksize = st1.st_blksize;
     st->st_blocks = st1.st_blocks;
+#if defined(__APPLE__)
+    st->st_atime_sec = st1.st_atimespec.tv_sec;
+    st->st_atime_nsec = st1.st_atimespec.tv_nsec;
+    st->st_mtime_sec = st1.st_mtimespec.tv_sec;
+    st->st_mtime_nsec = st1.st_mtimespec.tv_nsec;
+    st->st_ctime_sec = st1.st_ctimespec.tv_sec;
+    st->st_ctime_nsec = st1.st_ctimespec.tv_nsec;
+#else
     st->st_atime_sec = st1.st_atim.tv_sec;
     st->st_atime_nsec = st1.st_atim.tv_nsec;
     st->st_mtime_sec = st1.st_mtim.tv_sec;
     st->st_mtime_nsec = st1.st_mtim.tv_nsec;
     st->st_ctime_sec = st1.st_ctim.tv_sec;
     st->st_ctime_nsec = st1.st_ctim.tv_nsec;
+#endif
     return 0;
 }
 

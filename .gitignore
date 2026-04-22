@@ -1,0 +1,25 @@
+# Build directories
+build-*/
+tmp/
+
+# IDE/editor
+.cache/
+.vscode/
+compile_commands.json
+
+# Object files and build artifacts
+*.o
+*.d
+*.a
+*.so
+
+# QEMU build artifacts
+poc/qemu/build-tools/qemu-*/
+poc/qemu/build-tools/*.tar.xz
+
+# TinyEMU build artifacts
+src/tinyemu/*.o
+src/tinyemu/*.d
+src/tinyemu/js/
+src/tinyemu/Makefile.js
+src/tinyemu/Untitled

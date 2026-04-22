@@ -102,7 +102,8 @@ typedef struct {
     char *cmdline; /* bios or kernel command line */
     BOOL accel_enable; /* enable acceleration (KVM) */
     char *input_device; /* NULL means no input */
-    
+    int ncpus; /* number of CPUs (SMP) */
+
     /* kernel, bios and other auxiliary files */
     VMFileEntry files[VM_FILE_COUNT];
 } VirtMachineParams;

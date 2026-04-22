@@ -5,6 +5,12 @@
 #include <yetty/yconfig.h>
 #include <yetty/ycore/types.h>
 
+#if YETTY_HAS_TINYEMU
+/* Forward declaration for TinyEMU factory */
+extern struct yetty_platform_pty_factory_result tinyemu_pty_factory_create(
+    struct yetty_config *config);
+#endif
+
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -246,6 +252,13 @@ struct yetty_platform_pty_factory_result yetty_platform_pty_factory_create(
     struct unix_pty_factory *factory;
 
     (void)os_specific;
+
+#if YETTY_HAS_TINYEMU
+    /* Check for --virtual flag - use TinyEMU RISC-V VM instead of native PTY */
+    if (config && config->ops->get_bool(config, YETTY_CONFIG_KEY_VIRTUAL, 0)) {
+        return tinyemu_pty_factory_create(config);
+    }
+#endif
 
     factory = malloc(sizeof(struct unix_pty_factory));
     if (!factory)

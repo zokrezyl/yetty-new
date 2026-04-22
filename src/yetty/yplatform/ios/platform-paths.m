@@ -41,3 +41,9 @@ const char *yetty_platform_get_config_dir(void)
     }
     return "/tmp/yetty";
 }
+
+const char *yetty_platform_get_assets_dir(void)
+{
+    /* iOS assets are in the app bundle */
+    return yetty_platform_get_bundle_dir();
+}

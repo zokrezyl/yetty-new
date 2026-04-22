@@ -260,6 +260,7 @@ static void on_pty_pipe_alloc(uv_handle_t *handle, size_t suggested_size, uv_buf
 static void on_pty_pipe_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
 {
     struct pty_pipe_handle *ph = stream->data;
+    ydebug("on_pty_pipe_read: nread=%zd", nread);
     ph->read_cb(ph->cb_ctx, buf->base, (long)nread);
 }
 
@@ -449,6 +450,7 @@ static struct yetty_core_pipe_id_result libuv_register_pty_pipe(
         return YETTY_ERR(yetty_core_pipe_id, "uv_read_start failed");
 
     ph->active = 1;
+    yinfo("libuv_register_pty_pipe: registered fd=%d as pipe_id=%d", (int)source->abstract, id);
     return YETTY_OK(yetty_core_pipe_id, id);
 }
 

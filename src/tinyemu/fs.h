@@ -1,6 +1,6 @@
 /*
  * Filesystem abstraction
- * 
+ *
  * Copyright (c) 2016 Fabrice Bellard
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -21,6 +21,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#ifndef FS_H
+#define FS_H
 
 /* FSQID.type */
 #define P9_QTDIR 0x80
@@ -209,3 +211,5 @@ FSFile *fs_dup(FSDevice *fs, FSFile *f);
 FSFile *fs_walk_path1(FSDevice *fs, FSFile *f, const char *path,
                       char **pname);
 FSFile *fs_walk_path(FSDevice *fs, FSFile *f, const char *path);
+
+#endif /* FS_H */

@@ -2,8 +2,10 @@
 
 #include <yetty/platform/extract-assets.h>
 #include <yetty/yconfig.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* Forward declarations - implemented in platform-paths.c */
 const char *yetty_platform_get_data_dir(void);
@@ -16,6 +18,8 @@ void yetty_incbin_assets_destroy(struct yetty_incbin_assets *assets);
 int yetty_incbin_assets_needs_extraction(struct yetty_incbin_assets *assets, const char *dir);
 int yetty_incbin_assets_extract_data_to(struct yetty_incbin_assets *assets, const char *data_dir);
 int yetty_incbin_assets_extract_config_to(struct yetty_incbin_assets *assets, const char *config_dir);
+int yetty_incbin_assets_extract_tinyemu_to(struct yetty_incbin_assets *assets, const char *data_dir);
+int yetty_incbin_assets_has_tinyemu(struct yetty_incbin_assets *assets);
 
 struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config *config)
 {
@@ -52,6 +56,18 @@ struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config 
             if (!yetty_incbin_assets_extract_config_to(assets, config_dir)) {
                 yetty_incbin_assets_destroy(assets);
                 return YETTY_ERR(yetty_core_void, "failed to extract config assets");
+            }
+        }
+    }
+
+    /* Extract tinyemu if embedded and config file doesn't exist */
+    if (yetty_incbin_assets_has_tinyemu(assets)) {
+        char tinyemu_cfg[512];
+        snprintf(tinyemu_cfg, sizeof(tinyemu_cfg), "%s/tinyemu/root-riscv64.cfg", data_dir);
+        if (access(tinyemu_cfg, F_OK) != 0) {
+            if (!yetty_incbin_assets_extract_tinyemu_to(assets, data_dir)) {
+                yetty_incbin_assets_destroy(assets);
+                return YETTY_ERR(yetty_core_void, "failed to extract tinyemu assets");
             }
         }
     }
