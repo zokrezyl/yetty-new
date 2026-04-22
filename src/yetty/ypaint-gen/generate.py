@@ -2,10 +2,17 @@
 """
 Complex primitive code generator.
 
-Reads YAML schema, generates:
-- C header: struct definition, serialization API, offset constants
-- C source: serialization implementation
-- WGSL: accessor functions with calculated offsets
+Reads YAML schema, generates ALL boilerplate:
+- C header: struct definition, serialization API, factory API
+- C source: serialization, factory, instance implementation
+- WGSL: uniform struct and buffer bindings
+
+User provides only: YAML schema + WGSL shader
+Generator produces: everything else
+
+Architecture:
+- uniforms: section -> GPU uniform buffer (@group(0) @binding(0) var<uniform>)
+- buffers: section -> GPU storage buffer(s) (@group(0) @binding(1+) var<storage, read>)
 
 Usage: python generate.py <schema.yaml>
 Output files written to same directory as schema.
@@ -15,11 +22,11 @@ import sys
 import yaml
 from pathlib import Path
 
-# Type info: (c_type, wgsl_type, size_words, wgsl_cast)
+# Type info: (c_type, wgsl_type, size_bytes, render_uniform_type)
 TYPES = {
-    'f32': ('float', 'f32', 1, 'bitcast<f32>'),
-    'u32': ('uint32_t', 'u32', 1, ''),
-    'i32': ('int32_t', 'i32', 1, 'bitcast<i32>'),
+    'f32': ('float', 'f32', 4, 'YETTY_RENDER_UNIFORM_F32'),
+    'u32': ('uint32_t', 'u32', 4, 'YETTY_RENDER_UNIFORM_U32'),
+    'i32': ('int32_t', 'i32', 4, 'YETTY_RENDER_UNIFORM_I32'),
 }
 
 
@@ -29,12 +36,11 @@ def load_schema(path):
 
 
 def calculate_layout(schema):
-    """Calculate word offsets for uniforms and buffers."""
-    offset = 0
+    """Calculate layout for uniforms and buffers."""
     uniforms = []
     buffers = []
 
-    # Uniforms first
+    # Uniforms - go to GPU uniform buffer
     for u in schema.get('uniforms', []):
         count = u.get('count', 1)
         t = TYPES[u['type']]
@@ -43,177 +49,720 @@ def calculate_layout(schema):
             'type': u['type'],
             'c_type': t[0],
             'wgsl_type': t[1],
-            'wgsl_cast': t[2],
+            'render_type': t[3],
             'count': count,
-            'offset': offset,
+            'default': u.get('default'),
         })
-        offset += t[2] * count
 
-    uniforms_size = offset
-
-    # Buffer length fields
+    # Buffers - go to GPU storage buffer(s)
     for b in schema.get('buffers', []):
         buffers.append({
             'name': b['name'],
             'element_type': b['element_type'],
-            'len_offset': offset,
         })
-        offset += 1  # length word
 
-    header_size = offset  # total fixed header size
-
-    # Buffer data offsets (calculated at runtime, after all lengths)
-    data_offset = offset
-    for b in buffers:
-        b['data_offset'] = data_offset
-        # Actual offset depends on previous buffer lengths - runtime calc
-
-    return uniforms, buffers, uniforms_size, header_size
+    return uniforms, buffers
 
 
-def generate_c_header(schema, uniforms, buffers, uniforms_size, header_size):
+def generate_c_header(schema, uniforms, buffers):
     name = schema['name']
     NAME = name.upper()
     type_id = schema['type_id']
     if isinstance(type_id, str):
         type_id = int(type_id, 16)
 
-    lines = [
-        f'// Auto-generated from {name}.yaml - DO NOT EDIT',
-        f'#pragma once',
-        f'',
-        f'#include <stdint.h>',
-        f'#include <stddef.h>',
-        f'#include <yetty/ycore/result.h>',
-        f'',
-        f'#ifdef __cplusplus',
-        f'extern "C" {{',
-        f'#endif',
-        f'',
-        f'#define YETTY_{NAME}_TYPE_ID 0x{type_id:08x}u',
-        f'#define YETTY_{NAME}_UNIFORMS_SIZE {uniforms_size}',
-        f'#define YETTY_{NAME}_HEADER_SIZE {header_size}',
-        f'',
-        f'// Uniform offsets (words from payload start)',
-    ]
-
-    for u in uniforms:
-        lines.append(f'#define YETTY_{NAME}_{u["name"].upper()}_OFFSET {u["offset"]}')
-
-    lines.append('')
-    lines.append('// Buffer length offsets')
-    for b in buffers:
-        lines.append(f'#define YETTY_{NAME}_{b["name"].upper()}_LEN_OFFSET {b["len_offset"]}')
-
-    lines.extend([
-        f'',
-        f'// Uniforms struct',
-        f'struct yetty_{name}_uniforms {{',
-    ])
-
+    struct_fields = []
     for u in uniforms:
         if u['count'] > 1:
-            lines.append(f'    {u["c_type"]} {u["name"]}[{u["count"]}];')
+            struct_fields.append(f'    {u["c_type"]} {u["name"]}[{u["count"]}];')
         else:
-            lines.append(f'    {u["c_type"]} {u["name"]};')
+            struct_fields.append(f'    {u["c_type"]} {u["name"]};')
+    struct_fields_str = '\n'.join(struct_fields)
 
-    lines.extend([
-        f'}};',
-        f'',
-    ])
+    buf_struct_fields = []
+    for b in buffers:
+        buf_struct_fields.append(f'    const uint32_t *{b["name"]};')
+        buf_struct_fields.append(f'    size_t {b["name"]}_len;')
+    buf_struct_fields_str = '\n'.join(buf_struct_fields)
 
-    # Serialization API - one buffer param per buffer in schema
-    buf_params = ', '.join([f'const uint32_t *{b["name"]}, size_t {b["name"]}_len' for b in buffers])
+    return f'''// Auto-generated from {name}.yaml - DO NOT EDIT
+#pragma once
 
-    lines.extend([
-        f'// Serialization',
-        f'size_t yetty_{name}_serialized_size(',
-        f'    const struct yetty_{name}_uniforms *uniforms,',
-        f'    {buf_params});',
-        f'',
-        f'struct yetty_core_size_result yetty_{name}_serialize(',
-        f'    const struct yetty_{name}_uniforms *uniforms,',
-        f'    {buf_params},',
-        f'    uint8_t *out, size_t out_capacity);',
-        f'',
-        f'#ifdef __cplusplus',
-        f'}}',
-        f'#endif',
-    ])
+#include <stdint.h>
+#include <stddef.h>
+#include <yetty/ycore/result.h>
+#include <yetty/ypaint-core/complex-prim-types.h>
 
-    return '\n'.join(lines)
+#ifdef __cplusplus
+extern "C" {{
+#endif
+
+#define YETTY_{NAME}_TYPE_ID 0x{type_id:08x}u
+
+// Uniforms struct (goes to GPU uniform buffer)
+struct yetty_{name}_uniforms {{
+{struct_fields_str}
+}};
+
+// Buffers struct (goes to GPU storage buffer)
+struct yetty_{name}_buffers {{
+{buf_struct_fields_str}
+}};
+
+//=============================================================================
+// Serialization API
+//=============================================================================
+
+size_t yetty_{name}_serialized_size(
+    const struct yetty_{name}_uniforms *uniforms,
+    const struct yetty_{name}_buffers *buffers);
+
+struct yetty_core_size_result yetty_{name}_serialize(
+    const struct yetty_{name}_uniforms *uniforms,
+    const struct yetty_{name}_buffers *buffers,
+    uint8_t *out, size_t out_capacity);
+
+//=============================================================================
+// Factory API (creates binder with pre-compiled pipeline)
+//=============================================================================
+
+struct yetty_ypaint_concrete_factory *yetty_{name}_factory_create(void);
+void yetty_{name}_factory_destroy(struct yetty_ypaint_concrete_factory *factory);
+
+//=============================================================================
+// YAML parser registration
+//=============================================================================
+
+struct yetty_ypaint_yaml_parser;
+void yetty_{name}_register_yaml_factory(struct yetty_ypaint_yaml_parser *parser);
+
+#ifdef __cplusplus
+}}
+#endif
+'''
 
 
-def generate_c_source(schema, uniforms, buffers, uniforms_size, header_size):
+def generate_c_source(schema, uniforms, buffers):
+    name = schema['name']
+    NAME = name.upper()
+    libraries = schema.get('libraries', [])
+
+    # Calculate sizes
+    uniforms_word_count = sum(u['count'] for u in uniforms)
+    buffer_len_fields = len(buffers)
+
+    lib_includes = '\n'.join([f'#include <yetty/{lib}/compiler.h>' for lib in libraries])
+
+    # Generate buffer length sum expression
+    buf_len_sum_parts = [f'buffers->{b["name"]}_len' for b in buffers]
+    buf_len_sum = ' + '.join(buf_len_sum_parts) if buf_len_sum_parts else '0'
+
+    # Generate buffer length writes
+    buf_len_writes = '\n'.join([f'    *p++ = (uint32_t)buffers->{b["name"]}_len;' for b in buffers])
+
+    # Generate buffer data copies
+    buf_copies = '\n'.join([f'''    if (buffers->{b["name"]} && buffers->{b["name"]}_len > 0)
+        memcpy(p, buffers->{b["name"]}, buffers->{b["name"]}_len * sizeof(uint32_t));
+    p += buffers->{b["name"]}_len;''' for b in buffers])
+
+    # Generate uniform setup code (populate rs->uniforms)
+    uniform_setup = []
+    uniform_idx = 0
+    for u in uniforms:
+        if u['count'] > 1:
+            for i in range(u['count']):
+                uniform_setup.append(f'''    strncpy(rs->uniforms[{uniform_idx}].name, "{u["name"]}_{i}", YETTY_RENDER_NAME_MAX - 1);
+    rs->uniforms[{uniform_idx}].type = {u["render_type"]};
+    rs->uniforms[{uniform_idx}].u32 = 0;''')
+                uniform_idx += 1
+        else:
+            uniform_setup.append(f'''    strncpy(rs->uniforms[{uniform_idx}].name, "{u["name"]}", YETTY_RENDER_NAME_MAX - 1);
+    rs->uniforms[{uniform_idx}].type = {u["render_type"]};
+    rs->uniforms[{uniform_idx}].u32 = 0;''')
+            uniform_idx += 1
+    uniform_setup_str = '\n'.join(uniform_setup)
+    total_uniform_count = uniform_idx
+
+    # Generate uniform update code (from wire format to rs->uniforms)
+    uniform_update = []
+    wire_offset = 0
+    uniform_idx = 0
+    for u in uniforms:
+        if u['count'] > 1:
+            for i in range(u['count']):
+                if u['type'] == 'f32':
+                    uniform_update.append(f'    rs->uniforms[{uniform_idx}].f32 = *(float *)&payload[{wire_offset + i}];')
+                else:
+                    uniform_update.append(f'    rs->uniforms[{uniform_idx}].u32 = payload[{wire_offset + i}];')
+                uniform_idx += 1
+            wire_offset += u['count']
+        else:
+            if u['type'] == 'f32':
+                uniform_update.append(f'    rs->uniforms[{uniform_idx}].f32 = *(float *)&payload[{wire_offset}];')
+            else:
+                uniform_update.append(f'    rs->uniforms[{uniform_idx}].u32 = payload[{wire_offset}];')
+            uniform_idx += 1
+            wire_offset += 1
+    uniform_update_str = '\n'.join(uniform_update)
+
+    # Buffer offset in wire format (after uniforms)
+    buffer_data_offset = uniforms_word_count + buffer_len_fields
+
+    # Library children setup
+    lib_children = '\n'.join([f'''    // Library: {lib}
+    const struct yetty_render_gpu_resource_set *{lib}_rs =
+        yetty_{lib}_get_shader_resource_set();
+    if ({lib}_rs) {{
+        rs->children[{i}] = (struct yetty_render_gpu_resource_set *){lib}_rs;
+        rs->children_count = {i + 1};
+    }}''' for i, lib in enumerate(libraries)])
+
+    return f'''// Auto-generated from {name}.yaml - DO NOT EDIT
+
+#include "{name}-gen.h"
+#include <yetty/yrender/gpu-resource-binder.h>
+#include <yetty/yrender/gpu-resource-set.h>
+#include <yetty/yrender/gpu-allocator.h>
+#include <yetty/ypaint-core/complex-prim-types.h>
+#include <yetty/ytrace.h>
+#include <stdlib.h>
+#include <string.h>
+{lib_includes}
+
+extern const unsigned char g{name}_shaderData[];
+extern const unsigned int g{name}_shaderSize;
+
+struct {name}_factory {{
+    struct yetty_ypaint_concrete_factory base;
+    struct yetty_render_gpu_resource_set rs;
+    struct yetty_render_gpu_resource_binder *binder;
+}};
+
+static struct {name}_factory *{name}_factory_from_base(struct yetty_ypaint_concrete_factory *base)
+{{
+    return (struct {name}_factory *)base;
+}}
+
+//=============================================================================
+// Serialization
+//=============================================================================
+
+size_t yetty_{name}_serialized_size(
+    const struct yetty_{name}_uniforms *uniforms,
+    const struct yetty_{name}_buffers *buffers)
+{{
+    (void)uniforms;
+    // Wire format: [type_id][payload_size][uniforms...][buffer_lens...][buffer_data...]
+    size_t total_buf_words = {buf_len_sum};
+    return (2 + {uniforms_word_count} + {buffer_len_fields} + total_buf_words) * sizeof(uint32_t);
+}}
+
+struct yetty_core_size_result yetty_{name}_serialize(
+    const struct yetty_{name}_uniforms *uniforms,
+    const struct yetty_{name}_buffers *buffers,
+    uint8_t *out, size_t out_capacity)
+{{
+    if (!uniforms || !buffers)
+        return YETTY_ERR(yetty_core_size, "null argument");
+    if (!out)
+        return YETTY_ERR(yetty_core_size, "out is NULL");
+
+    size_t total_buf_words = {buf_len_sum};
+    size_t required = (2 + {uniforms_word_count} + {buffer_len_fields} + total_buf_words) * sizeof(uint32_t);
+    if (out_capacity < required)
+        return YETTY_ERR(yetty_core_size, "buffer too small");
+
+    uint32_t *p = (uint32_t *)out;
+    *p++ = YETTY_{NAME}_TYPE_ID;
+    *p++ = (uint32_t)(required - 2 * sizeof(uint32_t));
+
+    // Copy uniforms as raw words
+    memcpy(p, uniforms, sizeof(struct yetty_{name}_uniforms));
+    p += {uniforms_word_count};
+
+    // Write buffer lengths
+{buf_len_writes}
+
+    // Copy buffer data
+{buf_copies}
+
+    return YETTY_OK(yetty_core_size, required);
+}}
+
+//=============================================================================
+// Resource Set Setup
+//=============================================================================
+
+static void {name}_init_rs(struct {name}_factory *factory)
+{{
+    struct yetty_render_gpu_resource_set *rs = &factory->rs;
+    memset(rs, 0, sizeof(*rs));
+    strncpy(rs->namespace, "{name}", YETTY_RENDER_NAME_MAX - 1);
+    yetty_render_shader_code_set(&rs->shader,
+        (const char *)g{name}_shaderData, g{name}_shaderSize);
+
+{lib_children}
+
+    // Setup uniforms (values set later during render)
+{uniform_setup_str}
+    rs->uniform_count = {total_uniform_count};
+
+    // Setup storage buffer for buffer data
+    rs->buffer_count = 1;
+    strncpy(rs->buffers[0].name, "buffer", YETTY_RENDER_NAME_MAX - 1);
+    strncpy(rs->buffers[0].wgsl_type, "array<u32>", YETTY_RENDER_WGSL_TYPE_MAX - 1);
+    rs->buffers[0].readonly = 1;
+}}
+
+//=============================================================================
+// Instance Rendering
+//=============================================================================
+
+static struct yetty_core_void_result
+{name}_instance_render(struct yetty_ypaint_complex_prim_instance *self,
+                       struct yetty_render_target *target, float x, float y)
+{{
+    if (!self || !self->buffer_data || !self->factory)
+        return YETTY_ERR(yetty_core_void, "invalid instance");
+
+    struct {name}_factory *factory = {name}_factory_from_base(self->factory);
+    if (!factory->binder)
+        return YETTY_ERR(yetty_core_void, "binder not initialized");
+
+    struct yetty_render_gpu_resource_set *rs = &factory->rs;
+
+    // Parse wire format: [type_id][payload_size][uniforms...][buffer_lens...][buffer_data...]
+    const uint32_t *data = (const uint32_t *)self->buffer_data;
+    const uint32_t *payload = data + 2;  // skip type_id and payload_size
+
+    // Update uniforms from wire format
+{uniform_update_str}
+
+    // Get buffer data (after uniforms and length fields)
+    const uint32_t *buffer_data = payload + {buffer_data_offset};
+    size_t buffer_words = payload[{uniforms_word_count}];  // first buffer length
+
+    // Update storage buffer
+    rs->buffers[0].data = (uint8_t *)buffer_data;
+    rs->buffers[0].size = buffer_words * sizeof(uint32_t);
+    rs->buffers[0].dirty = 1;
+
+    (void)target;
+    (void)x;
+    (void)y;
+
+    struct yetty_core_void_result res = factory->binder->ops->update(factory->binder);
+    if (YETTY_IS_ERR(res))
+        return res;
+
+    return YETTY_OK_VOID();
+}}
+
+//=============================================================================
+// Factory Implementation
+//=============================================================================
+
+static struct yetty_core_void_result
+{name}_compile_pipeline(struct yetty_ypaint_concrete_factory *self,
+                        WGPUDevice device, WGPUQueue queue,
+                        WGPUTextureFormat target_format,
+                        struct yetty_render_gpu_allocator *allocator)
+{{
+    struct {name}_factory *factory = {name}_factory_from_base(self);
+
+    if (factory->binder) {{
+        ydebug("{name}: factory already initialized");
+        return YETTY_OK_VOID();
+    }}
+
+    {name}_init_rs(factory);
+
+    struct yetty_render_gpu_resource_binder_result binder_res =
+        yetty_render_gpu_resource_binder_create(device, queue, target_format, allocator);
+    if (YETTY_IS_ERR(binder_res))
+        return YETTY_ERR(yetty_core_void, binder_res.error.msg);
+
+    factory->binder = binder_res.value;
+
+    struct yetty_core_void_result submit_res =
+        factory->binder->ops->submit(factory->binder, &factory->rs);
+    if (YETTY_IS_ERR(submit_res)) {{
+        factory->binder->ops->destroy(factory->binder);
+        factory->binder = NULL;
+        return submit_res;
+    }}
+
+    struct yetty_core_void_result finalize_res =
+        factory->binder->ops->finalize(factory->binder);
+    if (YETTY_IS_ERR(finalize_res)) {{
+        factory->binder->ops->destroy(factory->binder);
+        factory->binder = NULL;
+        return finalize_res;
+    }}
+
+    yinfo("{name}: pipeline compiled (once for lifetime)");
+    return YETTY_OK_VOID();
+}}
+
+static WGPURenderPipeline {name}_get_pipeline(struct yetty_ypaint_concrete_factory *self)
+{{
+    struct {name}_factory *factory = {name}_factory_from_base(self);
+    if (!factory->binder)
+        return NULL;
+    return factory->binder->ops->get_pipeline(factory->binder);
+}}
+
+static struct yetty_ypaint_complex_prim_instance_ptr_result
+{name}_create_instance(struct yetty_ypaint_concrete_factory *self,
+                       const void *buffer_data, size_t size, uint32_t rolling_row)
+{{
+    if (!buffer_data || size < sizeof(struct yetty_ypaint_complex_prim))
+        return YETTY_ERR(yetty_ypaint_complex_prim_instance_ptr, "invalid buffer data");
+
+    struct yetty_ypaint_complex_prim_instance *instance =
+        calloc(1, sizeof(struct yetty_ypaint_complex_prim_instance));
+    if (!instance)
+        return YETTY_ERR(yetty_ypaint_complex_prim_instance_ptr, "allocation failed");
+
+    instance->buffer_data = malloc(size);
+    if (!instance->buffer_data) {{
+        free(instance);
+        return YETTY_ERR(yetty_ypaint_complex_prim_instance_ptr, "buffer alloc failed");
+    }}
+
+    memcpy(instance->buffer_data, buffer_data, size);
+    instance->buffer_size = size;
+    instance->type = YETTY_{NAME}_TYPE_ID;
+    instance->factory = self;
+    instance->rolling_row = rolling_row;
+    instance->render = {name}_instance_render;
+
+    struct rectangle_result aabb_res = yetty_ypaint_complex_prim_aabb(buffer_data);
+    if (YETTY_IS_OK(aabb_res))
+        instance->bounds = aabb_res.value;
+
+    return YETTY_OK(yetty_ypaint_complex_prim_instance_ptr, instance);
+}}
+
+static void {name}_destroy_instance(struct yetty_ypaint_concrete_factory *self,
+                                    struct yetty_ypaint_complex_prim_instance *instance)
+{{
+    (void)self;
+    if (!instance)
+        return;
+    free(instance->buffer_data);
+    free(instance);
+}}
+
+static struct yetty_render_gpu_resource_set *{name}_get_shared_rs(
+    struct yetty_ypaint_concrete_factory *self)
+{{
+    struct {name}_factory *factory = {name}_factory_from_base(self);
+    return &factory->rs;
+}}
+
+struct yetty_ypaint_concrete_factory *yetty_{name}_factory_create(void)
+{{
+    struct {name}_factory *factory = calloc(1, sizeof(struct {name}_factory));
+    if (!factory)
+        return NULL;
+
+    factory->base.type_id = YETTY_{NAME}_TYPE_ID;
+    factory->base.compile_pipeline = {name}_compile_pipeline;
+    factory->base.get_pipeline = {name}_get_pipeline;
+    factory->base.create_instance = {name}_create_instance;
+    factory->base.destroy_instance = {name}_destroy_instance;
+    factory->base.get_shared_rs = {name}_get_shared_rs;
+
+    return &factory->base;
+}}
+
+void yetty_{name}_factory_destroy(struct yetty_ypaint_concrete_factory *self)
+{{
+    if (!self)
+        return;
+
+    struct {name}_factory *factory = {name}_factory_from_base(self);
+
+    if (factory->binder)
+        factory->binder->ops->destroy(factory->binder);
+
+    free(factory);
+}}
+'''
+
+
+def generate_wgsl_bindings(schema, uniforms, buffers):
+    """Generate WGSL uniform struct and buffer bindings."""
     name = schema['name']
     NAME = name.upper()
 
-    buf_params = ', '.join([f'const uint32_t *{b["name"]}, size_t {b["name"]}_len' for b in buffers])
-    buf_len_sum = ' + '.join([f'{b["name"]}_len' for b in buffers]) or '0'
+    # Build uniform struct fields with WGSL alignment
+    # Note: binder auto-generates the uniform struct from rs->uniforms,
+    # but we still need accessor functions for the shader to use
 
-    lines = [
-        f'// Auto-generated from {name}.yaml - DO NOT EDIT',
-        f'',
-        f'#include "{name}-gen.h"',
-        f'#include <string.h>',
-        f'',
-        f'size_t yetty_{name}_serialized_size(',
-        f'    const struct yetty_{name}_uniforms *uniforms,',
-        f'    {buf_params})',
-        f'{{',
-        f'    (void)uniforms;',
-        f'    // FAM header (2) + uniforms + buffer lengths + buffer data',
-        f'    return (2 + YETTY_{NAME}_HEADER_SIZE + {buf_len_sum}) * sizeof(uint32_t);',
-        f'}}',
-        f'',
-        f'struct yetty_core_size_result yetty_{name}_serialize(',
-        f'    const struct yetty_{name}_uniforms *uniforms,',
-        f'    {buf_params},',
-        f'    uint8_t *out, size_t out_capacity)',
-        f'{{',
-        f'    if (!uniforms)',
-        f'        return YETTY_ERR(yetty_core_size, "uniforms is NULL");',
-        f'    if (!out)',
-        f'        return YETTY_ERR(yetty_core_size, "out is NULL");',
-        f'',
-        f'    size_t total_buf_words = {buf_len_sum};',
-        f'    size_t required = (2 + YETTY_{NAME}_HEADER_SIZE + total_buf_words) * sizeof(uint32_t);',
-        f'    if (out_capacity < required)',
-        f'        return YETTY_ERR(yetty_core_size, "buffer too small");',
-        f'',
-        f'    uint32_t *p = (uint32_t *)out;',
-        f'',
-        f'    // FAM header',
-        f'    *p++ = YETTY_{NAME}_TYPE_ID;',
-        f'    *p++ = (uint32_t)(required - 2 * sizeof(uint32_t));',
-        f'',
-        f'    // Uniforms',
-        f'    memcpy(p, uniforms, sizeof(struct yetty_{name}_uniforms));',
-        f'    p += YETTY_{NAME}_UNIFORMS_SIZE;',
-        f'',
-    ]
+    out = f'''// Auto-generated from {name}.yaml - DO NOT EDIT
+// Uniform accessors - read from uniforms struct generated by binder
+// Buffer accessors - read from storage buffer
+'''
 
-    # Write buffer lengths
-    for b in buffers:
-        lines.append(f'    *p++ = (uint32_t){b["name"]}_len;')
+    # Generate uniform accessor functions
+    # The binder creates: struct Uniforms {{ {name}_field: type; ... }}
+    # Accessible via: uniforms.{name}_field
+    out += '\n// Uniform accessors\n'
+    for u in uniforms:
+        if u['count'] > 1:
+            out += f'''
+fn {name}_get_{u["name"]}(idx: u32) -> {u["wgsl_type"]} {{
+    // Array uniform: {name}_{u["name"]}_0 through {name}_{u["name"]}_{u["count"]-1}
+    // Access via switch since WGSL doesn't support dynamic struct field access
+'''
+            out += '    switch idx {\n'
+            for i in range(u['count']):
+                out += f'        case {i}u: {{ return uniforms.{name}_{u["name"]}_{i}; }}\n'
+            out += f'        default: {{ return uniforms.{name}_{u["name"]}_0; }}\n'
+            out += '    }\n}\n'
+        else:
+            out += f'''
+fn {name}_get_{u["name"]}() -> {u["wgsl_type"]} {{
+    return uniforms.{name}_{u["name"]};
+}}
+'''
 
-    lines.append('')
+    # Generate buffer accessor comment
+    out += '\n// Buffer data is in storage_buffer (binding 1+)\n'
+    out += '// Access via: storage_buffer[offset]\n'
 
-    # Write buffer data
-    for b in buffers:
-        lines.extend([
-            f'    if ({b["name"]} && {b["name"]}_len > 0)',
-            f'        memcpy(p, {b["name"]}, {b["name"]}_len * sizeof(uint32_t));',
-            f'    p += {b["name"]}_len;',
-            f'',
-        ])
+    return out
 
-    lines.extend([
-        f'    return YETTY_OK(yetty_core_size, required);',
-        f'}}',
-    ])
 
-    return '\n'.join(lines)
+def generate_yaml_parser(schema, uniforms, buffers):
+    """Generate YAML parsing code from schema."""
+    name = schema['name']
+    NAME = name.upper()
+
+    # Generate defaults from schema
+    defaults = []
+    for u in uniforms:
+        if u['default'] is not None:
+            suffix = 'f' if u['type'] == 'f32' else ''
+            defaults.append(f"    uniforms.{u['name']} = {u['default']}{suffix};")
+    defaults_code = '\n'.join(defaults)
+
+    # Generate yaml_mapping handling from schema
+    yaml_mapping = schema.get('yaml_mapping', {})
+    mapping_checks = []
+    for yaml_key, field_list in yaml_mapping.items():
+        fields = ', '.join([f"uniforms.{f} = array_vals[{i}]" for i, f in enumerate(field_list)])
+        mapping_checks.append(
+            f'                if (strcmp(prop_key, "{yaml_key}") == 0 && array_idx >= {len(field_list)}) {{\n'
+            f'                    {fields};\n'
+            f'                }}'
+        )
+    mapping_code = ' else '.join(mapping_checks) if mapping_checks else '/* no yaml_mapping */'
+
+    # Generate yaml_flags handling from schema
+    yaml_flags = schema.get('yaml_flags', {})
+    flag_checks = []
+    for flag_name, flag_value in yaml_flags.items():
+        flag_checks.append(
+            f'                if (strcmp(prop_key, "{flag_name}") == 0)\n'
+            f'                    uniforms.flags = (uniforms.flags & ~{flag_value:#04x}) | ((strcmp(val, "true") == 0) ? {flag_value:#04x} : 0);'
+        )
+    flags_code = '\n                else '.join(flag_checks) if flag_checks else '/* no yaml_flags */'
+
+    return f'''// Auto-generated from {name}.yaml - DO NOT EDIT
+// YAML parser factory for {name} complex primitive
+
+#include "{name}-gen.h"
+#include <yetty/ypaint-yaml/ypaint-yaml.h>
+#include <yetty/ypaint-core/buffer.h>
+#include <yetty/yfsvm/compiler.h>
+#include <yetty/ytrace.h>
+#include <yaml.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define {NAME}_MAX_FUNCTIONS 8
+
+static int {name}_hex_digit(char c)
+{{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}}
+
+static uint32_t {name}_parse_color(const char *s)
+{{
+    if (!s) return 0;
+    if (*s == '#') s++;
+    size_t len = 0;
+    const char *p = s;
+    while (*p && {name}_hex_digit(*p) >= 0) {{ len++; p++; }}
+    if (len != 6 && len != 8) return 0;
+    uint32_t v = 0;
+    for (size_t i = 0; i < len; i++)
+        v = (v << 4) | (uint32_t){name}_hex_digit(s[i]);
+    return (len == 6) ? (0xFF000000 | v) : v;
+}}
+
+static const uint32_t {NAME}_COLOR_PALETTE[8] = {{
+    0xFFFF6B6B, 0xFF4ECDC4, 0xFFFFE66D, 0xFF95E1D3,
+    0xFFF38181, 0xFFAA96DA, 0xFF72D6C9, 0xFFFCBF49,
+}};
+
+static struct yetty_core_void_result
+{name}_yaml_factory(struct yetty_ypaint_core_buffer *buffer,
+                    yaml_parser_t *yaml_parser,
+                    const char *primitive_type_name)
+{{
+    (void)primitive_type_name;
+
+    struct yetty_{name}_uniforms uniforms = {{0}};
+{defaults_code}
+
+    char exprs[{NAME}_MAX_FUNCTIONS][256] = {{{{0}}}};
+    int func_count = 0;
+
+    char prop_key[64] = {{0}};
+    int expect_value = 0;
+    int in_array = 0, in_functions = 0, in_func_item = 0;
+    int array_idx = 0;
+    float array_vals[8] = {{0}};
+
+    yaml_event_t event;
+    int depth = 0, done = 0;
+
+    while (!done) {{
+        if (!yaml_parser_parse(yaml_parser, &event))
+            return YETTY_ERR(yetty_core_void, "yaml parse error");
+
+        switch (event.type) {{
+        case YAML_MAPPING_START_EVENT:
+            depth++;
+            if (in_functions && !in_func_item) {{
+                in_func_item = 1;
+                expect_value = 0;
+                if (func_count < {NAME}_MAX_FUNCTIONS)
+                    uniforms.colors[func_count] = {NAME}_COLOR_PALETTE[func_count % 8];
+            }}
+            break;
+        case YAML_MAPPING_END_EVENT:
+            depth--;
+            if (in_func_item) {{
+                in_func_item = 0;
+                if (func_count < {NAME}_MAX_FUNCTIONS)
+                    func_count++;
+            }}
+            if (depth == 0) done = 1;
+            break;
+        case YAML_SEQUENCE_START_EVENT:
+            if (strcmp(prop_key, "functions") == 0)
+                in_functions = 1;
+            else {{
+                in_array = 1;
+                array_idx = 0;
+            }}
+            break;
+        case YAML_SEQUENCE_END_EVENT:
+            if (in_functions) {{
+                in_functions = 0;
+            }} else if (in_array) {{
+                {mapping_code}
+                in_array = 0;
+            }}
+            expect_value = 0;
+            break;
+        case YAML_SCALAR_EVENT: {{
+            const char *val = (const char *)event.data.scalar.value;
+            if (in_array) {{
+                if (array_idx < 8)
+                    array_vals[array_idx++] = strtof(val, NULL);
+            }} else if (in_func_item) {{
+                if (!expect_value) {{
+                    strncpy(prop_key, val, sizeof(prop_key) - 1);
+                    expect_value = 1;
+                }} else {{
+                    if (strcmp(prop_key, "expr") == 0 && func_count < {NAME}_MAX_FUNCTIONS)
+                        strncpy(exprs[func_count], val, 255);
+                    else if (strcmp(prop_key, "color") == 0 && func_count < {NAME}_MAX_FUNCTIONS)
+                        uniforms.colors[func_count] = {name}_parse_color(val);
+                    expect_value = 0;
+                }}
+            }} else if (!expect_value) {{
+                strncpy(prop_key, val, sizeof(prop_key) - 1);
+                expect_value = 1;
+            }} else {{
+                {flags_code}
+                expect_value = 0;
+            }}
+            break;
+        }}
+        default:
+            break;
+        }}
+        yaml_event_delete(&event);
+    }}
+
+    uniforms.function_count = (uint32_t)func_count;
+
+    uint32_t bc_buf[1024] = {{0}};
+    size_t bc_count = 0;
+
+    if (func_count > 0) {{
+        char multi_expr[2048] = {{0}};
+        size_t off = 0;
+        for (int i = 0; i < func_count; i++) {{
+            if (i > 0 && off < sizeof(multi_expr) - 2) {{
+                multi_expr[off++] = ';';
+                multi_expr[off++] = ' ';
+            }}
+            size_t len = strlen(exprs[i]);
+            if (off + len < sizeof(multi_expr)) {{
+                memcpy(multi_expr + off, exprs[i], len);
+                off += len;
+            }}
+        }}
+
+        struct yetty_yfsvm_program_result prog_res =
+            yetty_yfsvm_compile_multi_expr(multi_expr, off);
+        if (YETTY_IS_OK(prog_res))
+            bc_count = yetty_yfsvm_program_serialize(&prog_res.value, bc_buf, 1024);
+    }}
+
+    struct yetty_{name}_buffers bufs = {{
+        .bytecode = bc_buf,
+        .bytecode_len = bc_count,
+    }};
+
+    size_t required = yetty_{name}_serialized_size(&uniforms, &bufs);
+    uint8_t *prim_buf = malloc(required);
+    if (!prim_buf)
+        return YETTY_ERR(yetty_core_void, "malloc failed");
+
+    struct yetty_core_size_result ser_res =
+        yetty_{name}_serialize(&uniforms, &bufs, prim_buf, required);
+    if (YETTY_IS_ERR(ser_res)) {{
+        free(prim_buf);
+        return YETTY_ERR(yetty_core_void, ser_res.error.msg);
+    }}
+
+    struct yetty_ypaint_id_result id_res =
+        yetty_ypaint_core_buffer_add_prim(buffer, prim_buf, required);
+    free(prim_buf);
+
+    if (id_res.error)
+        return YETTY_ERR(yetty_core_void, "add_prim failed");
+
+    return YETTY_OK_VOID();
+}}
+
+void yetty_{name}_register_yaml_factory(struct yetty_ypaint_yaml_parser *parser)
+{{
+    yetty_ypaint_yaml_parser_register(parser, "{name}", {name}_yaml_factory);
+}}
+'''
 
 
 def main():
@@ -223,20 +772,26 @@ def main():
 
     schema_path = Path(sys.argv[1])
     schema = load_schema(schema_path)
-    uniforms, buffers, uniforms_size, header_size = calculate_layout(schema)
+    uniforms, buffers = calculate_layout(schema)
 
     name = schema['name']
     out_dir = schema_path.parent
 
-    header = generate_c_header(schema, uniforms, buffers, uniforms_size, header_size)
-    source = generate_c_source(schema, uniforms, buffers, uniforms_size, header_size)
+    header = generate_c_header(schema, uniforms, buffers)
+    source = generate_c_source(schema, uniforms, buffers)
+    wgsl = generate_wgsl_bindings(schema, uniforms, buffers)
+    yaml_parser = generate_yaml_parser(schema, uniforms, buffers)
 
     (out_dir / f'{name}-gen.h').write_text(header + '\n')
     (out_dir / f'{name}-gen.c').write_text(source + '\n')
+    (out_dir / f'{name}-gen.wgsl').write_text(wgsl + '\n')
+    (out_dir / f'{name}-gen-yaml.c').write_text(yaml_parser + '\n')
 
     print(f'Generated:')
     print(f'  {out_dir / f"{name}-gen.h"}')
     print(f'  {out_dir / f"{name}-gen.c"}')
+    print(f'  {out_dir / f"{name}-gen.wgsl"}')
+    print(f'  {out_dir / f"{name}-gen-yaml.c"}')
 
 
 if __name__ == '__main__':

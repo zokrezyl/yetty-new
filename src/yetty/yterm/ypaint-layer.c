@@ -467,36 +467,26 @@ ypaint_layer_get_gpu_resource_set(
     }
   }
 
-  /* Include yplot shader (for yplot_render function, includes yfsvm as child) */
-  const struct yetty_render_gpu_resource_set *yplot_shader_rs =
-      yetty_yplot_get_shader_resource_set();
-  if (yplot_shader_rs && child_idx < YETTY_RENDER_RS_MAX_CHILDREN) {
-    layer->rs.children[child_idx++] =
-        (struct yetty_render_gpu_resource_set *)yplot_shader_rs;
-  }
-
-  /* Include complex prim resource sets as children (using factory instances) */
-  uint32_t complex_count =
-      yetty_yetty_ypaint_canvas_complex_prim_count(layer->canvas);
-
-  for (uint32_t i = 0; i < complex_count && child_idx < YETTY_RENDER_RS_MAX_CHILDREN; i++) {
-    struct yetty_ypaint_complex_prim_instance *instance =
-        yetty_yetty_ypaint_canvas_get_complex_prim(layer->canvas, i);
-    if (!instance || !instance->shared || !instance->shared->ops)
-      continue;
-
-    /* Get resource set from factory instance ops */
-    if (!instance->shared->ops->get_gpu_resource_set)
-      continue;
-
-    struct yetty_render_gpu_resource_set_result rs_res =
-        instance->shared->ops->get_gpu_resource_set(instance);
-    if (YETTY_IS_OK(rs_res)) {
-      layer->rs.children[child_idx++] =
-          (struct yetty_render_gpu_resource_set *)rs_res.value;
-      ydebug("ypaint_layer: added complex prim %u as child %zu", i, child_idx - 1);
+  /* Include yplot shared RS (shader + compiled pipeline).
+   * yplot data is inline in the prim buffer - no per-instance RS needed. */
+  struct yetty_ypaint_complex_prim_factory *abstract_factory =
+      yetty_yetty_ypaint_canvas_get_complex_prim_factory(layer->canvas);
+  if (abstract_factory) {
+    struct yetty_ypaint_concrete_factory *yplot_factory =
+        yetty_ypaint_complex_prim_factory_get(abstract_factory, YETTY_YPAINT_TYPE_YPLOT);
+    if (yplot_factory && yplot_factory->get_shared_rs) {
+      struct yetty_render_gpu_resource_set *yplot_rs =
+          yplot_factory->get_shared_rs(yplot_factory);
+      if (yplot_rs && child_idx < YETTY_RENDER_RS_MAX_CHILDREN) {
+        layer->rs.children[child_idx++] = yplot_rs;
+      }
     }
   }
+
+  /* NOTE: Per-instance RS loop removed. Complex prims like yplot store data
+   * inline in the unified prim buffer. The shared shader RS is included once
+   * above. Future complex prims with separate textures (yimage, yvideo) will
+   * need per-instance RS - add that logic when those types are implemented. */
 
   layer->rs.children_count = child_idx;
 

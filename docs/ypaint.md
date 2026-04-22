@@ -461,25 +461,82 @@ SDF primitives use base ops only. Complex primitives use extended ops with rende
 
 ---
 
-## Complex Primitive Factory
+## Complex Primitive Factory Pattern
 
-Factory registry maps type IDs to ops. Each complex prim type (yplot, yimage, yvideo) registers at init.
+```
+ABSTRACT FACTORY
+│
+└── create(buffer_data) → instance
+        └── reads type from buffer_data
+        └── dispatches to concrete factory
+        └── returns instance
 
-**Shared state (per type, owned by factory):**
-- Compiled shader/pipeline (gpu_resource_set)
-- Created once at factory initialization
-- Factory manages lifecycle
+CONCRETE FACTORY (per type, e.g. yplot)
+│
+├── binder (owns resource set + pre-compiled pipeline)
+│     ├── resource_set (structure for buffers, textures, uniforms)
+│     └── pipeline (compiled ONCE at factory creation, never recompiled)
+│
+└── create_instance(buffer_data) → instance
 
-**Instance (per primitive):**
-- Pointer to shared state
-- Rendered texture (cached render target)
-- Dirty flag (re-render only when dirty)
-- Buffer data copy (state from ypaint buffer, kept for delta updates from client)
+INSTANCE (stored in grid)
+│
+├── buffer_data (knows its size)
+├── factory (back-pointer)
+│
+└── render(render_target, x, y)
+```
 
-**Factory responsibilities:**
-- Create shared state at init (compile shaders, create pipeline)
-- Create instances from buffer data
-- Instances hold reference to shared state, own their texture
+### Abstract Factory
+
+The abstract factory is a registry that maps primitive type IDs to concrete factories. It provides a single entry point for creating instances from buffer data.
+
+When you call `create(buffer_data)`, the abstract factory reads the type from the beginning of the buffer, looks up the corresponding concrete factory, and delegates instance creation to it. The caller does not need to know which concrete factory handles which type.
+
+### Concrete Factory
+
+Each primitive type (yplot, image, video, etc.) has its own concrete factory. The concrete factory:
+
+- Owns a **binder** that contains:
+  - The resource set (defines structure for buffers, textures, uniforms)
+  - The pre-compiled pipeline (compiled ONCE at factory creation using existing gpu-resource-binder, then stored permanently)
+- Knows how to create instances from buffer data specific to its type.
+
+The binder is created when the factory is registered (device/queue available). The pipeline is compiled once and held warm for the entire terminal lifetime. No recompilation ever happens.
+
+### Instance
+
+An instance represents a single occurrence of a complex primitive. Instances are stored in the canvas grid. Each instance:
+
+- Holds a copy of its buffer data, which contains all primitive-specific values including its size.
+- Has a back-pointer to its concrete factory, giving access to the factory's binder.
+- Provides a render method that takes a render target and x,y coordinates.
+
+### Data Flow
+
+**Adding primitives:**
+
+1. Call `abstract_factory->create(buffer_data)`
+2. Store the returned instance in the grid
+
+The abstract factory handles all type dispatch internally.
+
+**Rendering:**
+
+1. Canvas calls `instance->render(render_target, x, y)`
+2. The x,y coordinates are provided by the canvas to handle scrolling
+3. The instance knows its own size from its buffer data
+4. The instance uses its factory back-pointer to access the factory's binder
+5. The instance binds its data to the binder's resource set:
+   - **Buffers** (e.g., bytecode, vertex data)
+   - **Textures** (if any, e.g., images)
+   - **Uniforms** (e.g., bounds, colors, flags)
+6. The binder uploads the data to GPU (no shader recompilation)
+7. The binder renders with pre-compiled pipeline to the render target
+
+### Key Point: No Recompilation
+
+The factory's binder owns the pre-compiled pipeline. This pipeline is compiled ONCE when the factory is registered (at startup when device/queue become available). During rendering, only instance data (buffers, textures, uniforms) is bound and uploaded. The shader is never reparsed or recompiled.
 
 ---
 
@@ -546,30 +603,61 @@ let y = yfsvm_execute(&storage_buffer, bc_offset, ...);
 
 ## Code Generation
 
-Complex primitives define schema in YAML, generator produces boilerplate.
+Complex primitives require **only two files** - everything else is generated.
+
+**User provides:**
+1. `<name>.yaml` - schema (uniforms, buffers, type_id, shader libraries)
+2. `<name>.wgsl` - shader (rendering logic)
+
+**Generator produces EVERYTHING else:**
+- C header: type ID, offset constants, uniforms struct, serialization API
+- C source: serialization implementation
+- C factory: create/destroy, compile_pipeline, get_pipeline, get_shared_rs
+- C instance: create/destroy, render (binds data to binder, calls render)
+- Resource set initialization (from YAML uniforms/buffers definition)
+- WGSL: accessor functions with calculated offsets
+
+**Zero type-specific C code needed.** The factory pattern is 100% generic - every complex primitive does the same thing:
+1. Factory creates binder with resource set + compiled pipeline
+2. Instance binds its data (uniforms, buffer, texture) to binder's RS
+3. Binder renders
 
 **Schema location:** `src/yetty/<module>/<module>.yaml`
 
 **Schema defines:**
-- Uniforms (fixed-size, serialized first)
-- Buffers (variable-size, serialized after uniforms)
+- `name` - primitive name
+- `type_id` - unique ID (0x80000000+)
+- `libraries` - shader dependencies (concatenated before main shader)
+- `uniforms` - fixed-size data (name, type, count)
+- `buffer` - variable-size buffer data
+- `texture` - texture input (if needed)
 
-**Generator produces:**
-- C header: struct, serialization API, offset constants
-- C source: serialization implementation
-- WGSL: accessor functions with calculated offsets
+**Standard binding layout (always the same):**
+- 1 uniform block
+- 1 buffer (single `array<u32>`)
+- 1 texture (single texture)
 
-**Serialization format (dumb pipe):**
+If a primitive needs multiple logical buffers or textures, they are **packed into the single buffer/texture**. The YAML uniforms section describes offsets/names to access sub-parts within the single buffer or texture regions within the single texture.
+
+**Serialization format:**
 ```
 [type][payload_size][uniforms...][buffer_lengths...][buffer_data...]
 ```
 
-Runtime just binds bytes to pipeline - no interpretation. Only constructor (sender) and shader know semantics.
+Runtime binds bytes to pipeline - no interpretation. Only constructor (sender) and shader know semantics.
 
 ---
 
 ## Status
 
-**Done:** Type registry with result-based error handling.
+**Done:**
+- Type registry with result-based error handling
+- Abstract factory pattern (maps type_id → concrete factory)
+- Code generator: serialization (C header/source from YAML)
 
-**TODO:** Refactor ops structure (base + complex), factory with shared state, instance management, direct rendering, code generator.
+**TODO:**
+- Code generator: factory boilerplate (create/destroy, binder management)
+- Code generator: instance boilerplate (create/destroy, render)
+- Code generator: resource set initialization from YAML
+- Code generator: WGSL accessor functions
+- Remove hand-written boilerplate from yplot.c (should be generated)

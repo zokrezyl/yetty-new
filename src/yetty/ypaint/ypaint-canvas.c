@@ -444,7 +444,10 @@ yetty_yetty_ypaint_canvas_create(bool scrolling_mode,
 
   /* Create complex prim factory and register types */
   struct yetty_ypaint_complex_prim_factory_ptr_result factory_res =
-      yetty_ypaint_complex_prim_factory_create();
+      yetty_ypaint_complex_prim_factory_create(
+          context->gpu_context.device,
+          context->gpu_context.queue,
+          context->gpu_context.surface_format);
   if (YETTY_IS_ERR(factory_res)) {
     yerror("ypaint_canvas: factory creation failed: %s", factory_res.error.msg);
     yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
@@ -454,11 +457,21 @@ yetty_yetty_ypaint_canvas_create(bool scrolling_mode,
   }
   canvas->complex_prim_factory = factory_res.value;
 
-  /* Register yplot to factory */
+  /* Create and register yplot factory */
+  struct yetty_ypaint_concrete_factory *yplot_factory = yetty_yplot_factory_create();
+  if (!yplot_factory) {
+    yerror("ypaint_canvas: yplot factory creation failed");
+    yetty_ypaint_complex_prim_factory_destroy(canvas->complex_prim_factory);
+    yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
+    free(canvas->lines.lines);
+    free(canvas);
+    return NULL;
+  }
   struct yetty_core_void_result yplot_reg_res =
-      yetty_yplot_register_to_factory(canvas->complex_prim_factory);
+      yetty_ypaint_complex_prim_factory_register(canvas->complex_prim_factory, yplot_factory);
   if (YETTY_IS_ERR(yplot_reg_res)) {
     yerror("ypaint_canvas: yplot registration failed: %s", yplot_reg_res.error.msg);
+    yetty_yplot_factory_destroy(yplot_factory);
     yetty_ypaint_complex_prim_factory_destroy(canvas->complex_prim_factory);
     yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
     free(canvas->lines.lines);

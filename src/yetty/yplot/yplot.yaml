@@ -13,29 +13,52 @@ libraries:
 uniforms:
   - name: bounds_x
     type: f32
-    description: Plot X position in canvas
+    default: 0.0
   - name: bounds_y
     type: f32
-    description: Plot Y position in canvas
+    default: 0.0
   - name: bounds_w
     type: f32
-    description: Plot width
+    default: 300.0
   - name: bounds_h
     type: f32
-    description: Plot height
+    default: 200.0
+  - name: x_min
+    type: f32
+    default: -3.14159
+  - name: x_max
+    type: f32
+    default: 3.14159
+  - name: y_min
+    type: f32
+    default: -1.5
+  - name: y_max
+    type: f32
+    default: 1.5
   - name: flags
     type: u32
-    description: GRID=1, AXES=2, LABELS=4
+    default: 7
   - name: function_count
     type: u32
-    description: Number of functions (max 8)
+    default: 0
   - name: colors
     type: u32
     count: 8
-    description: Per-function colors (ARGB)
 
 # Variable-size buffers (serialized after uniforms)
 buffers:
   - name: bytecode
     element_type: u32
-    description: yfsvm compiled bytecode
+
+# YAML input mapping (array inputs -> uniform fields)
+yaml_mapping:
+  position: [bounds_x, bounds_y]
+  size: [bounds_w, bounds_h]
+  x_range: [x_min, x_max]
+  y_range: [y_min, y_max]
+
+# Boolean flags from YAML
+yaml_flags:
+  show_grid: 0x01
+  show_axes: 0x02
+  show_labels: 0x04

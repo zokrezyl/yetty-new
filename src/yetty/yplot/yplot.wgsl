@@ -1,19 +1,11 @@
 // YPlot Complex Primitive Shader
-// Renders plot from primitive buffer data using yfsvm bytecode interpreter
+// Renders plot from uniform values and bytecode in storage buffer
 //
-// Wire format in primitive buffer (after rolling_row):
-//   [0] type (0x80000003)
-//   [1] payload_size
-//   Payload:
-//   [0] bounds_x (f32)
-//   [1] bounds_y (f32)
-//   [2] bounds_w (f32)
-//   [3] bounds_h (f32)
-//   [4] flags (u32)
-//   [5] function_count (u32)
-//   [6-13] colors[8] (u32)
-//   [14] bytecode_word_count (u32)
-//   [15+] bytecode[]
+// Architecture:
+//   Uniforms (binding 0): bounds, ranges, flags, function_count, colors
+//   Storage buffer (binding 1): bytecode for yfsvm interpreter
+//
+// Generated accessors in yplot-gen.wgsl provide type-safe uniform access
 
 const YPLOT_FLAG_GRID: u32 = 1u;
 const YPLOT_FLAG_AXES: u32 = 2u;
@@ -22,36 +14,6 @@ const YPLOT_FLAG_LABELS: u32 = 4u;
 const YPLOT_BG_COLOR: vec3<f32> = vec3<f32>(0.102, 0.102, 0.180);
 const YPLOT_GRID_COLOR: vec3<f32> = vec3<f32>(0.267, 0.267, 0.267);
 const YPLOT_AXIS_COLOR: vec3<f32> = vec3<f32>(0.667, 0.667, 0.667);
-
-// Read yplot data from primitive buffer
-// prim_offset points to rolling_row, payload starts at prim_offset + 3
-fn yplot_read_bounds_x(prim_offset: u32) -> f32 {
-    return bitcast<f32>(storage_buffer[prim_offset + 3u]);
-}
-fn yplot_read_bounds_y(prim_offset: u32) -> f32 {
-    return bitcast<f32>(storage_buffer[prim_offset + 4u]);
-}
-fn yplot_read_bounds_w(prim_offset: u32) -> f32 {
-    return bitcast<f32>(storage_buffer[prim_offset + 5u]);
-}
-fn yplot_read_bounds_h(prim_offset: u32) -> f32 {
-    return bitcast<f32>(storage_buffer[prim_offset + 6u]);
-}
-fn yplot_read_flags(prim_offset: u32) -> u32 {
-    return storage_buffer[prim_offset + 7u];
-}
-fn yplot_read_func_count(prim_offset: u32) -> u32 {
-    return storage_buffer[prim_offset + 8u];
-}
-fn yplot_read_color(prim_offset: u32, idx: u32) -> u32 {
-    return storage_buffer[prim_offset + 9u + idx];
-}
-fn yplot_read_bytecode_len(prim_offset: u32) -> u32 {
-    return storage_buffer[prim_offset + 17u];
-}
-fn yplot_bytecode_offset(prim_offset: u32) -> u32 {
-    return prim_offset + 18u;
-}
 
 fn yplot_unpack_color(packed: u32) -> vec3<f32> {
     return vec3<f32>(
@@ -99,11 +61,13 @@ fn yplot_draw_axes(bg: vec3<f32>, plotUV: vec2<f32>, xMin: f32, xMax: f32, yMin:
 }
 
 // Main yplot render function - called by ypaint dispatcher
-fn yplot_render(prim_offset: u32, local_pos: vec2<f32>) -> vec4<f32> {
-    let bounds_x = yplot_read_bounds_x(prim_offset);
-    let bounds_y = yplot_read_bounds_y(prim_offset);
-    let bounds_w = yplot_read_bounds_w(prim_offset);
-    let bounds_h = yplot_read_bounds_h(prim_offset);
+// Uses generated uniform accessors: yplot_get_*()
+fn yplot_render(local_pos: vec2<f32>) -> vec4<f32> {
+    // Read bounds from uniforms
+    let bounds_x = yplot_get_bounds_x();
+    let bounds_y = yplot_get_bounds_y();
+    let bounds_w = yplot_get_bounds_w();
+    let bounds_h = yplot_get_bounds_h();
 
     // Check if pixel is inside plot bounds
     if (local_pos.x < bounds_x || local_pos.x >= bounds_x + bounds_w ||
@@ -114,16 +78,13 @@ fn yplot_render(prim_offset: u32, local_pos: vec2<f32>) -> vec4<f32> {
     // Normalize to 0-1 within plot area
     let plotUV = (local_pos - vec2<f32>(bounds_x, bounds_y)) / vec2<f32>(bounds_w, bounds_h);
 
-    let flags = yplot_read_flags(prim_offset);
-    let func_count = yplot_read_func_count(prim_offset);
-    let bytecode_len = yplot_read_bytecode_len(prim_offset);
-    let bc_offset = yplot_bytecode_offset(prim_offset);
-
-    // Default data range (TODO: read from wire format if needed)
-    let xMin = -3.14159;
-    let xMax = 3.14159;
-    let yMin = -1.5;
-    let yMax = 1.5;
+    // Read plot parameters from uniforms
+    let flags = yplot_get_flags();
+    let func_count = yplot_get_function_count();
+    let xMin = yplot_get_x_min();
+    let xMax = yplot_get_x_max();
+    let yMin = yplot_get_y_min();
+    let yMax = yplot_get_y_max();
 
     // Background
     var color = YPLOT_BG_COLOR;
@@ -145,17 +106,17 @@ fn yplot_render(prim_offset: u32, local_pos: vec2<f32>) -> vec4<f32> {
     // Line width in normalized coords
     let lineWidth = 3.0 / bounds_h;
 
-    // Evaluate and render each function
-    if (func_count > 0u && bytecode_len > 0u) {
+    // Evaluate and render each function using bytecode from storage buffer
+    if (func_count > 0u) {
         var samplers: array<f32, 8>;
         samplers[0] = dataX;
 
         for (var fi = 0u; fi < min(func_count, 8u); fi++) {
-            let func_color_packed = yplot_read_color(prim_offset, fi);
+            let func_color_packed = yplot_get_colors(fi);
             let func_color = yplot_unpack_color(func_color_packed);
 
-            // Evaluate function using yfsvm
-            let y = yfsvm_execute(bc_offset, fi, dataX, 0.0, samplers);
+            // Evaluate function using yfsvm (bytecode is in storage_buffer starting at offset 0)
+            let y = yfsvm_execute(0u, fi, dataX, 0.0, samplers);
 
             // Map y to plot UV
             let yNorm = (y - yMin) / (yMax - yMin);

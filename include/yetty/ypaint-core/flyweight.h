@@ -1,5 +1,12 @@
 // YPaint Flyweight - primitive handler registry (instance-based)
 // Decoupled from buffer, usable by buffer and canvas
+//
+// Two-level ops structure:
+//   Base ops (all primitives - SDF and complex): size, aabb
+//   Extended ops (SDF only): destroy, get_gpu_resource_set
+//
+// Complex primitives use the factory pattern instead of extended ops.
+// See complex-prim-types.h for complex prim handling.
 #pragma once
 
 #include <stdint.h>
@@ -14,13 +21,27 @@ extern "C" {
 struct yetty_render_gpu_resource_set;
 struct yetty_render_gpu_resource_set_result;
 
-// Primitive ops vtable - all functions return result types
-struct yetty_ypaint_prim_ops {
+//=============================================================================
+// Base ops - for ALL primitives (SDF and complex)
+// Used by buffer iteration to get size and aabb
+//=============================================================================
+
+struct yetty_ypaint_prim_base_ops {
     // Size in bytes (for buffer iteration)
     struct yetty_core_size_result (*size)(const uint32_t *prim);
 
     // Bounding box (for spatial grid)
     struct rectangle_result (*aabb)(const uint32_t *prim);
+};
+
+//=============================================================================
+// Extended ops - for SDF primitives only (inherits base)
+// Complex primitives use factory pattern instead
+//=============================================================================
+
+struct yetty_ypaint_prim_ops {
+    // Base ops (size, aabb) - MUST be first for C inheritance
+    struct yetty_ypaint_prim_base_ops base;
 
     // Cleanup cached data (optional, may be NULL for simple prims)
     void (*destroy)(void *cache);
@@ -31,17 +52,18 @@ struct yetty_ypaint_prim_ops {
         const uint32_t *prim, void **cache_ptr);
 };
 
-// Flyweight - wraps pointer to primitive data + ops
+// Flyweight - wraps pointer to primitive data + base ops
+// Works for ALL primitives (SDF and complex)
 struct yetty_ypaint_prim_flyweight {
     const uint32_t *data;  // type at data[0]
-    const struct yetty_ypaint_prim_ops *ops;
+    const struct yetty_ypaint_prim_base_ops *ops;  // base ops (size, aabb)
 };
 
-YETTY_RESULT_DECLARE(yetty_ypaint_prim_ops_ptr, const struct yetty_ypaint_prim_ops *);
+YETTY_RESULT_DECLARE(yetty_ypaint_prim_base_ops_ptr, const struct yetty_ypaint_prim_base_ops *);
 YETTY_RESULT_DECLARE(yetty_ypaint_prim_flyweight_ptr, struct yetty_ypaint_prim_flyweight *);
 
-// Handler function - takes prim_type, returns ops pointer or error
-typedef struct yetty_ypaint_prim_ops_ptr_result (*yetty_ypaint_prim_handler_fn)(
+// Handler function - takes prim_type, returns base ops pointer or error
+typedef struct yetty_ypaint_prim_base_ops_ptr_result (*yetty_ypaint_prim_handler_fn)(
     uint32_t prim_type);
 
 // Flyweight registry instance (opaque)

@@ -78,7 +78,7 @@ struct yetty_ypaint_prim_flyweight_ptr_result yetty_ypaint_flyweight_registry_ge
 
     // Try default handler first (fast path for SDF types)
     if (reg->default_handler) {
-        struct yetty_ypaint_prim_ops_ptr_result ops_res = reg->default_handler(prim_type);
+        struct yetty_ypaint_prim_base_ops_ptr_result ops_res = reg->default_handler(prim_type);
         if (YETTY_IS_OK(ops_res)) {
             ydebug("flyweight_registry_get: default handler matched prim_type=0x%08x", prim_type);
             fw.data = prim_data;
@@ -94,7 +94,7 @@ struct yetty_ypaint_prim_flyweight_ptr_result yetty_ypaint_flyweight_registry_ge
                i, reg->handlers[i].type_min, reg->handlers[i].type_max);
         if (prim_type >= reg->handlers[i].type_min &&
             prim_type <= reg->handlers[i].type_max) {
-            struct yetty_ypaint_prim_ops_ptr_result ops_res =
+            struct yetty_ypaint_prim_base_ops_ptr_result ops_res =
                 reg->handlers[i].handler(prim_type);
             if (YETTY_IS_OK(ops_res)) {
                 ydebug("flyweight_registry_get: handler[%zu] matched prim_type=0x%08x",
