@@ -95,7 +95,7 @@ render_target_vnc_present(struct yetty_render_target *self)
 	struct yetty_core_void_result res;
 
 	int has_clients = rt->vnc_server ? yetty_vnc_server_has_clients(rt->vnc_server) : 0;
-	ydebug("vnc_render_target_present: vnc_server=%p has_clients=%d",
+	ytrace("vnc_render_target_present: vnc_server=%p has_clients=%d",
 	       (void *)rt->vnc_server, has_clients);
 
 	/* Send frame to VNC clients if any connected */

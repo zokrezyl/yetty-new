@@ -4,6 +4,7 @@
 
 #include <yetty/yvnc/vnc-server.h>
 #include <yetty/ycore/event-loop.h>
+#include <yetty/webgpu/error.h>
 #include <yetty/ytrace.h>
 #include "protocol.h"
 
@@ -11,14 +12,25 @@
 #include <stdlib.h>
 #include <string.h>
 #include <turbojpeg.h>
+#include <uv.h>
 
 #define MAX_CLIENTS 16
 #define FULL_REFRESH_INTERVAL 300
 #define RECV_BUFFER_SIZE 65536
 
-/* Capture state machine */
+/* Capture state machine.
+ *
+ * The IDLE step submits all GPU work in a single command buffer
+ * (clear-flags, compute-diff, copy-flags-to-readback, copy-texture-to-prev,
+ * copy-texture-to-tile-readback) AND registers both buffer maps right
+ * away. This collapses what used to be a multi-state ping-pong pipeline
+ * into a single submit + single wait, so we go from 3-keystroke lag down
+ * toward 1-keystroke lag (bounded by how often Dawn delivers callbacks). */
 enum capture_state {
 	CAPTURE_IDLE,
+	CAPTURE_WAITING_DATA,  /* both mapAsyncs in flight */
+	/* legacy states kept for compatibility with existing code paths,
+	 * no longer used by the primary path */
 	CAPTURE_WAITING_COMPUTE,
 	CAPTURE_WAITING_MAP,
 	CAPTURE_READY_TO_SEND,
@@ -41,6 +53,7 @@ struct vnc_client_ctx {
 };
 
 struct yetty_vnc_server {
+	WGPUInstance instance;
 	WGPUDevice device;
 	WGPUQueue queue;
 
@@ -81,6 +94,18 @@ struct yetty_vnc_server {
 	volatile int gpu_work_done;
 	WGPUMapAsyncStatus map_status;
 	WGPUTexture pending_texture;
+	uint32_t pending_width;
+	uint32_t pending_height;
+
+	/* Flags updated from Dawn map callbacks (thread-safe via volatile;
+	 * fine for x86 aligned int writes). Both start at 1 when IDLE
+	 * submits the pipeline; each respective callback clears to 0. */
+	volatile int flags_map_pending;
+	volatile int pixels_map_pending;
+	int needs_flags_map; /* 0 on first-frame path, 1 otherwise */
+
+	/* Thread-safe async handle for GPU callbacks */
+	uv_async_t *gpu_async;
 
 	/* Dirty tile tracking */
 	int *dirty_tiles;
@@ -190,6 +215,8 @@ static struct yetty_core_void_result encode_tile(struct yetty_vnc_server *server
 						 uint16_t tx, uint16_t ty,
 						 uint8_t **out_data, size_t *out_size,
 						 uint8_t *out_encoding);
+static void process_capture_state(struct yetty_vnc_server *server);
+static void on_gpu_async(uv_async_t *handle);
 
 /*===========================================================================
  * TCP Server Callbacks
@@ -239,6 +266,11 @@ static void *vnc_server_on_connect(void *ctx, struct yetty_tcp_conn *conn)
 	server->force_full_frame = 1;
 
 	yinfo("VNC client connected (slot %d, total %zu)", slot, server->client_count);
+
+	/* Trigger render to send first frame to new client */
+	if (server->event_loop && server->event_loop->ops->request_render)
+		server->event_loop->ops->request_render(server->event_loop);
+
 	return client_ctx;
 }
 
@@ -344,7 +376,8 @@ static void vnc_server_on_disconnect(void *conn_ctx)
  *===========================================================================*/
 
 struct yetty_vnc_server_ptr_result
-yetty_vnc_server_create(WGPUDevice device, WGPUQueue queue,
+yetty_vnc_server_create(WGPUInstance instance, WGPUDevice device,
+			WGPUQueue queue,
 			struct yetty_core_event_loop *event_loop)
 {
 	if (!event_loop)
@@ -355,6 +388,7 @@ yetty_vnc_server_create(WGPUDevice device, WGPUQueue queue,
 	if (!server)
 		return YETTY_ERR(yetty_vnc_server_ptr, "failed to allocate server");
 
+	server->instance = instance;
 	server->device = device;
 	server->queue = queue;
 	server->event_loop = event_loop;
@@ -369,6 +403,21 @@ yetty_vnc_server_create(WGPUDevice device, WGPUQueue queue,
 	if (!server->jpeg_compressor) {
 		free(server);
 		return YETTY_ERR(yetty_vnc_server_ptr, "failed to init JPEG compressor");
+	}
+
+	/* Initialize async handle for GPU callbacks (thread-safe wakeup) */
+	server->gpu_async = calloc(1, sizeof(uv_async_t));
+	if (!server->gpu_async) {
+		tjDestroy(server->jpeg_compressor);
+		free(server);
+		return YETTY_ERR(yetty_vnc_server_ptr, "failed to allocate async handle");
+	}
+	server->gpu_async->data = server;
+	if (uv_async_init(uv_default_loop(), server->gpu_async, on_gpu_async) != 0) {
+		free(server->gpu_async);
+		tjDestroy(server->jpeg_compressor);
+		free(server);
+		return YETTY_ERR(yetty_vnc_server_ptr, "failed to init async handle");
 	}
 
 	return YETTY_OK(yetty_vnc_server_ptr, server);
@@ -399,6 +448,12 @@ void yetty_vnc_server_destroy(struct yetty_vnc_server *server)
 
 	if (server->jpeg_compressor)
 		tjDestroy(server->jpeg_compressor);
+
+	/* Close async handle - must use uv_close, free in callback */
+	if (server->gpu_async) {
+		uv_close((uv_handle_t *)server->gpu_async, (uv_close_cb)free);
+		server->gpu_async = NULL;
+	}
 
 	free(server->dirty_tiles);
 	free(server->gpu_readback_pixels);
@@ -648,6 +703,15 @@ static struct yetty_core_void_result ensure_resources(struct yetty_vnc_server *s
 	if (server->last_width == width && server->last_height == height && server->prev_texture)
 		return YETTY_OK_VOID();
 
+	/* Resize: abandon any in-flight pipeline. The buffers it was
+	 * waiting on are about to be released; their callbacks (if any
+	 * still queued inside Dawn) will just set gpu_work_done on the
+	 * server, which is harmless because we return to IDLE here. */
+	server->capture_state = CAPTURE_IDLE;
+	server->gpu_work_done = 1;
+	server->force_full_frame = 1;
+	server->pending_texture = NULL;
+
 	if (server->prev_texture) {
 		wgpuTextureRelease(server->prev_texture);
 		server->prev_texture = NULL;
@@ -785,6 +849,7 @@ static void dispatch_input(struct yetty_vnc_server *server,
 			   const struct vnc_input_header *hdr,
 			   const uint8_t *data)
 {
+	ydebug("VNC dispatch_input: type=%u size=%u", hdr->type, hdr->data_size);
 	switch (hdr->type) {
 	case VNC_INPUT_MOUSE_MOVE:
 		if (hdr->data_size >= sizeof(struct vnc_mouse_move_event) &&
@@ -967,7 +1032,18 @@ yetty_vnc_server_send_frame_cpu(struct yetty_vnc_server *server,
 	return YETTY_OK_VOID();
 }
 
-/* GPU work done callback */
+/* Continue processing capture state machine (called from async callback) */
+static void process_capture_state(struct yetty_vnc_server *server)
+{
+	if (!server || server->capture_state == CAPTURE_IDLE)
+		return;
+
+	/* Call send_frame_gpu with stored texture and dimensions */
+	yetty_vnc_server_send_frame_gpu(server, server->pending_texture,
+					server->last_width, server->last_height);
+}
+
+/* GPU work done callback - runs on GPU thread, set flag and wake main thread */
 static void gpu_work_done_callback(WGPUQueueWorkDoneStatus status,
 				   WGPUStringView msg, void *userdata1, void *userdata2)
 {
@@ -975,24 +1051,62 @@ static void gpu_work_done_callback(WGPUQueueWorkDoneStatus status,
 	(void)msg;
 	(void)userdata2;
 	struct yetty_vnc_server *server = userdata1;
+	ydebug("VNC gpu_work_done_callback FIRED status=%u", (unsigned)status);
 	server->gpu_work_done = 1;
-	/* Wake up event loop */
-	if (server->event_loop && server->event_loop->ops->request_render)
-		server->event_loop->ops->request_render(server->event_loop);
+	/* Wake main thread - uv_async_send is thread-safe */
+	if (server->gpu_async)
+		uv_async_send(server->gpu_async);
 }
 
-/* Buffer map callback */
+/* Buffer map callback - runs on GPU thread, set flag and wake main thread */
 static void buffer_map_callback(WGPUMapAsyncStatus status,
 				WGPUStringView msg, void *userdata1, void *userdata2)
 {
 	(void)msg;
 	(void)userdata2;
 	struct yetty_vnc_server *server = userdata1;
+	ydebug("VNC buffer_map_callback FIRED status=%u", (unsigned)status);
 	server->map_status = status;
 	server->gpu_work_done = 1;
-	/* Wake up event loop */
-	if (server->event_loop && server->event_loop->ops->request_render)
-		server->event_loop->ops->request_render(server->event_loop);
+	/* Wake main thread - uv_async_send is thread-safe */
+	if (server->gpu_async)
+		uv_async_send(server->gpu_async);
+}
+
+/* Map callback specifically for dirty_flags_readback */
+static void flags_map_callback(WGPUMapAsyncStatus status,
+			       WGPUStringView msg, void *userdata1, void *userdata2)
+{
+	(void)msg;
+	(void)userdata2;
+	struct yetty_vnc_server *server = userdata1;
+	ydebug("VNC flags_map_callback FIRED status=%u", (unsigned)status);
+	server->map_status = status;
+	server->flags_map_pending = 0;
+	if (server->gpu_async)
+		uv_async_send(server->gpu_async);
+}
+
+/* Map callback specifically for tile_readback_buffer */
+static void pixels_map_callback(WGPUMapAsyncStatus status,
+				WGPUStringView msg, void *userdata1, void *userdata2)
+{
+	(void)msg;
+	(void)userdata2;
+	struct yetty_vnc_server *server = userdata1;
+	ydebug("VNC pixels_map_callback FIRED status=%u", (unsigned)status);
+	server->map_status = status;
+	server->pixels_map_pending = 0;
+	if (server->gpu_async)
+		uv_async_send(server->gpu_async);
+}
+
+/* Async callback - runs on main thread when GPU callback wakes us */
+static void on_gpu_async(uv_async_t *handle)
+{
+	struct yetty_vnc_server *server = handle->data;
+	if (server && server->gpu_work_done)
+		process_capture_state(server);
 }
 
 /* Encode and send dirty tiles */
@@ -1074,11 +1188,13 @@ yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 
 	switch (server->capture_state) {
 	case CAPTURE_IDLE: {
-		/* Save texture for later readback */
+		/* Save texture and dimensions for callbacks/read-back */
 		server->pending_texture = texture;
+		server->pending_width = width;
+		server->pending_height = height;
 		server->cpu_pixels = NULL;
 
-		/* Allocate GPU readback buffer if needed */
+		/* CPU pixel readback buffer (row-aligned to 4 bytes per pixel) */
 		size_t pixel_size = width * height * 4;
 		if (server->gpu_readback_pixels_size < pixel_size) {
 			free(server->gpu_readback_pixels);
@@ -1088,212 +1204,201 @@ yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 			server->gpu_readback_pixels_size = pixel_size;
 		}
 
-		/* Skip diff on first frame or forced full */
-		if (!server->prev_texture || server->force_full_frame ||
-		    server->always_full_frame) {
+		/* Ensure tile_readback_buffer exists with correct size */
+		uint32_t aligned_bytes_per_row = (width * 4 + 255) & ~255;
+		uint32_t tile_buf_size = aligned_bytes_per_row * height;
+		if (!server->tile_readback_buffer ||
+		    server->tile_readback_buffer_size != tile_buf_size) {
+			if (server->tile_readback_buffer)
+				wgpuBufferRelease(server->tile_readback_buffer);
+			WGPUBufferDescriptor buf_desc = {0};
+			buf_desc.size = tile_buf_size;
+			buf_desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
+			server->tile_readback_buffer =
+				wgpuDeviceCreateBuffer(server->device, &buf_desc);
+			server->tile_readback_buffer_size = tile_buf_size;
+		}
+
+		int do_full = (!server->prev_texture || server->force_full_frame ||
+			       server->always_full_frame);
+		if (do_full) {
 			server->force_full_frame = 0;
 			for (uint32_t i = 0; i < num_tiles; i++)
 				server->dirty_tiles[i] = 1;
-			server->capture_state = CAPTURE_READY_TO_SEND;
-			return yetty_vnc_server_send_frame_gpu(server, texture, width, height);
 		}
 
-		/* Create bind group for this frame */
-		if (server->diff_bind_group) {
-			wgpuBindGroupRelease(server->diff_bind_group);
-			server->diff_bind_group = NULL;
+		/* Build ONE command buffer with ALL work for this frame so
+		 * we only wait for a single GPU completion: compute-diff (if
+		 * not first-frame), copy-flags-to-readback, copy-texture-to-prev,
+		 * copy-texture-to-tile-readback. */
+		WGPUCommandEncoder encoder =
+			wgpuDeviceCreateCommandEncoder(server->device, NULL);
+
+		if (!do_full) {
+			/* Set up diff bind group */
+			if (server->diff_bind_group) {
+				wgpuBindGroupRelease(server->diff_bind_group);
+				server->diff_bind_group = NULL;
+			}
+			WGPUTextureViewDescriptor view_desc = {0};
+			view_desc.format = WGPUTextureFormat_BGRA8Unorm;
+			view_desc.dimension = WGPUTextureViewDimension_2D;
+			view_desc.mipLevelCount = 1;
+			view_desc.arrayLayerCount = 1;
+			WGPUTextureView curr_view = wgpuTextureCreateView(texture, &view_desc);
+			WGPUTextureView prev_view = wgpuTextureCreateView(server->prev_texture, &view_desc);
+			WGPUBindGroupEntry entries[3] = {0};
+			entries[0].binding = 0;
+			entries[0].textureView = curr_view;
+			entries[1].binding = 1;
+			entries[1].textureView = prev_view;
+			entries[2].binding = 2;
+			entries[2].buffer = server->dirty_flags_buffer;
+			entries[2].size = num_tiles * sizeof(uint32_t);
+			WGPUBindGroupDescriptor bg_desc = {0};
+			bg_desc.layout = server->diff_bind_group_layout;
+			bg_desc.entryCount = 3;
+			bg_desc.entries = entries;
+			server->diff_bind_group =
+				wgpuDeviceCreateBindGroup(server->device, &bg_desc);
+			wgpuTextureViewRelease(curr_view);
+			wgpuTextureViewRelease(prev_view);
+
+			/* 1. Clear dirty flags buffer */
+			wgpuCommandEncoderClearBuffer(encoder, server->dirty_flags_buffer,
+						      0, num_tiles * sizeof(uint32_t));
+			/* 2. Run compute shader */
+			WGPUComputePassDescriptor cp_desc = {0};
+			WGPUComputePassEncoder cpass =
+				wgpuCommandEncoderBeginComputePass(encoder, &cp_desc);
+			wgpuComputePassEncoderSetPipeline(cpass, server->diff_pipeline);
+			wgpuComputePassEncoderSetBindGroup(cpass, 0, server->diff_bind_group, 0, NULL);
+			wgpuComputePassEncoderDispatchWorkgroups(cpass, server->tiles_x,
+								 server->tiles_y, 1);
+			wgpuComputePassEncoderEnd(cpass);
+			wgpuComputePassEncoderRelease(cpass);
+			/* 3. Copy dirty flags -> readback buffer */
+			wgpuCommandEncoderCopyBufferToBuffer(encoder, server->dirty_flags_buffer,
+							     0, server->dirty_flags_readback,
+							     0, num_tiles * sizeof(uint32_t));
 		}
 
-		WGPUTextureViewDescriptor view_desc = {0};
-		view_desc.format = WGPUTextureFormat_BGRA8Unorm;
-		view_desc.dimension = WGPUTextureViewDimension_2D;
-		view_desc.mipLevelCount = 1;
-		view_desc.arrayLayerCount = 1;
+		/* 4. Copy current texture -> prev (for next frame's diff) */
+		if (server->prev_texture) {
+			WGPUTexelCopyTextureInfo src_tp = {0};
+			src_tp.texture = texture;
+			WGPUTexelCopyTextureInfo dst_tp = {0};
+			dst_tp.texture = server->prev_texture;
+			WGPUExtent3D extent = {width, height, 1};
+			wgpuCommandEncoderCopyTextureToTexture(encoder, &src_tp, &dst_tp, &extent);
+		}
 
-		WGPUTextureView curr_view = wgpuTextureCreateView(texture, &view_desc);
-		WGPUTextureView prev_view = wgpuTextureCreateView(server->prev_texture, &view_desc);
+		/* 5. Copy current texture -> tile_readback_buffer (pixels for tiles) */
+		{
+			WGPUTexelCopyTextureInfo src_tb = {0};
+			src_tb.texture = texture;
+			WGPUTexelCopyBufferInfo dst_tb = {0};
+			dst_tb.buffer = server->tile_readback_buffer;
+			dst_tb.layout.bytesPerRow = aligned_bytes_per_row;
+			dst_tb.layout.rowsPerImage = height;
+			WGPUExtent3D copy_size = {width, height, 1};
+			wgpuCommandEncoderCopyTextureToBuffer(encoder, &src_tb, &dst_tb, &copy_size);
+		}
 
-		WGPUBindGroupEntry entries[3] = {0};
-		entries[0].binding = 0;
-		entries[0].textureView = curr_view;
-		entries[1].binding = 1;
-		entries[1].textureView = prev_view;
-		entries[2].binding = 2;
-		entries[2].buffer = server->dirty_flags_buffer;
-		entries[2].size = num_tiles * sizeof(uint32_t);
-
-		WGPUBindGroupDescriptor bg_desc = {0};
-		bg_desc.layout = server->diff_bind_group_layout;
-		bg_desc.entryCount = 3;
-		bg_desc.entries = entries;
-		server->diff_bind_group = wgpuDeviceCreateBindGroup(server->device, &bg_desc);
-
-		wgpuTextureViewRelease(curr_view);
-		wgpuTextureViewRelease(prev_view);
-
-		/* Batch all GPU work in one encoder */
-		WGPUCommandEncoderDescriptor enc_desc = {0};
-		WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(server->device, &enc_desc);
-
-		/* 1. Clear dirty flags buffer */
-		wgpuCommandEncoderClearBuffer(encoder, server->dirty_flags_buffer, 0,
-					      num_tiles * sizeof(uint32_t));
-
-		/* 2. Run compute shader */
-		WGPUComputePassDescriptor cp_desc = {0};
-		WGPUComputePassEncoder cpass = wgpuCommandEncoderBeginComputePass(encoder, &cp_desc);
-		wgpuComputePassEncoderSetPipeline(cpass, server->diff_pipeline);
-		wgpuComputePassEncoderSetBindGroup(cpass, 0, server->diff_bind_group, 0, NULL);
-		wgpuComputePassEncoderDispatchWorkgroups(cpass, server->tiles_x, server->tiles_y, 1);
-		wgpuComputePassEncoderEnd(cpass);
-		wgpuComputePassEncoderRelease(cpass);
-
-		/* 3. Copy dirty flags to readback buffer */
-		wgpuCommandEncoderCopyBufferToBuffer(encoder, server->dirty_flags_buffer, 0,
-						     server->dirty_flags_readback, 0,
-						     num_tiles * sizeof(uint32_t));
-
-		/* 4. Copy current texture to prev for next frame */
-		WGPUTexelCopyTextureInfo src_copy = {0};
-		src_copy.texture = texture;
-		WGPUTexelCopyTextureInfo dst_copy = {0};
-		dst_copy.texture = server->prev_texture;
-		WGPUExtent3D extent = {width, height, 1};
-		wgpuCommandEncoderCopyTextureToTexture(encoder, &src_copy, &dst_copy, &extent);
-
-		/* Submit */
 		WGPUCommandBuffer cmd_buf = wgpuCommandEncoderFinish(encoder, NULL);
 		wgpuQueueSubmit(server->queue, 1, &cmd_buf);
 		wgpuCommandBufferRelease(cmd_buf);
 		wgpuCommandEncoderRelease(encoder);
 
-		/* Register async callback */
-		server->gpu_work_done = 0;
-		WGPUQueueWorkDoneCallbackInfo cb_info = {0};
-		cb_info.mode = WGPUCallbackMode_AllowSpontaneous;
-		cb_info.callback = gpu_work_done_callback;
-		cb_info.userdata1 = server;
-		wgpuQueueOnSubmittedWorkDone(server->queue, cb_info);
+		/* Register BOTH buffer maps right away so Dawn schedules them
+		 * for completion as soon as the submit above finishes. */
+		server->needs_flags_map = !do_full;
+		server->flags_map_pending = !do_full;
+		server->pixels_map_pending = 1;
+		server->map_status = WGPUMapAsyncStatus_Success;
 
-		server->capture_state = CAPTURE_WAITING_COMPUTE;
+		if (!do_full) {
+			WGPUBufferMapCallbackInfo fcb = {0};
+			fcb.mode = WGPUCallbackMode_AllowSpontaneous;
+			fcb.callback = flags_map_callback;
+			fcb.userdata1 = server;
+			wgpuBufferMapAsync(server->dirty_flags_readback, WGPUMapMode_Read,
+					   0, num_tiles * sizeof(uint32_t), fcb);
+		}
+		{
+			WGPUBufferMapCallbackInfo pcb = {0};
+			pcb.mode = WGPUCallbackMode_AllowSpontaneous;
+			pcb.callback = pixels_map_callback;
+			pcb.userdata1 = server;
+			wgpuBufferMapAsync(server->tile_readback_buffer, WGPUMapMode_Read,
+					   0, tile_buf_size, pcb);
+		}
+
+		wgpuInstanceProcessEvents(server->instance);
+
+		server->capture_state = CAPTURE_WAITING_DATA;
+		/* Fast path: if maps delivered inline, process immediately */
+		if (!server->flags_map_pending && !server->pixels_map_pending)
+			return yetty_vnc_server_send_frame_gpu(server, texture, width, height);
 		return YETTY_OK_VOID();
 	}
 
-	case CAPTURE_WAITING_COMPUTE: {
-		if (!server->gpu_work_done)
-			return YETTY_OK_VOID();
-
-		/* Map dirty flags buffer */
-		server->gpu_work_done = 0;
-		WGPUBufferMapCallbackInfo cb_info = {0};
-		cb_info.mode = WGPUCallbackMode_AllowSpontaneous;
-		cb_info.callback = buffer_map_callback;
-		cb_info.userdata1 = server;
-		wgpuBufferMapAsync(server->dirty_flags_readback, WGPUMapMode_Read, 0,
-				   num_tiles * sizeof(uint32_t), cb_info);
-
-		server->capture_state = CAPTURE_WAITING_MAP;
-		return YETTY_OK_VOID();
-	}
-
-	case CAPTURE_WAITING_MAP: {
-		if (!server->gpu_work_done)
+	case CAPTURE_WAITING_DATA: {
+		if (server->flags_map_pending || server->pixels_map_pending)
+			wgpuInstanceProcessEvents(server->instance);
+		if (server->flags_map_pending || server->pixels_map_pending)
 			return YETTY_OK_VOID();
 
 		if (server->map_status != WGPUMapAsyncStatus_Success) {
-			ywarn("VNC dirty flags map failed");
+			ywarn("VNC map failed status=%u", server->map_status);
+			if (server->needs_flags_map)
+				wgpuBufferUnmap(server->dirty_flags_readback);
+			wgpuBufferUnmap(server->tile_readback_buffer);
 			server->capture_state = CAPTURE_IDLE;
 			return YETTY_OK_VOID();
 		}
+
+		uint32_t pw = server->pending_width;
+		uint32_t ph = server->pending_height;
 
 		/* Read dirty flags */
-		const uint32_t *flags = wgpuBufferGetConstMappedRange(
-			server->dirty_flags_readback, 0, num_tiles * sizeof(uint32_t));
-
-		for (uint32_t i = 0; i < num_tiles; i++)
-			server->dirty_tiles[i] = (flags[i] != 0);
-
-		wgpuBufferUnmap(server->dirty_flags_readback);
-
-		server->capture_state = CAPTURE_READY_TO_SEND;
-		/* Fall through */
-	}
-	/* fallthrough */
-
-	case CAPTURE_READY_TO_SEND: {
-		/* Need to read back texture pixels */
-		uint32_t bytes_per_pixel = 4;
-		uint32_t aligned_bytes_per_row = (width * bytes_per_pixel + 255) & ~255;
-		uint32_t buf_size = aligned_bytes_per_row * height;
-
-		/* Create or recreate readback buffer if size changed */
-		if (!server->tile_readback_buffer || server->tile_readback_buffer_size != buf_size) {
-			if (server->tile_readback_buffer)
-				wgpuBufferRelease(server->tile_readback_buffer);
-
-			WGPUBufferDescriptor buf_desc = {0};
-			buf_desc.size = buf_size;
-			buf_desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
-			server->tile_readback_buffer = wgpuDeviceCreateBuffer(server->device, &buf_desc);
-			server->tile_readback_buffer_size = buf_size;
+		if (server->needs_flags_map) {
+			const uint32_t *flags = wgpuBufferGetConstMappedRange(
+				server->dirty_flags_readback,
+				0, num_tiles * sizeof(uint32_t));
+			for (uint32_t i = 0; i < num_tiles; i++)
+				server->dirty_tiles[i] = (flags[i] != 0);
+			wgpuBufferUnmap(server->dirty_flags_readback);
 		}
 
-		/* Copy texture to buffer */
-		WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(server->device, NULL);
-		WGPUTexelCopyTextureInfo src = {0};
-		src.texture = server->pending_texture;
-		WGPUTexelCopyBufferInfo dst = {0};
-		dst.buffer = server->tile_readback_buffer;
-		dst.layout.bytesPerRow = aligned_bytes_per_row;
-		dst.layout.rowsPerImage = height;
-		WGPUExtent3D copy_size = {width, height, 1};
-		wgpuCommandEncoderCopyTextureToBuffer(encoder, &src, &dst, &copy_size);
-		WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, NULL);
-		wgpuQueueSubmit(server->queue, 1, &cmd);
-		wgpuCommandBufferRelease(cmd);
-		wgpuCommandEncoderRelease(encoder);
-
-		/* Map buffer async */
-		server->gpu_work_done = 0;
-		WGPUBufferMapCallbackInfo cb_info = {0};
-		cb_info.mode = WGPUCallbackMode_AllowSpontaneous;
-		cb_info.callback = buffer_map_callback;
-		cb_info.userdata1 = server;
-		wgpuBufferMapAsync(server->tile_readback_buffer, WGPUMapMode_Read, 0, buf_size, cb_info);
-
-		server->capture_state = CAPTURE_WAITING_TILE_READBACK;
-		return YETTY_OK_VOID();
-	}
-
-	case CAPTURE_WAITING_TILE_READBACK: {
-		if (!server->gpu_work_done)
-			return YETTY_OK_VOID();
-
-		if (server->map_status != WGPUMapAsyncStatus_Success) {
-			ywarn("VNC tile readback map failed");
-			server->capture_state = CAPTURE_IDLE;
-			return YETTY_OK_VOID();
-		}
-
-		/* Copy mapped data to CPU buffer (handle row alignment) */
-		uint32_t bytes_per_pixel = 4;
-		uint32_t aligned_bytes_per_row = (width * bytes_per_pixel + 255) & ~255;
-		uint32_t unaligned_row = width * bytes_per_pixel;
-		uint32_t buf_size = aligned_bytes_per_row * height;
-
+		/* Read pixels */
+		uint32_t aligned_row = (pw * 4 + 255) & ~255;
+		uint32_t unaligned_row = pw * 4;
+		uint32_t tbuf_size = aligned_row * ph;
 		const uint8_t *mapped = wgpuBufferGetConstMappedRange(
-			server->tile_readback_buffer, 0, buf_size);
-
-		for (uint32_t y = 0; y < height; y++) {
+			server->tile_readback_buffer, 0, tbuf_size);
+		for (uint32_t y = 0; y < ph; y++) {
 			memcpy(server->gpu_readback_pixels + y * unaligned_row,
-			       mapped + y * aligned_bytes_per_row, unaligned_row);
+			       mapped + y * aligned_row, unaligned_row);
 		}
 		wgpuBufferUnmap(server->tile_readback_buffer);
 
-		/* Now encode and send */
 		server->capture_state = CAPTURE_IDLE;
-		return encode_and_send_dirty_tiles(server, width, height);
+		encode_and_send_dirty_tiles(server, pw, ph);
+
+		/* Immediately kick off the next pipeline with the CURRENT texture
+		 * so a client sees the freshest frame, not the one we just sent. */
+		return yetty_vnc_server_send_frame_gpu(server, texture, width, height);
 	}
+
+	/* Legacy states — no longer used by the pipeline above; treat
+	 * as a no-op. Kept enumerated for API stability. */
+	case CAPTURE_WAITING_COMPUTE:
+	case CAPTURE_WAITING_MAP:
+	case CAPTURE_READY_TO_SEND:
+	case CAPTURE_WAITING_TILE_READBACK:
+		server->capture_state = CAPTURE_IDLE;
+		break;
 	}
 
 	return YETTY_OK_VOID();

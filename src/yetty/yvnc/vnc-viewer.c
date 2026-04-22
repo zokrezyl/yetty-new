@@ -199,6 +199,10 @@ static struct yetty_core_int_result vnc_viewer_view_on_event(
 {
 	struct yetty_vnc_viewer *viewer = (struct yetty_vnc_viewer *)view;
 
+	ydebug("vnc_viewer_view_on_event: type=%d connected=%d",
+	       (int)event->type,
+	       viewer->client ? yetty_vnc_client_is_connected(viewer->client) : -1);
+
 	if (!viewer->client || !yetty_vnc_client_is_connected(viewer->client))
 		return YETTY_OK(yetty_core_int, 0);
 

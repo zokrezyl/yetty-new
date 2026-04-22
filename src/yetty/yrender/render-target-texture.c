@@ -192,7 +192,8 @@ render_target_texture_resize(struct yetty_render_target *self,
 	WGPUTextureDescriptor tex_desc = {0};
 	tex_desc.label = (WGPUStringView){.data = "render_target", .length = 13};
 	tex_desc.usage = WGPUTextureUsage_RenderAttachment |
-			 WGPUTextureUsage_TextureBinding;
+			 WGPUTextureUsage_TextureBinding |
+			 WGPUTextureUsage_CopySrc;
 	tex_desc.dimension = WGPUTextureDimension_2D;
 	tex_desc.size.width = width;
 	tex_desc.size.height = height;

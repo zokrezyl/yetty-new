@@ -230,7 +230,6 @@ static void process_tile_data(struct yetty_vnc_client *client)
 			client->stats_frames_window++;
 			client->recv_state = RECV_FRAME_HEADER;
 			client->recv_needed = sizeof(struct vnc_frame_header);
-			client->recv_offset = 0;
 			yetty_vnc_client_send_frame_ack(client);
 		}
 		return;
@@ -274,16 +273,15 @@ static void process_tile_data(struct yetty_vnc_client *client)
 	client->tiles_received++;
 	client->stats_tiles_window++;
 
+	/* State transition - buffer management handled by caller */
 	if (client->tiles_received >= client->current_frame.num_tiles) {
 		client->stats_frames_window++;
 		client->recv_state = RECV_FRAME_HEADER;
 		client->recv_needed = sizeof(struct vnc_frame_header);
-		client->recv_offset = 0;
 		yetty_vnc_client_send_frame_ack(client);
 	} else {
 		client->recv_state = RECV_TILE_HEADER;
 		client->recv_needed = sizeof(struct vnc_tile_header);
-		client->recv_offset = 0;
 	}
 }
 
@@ -462,6 +460,7 @@ static void process_received_data(struct yetty_vnc_client *client)
 			process_tile_data(client);
 			tiles_received = 1;
 
+			/* Consume tile data and shift remaining */
 			size_t consumed = client->current_tile.data_size;
 			size_t remaining = client->recv_offset - consumed;
 			if (remaining > 0)
@@ -522,19 +521,22 @@ static void process_received_data(struct yetty_vnc_client *client)
 static void vnc_client_on_connect(void *ctx, struct yetty_tcp_conn *conn)
 {
 	struct yetty_vnc_client *client = ctx;
+	ydebug("VNC client: on_connect callback fired, conn=%p", (void *)conn);
 	client->conn = conn;
 	client->connected = 1;
 
 	yinfo("VNC client connected");
 
-	if (client->on_connected_fn)
+	if (client->on_connected_fn) {
+		ydebug("VNC client: calling on_connected_fn");
 		client->on_connected_fn(client->on_connected_userdata);
+	}
 }
 
 static void vnc_client_on_connect_error(void *ctx, const char *error)
 {
 	struct yetty_vnc_client *client = ctx;
-	(void)error;
+	ydebug("VNC client: on_connect_error callback fired, error=%s", error);
 
 	yerror("VNC client connect failed: %s", error);
 	client->connected = 0;
@@ -542,8 +544,10 @@ static void vnc_client_on_connect_error(void *ctx, const char *error)
 	client->tcp_client_id = -1;
 	client->wants_reconnect = 1;
 
-	if (client->on_disconnected_fn)
+	if (client->on_disconnected_fn) {
+		ydebug("VNC client: calling on_disconnected_fn (from connect error)");
 		client->on_disconnected_fn(client->on_disconnected_userdata);
+	}
 }
 
 static void vnc_client_on_alloc(void *ctx, size_t suggested, char **buf, size_t *len)
@@ -575,12 +579,16 @@ static void vnc_client_on_data(void *ctx, struct yetty_tcp_conn *conn,
 	(void)conn;
 	(void)data; /* Data already in recv_buffer from on_alloc */
 
+	ydebug("VNC client: on_data callback, nread=%ld", nread);
+
 	if (nread <= 0)
 		return;
 
 	client->recv_offset += (size_t)nread;
 	client->stats_bytes_window += (size_t)nread;
 
+	ydebug("VNC client: processing data, recv_offset=%zu, recv_needed=%zu",
+	       client->recv_offset, client->recv_needed);
 	process_received_data(client);
 }
 
@@ -609,6 +617,9 @@ yetty_vnc_client_create(WGPUDevice device, WGPUQueue queue,
 			struct yetty_core_event_loop *event_loop,
 			uint16_t width, uint16_t height)
 {
+	ydebug("VNC client: create called, device=%p queue=%p event_loop=%p %ux%u",
+	       (void *)device, (void *)queue, (void *)event_loop, width, height);
+
 	if (!event_loop)
 		return YETTY_ERR(yetty_vnc_client_ptr, "event_loop is NULL");
 
@@ -666,6 +677,7 @@ yetty_vnc_client_create(WGPUDevice device, WGPUQueue queue,
 		}
 	}
 
+	ydebug("VNC client: create complete, client=%p", (void *)client);
 	return YETTY_OK(yetty_vnc_client_ptr, client);
 }
 
@@ -702,6 +714,8 @@ struct yetty_core_void_result
 yetty_vnc_client_connect(struct yetty_vnc_client *client, const char *host,
 			 uint16_t port)
 {
+	ydebug("VNC client: connect called, host=%s port=%u", host, port);
+
 	if (!client)
 		return YETTY_ERR(yetty_core_void, "null client");
 	if (client->connected)
@@ -713,6 +727,7 @@ yetty_vnc_client_connect(struct yetty_vnc_client *client, const char *host,
 	client->recv_offset = 0;
 
 	/* Setup TCP client callbacks */
+	ydebug("VNC client: setting up TCP callbacks");
 	struct yetty_tcp_client_callbacks callbacks = {
 		.ctx = client,
 		.on_connect = vnc_client_on_connect,
@@ -723,15 +738,18 @@ yetty_vnc_client_connect(struct yetty_vnc_client *client, const char *host,
 	};
 
 	/* Create TCP client (starts connecting immediately) */
+	ydebug("VNC client: calling event_loop->create_tcp_client");
 	struct yetty_core_tcp_client_id_result id_res =
 		client->event_loop->ops->create_tcp_client(
 			client->event_loop, host, port, &callbacks);
-	if (!YETTY_IS_OK(id_res))
+	if (!YETTY_IS_OK(id_res)) {
+		ydebug("VNC client: create_tcp_client failed: %s", id_res.error.msg);
 		return YETTY_ERR(yetty_core_void, "failed to create TCP client");
+	}
 
 	client->tcp_client_id = id_res.value;
 
-	ydebug("VNC client connecting to %s:%u", host, port);
+	ydebug("VNC client: connecting to %s:%u, tcp_client_id=%d", host, port, client->tcp_client_id);
 	return YETTY_OK_VOID();
 }
 
@@ -841,6 +859,7 @@ static struct yetty_core_void_result ensure_resources(
 		sampler_desc.addressModeU = WGPUAddressMode_ClampToEdge;
 		sampler_desc.addressModeV = WGPUAddressMode_ClampToEdge;
 		sampler_desc.addressModeW = WGPUAddressMode_ClampToEdge;
+		sampler_desc.maxAnisotropy = 1;
 		client->sampler = wgpuDeviceCreateSampler(client->device, &sampler_desc);
 	}
 

@@ -51,7 +51,8 @@ typedef void (*yetty_vnc_on_input_received_fn)(void *userdata);
 
 /* Create server */
 struct yetty_vnc_server_ptr_result
-yetty_vnc_server_create(WGPUDevice device, WGPUQueue queue,
+yetty_vnc_server_create(WGPUInstance instance, WGPUDevice device,
+			WGPUQueue queue,
 			struct yetty_core_event_loop *event_loop);
 
 /* Destroy server (handles NULL) */
