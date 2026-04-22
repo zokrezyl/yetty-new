@@ -2107,8 +2107,6 @@ static int virtio_9p_recv_request(VIRTIODevice *s1, int queue_idx,
     tag = get_le16(buf + 5);
     offset += header_len;
 
-    fprintf(stderr, "[9p] op=%d tag=%d\n", id, tag);
-
 #ifdef DEBUG_VIRTIO
     if (s1->debug & VIRTIO_DEBUG_9P) {
         const char *name;
@@ -2336,9 +2334,7 @@ static int virtio_9p_recv_request(VIRTIODevice *s1, int queue_idx,
             if (!f)
                 goto fid_not_found;
             buf = malloc(count + 4);
-            fprintf(stderr, "[9p readdir] fid=%u offs=%lu count=%u\n", fid, (unsigned long)offs, count);
             n = fs->fs_readdir(fs, f, offs, buf + 4, count);
-            fprintf(stderr, "[9p readdir] result n=%d\n", n);
             if (n < 0) {
                 err = n;
                 goto error;

@@ -65,7 +65,21 @@ add_executable(yetty
 
 target_include_directories(yetty PRIVATE ${YETTY_INCLUDES} ${YETTY_RENDERER_INCLUDES} ${JPEG_INCLUDE_DIRS} ${BROTLI_INCLUDE_DIR})
 
-# Embed all assets (logo, shaders, fonts, CDB files)
+# TinyEMU: Build kernel, download rootfs BEFORE embedding assets
+if(YETTY_ENABLE_LIB_TINYEMU)
+    # Build OpenSBI firmware
+    opensbi_build()
+
+    # Build Linux kernel for RISC-V (requires cross-compiler)
+    linux_kernel_build()
+
+    # Download Alpine rootfs
+    alpine_rootfs_download()
+    alpine_rootfs_create_image()
+    alpine_rootfs_create_config()
+endif()
+
+# Embed all assets (logo, shaders, fonts, CDB files, TinyEMU)
 yetty_embed_assets(yetty)
 
 # Dummy targets for dependency tracking (legacy)
@@ -81,6 +95,7 @@ target_compile_definitions(yetty PRIVATE
     YETTY_USE_FORKPTY=1
     YETTY_HAS_VNC=1
     $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:YETTY_HAS_TINYEMU=1>
+    $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:CONFIG_SLIRP>
 )
 
 set_target_properties(yetty PROPERTIES ENABLE_EXPORTS TRUE)
@@ -141,27 +156,3 @@ if(YETTY_ENABLE_FEATURE_ASSETS)
     )
 endif()
 
-# TinyEMU: Build kernel, download rootfs, copy assets
-if(YETTY_ENABLE_LIB_TINYEMU)
-    # Build OpenSBI firmware
-    opensbi_build()
-
-    # Build Linux kernel for RISC-V (requires cross-compiler)
-    linux_kernel_build()
-
-    # Download Alpine rootfs
-    alpine_rootfs_download()
-    alpine_rootfs_create_image()
-    alpine_rootfs_create_config()
-
-    # Copy TinyEMU runtime files to assets directory
-    tinyemu_copy_runtime_to_bundle(yetty)
-
-    # Add dependencies on opensbi and kernel
-    if(TARGET opensbi)
-        add_dependencies(yetty opensbi)
-    endif()
-    if(TARGET linux-kernel)
-        add_dependencies(yetty linux-kernel)
-    endif()
-endif()

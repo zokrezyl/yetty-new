@@ -339,6 +339,37 @@ function(yetty_embed_assets TARGET)
     # Embed config (not compressed)
     incbin_add_directory(${TARGET} "config" "${INCBIN_CONFIG_DIR}" "*" FALSE)
 
+    # Embed TinyEMU runtime assets if enabled
+    # Assets are built at configure time, then embedded via incbin_add_directory
+    if(YETTY_ENABLE_LIB_TINYEMU)
+        set(TINYEMU_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets/tinyemu")
+        set(INCBIN_TINYEMU_DIR "${CMAKE_BINARY_DIR}/incbin-tinyemu")
+
+        # Create incbin staging directory and copy assets
+        file(MAKE_DIRECTORY "${INCBIN_TINYEMU_DIR}")
+
+        if(EXISTS "${TINYEMU_ASSETS_DIR}/kernel-riscv64.bin")
+            file(COPY "${TINYEMU_ASSETS_DIR}/kernel-riscv64.bin" DESTINATION "${INCBIN_TINYEMU_DIR}")
+        endif()
+        if(EXISTS "${TINYEMU_ASSETS_DIR}/opensbi-fw_jump.elf")
+            file(COPY "${TINYEMU_ASSETS_DIR}/opensbi-fw_jump.elf" DESTINATION "${INCBIN_TINYEMU_DIR}")
+        endif()
+        if(EXISTS "${TINYEMU_ASSETS_DIR}/root-riscv64.cfg")
+            file(COPY "${TINYEMU_ASSETS_DIR}/root-riscv64.cfg" DESTINATION "${INCBIN_TINYEMU_DIR}")
+        endif()
+
+        # Create tarball of alpine-rootfs at configure time (preserves symlinks)
+        if(EXISTS "${TINYEMU_ASSETS_DIR}/alpine-rootfs")
+            execute_process(
+                COMMAND ${CMAKE_COMMAND} -E tar cf "${INCBIN_TINYEMU_DIR}/alpine-rootfs.tar" .
+                WORKING_DIRECTORY "${TINYEMU_ASSETS_DIR}/alpine-rootfs"
+            )
+        endif()
+
+        # Embed TinyEMU assets (not compressed - binary files)
+        incbin_add_directory(${TARGET} "tinyemu" "${INCBIN_TINYEMU_DIR}" "*" FALSE)
+    endif()
+
     # Make manifest headers available
     target_include_directories(${TARGET} PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 endfunction()

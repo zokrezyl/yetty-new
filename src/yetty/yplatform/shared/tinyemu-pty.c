@@ -52,8 +52,8 @@ struct tinyemu_pty {
     char *config_path;
 };
 
-/* External: get assets directory (platform-specific) */
-extern const char *yetty_platform_get_assets_dir(void);
+/* External: get data directory (platform-specific) */
+extern const char *yetty_platform_get_data_dir(void);
 
 /* Forward declarations */
 static void tinyemu_pty_destroy(struct yetty_platform_pty *self);
@@ -527,11 +527,11 @@ static struct yetty_platform_pty_result tinyemu_pty_create(struct yetty_config *
     /* Terminal polls pty_pipe[0] for VM output */
     pty->pipe_source.abstract = pty->pty_pipe[0];
 
-    /* Get VM config path - use assets directory */
+    /* Get VM config path - use data directory */
     {
-        const char *assets_dir = yetty_platform_get_assets_dir();
+        const char *data_dir = yetty_platform_get_data_dir();
         char path_buf[512];
-        snprintf(path_buf, sizeof(path_buf), "%s/tinyemu/root-riscv64.cfg", assets_dir);
+        snprintf(path_buf, sizeof(path_buf), "%s/tinyemu/root-riscv64.cfg", data_dir);
         pty->config_path = strdup(path_buf);
     }
 

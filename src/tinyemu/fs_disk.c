@@ -241,17 +241,13 @@ static int fs_open(FSDevice *fs, FSQID *qid, FSFile *f, uint32_t flags,
     struct stat st;
     fs_close(fs, f);
 
-    fprintf(stderr, "[fs_open] path=%s flags=0x%x\n", f->path, flags);
-
     if (stat(f->path, &st) != 0)
         return -errno_to_p9(errno);
     stat_to_qid(qid, &st);
 
-    /* Check if it's actually a directory even if P9_O_DIRECTORY not set */
-    int is_actually_dir = S_ISDIR(st.st_mode);
-    fprintf(stderr, "[fs_open] is_actually_dir=%d P9_O_DIRECTORY=%d\n", is_actually_dir, !!(flags & P9_O_DIRECTORY));
-
-    if ((flags & P9_O_DIRECTORY) || is_actually_dir) {
+    /* Open as directory if P9_O_DIRECTORY set OR path is actually a directory.
+     * Newer kernels (7.x) don't always send P9_O_DIRECTORY flag. */
+    if ((flags & P9_O_DIRECTORY) || S_ISDIR(st.st_mode)) {
         DIR *dirp;
         dirp = opendir(f->path);
         if (!dirp)
@@ -309,9 +305,6 @@ static int fs_readdir(FSDevice *fs, FSFile *f, uint64_t offset,
 
     if (!f->is_opened || !f->is_dir)
         return -P9_EPROTO;
-
-    fprintf(stderr, "[fs_readdir] path=%s offset=%lu count=%d\n", f->path, (unsigned long)offset, count);
-
     if (offset == 0)
         rewinddir(f->u.dirp);
     else
@@ -319,7 +312,6 @@ static int fs_readdir(FSDevice *fs, FSFile *f, uint64_t offset,
     pos = 0;
     for(;;) {
         de = readdir(f->u.dirp);
-        if (de) fprintf(stderr, "[fs_readdir] entry: %s (ino=%lu)\n", de->d_name, (unsigned long)de->d_ino);
         if (de == NULL)
             break;
         name_len = strlen(de->d_name);
@@ -358,7 +350,6 @@ static int fs_readdir(FSDevice *fs, FSFile *f, uint64_t offset,
         memcpy(buf + pos, de->d_name, name_len);
         pos += name_len;
     }
-    fprintf(stderr, "[fs_readdir] returning pos=%d\n", pos);
     return pos;
 }
 
