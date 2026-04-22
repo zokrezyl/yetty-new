@@ -1,0 +1,149 @@
+# Platform constraints and definitions for yetty
+
+#=============================================================================
+# OS constraints
+#=============================================================================
+
+constraint_setting(
+    name = "os",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "linux",
+    constraint_setting = ":os",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "macos",
+    constraint_setting = ":os",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "windows",
+    constraint_setting = ":os",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "android",
+    constraint_setting = ":os",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "webasm",
+    constraint_setting = ":os",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "ios",
+    constraint_setting = ":os",
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# CPU constraints
+#=============================================================================
+
+constraint_setting(
+    name = "cpu",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "x86_64",
+    constraint_setting = ":cpu",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "arm64",
+    constraint_setting = ":cpu",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "wasm32",
+    constraint_setting = ":cpu",
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# Platform definitions
+#=============================================================================
+
+platform(
+    name = "yetty_linux_x86_64",
+    constraint_values = [
+        ":linux",
+        ":x86_64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+platform(
+    name = "yetty_macos_arm64",
+    constraint_values = [
+        ":macos",
+        ":arm64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+platform(
+    name = "yetty_macos_x86_64",
+    constraint_values = [
+        ":macos",
+        ":x86_64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+platform(
+    name = "yetty_android_arm64",
+    constraint_values = [
+        ":android",
+        ":arm64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+platform(
+    name = "yetty_android_x86_64",
+    constraint_values = [
+        ":android",
+        ":x86_64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+platform(
+    name = "yetty_wasm32",
+    constraint_values = [
+        ":webasm",
+        ":wasm32",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+platform(
+    name = "yetty_ios_arm64",
+    constraint_values = [
+        ":ios",
+        ":arm64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# Default platform (host detection)
+#=============================================================================
+
+platform(
+    name = "default",
+    visibility = ["PUBLIC"],
+)

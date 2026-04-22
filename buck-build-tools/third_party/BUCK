@@ -1,0 +1,400 @@
+# Third-party dependencies
+
+#=============================================================================
+# zlib
+#=============================================================================
+
+genrule(
+    name = "zlib_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cmake -S "$BUCK_SCRATCH_PATH/zlib-1.3.1" -B "$BUCK_SCRATCH_PATH/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OUT" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        cmake --build "$BUCK_SCRATCH_PATH/build" --parallel
+        cmake --install "$BUCK_SCRATCH_PATH/build"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "zlib",
+    exported_linker_flags = ["$(location :zlib_build)/lib/libz.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :zlib_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# FreeType
+#=============================================================================
+
+genrule(
+    name = "freetype_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/freetype/freetype/archive/refs/tags/VER-2-13-2.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cmake -S "$BUCK_SCRATCH_PATH/freetype-VER-2-13-2" -B "$BUCK_SCRATCH_PATH/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OUT" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DFT_DISABLE_HARFBUZZ=ON \
+            -DFT_DISABLE_BROTLI=ON \
+            -DFT_DISABLE_BZIP2=ON \
+            -DFT_DISABLE_PNG=ON \
+            -DFT_DISABLE_ZLIB=ON \
+            -DBUILD_SHARED_LIBS=OFF
+        cmake --build "$BUCK_SCRATCH_PATH/build" --parallel
+        cmake --install "$BUCK_SCRATCH_PATH/build"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "freetype",
+    exported_linker_flags = ["$(location :freetype_build)/lib64/libfreetype.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :freetype_build)/include/freetype2"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# libuv
+#=============================================================================
+
+genrule(
+    name = "libuv_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/libuv/libuv/archive/refs/tags/v1.48.0.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cmake -S "$BUCK_SCRATCH_PATH/libuv-1.48.0" -B "$BUCK_SCRATCH_PATH/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OUT" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_TESTING=OFF \
+            -DLIBUV_BUILD_SHARED=OFF
+        cmake --build "$BUCK_SCRATCH_PATH/build" --parallel
+        cmake --install "$BUCK_SCRATCH_PATH/build"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "libuv",
+    exported_linker_flags = ["$(location :libuv_build)/lib64/libuv.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :libuv_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# libyaml
+#=============================================================================
+
+genrule(
+    name = "libyaml_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/yaml/libyaml/archive/refs/tags/0.2.5.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cmake -S "$BUCK_SCRATCH_PATH/libyaml-0.2.5" -B "$BUCK_SCRATCH_PATH/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OUT" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_TESTING=OFF
+        cmake --build "$BUCK_SCRATCH_PATH/build" --parallel
+        cmake --install "$BUCK_SCRATCH_PATH/build"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "libyaml",
+    exported_linker_flags = ["$(location :libyaml_build)/lib/libyaml.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :libyaml_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# glfw
+#=============================================================================
+
+genrule(
+    name = "glfw_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cmake -S "$BUCK_SCRATCH_PATH/glfw-3.4" -B "$BUCK_SCRATCH_PATH/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OUT" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGLFW_BUILD_EXAMPLES=OFF \
+            -DGLFW_BUILD_TESTS=OFF \
+            -DGLFW_BUILD_DOCS=OFF
+        cmake --build "$BUCK_SCRATCH_PATH/build" --parallel
+        cmake --install "$BUCK_SCRATCH_PATH/build"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "glfw",
+    exported_linker_flags = ["$(location :glfw_build)/lib64/libglfw3.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :glfw_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# msgpack-c
+#=============================================================================
+
+genrule(
+    name = "msgpack_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/msgpack/msgpack-c/archive/refs/tags/c-6.0.0.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cmake -S "$BUCK_SCRATCH_PATH/msgpack-c-c-6.0.0" -B "$BUCK_SCRATCH_PATH/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OUT" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DMSGPACK_BUILD_EXAMPLES=OFF \
+            -DMSGPACK_BUILD_TESTS=OFF
+        cmake --build "$BUCK_SCRATCH_PATH/build" --parallel
+        cmake --install "$BUCK_SCRATCH_PATH/build"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "msgpack",
+    exported_linker_flags = ["$(location :msgpack_build)/lib/libmsgpack-c.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :msgpack_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# libjpeg-turbo
+#=============================================================================
+
+genrule(
+    name = "libjpeg_turbo_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/3.0.3.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cmake -S "$BUCK_SCRATCH_PATH/libjpeg-turbo-3.0.3" -B "$BUCK_SCRATCH_PATH/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OUT" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DENABLE_SHARED=OFF \
+            -DENABLE_STATIC=ON
+        cmake --build "$BUCK_SCRATCH_PATH/build" --parallel
+        cmake --install "$BUCK_SCRATCH_PATH/build"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "libjpeg_turbo",
+    exported_linker_flags = ["$(location :libjpeg_turbo_build)/lib/libturbojpeg.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :libjpeg_turbo_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# libpng
+#=============================================================================
+
+genrule(
+    name = "libpng_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/glennrp/libpng/archive/refs/tags/v1.6.43.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cmake -S "$BUCK_SCRATCH_PATH/libpng-1.6.43" -B "$BUCK_SCRATCH_PATH/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OUT" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DPNG_SHARED=OFF \
+            -DPNG_TESTS=OFF
+        cmake --build "$BUCK_SCRATCH_PATH/build" --parallel
+        cmake --install "$BUCK_SCRATCH_PATH/build"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "libpng",
+    exported_linker_flags = ["$(location :libpng_build)/lib64/libpng16.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :libpng_build)/include"],
+    deps = [":zlib"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# spdlog
+#=============================================================================
+
+genrule(
+    name = "spdlog_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/gabime/spdlog/archive/refs/tags/v1.16.0.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cmake -S "$BUCK_SCRATCH_PATH/spdlog-1.16.0" -B "$BUCK_SCRATCH_PATH/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OUT" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DSPDLOG_BUILD_SHARED=OFF \
+            -DSPDLOG_BUILD_EXAMPLE=OFF \
+            -DSPDLOG_BUILD_TESTS=OFF
+        cmake --build "$BUCK_SCRATCH_PATH/build" --parallel
+        cmake --install "$BUCK_SCRATCH_PATH/build"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "spdlog",
+    exported_linker_flags = ["$(location :spdlog_build)/lib64/libspdlog.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :spdlog_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# Dawn WebGPU (pre-built)
+#=============================================================================
+
+DAWN_VERSION = "20260214.164635"
+DAWN_COMMIT = "1a3afc99a7ef7dacaab73b71d44575c4f1bf2dd7"
+
+genrule(
+    name = "dawn_download",
+    out = "dawn",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/google/dawn/releases/download/v{version}/Dawn-{commit}-ubuntu-latest-Release.tar.gz" | tar -xz -C "$OUT" --strip-components=1
+    """.format(version = DAWN_VERSION, commit = DAWN_COMMIT),
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "dawn",
+    exported_linker_flags = ["$(location :dawn_download)/lib64/libwebgpu_dawn.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :dawn_download)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# glfw3webgpu (GLFW-WebGPU bridge)
+# Header-only usage - just provide the header, source compiled by consumer
+#=============================================================================
+
+genrule(
+    name = "glfw3webgpu_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT/include" "$OUT/lib"
+        curl -fsSL "https://raw.githubusercontent.com/eliemichel/glfw3webgpu/main/glfw3webgpu.h" -o "$OUT/include/glfw3webgpu.h"
+        curl -fsSL "https://raw.githubusercontent.com/eliemichel/glfw3webgpu/main/glfw3webgpu.c" -o "$BUCK_SCRATCH_PATH/glfw3webgpu.c"
+        cc -c -fPIC -O2 -w -DWEBGPU_BACKEND_DAWN \
+            -I"$OUT/include" \
+            -isystem "$(location :glfw_build)/include" \
+            -isystem "$(location :dawn_download)/include" \
+            "$BUCK_SCRATCH_PATH/glfw3webgpu.c" -o "$BUCK_SCRATCH_PATH/glfw3webgpu.o"
+        ar rcs "$OUT/lib/libglfw3webgpu.a" "$BUCK_SCRATCH_PATH/glfw3webgpu.o"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "glfw3webgpu",
+    exported_linker_flags = ["$(location :glfw3webgpu_build)/lib/libglfw3webgpu.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :glfw3webgpu_build)/include"],
+    deps = [
+        ":dawn",
+        ":glfw",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# libvterm (local customized version)
+# NOTE: vterm_build genrule is in root BUCK to access src/libvterm-0.3.3
+#=============================================================================
+
+cxx_library(
+    name = "vterm",
+    exported_linker_flags = ["$(location //:vterm_build)/lib/libvterm.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location //:vterm_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# howerj/cdb (constant database library - portable implementation)
+#=============================================================================
+
+genrule(
+    name = "howerj_cdb_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT/lib" "$OUT/include"
+        curl -fsSL "https://github.com/howerj/cdb/archive/refs/heads/master.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        CDB="$BUCK_SCRATCH_PATH/cdb-master"
+        cc -c -fPIC -O2 -w "$CDB/cdb.c" -o "$BUCK_SCRATCH_PATH/cdb.o"
+        ar rcs "$OUT/lib/libcdb.a" "$BUCK_SCRATCH_PATH/cdb.o"
+        cp "$CDB/cdb.h" "$OUT/include/"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "howerj_cdb",
+    exported_linker_flags = ["$(location :howerj_cdb_build)/lib/libcdb.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :howerj_cdb_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# brotli (system library - provided by nix)
+#=============================================================================
+
+cxx_library(
+    name = "brotli",
+    exported_linker_flags = ["-lbrotlidec", "-lbrotlicommon"],
+    visibility = ["PUBLIC"],
+)
