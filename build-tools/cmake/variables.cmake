@@ -86,7 +86,7 @@ option(YETTY_ENABLE_FEATURE_YVIDEO    "yvideo — video codec support"         O
 
 # Network / connectivity
 option(YETTY_ENABLE_FEATURE_YVNC       "vnc — VNC client/server"              ON)
-option(YETTY_ENABLE_FEATURE_TELNET    "telnet — telnet connectivity"         OFF)
+option(YETTY_ENABLE_FEATURE_TELNET    "telnet — telnet connectivity"         ON)
 option(YETTY_ENABLE_FEATURE_SSH       "ssh — SSH connectivity"               OFF)
 option(YETTY_ENABLE_FEATURE_YRPC      "yrpc — msgpack-RPC interface"         ON)
 

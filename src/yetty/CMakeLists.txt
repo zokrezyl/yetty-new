@@ -168,7 +168,7 @@ if(YETTY_ENABLE_FEATURE_VNC)
 endif()
 
 if(YETTY_ENABLE_FEATURE_TELNET)
-    add_subdirectory(telnet)
+    add_subdirectory(ytelnet)
 endif()
 
 if(YETTY_ENABLE_FEATURE_SSH)
