@@ -15,6 +15,8 @@
 #include <yetty/yui/tile.h>
 #include <yetty/yui/view.h>
 #include <yetty/yrpc/rpc-server.h>
+#include <yetty/yvnc/vnc-server.h>
+#include <yetty/platform/platform-input-pipe.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +46,9 @@ struct yetty_yetty {
     struct yetty_rpc_server *rpc_server;
     yetty_core_timer_id rpc_timer_id;
     struct yetty_core_event_listener rpc_timer_listener;
+
+    /* VNC server (optional, for --vnc-server or --vnc-headless) */
+    struct yetty_vnc_server *vnc_server;
 };
 
 /*===========================================================================
@@ -236,6 +241,107 @@ static void device_callback(WGPURequestDeviceStatus status, WGPUDevice device,
 static uint32_t min_u32(uint32_t a, uint32_t b) { return a < b ? a : b; }
 static uint64_t min_u64(uint64_t a, uint64_t b) { return a < b ? a : b; }
 
+/*===========================================================================
+ * VNC server -> platform_input_pipe shim
+ *
+ * Translates VNC input callbacks into struct yetty_core_event and pushes
+ * them onto the platform input pipe so the main event loop dispatches
+ * them the same way GLFW input would.
+ *===========================================================================*/
+
+static void vnc_push_event(struct yetty_yetty *yetty,
+                           const struct yetty_core_event *event)
+{
+    struct yetty_platform_input_pipe *pipe =
+        yetty->context.app_context.platform_input_pipe;
+    if (!pipe)
+        return;
+    pipe->ops->write(pipe, event, sizeof(*event));
+}
+
+static void vnc_on_mouse_move_cb(int16_t x, int16_t y, uint8_t mods,
+                                 void *userdata)
+{
+    struct yetty_yetty *yetty = userdata;
+    struct yetty_core_event event = {0};
+    event.type = YETTY_EVENT_MOUSE_MOVE;
+    event.mouse.x = (float)x;
+    event.mouse.y = (float)y;
+    event.mouse.mods = mods;
+    vnc_push_event(yetty, &event);
+}
+
+static void vnc_on_mouse_button_cb(int16_t x, int16_t y, uint8_t button,
+                                   int pressed, uint8_t mods, void *userdata)
+{
+    struct yetty_yetty *yetty = userdata;
+    struct yetty_core_event event = {0};
+    event.type = pressed ? YETTY_EVENT_MOUSE_DOWN : YETTY_EVENT_MOUSE_UP;
+    event.mouse.x = (float)x;
+    event.mouse.y = (float)y;
+    event.mouse.button = button;
+    event.mouse.mods = mods;
+    vnc_push_event(yetty, &event);
+}
+
+static void vnc_on_mouse_scroll_cb(int16_t x, int16_t y, int16_t dx,
+                                   int16_t dy, uint8_t mods, void *userdata)
+{
+    struct yetty_yetty *yetty = userdata;
+    struct yetty_core_event event = {0};
+    event.type = YETTY_EVENT_SCROLL;
+    event.scroll.x = (float)x;
+    event.scroll.y = (float)y;
+    event.scroll.dx = (float)dx;
+    event.scroll.dy = (float)dy;
+    event.scroll.mods = mods;
+    vnc_push_event(yetty, &event);
+}
+
+static void vnc_on_key_down_cb(uint32_t keycode, uint32_t scancode,
+                               uint8_t mods, void *userdata)
+{
+    struct yetty_yetty *yetty = userdata;
+    struct yetty_core_event event = {0};
+    event.type = YETTY_EVENT_KEY_DOWN;
+    event.key.key = (int)keycode;
+    event.key.scancode = (int)scancode;
+    event.key.mods = mods;
+    vnc_push_event(yetty, &event);
+}
+
+static void vnc_on_key_up_cb(uint32_t keycode, uint32_t scancode,
+                             uint8_t mods, void *userdata)
+{
+    struct yetty_yetty *yetty = userdata;
+    struct yetty_core_event event = {0};
+    event.type = YETTY_EVENT_KEY_UP;
+    event.key.key = (int)keycode;
+    event.key.scancode = (int)scancode;
+    event.key.mods = mods;
+    vnc_push_event(yetty, &event);
+}
+
+static void vnc_on_char_cb(uint32_t codepoint, uint8_t mods, void *userdata)
+{
+    struct yetty_yetty *yetty = userdata;
+    struct yetty_core_event event = {0};
+    event.type = YETTY_EVENT_CHAR;
+    event.chr.codepoint = codepoint;
+    event.chr.mods = mods;
+    vnc_push_event(yetty, &event);
+}
+
+static void vnc_on_resize_cb(uint16_t width, uint16_t height, void *userdata)
+{
+    struct yetty_yetty *yetty = userdata;
+    struct yetty_core_event event = {0};
+    event.type = YETTY_EVENT_RESIZE;
+    event.resize.width = (float)width;
+    event.resize.height = (float)height;
+    vnc_push_event(yetty, &event);
+}
+
 static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
 {
     ydebug("initWebGPU: Starting...");
@@ -247,14 +353,11 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     if (!instance) {
         return YETTY_ERR(yetty_core_void, "No WebGPU instance provided");
     }
-    if (!surface) {
-        return YETTY_ERR(yetty_core_void, "No WebGPU surface provided");
-    }
-    ydebug("initWebGPU: Using platform instance and surface");
+    ydebug("initWebGPU: instance=%p surface=%p", (void *)instance, (void *)surface);
 
-    /* Request adapter */
+    /* Request adapter (surface can be NULL for headless mode) */
     WGPURequestAdapterOptions adapter_opts = {0};
-    adapter_opts.compatibleSurface = surface;
+    adapter_opts.compatibleSurface = surface;  /* NULL is OK for headless */
     adapter_opts.powerPreference = WGPUPowerPreference_HighPerformance;
 
     int adapter_ready = 0;
@@ -373,16 +476,20 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     }
     ydebug("initWebGPU: Surface format = %d", (int)yetty->surface_format);
 
-    /* Configure surface */
-    WGPUSurfaceConfiguration surface_config = {0};
-    surface_config.device = yetty->device;
-    surface_config.format = yetty->surface_format;
-    surface_config.usage = WGPUTextureUsage_RenderAttachment;
-    surface_config.width = yetty->context.app_context.app_gpu_context.surface_width;
-    surface_config.height = yetty->context.app_context.app_gpu_context.surface_height;
-    surface_config.presentMode = WGPUPresentMode_Fifo;
-    wgpuSurfaceConfigure(surface, &surface_config);
-    ydebug("initWebGPU: Surface configured %ux%u", surface_config.width, surface_config.height);
+    /* Configure surface (skip for headless) */
+    if (surface) {
+        WGPUSurfaceConfiguration surface_config = {0};
+        surface_config.device = yetty->device;
+        surface_config.format = yetty->surface_format;
+        surface_config.usage = WGPUTextureUsage_RenderAttachment;
+        surface_config.width = yetty->context.app_context.app_gpu_context.surface_width;
+        surface_config.height = yetty->context.app_context.app_gpu_context.surface_height;
+        surface_config.presentMode = WGPUPresentMode_Fifo;
+        wgpuSurfaceConfigure(surface, &surface_config);
+        ydebug("initWebGPU: Surface configured %ux%u", surface_config.width, surface_config.height);
+    } else {
+        ydebug("initWebGPU: No surface (headless mode)");
+    }
 
     /* Create GPU allocator */
     struct yetty_render_gpu_allocator_result alloc_res =
@@ -400,24 +507,85 @@ static struct yetty_core_void_result init_webgpu(struct yetty_yetty *yetty)
     yetty->context.gpu_context.surface_format = yetty->surface_format;
     yetty->context.gpu_context.allocator = alloc_res.value;
 
-    /* Create big render target (window-sized texture with surface for presentation) */
+    /* Check for VNC mode */
+    struct yetty_config *config = yetty->context.app_context.config;
+    const char *vnc_server_str = config->ops->get_string(config, "vnc/server", NULL);
+    const char *vnc_headless_str = config->ops->get_string(config, "vnc/headless", NULL);
+    int vnc_enabled = (vnc_server_str && strcmp(vnc_server_str, "true") == 0) ||
+                      (vnc_headless_str && strcmp(vnc_headless_str, "true") == 0);
+
+    /* Create VNC server if enabled */
+    if (vnc_enabled) {
+        struct yetty_vnc_server_ptr_result vnc_res =
+            yetty_vnc_server_create(instance, yetty->device, yetty->queue,
+                                    yetty->event_loop);
+        if (!YETTY_IS_OK(vnc_res)) {
+            return YETTY_ERR(yetty_core_void, "failed to create VNC server");
+        }
+        yetty->vnc_server = vnc_res.value;
+        ydebug("initWebGPU: VNC server created");
+
+        /* Start VNC server */
+        int vnc_port = config->ops->get_int(config, "vnc/port", 5900);
+        struct yetty_core_void_result start_res =
+            yetty_vnc_server_start(yetty->vnc_server, (uint16_t)vnc_port);
+        if (!YETTY_IS_OK(start_res)) {
+            yetty_vnc_server_destroy(yetty->vnc_server);
+            yetty->vnc_server = NULL;
+            return YETTY_ERR(yetty_core_void, "failed to start VNC server");
+        }
+        yinfo("VNC server started on port %d", vnc_port);
+
+        /* Wire VNC input -> platform_input_pipe so events reach workspace */
+        yetty_vnc_server_set_on_mouse_move(yetty->vnc_server,
+                                           vnc_on_mouse_move_cb, yetty);
+        yetty_vnc_server_set_on_mouse_button(yetty->vnc_server,
+                                             vnc_on_mouse_button_cb, yetty);
+        yetty_vnc_server_set_on_mouse_scroll(yetty->vnc_server,
+                                             vnc_on_mouse_scroll_cb, yetty);
+        yetty_vnc_server_set_on_key_down(yetty->vnc_server,
+                                         vnc_on_key_down_cb, yetty);
+        yetty_vnc_server_set_on_key_up(yetty->vnc_server,
+                                       vnc_on_key_up_cb, yetty);
+        yetty_vnc_server_set_on_char_with_mods(yetty->vnc_server,
+                                               vnc_on_char_cb, yetty);
+        yetty_vnc_server_set_on_resize(yetty->vnc_server,
+                                       vnc_on_resize_cb, yetty);
+    }
+
+    /* Create render target */
     struct yetty_render_viewport vp = {
         .x = 0, .y = 0,
         .w = (float)yetty->context.app_context.app_gpu_context.surface_width,
         .h = (float)yetty->context.app_context.app_gpu_context.surface_height
     };
-    struct yetty_render_target_ptr_result target_res = yetty_render_target_texture_create(
-        yetty->device,
-        yetty->queue,
-        yetty->surface_format,
-        alloc_res.value,
-        surface,  /* surface for presentation */
-        vp);
+
+    struct yetty_render_target_ptr_result target_res;
+    if (vnc_enabled) {
+        /* VNC render target: sends frames to VNC, optionally presents to surface */
+        target_res = yetty_render_target_vnc_create(
+            yetty->device,
+            yetty->queue,
+            yetty->surface_format,
+            alloc_res.value,
+            surface,  /* NULL for headless, non-NULL for mirror */
+            yetty->vnc_server,
+            vp);
+    } else {
+        /* Standard texture render target */
+        target_res = yetty_render_target_texture_create(
+            yetty->device,
+            yetty->queue,
+            yetty->surface_format,
+            alloc_res.value,
+            surface,
+            vp);
+    }
     if (!YETTY_IS_OK(target_res)) {
         return YETTY_ERR(yetty_core_void, "failed to create render target");
     }
     yetty->render_target = target_res.value;
-    ydebug("initWebGPU: render target created %.0fx%.0f", vp.w, vp.h);
+    ydebug("initWebGPU: render target created %.0fx%.0f vnc=%d", vp.w, vp.h, vnc_enabled);
 
     ydebug("initWebGPU: Complete");
     return YETTY_OK_VOID();
@@ -441,24 +609,24 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
     yetty->context.app_context = *app_context;
     ydebug("yetty_create: Copied app context");
 
-    /* Initialize WebGPU */
-    struct yetty_core_void_result res = init_webgpu(yetty);
-    if (!YETTY_IS_OK(res)) {
-        free(yetty);
-        return YETTY_ERR(yetty_yetty, "WebGPU init failed");
-    }
-    ydebug("yetty_create: WebGPU initialized");
-
-    /* Create event loop */
+    /* Create event loop early - needed by VNC in init_webgpu */
     struct yetty_platform_input_pipe *pipe = app_context->platform_input_pipe;
     struct yetty_core_event_loop_result event_loop_res = yetty_core_event_loop_create(pipe);
     if (!YETTY_IS_OK(event_loop_res)) {
-        yetty_destroy(yetty);
+        free(yetty);
         return YETTY_ERR(yetty_yetty, "failed to create event loop");
     }
     yetty->event_loop = event_loop_res.value;
     yetty->context.event_loop = yetty->event_loop;
     ydebug("yetty_create: event loop created at %p", (void *)yetty->event_loop);
+
+    /* Initialize WebGPU */
+    struct yetty_core_void_result res = init_webgpu(yetty);
+    if (!YETTY_IS_OK(res)) {
+        yetty_destroy(yetty);
+        return YETTY_ERR(yetty_yetty, "WebGPU init failed");
+    }
+    ydebug("yetty_create: WebGPU initialized");
 
     /* Register event listeners */
     res = register_event_listeners(yetty);
@@ -557,6 +725,15 @@ void yetty_destroy(struct yetty_yetty *yetty)
         yetty->render_target = NULL;
     }
 
+    /* Destroy VNC server after render target (render target references it) */
+    if (yetty->vnc_server) {
+        ydebug("yetty_destroy: stopping VNC server");
+        yetty_vnc_server_stop(yetty->vnc_server);
+        ydebug("yetty_destroy: destroying VNC server");
+        yetty_vnc_server_destroy(yetty->vnc_server);
+        yetty->vnc_server = NULL;
+    }
+
     /* Destroy GPU allocator before device */
     if (yetty->context.gpu_context.allocator) {
         ydebug("yetty_destroy: destroying GPU allocator");
@@ -565,8 +742,8 @@ void yetty_destroy(struct yetty_yetty *yetty)
         yetty->context.gpu_context.allocator = NULL;
     }
 
-    /* Surface is created by platform (glfw-main.c) but owned by yetty since we
-     * configured it with our device. Must release before device. */
+    /* Surface is created by platform (glfw-main.c), but we configured it.
+     * Must release BEFORE device since release needs device for swapchain detach. */
     WGPUSurface surface = yetty->context.app_context.app_gpu_context.surface;
     if (surface && yetty->device) {
         ydebug("yetty_destroy: unconfiguring surface");

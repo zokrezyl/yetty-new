@@ -5,6 +5,7 @@
 #include <yetty/yrender/render-target.h>
 #include <yetty/yetty.h>
 #include <yetty/yterm/terminal.h>
+#include <yetty/yvnc/vnc-viewer.h>
 #include <yetty/ytrace.h>
 #include <stdlib.h>
 #include <string.h>
@@ -759,28 +760,64 @@ yetty_yui_tile_create_from_config(const struct yetty_config *config,
 	if (YETTY_IS_ERR(res))
 		return res;
 
-	/* Create view based on config */
+	/* Create view based on config or vnc/client override */
 	{
-		const char *view_type;
-		struct yetty_term_terminal_result term_res;
-		struct grid_size grid_size = {.rows = 24, .cols = 80};
+		const char *vnc_client = NULL;
+		struct yetty_config *app_config = yetty_ctx->app_context.config;
 
-		view_type = config->ops->get_string(config, "view", "terminal");
+		if (app_config)
+			vnc_client = app_config->ops->get_string(
+				app_config, "vnc/client", NULL);
 
-		if (strcmp(view_type, "terminal") == 0) {
-			term_res = yetty_term_terminal_create(grid_size,
-							      yetty_ctx);
-			if (YETTY_IS_ERR(term_res)) {
+		if (vnc_client && strlen(vnc_client) > 0) {
+			/* VNC client mode: create VNC viewer */
+			char host[256] = {0};
+			uint16_t port = 5900;
+			const char *colon = strchr(vnc_client, ':');
+
+			if (colon) {
+				size_t host_len = (size_t)(colon - vnc_client);
+				if (host_len >= sizeof(host))
+					host_len = sizeof(host) - 1;
+				memcpy(host, vnc_client, host_len);
+				port = (uint16_t)atoi(colon + 1);
+			} else {
+				strncpy(host, vnc_client, sizeof(host) - 1);
+			}
+
+			struct yetty_vnc_viewer_ptr_result vnc_res =
+				yetty_vnc_viewer_create(host, port, yetty_ctx);
+			if (YETTY_IS_ERR(vnc_res)) {
 				yetty_yui_tile_destroy(res.value);
 				return YETTY_ERR(yetty_yui_tile_ptr,
-						 term_res.error.msg);
+						 vnc_res.error.msg);
 			}
 
 			yetty_yui_pane_push_view(
-			    res.value,
-			    yetty_term_terminal_as_view(term_res.value));
+				res.value,
+				yetty_vnc_viewer_as_view(vnc_res.value));
+		} else {
+			/* Normal mode: create terminal */
+			const char *view_type;
+			struct yetty_term_terminal_result term_res;
+			struct grid_size grid_size = {.rows = 24, .cols = 80};
+
+			view_type = config->ops->get_string(config, "view", "terminal");
+
+			if (strcmp(view_type, "terminal") == 0) {
+				term_res = yetty_term_terminal_create(grid_size,
+								      yetty_ctx);
+				if (YETTY_IS_ERR(term_res)) {
+					yetty_yui_tile_destroy(res.value);
+					return YETTY_ERR(yetty_yui_tile_ptr,
+							 term_res.error.msg);
+				}
+
+				yetty_yui_pane_push_view(
+				    res.value,
+				    yetty_term_terminal_as_view(term_res.value));
+			}
 		}
-		/* Future: handle other view types */
 	}
 
 	/* Focus is set by workspace after layout is fully built */

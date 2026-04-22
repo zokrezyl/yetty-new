@@ -58,6 +58,9 @@ struct yetty_render_target_ops {
 	/* Get texture view for blending */
 	WGPUTextureView (*get_view)(const struct yetty_render_target *self);
 
+	/* Get texture for VNC/other use */
+	WGPUTexture (*get_texture)(const struct yetty_render_target *self);
+
 	/* Resize/reposition the target */
 	struct yetty_core_void_result (*resize)(
 		struct yetty_render_target *self,
@@ -88,6 +91,28 @@ struct yetty_render_target_ptr_result yetty_render_target_texture_create(
 	WGPUTextureFormat format,
 	struct yetty_render_gpu_allocator *allocator,
 	WGPUSurface surface,  /* NULL for layer/terminal targets */
+	struct yetty_render_viewport viewport);
+
+/*=============================================================================
+ * VNC render target - renders to texture and sends to VNC clients
+ *
+ * Wraps a texture render target:
+ * - clear/render_layer/blend delegate to inner texture target
+ * - present() sends frame to VNC server, optionally also to surface (mirror)
+ *
+ * For headless mode: surface=NULL, only sends to VNC
+ * For mirror mode: surface provided, sends to VNC AND presents to surface
+ *===========================================================================*/
+
+struct yetty_vnc_server;
+
+struct yetty_render_target_ptr_result yetty_render_target_vnc_create(
+	WGPUDevice device,
+	WGPUQueue queue,
+	WGPUTextureFormat format,
+	struct yetty_render_gpu_allocator *allocator,
+	WGPUSurface surface,  /* NULL for headless, non-NULL for mirror */
+	struct yetty_vnc_server *vnc_server,
 	struct yetty_render_viewport viewport);
 
 #ifdef __cplusplus

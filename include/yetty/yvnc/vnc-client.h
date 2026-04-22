@@ -29,11 +29,12 @@ typedef void (*yetty_vnc_on_frame_fn)(void *userdata);
 typedef void (*yetty_vnc_on_connected_fn)(void *userdata);
 typedef void (*yetty_vnc_on_disconnected_fn)(void *userdata);
 
-/* Create client */
+/* Create client - event_loop used for async socket I/O */
 struct yetty_vnc_client_ptr_result
 yetty_vnc_client_create(WGPUDevice device, WGPUQueue queue,
-			WGPUTextureFormat surface_format, uint16_t width,
-			uint16_t height);
+			WGPUTextureFormat surface_format,
+			struct yetty_core_event_loop *event_loop,
+			uint16_t width, uint16_t height);
 
 /* Destroy client (handles NULL) */
 void yetty_vnc_client_destroy(struct yetty_vnc_client *client);

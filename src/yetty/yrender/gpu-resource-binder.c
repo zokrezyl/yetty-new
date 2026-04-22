@@ -794,9 +794,17 @@ static struct yetty_core_void_result binder_submit(struct yetty_render_gpu_resou
             return YETTY_OK_VOID();
     }
 
-    if (impl->resource_set_count >= MAX_RESOURCE_SETS)
+    if (impl->resource_set_count >= MAX_RESOURCE_SETS) {
+        ydebug("binder_submit OVERFLOW binder=%p rs=%p submitted=%d existing:",
+               (void *)impl, (void *)rs, impl->submitted);
+        for (size_t i = 0; i < impl->resource_set_count; i++)
+            ydebug("  [%zu] = %p", i, (void *)impl->resource_sets[i]);
         return YETTY_ERR(yetty_core_void, "max resource sets reached");
+    }
 
+    ydebug("binder_submit APPEND binder=%p rs=%p submitted=%d count=%zu->%zu",
+           (void *)impl, (void *)rs, impl->submitted,
+           impl->resource_set_count, impl->resource_set_count + 1);
     impl->resource_sets[impl->resource_set_count++] = (struct yetty_render_gpu_resource_set *)rs;
     return YETTY_OK_VOID();
 }

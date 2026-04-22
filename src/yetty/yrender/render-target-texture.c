@@ -192,7 +192,8 @@ render_target_texture_resize(struct yetty_render_target *self,
 	WGPUTextureDescriptor tex_desc = {0};
 	tex_desc.label = (WGPUStringView){.data = "render_target", .length = 13};
 	tex_desc.usage = WGPUTextureUsage_RenderAttachment |
-			 WGPUTextureUsage_TextureBinding;
+			 WGPUTextureUsage_TextureBinding |
+			 WGPUTextureUsage_CopySrc;
 	tex_desc.dimension = WGPUTextureDimension_2D;
 	tex_desc.size.width = width;
 	tex_desc.size.height = height;
@@ -235,6 +236,14 @@ render_target_texture_get_view(const struct yetty_render_target *self)
 	const struct render_target_texture *rt =
 		(const struct render_target_texture *)self;
 	return rt->view;
+}
+
+static WGPUTexture
+render_target_texture_get_texture(const struct yetty_render_target *self)
+{
+	const struct render_target_texture *rt =
+		(const struct render_target_texture *)self;
+	return rt->texture;
 }
 
 
@@ -704,6 +713,7 @@ static const struct yetty_render_target_ops render_target_texture_ops = {
 	.blend = render_target_texture_blend,
 	.present = render_target_texture_present,
 	.get_view = render_target_texture_get_view,
+	.get_texture = render_target_texture_get_texture,
 	.resize = render_target_texture_resize,
 };
 
