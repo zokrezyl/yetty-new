@@ -151,6 +151,7 @@ Share suggestions on [GitHub Discussions](https://github.com/zokrezyl/yetty/disc
 
 All dependencies use permissive licenses (MIT, BSD, Zlib, Apache-2.0).
 
+
 ---
 
 *Your terminal, unchained.*
