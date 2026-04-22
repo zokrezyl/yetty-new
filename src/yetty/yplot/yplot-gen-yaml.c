@@ -1,7 +1,7 @@
 // Auto-generated from yplot.yaml - DO NOT EDIT
 // YAML parser factory for yplot complex primitive
 
-#include "yplot-gen.h"
+#include <yetty/yplot/yplot-gen.h>
 #include <yetty/ypaint-yaml/ypaint-yaml.h>
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/yfsvm/compiler.h>

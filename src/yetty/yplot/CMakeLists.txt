@@ -15,7 +15,8 @@ target_link_libraries(yetty_yplot PUBLIC
     yetty_yfsvm
 )
 
-# Embed shader via incbin
+# Embed shaders via incbin
 incbin_add_resources(yetty_yplot
     yplot_shader "${CMAKE_CURRENT_SOURCE_DIR}/yplot.wgsl"
+    yplot_lib_shader "${CMAKE_CURRENT_SOURCE_DIR}/yplot-gen.wgsl"
 )

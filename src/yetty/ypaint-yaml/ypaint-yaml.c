@@ -2,7 +2,7 @@
 
 #include <yetty/ypaint-yaml/ypaint-yaml.h>
 #include <yetty/ysdf/handler.h>
-#include <yetty/yplot/yplot.h>
+#include <yetty/yplot/yplot-gen.h>
 #include <yetty/yfsvm/compiler.h>
 #include <yetty/ypaint-core/complex-prim-types.h>
 #include <yetty/ytrace.h>

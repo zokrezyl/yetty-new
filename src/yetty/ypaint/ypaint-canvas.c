@@ -16,7 +16,7 @@
 #include <yetty/ysdf/types.gen.h>
 #include <yetty/yconfig.h>
 #include <yetty/yetty.h>
-#include <yetty/yplot/yplot.h>
+#include <yetty/yplot/yplot-gen.h>
 #include <yetty/ytrace.h>
 
 /* Glyph primitive type (not in ysdf types.gen.h since not SDF) */
@@ -447,7 +447,8 @@ yetty_ypaint_canvas_create(bool scrolling_mode,
       yetty_ypaint_complex_prim_factory_create(
           context->gpu_context.device,
           context->gpu_context.queue,
-          context->gpu_context.surface_format);
+          context->gpu_context.surface_format,
+          context->gpu_context.allocator);
   if (YETTY_IS_ERR(factory_res)) {
     yerror("ypaint_canvas: factory creation failed: %s", factory_res.error.msg);
     yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);

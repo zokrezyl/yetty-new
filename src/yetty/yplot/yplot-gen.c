@@ -1,8 +1,9 @@
 // Auto-generated from yplot.yaml - DO NOT EDIT
 
-#include "yplot-gen.h"
+#include <yetty/yplot/yplot-gen.h>
 #include <yetty/yrender/gpu-resource-binder.h>
 #include <yetty/yrender/gpu-resource-set.h>
+#include <yetty/yrender/gpu-allocator.h>
 #include <yetty/ypaint-core/complex-prim-types.h>
 #include <yetty/ytrace.h>
 #include <stdlib.h>
@@ -11,6 +12,22 @@
 
 extern const unsigned char gyplot_shaderData[];
 extern const unsigned int gyplot_shaderSize;
+extern const unsigned char gyplot_lib_shaderData[];
+extern const unsigned int gyplot_lib_shaderSize;
+
+/* Static resource set for accessor library (yplot-gen.wgsl) */
+static struct yetty_yrender_gpu_resource_set yplot_lib_rs;
+static bool yplot_lib_rs_initialized = false;
+
+static void yplot_init_lib_rs(void)
+{
+    if (yplot_lib_rs_initialized)
+        return;
+    memset(&yplot_lib_rs, 0, sizeof(yplot_lib_rs));
+    yetty_yrender_shader_code_set(&yplot_lib_rs.shader,
+        (const char *)gyplot_lib_shaderData, gyplot_lib_shaderSize);
+    yplot_lib_rs_initialized = true;
+}
 
 struct yplot_factory {
     struct yetty_ypaint_concrete_factory base;
@@ -77,18 +94,23 @@ struct yetty_ycore_size_result yetty_yplot_serialize(
 
 static void yplot_init_rs(struct yplot_factory *factory)
 {
+    yplot_init_lib_rs();
+
     struct yetty_yrender_gpu_resource_set *rs = &factory->rs;
     memset(rs, 0, sizeof(*rs));
     strncpy(rs->namespace, "yplot", YETTY_YRENDER_NAME_MAX - 1);
     yetty_yrender_shader_code_set(&rs->shader,
         (const char *)gyplot_shaderData, gyplot_shaderSize);
 
+    // Accessor library (generated uniforms accessors)
+    rs->children[0] = (struct yetty_yrender_gpu_resource_set *)&yplot_lib_rs;
+    rs->children_count = 1;
     // Library: yfsvm
     const struct yetty_yrender_gpu_resource_set *yfsvm_rs =
         yetty_yfsvm_get_shader_resource_set();
     if (yfsvm_rs) {
-        rs->children[0] = (struct yetty_yrender_gpu_resource_set *)yfsvm_rs;
-        rs->children_count = 1;
+        rs->children[1] = (struct yetty_yrender_gpu_resource_set *)yfsvm_rs;
+        rs->children_count = 2;
     }
 
     // Setup uniforms (values set later during render)
@@ -223,7 +245,8 @@ yplot_instance_render(struct yetty_ypaint_complex_prim_instance *self,
 static struct yetty_ycore_void_result
 yplot_compile_pipeline(struct yetty_ypaint_concrete_factory *self,
                         WGPUDevice device, WGPUQueue queue,
-                        WGPUTextureFormat target_format)
+                        WGPUTextureFormat target_format,
+                        struct yetty_yrender_gpu_allocator *allocator)
 {
     struct yplot_factory *factory = yplot_factory_from_base(self);
 
@@ -235,7 +258,7 @@ yplot_compile_pipeline(struct yetty_ypaint_concrete_factory *self,
     yplot_init_rs(factory);
 
     struct yetty_yrender_gpu_resource_binder_result binder_res =
-        yetty_yrender_gpu_resource_binder_create(device, queue, target_format, NULL);
+        yetty_yrender_gpu_resource_binder_create(device, queue, target_format, allocator);
     if (YETTY_IS_ERR(binder_res))
         return YETTY_ERR(yetty_ycore_void, binder_res.error.msg);
 

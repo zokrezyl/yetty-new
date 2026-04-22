@@ -70,7 +70,7 @@ set(YETTY_ANDROID_SOURCES "" PARENT_SCOPE)
 set(YETTY_IOS_SOURCES "" PARENT_SCOPE)
 
 # Include directories for renderer sources
-set(YETTY_RENDERER_INCLUDES "" PARENT_SCOPE)
+set(YETTY_YRENDERER_INCLUDES "" PARENT_SCOPE)
 
 #-----------------------------------------------------------------------------
 # Library subdirectories — guarded by YETTY_ENABLE_FEATURE_*

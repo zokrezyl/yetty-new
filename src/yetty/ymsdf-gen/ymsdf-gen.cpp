@@ -282,7 +282,7 @@ static std::vector<uint32_t> get_font_charset(const std::string &font_path)
  * Write CDB (non-monospace format)
  *===========================================================================*/
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 write_cdb(const char *path, const std::vector<glyph_result> &results)
 {
 	struct yetty_ycdb_writer_result wr = yetty_ycdb_writer_create(path);
@@ -300,7 +300,7 @@ write_cdb(const char *path, const std::vector<glyph_result> &results)
 				    r.pixels.data(), r.pixels.size());
 
 		uint32_t key = r.codepoint;
-		struct yetty_core_void_result add_res = yetty_ycdb_writer_add(
+		struct yetty_ycore_void_result add_res = yetty_ycdb_writer_add(
 			wr.value, &key, sizeof(key), val.data(), val_size);
 		if (YETTY_IS_ERR(add_res)) {
 			yetty_ycdb_writer_finish(wr.value);
@@ -315,7 +315,7 @@ write_cdb(const char *path, const std::vector<glyph_result> &results)
  * Public API
  *===========================================================================*/
 
-extern "C" struct yetty_core_void_result
+extern "C" struct yetty_ycore_void_result
 yetty_ymsdf_gen_cpu_generate(const struct yetty_ymsdf_gen_config *config)
 {
 	if (!config || !config->ttf_path || !config->output_dir)

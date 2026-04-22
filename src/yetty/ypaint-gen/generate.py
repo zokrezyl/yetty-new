@@ -24,9 +24,9 @@ from pathlib import Path
 
 # Type info: (c_type, wgsl_type, size_bytes, render_uniform_type)
 TYPES = {
-    'f32': ('float', 'f32', 4, 'YETTY_RENDER_UNIFORM_F32'),
-    'u32': ('uint32_t', 'u32', 4, 'YETTY_RENDER_UNIFORM_U32'),
-    'i32': ('int32_t', 'i32', 4, 'YETTY_RENDER_UNIFORM_I32'),
+    'f32': ('float', 'f32', 4, 'YETTY_YRENDER_UNIFORM_F32'),
+    'u32': ('uint32_t', 'u32', 4, 'YETTY_YRENDER_UNIFORM_U32'),
+    'i32': ('int32_t', 'i32', 4, 'YETTY_YRENDER_UNIFORM_I32'),
 }
 
 
@@ -117,7 +117,7 @@ size_t yetty_{name}_serialized_size(
     const struct yetty_{name}_uniforms *uniforms,
     const struct yetty_{name}_buffers *buffers);
 
-struct yetty_core_size_result yetty_{name}_serialize(
+struct yetty_ycore_size_result yetty_{name}_serialize(
     const struct yetty_{name}_uniforms *uniforms,
     const struct yetty_{name}_buffers *buffers,
     uint8_t *out, size_t out_capacity);
@@ -171,12 +171,12 @@ def generate_c_source(schema, uniforms, buffers):
     for u in uniforms:
         if u['count'] > 1:
             for i in range(u['count']):
-                uniform_setup.append(f'''    strncpy(rs->uniforms[{uniform_idx}].name, "{u["name"]}_{i}", YETTY_RENDER_NAME_MAX - 1);
+                uniform_setup.append(f'''    strncpy(rs->uniforms[{uniform_idx}].name, "{u["name"]}_{i}", YETTY_YRENDER_NAME_MAX - 1);
     rs->uniforms[{uniform_idx}].type = {u["render_type"]};
     rs->uniforms[{uniform_idx}].u32 = 0;''')
                 uniform_idx += 1
         else:
-            uniform_setup.append(f'''    strncpy(rs->uniforms[{uniform_idx}].name, "{u["name"]}", YETTY_RENDER_NAME_MAX - 1);
+            uniform_setup.append(f'''    strncpy(rs->uniforms[{uniform_idx}].name, "{u["name"]}", YETTY_YRENDER_NAME_MAX - 1);
     rs->uniforms[{uniform_idx}].type = {u["render_type"]};
     rs->uniforms[{uniform_idx}].u32 = 0;''')
             uniform_idx += 1
@@ -208,18 +208,23 @@ def generate_c_source(schema, uniforms, buffers):
     # Buffer offset in wire format (after uniforms)
     buffer_data_offset = uniforms_word_count + buffer_len_fields
 
-    # Library children setup
-    lib_children = '\n'.join([f'''    // Library: {lib}
-    const struct yetty_render_gpu_resource_set *{lib}_rs =
+    # Library children setup - accessor lib is children[0], external libs start at [1]
+    lib_children_parts = [f'''    // Accessor library (generated uniforms accessors)
+    rs->children[0] = (struct yetty_yrender_gpu_resource_set *)&{name}_lib_rs;
+    rs->children_count = 1;''']
+    for i, lib in enumerate(libraries):
+        lib_children_parts.append(f'''    // Library: {lib}
+    const struct yetty_yrender_gpu_resource_set *{lib}_rs =
         yetty_{lib}_get_shader_resource_set();
     if ({lib}_rs) {{
-        rs->children[{i}] = (struct yetty_render_gpu_resource_set *){lib}_rs;
-        rs->children_count = {i + 1};
-    }}''' for i, lib in enumerate(libraries)])
+        rs->children[{i + 1}] = (struct yetty_yrender_gpu_resource_set *){lib}_rs;
+        rs->children_count = {i + 2};
+    }}''')
+    lib_children = '\n'.join(lib_children_parts)
 
     return f'''// Auto-generated from {name}.yaml - DO NOT EDIT
 
-#include "{name}-gen.h"
+#include <yetty/{name}/{name}-gen.h>
 #include <yetty/yrender/gpu-resource-binder.h>
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/yrender/gpu-allocator.h>
@@ -231,11 +236,27 @@ def generate_c_source(schema, uniforms, buffers):
 
 extern const unsigned char g{name}_shaderData[];
 extern const unsigned int g{name}_shaderSize;
+extern const unsigned char g{name}_lib_shaderData[];
+extern const unsigned int g{name}_lib_shaderSize;
+
+/* Static resource set for accessor library ({name}-gen.wgsl) */
+static struct yetty_yrender_gpu_resource_set {name}_lib_rs;
+static bool {name}_lib_rs_initialized = false;
+
+static void {name}_init_lib_rs(void)
+{{
+    if ({name}_lib_rs_initialized)
+        return;
+    memset(&{name}_lib_rs, 0, sizeof({name}_lib_rs));
+    yetty_yrender_shader_code_set(&{name}_lib_rs.shader,
+        (const char *)g{name}_lib_shaderData, g{name}_lib_shaderSize);
+    {name}_lib_rs_initialized = true;
+}}
 
 struct {name}_factory {{
     struct yetty_ypaint_concrete_factory base;
-    struct yetty_render_gpu_resource_set rs;
-    struct yetty_render_gpu_resource_binder *binder;
+    struct yetty_yrender_gpu_resource_set rs;
+    struct yetty_yrender_gpu_resource_binder *binder;
 }};
 
 static struct {name}_factory *{name}_factory_from_base(struct yetty_ypaint_concrete_factory *base)
@@ -257,20 +278,20 @@ size_t yetty_{name}_serialized_size(
     return (2 + {uniforms_word_count} + {buffer_len_fields} + total_buf_words) * sizeof(uint32_t);
 }}
 
-struct yetty_core_size_result yetty_{name}_serialize(
+struct yetty_ycore_size_result yetty_{name}_serialize(
     const struct yetty_{name}_uniforms *uniforms,
     const struct yetty_{name}_buffers *buffers,
     uint8_t *out, size_t out_capacity)
 {{
     if (!uniforms || !buffers)
-        return YETTY_ERR(yetty_core_size, "null argument");
+        return YETTY_ERR(yetty_ycore_size, "null argument");
     if (!out)
-        return YETTY_ERR(yetty_core_size, "out is NULL");
+        return YETTY_ERR(yetty_ycore_size, "out is NULL");
 
     size_t total_buf_words = {buf_len_sum};
     size_t required = (2 + {uniforms_word_count} + {buffer_len_fields} + total_buf_words) * sizeof(uint32_t);
     if (out_capacity < required)
-        return YETTY_ERR(yetty_core_size, "buffer too small");
+        return YETTY_ERR(yetty_ycore_size, "buffer too small");
 
     uint32_t *p = (uint32_t *)out;
     *p++ = YETTY_{NAME}_TYPE_ID;
@@ -286,7 +307,7 @@ struct yetty_core_size_result yetty_{name}_serialize(
     // Copy buffer data
 {buf_copies}
 
-    return YETTY_OK(yetty_core_size, required);
+    return YETTY_OK(yetty_ycore_size, required);
 }}
 
 //=============================================================================
@@ -295,10 +316,12 @@ struct yetty_core_size_result yetty_{name}_serialize(
 
 static void {name}_init_rs(struct {name}_factory *factory)
 {{
-    struct yetty_render_gpu_resource_set *rs = &factory->rs;
+    {name}_init_lib_rs();
+
+    struct yetty_yrender_gpu_resource_set *rs = &factory->rs;
     memset(rs, 0, sizeof(*rs));
-    strncpy(rs->namespace, "{name}", YETTY_RENDER_NAME_MAX - 1);
-    yetty_render_shader_code_set(&rs->shader,
+    strncpy(rs->namespace, "{name}", YETTY_YRENDER_NAME_MAX - 1);
+    yetty_yrender_shader_code_set(&rs->shader,
         (const char *)g{name}_shaderData, g{name}_shaderSize);
 
 {lib_children}
@@ -309,8 +332,8 @@ static void {name}_init_rs(struct {name}_factory *factory)
 
     // Setup storage buffer for buffer data
     rs->buffer_count = 1;
-    strncpy(rs->buffers[0].name, "buffer", YETTY_RENDER_NAME_MAX - 1);
-    strncpy(rs->buffers[0].wgsl_type, "array<u32>", YETTY_RENDER_WGSL_TYPE_MAX - 1);
+    strncpy(rs->buffers[0].name, "buffer", YETTY_YRENDER_NAME_MAX - 1);
+    strncpy(rs->buffers[0].wgsl_type, "array<u32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
     rs->buffers[0].readonly = 1;
 }}
 
@@ -318,18 +341,18 @@ static void {name}_init_rs(struct {name}_factory *factory)
 // Instance Rendering
 //=============================================================================
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 {name}_instance_render(struct yetty_ypaint_complex_prim_instance *self,
-                       struct yetty_render_target *target, float x, float y)
+                       struct yetty_yrender_target *target, float x, float y)
 {{
     if (!self || !self->buffer_data || !self->factory)
-        return YETTY_ERR(yetty_core_void, "invalid instance");
+        return YETTY_ERR(yetty_ycore_void, "invalid instance");
 
     struct {name}_factory *factory = {name}_factory_from_base(self->factory);
     if (!factory->binder)
-        return YETTY_ERR(yetty_core_void, "binder not initialized");
+        return YETTY_ERR(yetty_ycore_void, "binder not initialized");
 
-    struct yetty_render_gpu_resource_set *rs = &factory->rs;
+    struct yetty_yrender_gpu_resource_set *rs = &factory->rs;
 
     // Parse wire format: [type_id][payload_size][uniforms...][buffer_lens...][buffer_data...]
     const uint32_t *data = (const uint32_t *)self->buffer_data;
@@ -351,7 +374,7 @@ static struct yetty_core_void_result
     (void)x;
     (void)y;
 
-    struct yetty_core_void_result res = factory->binder->ops->update(factory->binder);
+    struct yetty_ycore_void_result res = factory->binder->ops->update(factory->binder);
     if (YETTY_IS_ERR(res))
         return res;
 
@@ -362,11 +385,11 @@ static struct yetty_core_void_result
 // Factory Implementation
 //=============================================================================
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 {name}_compile_pipeline(struct yetty_ypaint_concrete_factory *self,
                         WGPUDevice device, WGPUQueue queue,
                         WGPUTextureFormat target_format,
-                        struct yetty_render_gpu_allocator *allocator)
+                        struct yetty_yrender_gpu_allocator *allocator)
 {{
     struct {name}_factory *factory = {name}_factory_from_base(self);
 
@@ -377,14 +400,14 @@ static struct yetty_core_void_result
 
     {name}_init_rs(factory);
 
-    struct yetty_render_gpu_resource_binder_result binder_res =
-        yetty_render_gpu_resource_binder_create(device, queue, target_format, allocator);
+    struct yetty_yrender_gpu_resource_binder_result binder_res =
+        yetty_yrender_gpu_resource_binder_create(device, queue, target_format, allocator);
     if (YETTY_IS_ERR(binder_res))
-        return YETTY_ERR(yetty_core_void, binder_res.error.msg);
+        return YETTY_ERR(yetty_ycore_void, binder_res.error.msg);
 
     factory->binder = binder_res.value;
 
-    struct yetty_core_void_result submit_res =
+    struct yetty_ycore_void_result submit_res =
         factory->binder->ops->submit(factory->binder, &factory->rs);
     if (YETTY_IS_ERR(submit_res)) {{
         factory->binder->ops->destroy(factory->binder);
@@ -392,7 +415,7 @@ static struct yetty_core_void_result
         return submit_res;
     }}
 
-    struct yetty_core_void_result finalize_res =
+    struct yetty_ycore_void_result finalize_res =
         factory->binder->ops->finalize(factory->binder);
     if (YETTY_IS_ERR(finalize_res)) {{
         factory->binder->ops->destroy(factory->binder);
@@ -454,7 +477,7 @@ static void {name}_destroy_instance(struct yetty_ypaint_concrete_factory *self,
     free(instance);
 }}
 
-static struct yetty_render_gpu_resource_set *{name}_get_shared_rs(
+static struct yetty_yrender_gpu_resource_set *{name}_get_shared_rs(
     struct yetty_ypaint_concrete_factory *self)
 {{
     struct {name}_factory *factory = {name}_factory_from_base(self);
@@ -574,7 +597,7 @@ def generate_yaml_parser(schema, uniforms, buffers):
     return f'''// Auto-generated from {name}.yaml - DO NOT EDIT
 // YAML parser factory for {name} complex primitive
 
-#include "{name}-gen.h"
+#include <yetty/{name}/{name}-gen.h>
 #include <yetty/ypaint-yaml/ypaint-yaml.h>
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/yfsvm/compiler.h>
@@ -612,7 +635,7 @@ static const uint32_t {NAME}_COLOR_PALETTE[8] = {{
     0xFFF38181, 0xFFAA96DA, 0xFF72D6C9, 0xFFFCBF49,
 }};
 
-static struct yetty_core_void_result
+static struct yetty_ycore_void_result
 {name}_yaml_factory(struct yetty_ypaint_core_buffer *buffer,
                     yaml_parser_t *yaml_parser,
                     const char *primitive_type_name)
@@ -636,7 +659,7 @@ static struct yetty_core_void_result
 
     while (!done) {{
         if (!yaml_parser_parse(yaml_parser, &event))
-            return YETTY_ERR(yetty_core_void, "yaml parse error");
+            return YETTY_ERR(yetty_ycore_void, "yaml parse error");
 
         switch (event.type) {{
         case YAML_MAPPING_START_EVENT:
@@ -739,13 +762,13 @@ static struct yetty_core_void_result
     size_t required = yetty_{name}_serialized_size(&uniforms, &bufs);
     uint8_t *prim_buf = malloc(required);
     if (!prim_buf)
-        return YETTY_ERR(yetty_core_void, "malloc failed");
+        return YETTY_ERR(yetty_ycore_void, "malloc failed");
 
-    struct yetty_core_size_result ser_res =
+    struct yetty_ycore_size_result ser_res =
         yetty_{name}_serialize(&uniforms, &bufs, prim_buf, required);
     if (YETTY_IS_ERR(ser_res)) {{
         free(prim_buf);
-        return YETTY_ERR(yetty_core_void, ser_res.error.msg);
+        return YETTY_ERR(yetty_ycore_void, ser_res.error.msg);
     }}
 
     struct yetty_ypaint_id_result id_res =
@@ -753,7 +776,7 @@ static struct yetty_core_void_result
     free(prim_buf);
 
     if (id_res.error)
-        return YETTY_ERR(yetty_core_void, "add_prim failed");
+        return YETTY_ERR(yetty_ycore_void, "add_prim failed");
 
     return YETTY_OK_VOID();
 }}
@@ -775,23 +798,28 @@ def main():
     uniforms, buffers = calculate_layout(schema)
 
     name = schema['name']
-    out_dir = schema_path.parent
+    src_dir = schema_path.parent
+    # Header goes to include/yetty/<module>/, source files stay in src/yetty/<module>/
+    # Schema is at src/yetty/<module>/<module>.yaml
+    # Include dir is at include/yetty/<module>/
+    include_dir = src_dir.parent.parent.parent / 'include' / 'yetty' / name
+    include_dir.mkdir(parents=True, exist_ok=True)
 
     header = generate_c_header(schema, uniforms, buffers)
     source = generate_c_source(schema, uniforms, buffers)
     wgsl = generate_wgsl_bindings(schema, uniforms, buffers)
     yaml_parser = generate_yaml_parser(schema, uniforms, buffers)
 
-    (out_dir / f'{name}-gen.h').write_text(header + '\n')
-    (out_dir / f'{name}-gen.c').write_text(source + '\n')
-    (out_dir / f'{name}-gen.wgsl').write_text(wgsl + '\n')
-    (out_dir / f'{name}-gen-yaml.c').write_text(yaml_parser + '\n')
+    (include_dir / f'{name}-gen.h').write_text(header + '\n')
+    (src_dir / f'{name}-gen.c').write_text(source + '\n')
+    (src_dir / f'{name}-gen.wgsl').write_text(wgsl + '\n')
+    (src_dir / f'{name}-gen-yaml.c').write_text(yaml_parser + '\n')
 
     print(f'Generated:')
-    print(f'  {out_dir / f"{name}-gen.h"}')
-    print(f'  {out_dir / f"{name}-gen.c"}')
-    print(f'  {out_dir / f"{name}-gen.wgsl"}')
-    print(f'  {out_dir / f"{name}-gen-yaml.c"}')
+    print(f'  {include_dir / f"{name}-gen.h"}')
+    print(f'  {src_dir / f"{name}-gen.c"}')
+    print(f'  {src_dir / f"{name}-gen.wgsl"}')
+    print(f'  {src_dir / f"{name}-gen-yaml.c"}')
 
 
 if __name__ == '__main__':

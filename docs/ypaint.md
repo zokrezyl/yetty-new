@@ -311,21 +311,21 @@ line[7].complex_prims.add(ptr)  // Only last overlapping line
 ```
 
 Why simplified:
-- Complex prims render to atlas, not via grid dispatch
+- Complex prims render via own pipelines, not via grid dispatch
 - Last line reference sufficient for lifetime management
 - When last line scrolls out → prim out of scope → release
 
 ### Direct Layer Rendering
 
-Complex primitives render directly to the ypaint layer texture at their screen positions using instanced rendering:
+Complex primitives render directly to the ypaint layer texture at their viewport positions:
 
 ```
 ypaint_layer_texture (render target)
 ┌─────────────────────────────────────────────────────┐
 │                                                     │
 │    ┌──────────┐                                     │
-│    │  yplot0  │  ← rendered at screen coords       │
-│    │          │    via vertex shader positioning   │
+│    │  yplot0  │  ← viewport set to prim bounds     │
+│    │          │    own pipeline, LoadOp=Load       │
 │    └──────────┘                                     │
 │                    ┌──────────┐                     │
 │                    │  yplot1  │                     │
@@ -341,81 +341,52 @@ ypaint_layer_texture (render target)
 ```
 
 **Flow:**
-1. Clear ypaint_layer_texture
-2. Render simple prims via grid dispatch (existing flow)
-3. For each complex primitive: `layer->render(primitive)`
-   - Single instanced draw call renders all instances of same type
-   - Vertex shader positions output to primitive's screen bounds
-   - Fragment shader fills the region with primitive content
+1. `layer->render(render_target)` called by terminal
+2. Render simple prims to render_target (LoadOp=Clear, full-screen quad, SDF shader)
+3. For each complex primitive: `instance->render(render_target, x, y)`
+   - LoadOp=Load (preserves simple prims and previous complex prims)
+   - Viewport set to instance's screen bounds (x, y, width, height)
+   - Instance uses its factory's pre-compiled pipeline
+   - Fragment shader fills the viewport region
 4. Layer texture blended with other layers (text_layer, etc.)
 5. Result → screen
 
-**No atlas sampling needed** - primitives render directly to correct screen positions.
+**No atlas needed** - each primitive renders directly to its viewport region on the layer texture.
 
-### Atlas Lifecycle
+### Complex Prim Lifecycle
 
 **Creation:**
-- Atlas created on first render of complex prims
-- Regions packed (simple bin packing)
-- Each complex prim renders to its region
+- Instance created when primitive added to canvas
+- Factory's pipeline already compiled (at registration time)
 
-**Caching:**
-- Atlas texture cached between frames
-- Prim dirty flag → re-render only that region (or full atlas if simpler)
-- No re-render if nothing changed
+**Rendering:**
+- Instance dirty flag checked
+- If dirty: render to layer texture at viewport, clear dirty
+- If clean: skip (previous frame's pixels preserved if layer not dirty)
 
 **Release:**
-- Complex prim attached to last overlapping line
-- Line scrolls out → prim released
-- Atlas region freed (or full atlas recreated)
+- Instance attached to last overlapping line
+- Line scrolls out → instance destroyed
 
-### Recursive Composition
+### Recursive Composition (Future)
 
-Complex primitives can contain nested ypaint (recursive):
-
-```
-Terminal
-  └── ypaint layer
-        ├── simple prims → grid dispatch
-        └── complex prims → atlas
-              └── nested ypaint → nested atlas (cached)
-                    ├── simple prims → nested grid dispatch
-                    └── complex prims → nested-nested atlas
-                          └── ...recursive
-```
-
-Each nesting level:
-- Has its own atlas
-- Renders independently
-- Cached separately
-- Blended into parent's atlas
-
-### Atlas Sizing
-
-| Scenario | Atlas Size | Memory |
-|----------|-----------|--------|
-| Typical (5-20 prims) | 2048×2048 | 16MB |
-| Busy (50+ prims) | 4096×4096 | 64MB |
-| Extreme (100+ prims) | 8192×8192 | 256MB |
-
-Query `device.limits.maxTextureDimension2D` for GPU limit. Safe baseline: 4096×4096.
+Complex primitives may contain nested ypaint (recursive). Each nesting level would render to its parent's render target at its viewport bounds.
 
 ### Render Target Integration
 
 The render target abstraction handles both local GPU and remote ymux:
 
-**Surface target (local GPU):**
+**Local GPU:**
 ```
-layer_renderer[0] → simple prims texture
-complex_prim_atlas → pre-rendered complex prims
-         ↓
-    blend_pass → surface
+layer->render(render_target)
+  ├── simple prims → full-screen pass
+  └── complex prims → viewport passes (same target)
 ```
 
-**ymux target (remote):**
+**ymux (remote):**
 ```
-Serialize complex prim data → send to remote
-Remote renders using same atlas approach
+Serialize primitive data → send to remote
+Remote renders using same approach
 ```
 
 ### Wire Format (FAM - Flexible Array Member)
@@ -438,9 +409,9 @@ Complex primitive rendering follows flyweight pattern:
 
 **Extrinsic (per instance):**
 - Bounds, colors, content data
-- Atlas region (render artifact)
+- Viewport position (computed at render time from bounds + scroll offset)
 
-Type registration provides intrinsic parts. Instance data stored in buffer. Atlas is render-time artifact, cached but separate from data model.
+Type registration provides intrinsic parts. Instance data stored in buffer.
 
 ---
 
@@ -455,7 +426,7 @@ Two-level ops structure for primitives:
 **Complex prim ops (extends base):**
 - `size` - same as base
 - `aabb` - same as base
-- `render` - render to instance texture
+- `render` - render to render_target at viewport
 
 SDF primitives use base ops only. Complex primitives use extended ops with render.
 
@@ -542,23 +513,24 @@ The factory's binder owns the pre-compiled pipeline. This pipeline is compiled O
 
 ## Direct Layer Rendering
 
-Complex primitives render to their own texture, then composited to layer.
+Complex primitives render directly to the layer texture at their viewport positions.
 
 **Render flow:**
 ```
 for each complex prim instance:
     if dirty:
-        ops.render(instance)  # binds values to shared state, renders to instance texture
+        instance->render(render_target, x, y)
+        # sets viewport to instance bounds
+        # uses factory's pre-compiled pipeline
+        # LoadOp=Load preserves existing pixels
         clear dirty
-    composite instance texture to layer_texture
 ```
 
-**Instanced rendering:** All instances of same type can be rendered in single draw call. Vertex shader positions each quad from instance buffer. Fragment shader evaluates at local coordinates.
-
-**Why direct rendering (no atlas):**
-- No tile allocation
-- No texture sampling overhead
-- Simpler pipeline
+**Why direct rendering:**
+- No separate texture per instance
+- No compositing pass
+- Each instance just renders to its viewport region
+- Simple multi-pass to same render target
 
 ---
 

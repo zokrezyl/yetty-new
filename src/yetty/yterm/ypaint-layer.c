@@ -13,7 +13,6 @@
 #include <yetty/yterm/ypaint-layer.h>
 #include <yetty/yconfig.h>
 #include <yetty/yetty.h>
-#include <yetty/yplot/yplot.h>
 #include <yetty/ytrace.h>
 
 
@@ -467,26 +466,8 @@ ypaint_layer_get_gpu_resource_set(
     }
   }
 
-  /* Include yplot shared RS (shader + compiled pipeline).
-   * yplot data is inline in the prim buffer - no per-instance RS needed. */
-  struct yetty_ypaint_complex_prim_factory *abstract_factory =
-      yetty_ypaint_canvas_get_complex_prim_factory(layer->canvas);
-  if (abstract_factory) {
-    struct yetty_ypaint_concrete_factory *yplot_factory =
-        yetty_ypaint_complex_prim_factory_get(abstract_factory, YETTY_YPAINT_TYPE_YPLOT);
-    if (yplot_factory && yplot_factory->get_shared_rs) {
-      struct yetty_yrender_gpu_resource_set *yplot_rs =
-          yplot_factory->get_shared_rs(yplot_factory);
-      if (yplot_rs && child_idx < YETTY_YRENDER_RS_MAX_CHILDREN) {
-        layer->rs.children[child_idx++] = yplot_rs;
-      }
-    }
-  }
-
-  /* NOTE: Per-instance RS loop removed. Complex prims like yplot store data
-   * inline in the unified prim buffer. The shared shader RS is included once
-   * above. Future complex prims with separate textures (yimage, yvideo) will
-   * need per-instance RS - add that logic when those types are implemented. */
+  /* NOTE: Complex prims (yplot, yimage, yvideo) render via their own pipelines
+   * (factory pattern), not as part of ypaint layer shader dispatch. */
 
   layer->rs.children_count = child_idx;
 

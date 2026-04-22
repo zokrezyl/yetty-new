@@ -325,13 +325,13 @@ static struct yetty_ycore_void_result create_atlas(struct gpu_resource_binder_im
 /* Create GPU resources */
 static struct yetty_ycore_void_result create_gpu_resources(struct gpu_resource_binder_impl *impl)
 {
-    /* Storage buffer */
-    if (impl->storage_buffer_size > 0) {
+    /* Storage buffer - create even if size is 0 when buffers are declared (placeholder for bind group) */
+    if (impl->flat_buffer_count > 0) {
         char label[] = "storage_buffer";
         WGPUBufferDescriptor desc = {0};
         desc.label.data = label;
         desc.label.length = sizeof(label) - 1;
-        desc.size = impl->storage_buffer_size;
+        desc.size = impl->storage_buffer_size > 0 ? impl->storage_buffer_size : 4;  /* min 4 bytes */
         desc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
         impl->storage_buffer = impl->allocator->ops->create_buffer(impl->allocator, &desc);
         if (!impl->storage_buffer)
@@ -499,8 +499,8 @@ static void generate_wgsl_bindings(struct gpu_resource_binder_impl *impl, char *
         if (n > 0 && (size_t)n < rem) { p += n; rem -= n; }
     }
 
-    /* Storage buffer */
-    if (impl->storage_buffer_size > 0) {
+    /* Storage buffer - declare if any buffers exist (even if size is 0 during pipeline compilation) */
+    if (impl->flat_buffer_count > 0) {
         n = snprintf(p, rem, "@group(0) @binding(%u) var<storage, read> storage_buffer: array<u32>;\n", binding++);
         if (n > 0 && (size_t)n < rem) { p += n; rem -= n; }
 
@@ -595,7 +595,7 @@ static struct yetty_ycore_void_result create_bind_group(struct gpu_resource_bind
         memset(ge, 0, sizeof(*ge));
         ge->binding = binding;
         ge->buffer = impl->storage_buffer;
-        ge->size = impl->storage_buffer_size;
+        ge->size = impl->storage_buffer_size > 0 ? impl->storage_buffer_size : 4;
         count++; binding++;
     }
 
