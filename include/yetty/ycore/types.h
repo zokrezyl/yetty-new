@@ -113,6 +113,7 @@ struct rectangle {
 };
 
 YETTY_YRESULT_DECLARE(uint32, uint32_t);
+YETTY_YRESULT_DECLARE(float, float);
 YETTY_YRESULT_DECLARE(pixel_size, struct pixel_size);
 YETTY_YRESULT_DECLARE(rectangle, struct rectangle);
 

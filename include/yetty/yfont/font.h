@@ -48,6 +48,21 @@ struct yetty_font_font_ops {
 						     size_t count);
 	struct yetty_ycore_void_result (*load_basic_latin)(struct yetty_font_font *self);
 
+	/* Horizontal advance for a single codepoint at the given pixel size.
+	 * Must not require glyph rasterization, atlas placement, or shader.
+	 * Units: pixels at the requested font_size. */
+	struct float_result (*get_advance)(struct yetty_font_font *self,
+					   uint32_t codepoint,
+					   float font_size);
+
+	/* Width of a UTF-8 byte range at the given pixel size.
+	 * Must not require glyph rasterization, atlas placement, or shader.
+	 * Implementations may override to handle kerning/shaping; the default
+	 * behaviour is to sum get_advance() over codepoints. */
+	struct float_result (*measure_text)(struct yetty_font_font *self,
+					    const char *utf8, size_t len,
+					    float font_size);
+
 	/* Base size the CDB was generated at */
 	float (*get_base_size)(const struct yetty_font_font *self);
 

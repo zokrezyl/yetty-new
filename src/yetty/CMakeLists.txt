@@ -147,6 +147,10 @@ if(YETTY_ENABLE_FEATURE_YPLOT)
     add_subdirectory(yplot)
 endif()
 
+if(YETTY_ENABLE_FEATURE_YPDF)
+    add_subdirectory(ypdf)
+endif()
+
 if(YETTY_ENABLE_FEATURE_YIMAGE)
     add_subdirectory(yimage)
 endif()

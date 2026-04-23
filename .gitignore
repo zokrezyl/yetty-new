@@ -1,4 +1,7 @@
 # Build directories
+build-*
+!build-tools
+!build-tools/**
 tmp/
 
 # IDE/editor

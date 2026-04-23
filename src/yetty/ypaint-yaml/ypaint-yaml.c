@@ -544,7 +544,7 @@ yetty_ypaint_yaml_parse(const char *yaml, size_t len)
     if (!yaml || len == 0)
         return YETTY_ERR(yetty_ypaint_core_buffer, "null or empty yaml");
 
-    struct yetty_ypaint_core_buffer_result buf_res = yetty_ypaint_core_buffer_create();
+    struct yetty_ypaint_core_buffer_result buf_res = yetty_ypaint_core_buffer_create(NULL);
     if (YETTY_IS_ERR(buf_res))
         return buf_res;
 

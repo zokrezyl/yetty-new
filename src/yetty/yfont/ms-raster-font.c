@@ -477,7 +477,7 @@ struct yetty_font_ms_font_result yetty_font_ms_raster_font_create(
 
     /* Load shader from file */
     char shader_path[RASTER_FONT_MAX_PATH];
-    snprintf(shader_path, sizeof(shader_path), "%s/raster-font.wgsl", shaders_dir);
+    snprintf(shader_path, sizeof(shader_path), "%s/ms-raster-font.wgsl", shaders_dir);
     struct yetty_ycore_buffer_result shader_res = yetty_ycore_read_file(shader_path);
     if (YETTY_IS_ERR(shader_res))
         return YETTY_ERR(yetty_font_ms_font, shader_res.error.msg);
