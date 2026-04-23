@@ -24,6 +24,7 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pipe.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/time.c
 )
 
 # Create iOS app bundle

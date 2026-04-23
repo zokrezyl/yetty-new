@@ -2,10 +2,10 @@
 
 #include <yetty/platform/extract-assets.h>
 #include <yetty/yconfig.h>
+#include <yetty/yplatform/fs.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 /* Forward declarations - implemented in platform-paths.c */
 const char *yetty_yplatform_get_data_dir(void);

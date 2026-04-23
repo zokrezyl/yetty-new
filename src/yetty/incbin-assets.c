@@ -2,13 +2,12 @@
 
 #include <brotli/decode.h>
 #include <yetty/ytrace.h>
+#include <yetty/yplatform/fs.h>
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #ifndef YETTY_BUILD_VERSION
 #define YETTY_BUILD_VERSION "dev"
@@ -131,13 +130,13 @@ static int mkdir_p(const char *path) {
   for (p = tmp + 1; *p; p++) {
     if (*p == '/') {
       *p = 0;
-      if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
+      if (yplatform_mkdir(tmp) != 0 && errno != EEXIST)
         return -1;
       *p = '/';
     }
   }
 
-  if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
+  if (yplatform_mkdir(tmp) != 0 && errno != EEXIST)
     return -1;
 
   return 0;
@@ -399,7 +398,7 @@ int yetty_incbin_assets_extract_yemu_to(struct yetty_incbin_assets *assets,
       return 0;
     }
     /* Remove tarball after extraction */
-    unlink(rootfs_tar);
+    yplatform_unlink(rootfs_tar);
   }
 
   ydebug("yemu asset extraction complete");

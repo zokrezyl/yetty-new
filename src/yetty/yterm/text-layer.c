@@ -129,8 +129,12 @@ static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
     struct yetty_yterm_terminal_text_layer *text_layer = user;
     VTermResolvedGlyph result = {0, 0};
 
-    if (!text_layer->font || !text_layer->font->ops || count == 0)
+    ydebug("resolve_glyph ENTER: count=%d cp=U+%04X bold=%d italic=%d", count, count > 0 ? chars[0] : 0u, bold, italic);
+
+    if (!text_layer->font || !text_layer->font->ops || count == 0) {
+        ydebug("resolve_glyph EXIT early: font=%p count=%d", (void *)text_layer->font, count);
         return result;
+    }
 
     enum yetty_font_ms_style style = YETTY_YFONT_MS_STYLE_REGULAR;
     if (bold && italic)      style = YETTY_YFONT_MS_STYLE_BOLD_ITALIC;
@@ -141,8 +145,11 @@ static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
         text_layer->font, chars[0], style);
     if (YETTY_IS_OK(glyph_res))
         result.glyph_index = glyph_res.value;
+    else
+        ydebug("resolve_glyph: get_glyph_index_styled ERR for U+%04X: %s", chars[0], glyph_res.error.msg);
     result.font_type = 0;
 
+    ydebug("resolve_glyph EXIT: U+%04X -> glyph_index=%u", chars[0], result.glyph_index);
     return result;
 }
 

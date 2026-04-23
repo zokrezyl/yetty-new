@@ -32,6 +32,7 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/windows/thread.c
     ${YETTY_ROOT}/src/yetty/yplatform/windows/term.c
     ${YETTY_ROOT}/src/yetty/yplatform/windows/fs.c
+    ${YETTY_ROOT}/src/yetty/yplatform/windows/time.c
 )
 
 # Create executable with core sources + platform

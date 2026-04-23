@@ -4,6 +4,7 @@
 
 #include <yetty/yvnc/vnc-client.h>
 #include <yetty/ycore/event-loop.h>
+#include <yetty/yplatform/time.h>
 #include <yetty/ytrace.h>
 #include "protocol.h"
 
@@ -11,7 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <turbojpeg.h>
-#include <time.h>
 
 #define RECV_BUFFER_SIZE 65536
 
@@ -125,13 +125,6 @@ struct yetty_vnc_client {
 	uint32_t stats_tiles_window;
 	double stats_window_start;
 };
-
-static double get_time_sec(void)
-{
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return ts.tv_sec + ts.tv_nsec / 1e9;
-}
 
 static struct yetty_ycore_void_result ensure_resources(
 	struct yetty_vnc_client *client, uint16_t width, uint16_t height);
@@ -663,7 +656,7 @@ yetty_vnc_client_create(WGPUDevice device, WGPUQueue queue,
 		return YETTY_ERR(yetty_vnc_client_ptr, "failed to allocate tile pixels");
 	}
 
-	client->stats_window_start = get_time_sec();
+	client->stats_window_start = ytime_monotonic_sec();
 
 	/* Create initial GPU resources */
 	if (width > 0 && height > 0) {

@@ -35,6 +35,7 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/webasm/platform-paths.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/term.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/time.c
 )
 
 # Create executable with core sources + web platform

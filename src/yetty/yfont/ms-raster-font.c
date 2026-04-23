@@ -262,8 +262,11 @@ static int raster_font_rasterize_glyph(struct raster_font *font, uint32_t codepo
     int face_idx = (int)style;
     FT_Face face = font->ft_faces[face_idx];
 
+    ydebug("rasterize ENTER: cp=U+%04X style=%d face=%p", codepoint, (int)style, (void *)face);
+
     /* Fallback to Regular if this face not available */
     if (!face) {
+        ydebug("rasterize: face[%d] NULL, fallback or fail (style=%d)", face_idx, (int)style);
         if (style != YETTY_YFONT_MS_STYLE_REGULAR) {
             return raster_font_rasterize_glyph(font, codepoint, YETTY_YFONT_MS_STYLE_REGULAR);
         }
@@ -271,15 +274,20 @@ static int raster_font_rasterize_glyph(struct raster_font *font, uint32_t codepo
     }
 
     FT_UInt glyph_index = FT_Get_Char_Index(face, codepoint);
+    ydebug("rasterize: FT_Get_Char_Index(U+%04X) = %u on face=%p num_glyphs=%ld",
+           codepoint, (unsigned)glyph_index, (void *)face, (long)face->num_glyphs);
     if (glyph_index == 0) {
         /* Fallback to Regular if glyph not in this face */
         if (style != YETTY_YFONT_MS_STYLE_REGULAR) {
             return raster_font_rasterize_glyph(font, codepoint, YETTY_YFONT_MS_STYLE_REGULAR);
         }
+        ydebug("rasterize: no glyph for U+%04X and style already REGULAR, returning 0", codepoint);
         return 0;
     }
 
-    if (FT_Load_Glyph(face, glyph_index, FT_LOAD_RENDER)) {
+    int ft_err = FT_Load_Glyph(face, glyph_index, FT_LOAD_RENDER);
+    if (ft_err) {
+        ydebug("rasterize: FT_Load_Glyph err=%d for U+%04X glyph=%u", ft_err, codepoint, glyph_index);
         return 0;
     }
 

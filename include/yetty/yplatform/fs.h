@@ -15,6 +15,12 @@ int yplatform_mkdir(const char *path);
 /* Create directory and all parent directories */
 void yplatform_mkdir_p(const char *path);
 
+/* Non-zero if a file or directory exists at path. */
+int yplatform_file_exists(const char *path);
+
+/* Remove a file. Returns 0 on success, -1 on error (errno set). */
+int yplatform_unlink(const char *path);
+
 #ifdef __cplusplus
 }
 #endif

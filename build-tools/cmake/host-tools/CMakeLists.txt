@@ -131,12 +131,14 @@ if(WIN32)
         ${YETTY_ROOT}/src/yetty/yplatform/windows/thread.c
         ${YETTY_ROOT}/src/yetty/yplatform/windows/term.c
         ${YETTY_ROOT}/src/yetty/yplatform/windows/fs.c
+        ${YETTY_ROOT}/src/yetty/yplatform/windows/time.c
     )
 else()
     set(YETTY_HOST_PLATFORM_SOURCES
         ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c
         ${YETTY_ROOT}/src/yetty/yplatform/shared/term.c
         ${YETTY_ROOT}/src/yetty/yplatform/shared/fs.c
+        ${YETTY_ROOT}/src/yetty/yplatform/shared/time.c
     )
 endif()
 

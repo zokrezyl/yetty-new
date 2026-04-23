@@ -18,20 +18,23 @@ else()
     set(YETTY_PLATFORM "linux")
 endif()
 
-# Platform abstraction sources (thread, term, fs)
+# Platform abstraction sources (thread, term, fs, time)
 if(WIN32)
     set(YETTY_YPLATFORM_THREAD_SOURCES
         ${YETTY_ROOT}/src/yetty/yplatform/windows/thread.c
         ${YETTY_ROOT}/src/yetty/yplatform/windows/term.c
         ${YETTY_ROOT}/src/yetty/yplatform/windows/fs.c
+        ${YETTY_ROOT}/src/yetty/yplatform/windows/time.c
     )
 else()
     set(YETTY_YPLATFORM_THREAD_SOURCES
         ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c
         ${YETTY_ROOT}/src/yetty/yplatform/shared/term.c
         ${YETTY_ROOT}/src/yetty/yplatform/shared/fs.c
+        ${YETTY_ROOT}/src/yetty/yplatform/shared/time.c
     )
 endif()
+
 
 # Auto-generate MSDF CDB fonts if not present (must run before incbin)
 if(YETTY_ENABLE_FEATURE_MSDF_GEN)
