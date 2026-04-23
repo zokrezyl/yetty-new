@@ -102,9 +102,13 @@ static uint32_t raster_font_lookup_slot(struct raster_font *font, int style_idx,
 static void raster_font_add_slot(struct raster_font *font, int style_idx, uint32_t codepoint, uint32_t slot);
 static void raster_font_grow_atlas(struct raster_font *font);
 
+static struct yetty_ycore_void_result raster_font_set_cell_size(
+    struct yetty_font_ms_font *self, struct pixel_size cell_size);
+
 static const struct yetty_font_ms_font_ops raster_font_ops = {
     .destroy = raster_font_destroy,
     .get_cell_size = raster_font_get_cell_size,
+    .set_cell_size = raster_font_set_cell_size,
     .get_glyph_index = raster_font_get_glyph_index,
     .get_glyph_index_styled = raster_font_get_glyph_index_styled,
     .resize = raster_font_resize,
@@ -640,6 +644,31 @@ static struct yetty_ycore_void_result raster_font_resize(struct yetty_font_ms_fo
     /* TODO: implement resize — recalculate cell size from font_size, re-rasterize */
     raster_font_update_font_size(font);
     raster_font_rasterize_all(font);
+    return YETTY_OK_VOID();
+}
+
+static struct yetty_ycore_void_result raster_font_set_cell_size(
+    struct yetty_font_ms_font *self, struct pixel_size cell_size)
+{
+    struct raster_font *font = container_of(self, struct raster_font, base);
+    if (cell_size.width <= 0.0f || cell_size.height <= 0.0f)
+        return YETTY_ERR(yetty_ycore_void, "invalid cell size");
+
+    /* Clamp — silly huge cells blow the atlas. */
+    float cw = cell_size.width;
+    float ch = cell_size.height;
+    if (ch > 128.0f) ch = 128.0f;
+    if (cw > 256.0f) cw = 256.0f;
+
+    font->cell_width = cw;
+    font->cell_height = ch;
+
+    /* Re-derive font_size from the new cell_height and re-rasterize every
+     * already-loaded glyph. The atlas grows on demand if needed. */
+    raster_font_update_font_size(font);
+    raster_font_rasterize_all(font);
+    ydebug("raster_font: set_cell_size %.1fx%.1f font_size=%u",
+           cw, ch, (unsigned)font->font_size);
     return YETTY_OK_VOID();
 }
 

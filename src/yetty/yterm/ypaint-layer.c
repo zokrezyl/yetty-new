@@ -145,11 +145,33 @@ on_canvas_cursor_set(struct yetty_ycore_void_result *user_data,
   return YETTY_OK_VOID();
 }
 
+static struct yetty_ycore_void_result
+ypaint_layer_set_cell_size(struct yetty_yterm_terminal_layer *self,
+                           struct pixel_size cell_size)
+{
+    struct yetty_yterm_ypaint_layer *layer =
+        (struct yetty_yterm_ypaint_layer *)self;
+    if (cell_size.width <= 0.0f || cell_size.height <= 0.0f)
+        return YETTY_ERR(yetty_ycore_void, "invalid cell size");
+    if (!layer->canvas)
+        return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
+
+    self->cell_size = cell_size;
+    /* Canvas is the single source of truth; layer pulls cell_size from it in
+     * get_gpu_resource_set() and pushes to the GPU uniform there. */
+    yetty_ypaint_canvas_set_cell_size(layer->canvas, cell_size);
+    self->dirty = 1;
+    ydebug("ypaint_layer_set_cell_size: %.1fx%.1f",
+           cell_size.width, cell_size.height);
+    return YETTY_OK_VOID();
+}
+
 /* Ops */
 static const struct yetty_yterm_terminal_layer_ops ypaint_layer_ops = {
     .destroy = ypaint_layer_destroy,
     .write = ypaint_layer_write,
     .resize_grid = ypaint_layer_resize_grid,
+    .set_cell_size = ypaint_layer_set_cell_size,
     .get_gpu_resource_set = ypaint_layer_get_gpu_resource_set,
     .render = ypaint_layer_render,
     .is_empty = ypaint_layer_is_empty,

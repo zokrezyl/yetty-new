@@ -127,6 +127,16 @@ render_target_vnc_present(struct yetty_yrender_target *self)
  * vtable and create
  *===========================================================================*/
 
+static struct yetty_ycore_void_result
+render_target_vnc_set_visual_zoom(struct yetty_yrender_target *self,
+				  float scale, float off_x, float off_y)
+{
+	struct render_target_vnc *rt = (struct render_target_vnc *)self;
+	if (rt->inner && rt->inner->ops && rt->inner->ops->set_visual_zoom)
+		return rt->inner->ops->set_visual_zoom(rt->inner, scale, off_x, off_y);
+	return YETTY_OK_VOID();
+}
+
 static const struct yetty_yrender_target_ops render_target_vnc_ops = {
 	.destroy = render_target_vnc_destroy,
 	.clear = render_target_vnc_clear,
@@ -136,6 +146,7 @@ static const struct yetty_yrender_target_ops render_target_vnc_ops = {
 	.get_view = render_target_vnc_get_view,
 	.get_texture = render_target_vnc_get_texture,
 	.resize = render_target_vnc_resize,
+	.set_visual_zoom = render_target_vnc_set_visual_zoom,
 };
 
 struct yetty_yrender_target_ptr_result

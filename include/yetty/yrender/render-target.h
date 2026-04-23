@@ -65,6 +65,14 @@ struct yetty_yrender_target_ops {
 	struct yetty_ycore_void_result (*resize)(
 		struct yetty_yrender_target *self,
 		struct yetty_yrender_viewport viewport);
+
+	/* Apply a non-intrusive visual zoom to the next blend() into this target.
+	 * scale = 1.0 disables zoom; scale > 1.0 zooms in.
+	 * offset_{x,y} are in source pixels within the target. Optional op — may
+	 * be NULL for targets that don't composite layers. */
+	struct yetty_ycore_void_result (*set_visual_zoom)(
+		struct yetty_yrender_target *self,
+		float scale, float offset_x, float offset_y);
 };
 
 /* Render target base - embed as first member in subclasses */

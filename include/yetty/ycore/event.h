@@ -56,6 +56,12 @@ enum yetty_ycore_event_type {
     YETTY_EVENT_RENDER,
     /* Shutdown - window close, propagates destroy */
     YETTY_EVENT_SHUTDOWN,
+    /* Named zoom events (produced from raw SCROLL + modifier combinations by
+     * yetty_event_handler; decoupled so rpc/kb-mapping can inject them too).
+     * ZOOM_VISUAL  = non-intrusive shader-level zoom (uniform only).
+     * ZOOM_CELL_SIZE = structural zoom (changes cell pixel size → cols/rows). */
+    YETTY_EVENT_ZOOM_VISUAL,
+    YETTY_EVENT_ZOOM_CELL_SIZE,
     /* Must be last - used for array sizing */
     YETTY_EVENT_COUNT
 };
@@ -166,6 +172,18 @@ struct yetty_ycore_event_set_frame_rate {
     uint32_t fps;
 };
 
+struct yetty_ycore_event_zoom_visual {
+    float delta;    /* change in zoom scale; reset=1 overrides */
+    int reset;      /* non-zero -> set scale back to 1.0, clear offsets */
+    float anchor_x; /* pan anchor in pixels (screen-space); 0 if unused */
+    float anchor_y;
+};
+
+struct yetty_ycore_event_zoom_cell_size {
+    float delta; /* multiplicative delta applied to cell_size; e.g. 0.04 */
+    int reset;   /* non-zero -> restore baseline cell size */
+};
+
 struct yetty_ycore_event {
     enum yetty_ycore_event_type type;
     union {
@@ -188,6 +206,8 @@ struct yetty_ycore_event {
         struct yetty_ycore_event_set_cursor set_cursor;
         struct yetty_ycore_event_card_repack card_repack;
         struct yetty_ycore_event_set_frame_rate set_frame_rate;
+        struct yetty_ycore_event_zoom_visual zoom_visual;
+        struct yetty_ycore_event_zoom_cell_size zoom_cell_size;
     };
     void *payload;  /* optional heap-allocated data (copy/paste text) */
 };

@@ -341,9 +341,28 @@ ms_msdf_get_gpu_resource_set(struct yetty_font_ms_font *self)
 	return YETTY_OK(yetty_yrender_gpu_resource_set, &f->rs);
 }
 
+static struct yetty_ycore_void_result
+ms_msdf_set_cell_size(struct yetty_font_ms_font *self, struct pixel_size cell_size)
+{
+	struct ms_msdf_font *f = (struct ms_msdf_font *)self;
+	if (!f)
+		return YETTY_ERR(yetty_ycore_void, "font is NULL");
+	if (cell_size.height <= 0.0f)
+		return YETTY_ERR(yetty_ycore_void, "invalid cell height");
+	/* MSDF is resolution-independent; the cell size drives the requested
+	 * render size, and get_cell_size() derives width from requested_size via
+	 * the cached hw_ratio. Update hw_ratio too so non-square cells survive. */
+	f->requested_size = cell_size.height;
+	if (cell_size.width > 0.0f)
+		f->hw_ratio = cell_size.height / cell_size.width;
+	f->dirty = 1;
+	return YETTY_OK_VOID();
+}
+
 static const struct yetty_font_ms_font_ops ms_msdf_ops = {
 	.destroy = ms_msdf_destroy,
 	.get_cell_size = ms_msdf_get_cell_size,
+	.set_cell_size = ms_msdf_set_cell_size,
 	.get_glyph_index = ms_msdf_get_glyph_index,
 	.get_glyph_index_styled = ms_msdf_get_glyph_index_styled,
 	.resize = ms_msdf_resize,

@@ -36,6 +36,12 @@ struct yetty_font_ms_font_ops {
 	/* Cell size — the fixed cell dimensions for the grid */
 	struct pixel_size_result (*get_cell_size)(const struct yetty_font_ms_font *self);
 
+	/* Change the cell size. Implementations should re-rasterize the atlas
+	 * (raster) or update the requested render size (MSDF) so glyphs scale
+	 * together with the cell. Used by ZOOM_CELL_SIZE. */
+	struct yetty_ycore_void_result (*set_cell_size)(
+		struct yetty_font_ms_font *self, struct pixel_size cell_size);
+
 	/* Glyph lookup */
 	struct uint32_result (*get_glyph_index)(struct yetty_font_ms_font *self,
 						uint32_t codepoint);

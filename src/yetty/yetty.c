@@ -54,7 +54,45 @@ struct yetty_yetty {
 
     /* VNC server (optional, for --vnc-server or --vnc-headless) */
     struct yetty_vnc_server *vnc_server;
+
+    /* Visual (shader-level) zoom state — applied by the final blend. */
+    float visual_zoom_scale;    /* 1.0 = off; clamped to [1.0, 100.0] */
+    float visual_zoom_offset_x; /* source-pixel pan */
+    float visual_zoom_offset_y;
+
+    /* Cached window size so ZOOM_CELL_SIZE can re-post a RESIZE that
+     * forces the terminal to re-derive cols/rows. */
+    float window_width;
+    float window_height;
 };
+
+/* GLFW modifier bit layout (matches glfw-main.c and the VNC shim). */
+#define YETTY_MOD_SHIFT   0x0001
+#define YETTY_MOD_CONTROL 0x0002
+
+/* Clamp helpers — no float.h dependency needed. */
+static float yetty_clampf(float v, float lo, float hi)
+{
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+/* Post an event asynchronously by writing it to the platform input pipe.
+ * This decouples the translation (e.g. Ctrl+Scroll → ZOOM_VISUAL) from the
+ * handler, and gives rpc/keyboard-mapping paths one entry point to inject
+ * the same named events. */
+static void yetty_post_event_async(struct yetty_yetty *yetty,
+                                   const struct yetty_ycore_event *event)
+{
+    struct yetty_yplatform_input_pipe *pipe =
+        yetty->context.app_context.platform_input_pipe;
+    if (!pipe || !pipe->ops || !pipe->ops->write) {
+        yerror("yetty_post_event_async: no input pipe available");
+        return;
+    }
+    pipe->ops->write(pipe, event, sizeof(*event));
+}
 
 /*===========================================================================
  * Event handling
@@ -102,6 +140,81 @@ static struct yetty_ycore_int_result yetty_event_handler(
         return YETTY_OK(yetty_ycore_int, 1);
     }
 
+    /* Translate raw Ctrl-modifier scrolls into named zoom events, asynchronously.
+     *
+     * Why a separate named event (instead of branching inline here): anything
+     * that wants to trigger zoom — RPC, keyboard remapping, macro replay — can
+     * push the same ZOOM_VISUAL / ZOOM_CELL_SIZE event. The raw scroll keeps
+     * flowing to the workspace unchanged when no zoom modifier is held. */
+    if (event->type == YETTY_EVENT_SCROLL) {
+        int mods = event->scroll.mods;
+        bool ctrl = (mods & YETTY_MOD_CONTROL) != 0;
+        bool shift = (mods & YETTY_MOD_SHIFT) != 0;
+
+        if (ctrl && shift) {
+            struct yetty_ycore_event ev = {0};
+            ev.type = YETTY_EVENT_ZOOM_CELL_SIZE;
+            ev.zoom_cell_size.delta = event->scroll.dy * 0.04f;
+            yetty_post_event_async(yetty, &ev);
+            return YETTY_OK(yetty_ycore_int, 1);
+        }
+        if (ctrl) {
+            struct yetty_ycore_event ev = {0};
+            ev.type = YETTY_EVENT_ZOOM_VISUAL;
+            ev.zoom_visual.delta = event->scroll.dy * 0.1f;
+            ev.zoom_visual.anchor_x = event->scroll.x;
+            ev.zoom_visual.anchor_y = event->scroll.y;
+            yetty_post_event_async(yetty, &ev);
+            return YETTY_OK(yetty_ycore_int, 1);
+        }
+        /* No zoom modifier — fall through to workspace forwarding below. */
+    }
+
+    /* ZOOM_VISUAL — update the blend-uniform state on the big render target.
+     * This is "non-intrusive": cols/rows/cell-size don't change, only the
+     * composite's UV transform. Cheap, instant, fully reversible. */
+    if (event->type == YETTY_EVENT_ZOOM_VISUAL) {
+        if (event->zoom_visual.reset) {
+            yetty->visual_zoom_scale = 1.0f;
+            yetty->visual_zoom_offset_x = 0.0f;
+            yetty->visual_zoom_offset_y = 0.0f;
+        } else {
+            yetty->visual_zoom_scale = yetty_clampf(
+                yetty->visual_zoom_scale + event->zoom_visual.delta,
+                1.0f, 100.0f);
+            if (yetty->visual_zoom_scale <= 1.0f) {
+                yetty->visual_zoom_scale = 1.0f;
+                yetty->visual_zoom_offset_x = 0.0f;
+                yetty->visual_zoom_offset_y = 0.0f;
+            }
+        }
+
+        ydebug("yetty: ZOOM_VISUAL scale=%.2f rt=%p", yetty->visual_zoom_scale,
+               (void *)yetty->render_target);
+        if (yetty->render_target && yetty->render_target->ops->set_visual_zoom) {
+            yetty->render_target->ops->set_visual_zoom(
+                yetty->render_target,
+                yetty->visual_zoom_scale,
+                yetty->visual_zoom_offset_x,
+                yetty->visual_zoom_offset_y);
+        } else {
+            yerror("yetty: ZOOM_VISUAL: set_visual_zoom not available on rt=%p",
+                   (void *)yetty->render_target);
+        }
+        if (yetty->event_loop && yetty->event_loop->ops->request_render)
+            yetty->event_loop->ops->request_render(yetty->event_loop);
+        return YETTY_OK(yetty_ycore_int, 1);
+    }
+
+    /* ZOOM_CELL_SIZE — structural zoom. Forward to the workspace so the
+     * active terminal can scale its layers' cell_size and recompute cols/rows.
+     * See terminal.c for the actual restructuring. */
+    if (event->type == YETTY_EVENT_ZOOM_CELL_SIZE) {
+        if (yetty->workspace)
+            yetty_yui_workspace_on_event(yetty->workspace, event);
+        return YETTY_OK(yetty_ycore_int, 1);
+    }
+
     /* Handle RESIZE event - reconfigure surface and resize render target */
     if (event->type == YETTY_EVENT_RESIZE) {
         uint32_t width = (uint32_t)event->resize.width;
@@ -111,6 +224,9 @@ static struct yetty_ycore_int_result yetty_event_handler(
 
         if (width == 0 || height == 0)
             return YETTY_OK(yetty_ycore_int, 1);
+
+        yetty->window_width = (float)width;
+        yetty->window_height = (float)height;
 
         /* Reconfigure surface */
         WGPUSurface surface = yetty->context.app_context.app_gpu_context.surface;
@@ -193,6 +309,13 @@ static struct yetty_ycore_void_result register_event_listeners(struct yetty_yett
     res = el->ops->register_listener(el, YETTY_EVENT_RENDER, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
     res = el->ops->register_listener(el, YETTY_EVENT_SHUTDOWN, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+
+    /* Named zoom events — consumed here (ZOOM_VISUAL) or forwarded to the
+     * workspace (ZOOM_CELL_SIZE). Same entry point for RPC / kb-map injection. */
+    res = el->ops->register_listener(el, YETTY_EVENT_ZOOM_VISUAL, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_ZOOM_CELL_SIZE, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
 
     ydebug("yetty: registered for all events");
@@ -608,6 +731,7 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
     if (!yetty) {
         return YETTY_ERR(yetty_yetty, "Failed to allocate yetty");
     }
+    yetty->visual_zoom_scale = 1.0f;
     ydebug("yetty_create: Allocated yetty struct");
 
     /* Copy app context */

@@ -177,11 +177,47 @@ static void text_layer_set_cursor(struct yetty_yterm_terminal_layer *self, int c
     ydebug("text_layer_set_cursor EXIT: col=%d row=%d set", col, row);
 }
 
+static struct yetty_ycore_void_result
+text_layer_set_cell_size(struct yetty_yterm_terminal_layer *self,
+                         struct pixel_size cell_size)
+{
+    struct yetty_yterm_terminal_text_layer *text_layer =
+        container_of(self, struct yetty_yterm_terminal_text_layer, base);
+    if (cell_size.width <= 0.0f || cell_size.height <= 0.0f)
+        return YETTY_ERR(yetty_ycore_void, "invalid cell size");
+
+    /* Ask the font to re-rasterize (raster) or update its requested render
+     * size (MSDF) FIRST, so get_cell_size() reports something useful if we
+     * later want to snap to the font's natural cell. */
+    if (text_layer->font && text_layer->font->ops &&
+        text_layer->font->ops->set_cell_size) {
+        struct yetty_ycore_void_result r =
+            text_layer->font->ops->set_cell_size(text_layer->font, cell_size);
+        if (!YETTY_IS_OK(r))
+            ywarn("text_layer_set_cell_size: font set_cell_size failed: %s",
+                  r.error.msg);
+    }
+
+    self->cell_size = cell_size;
+    /* Push to the GPU uniform the shader actually reads. Keeping base.cell_size
+     * in sync without this is invisible to the shader. */
+    set_cell_size(&text_layer->rs, cell_size.width, cell_size.height);
+    text_layer->rs.pixel_size.width =
+        (float)self->grid_size.cols * cell_size.width;
+    text_layer->rs.pixel_size.height =
+        (float)self->grid_size.rows * cell_size.height;
+    self->dirty = 1;
+    ydebug("text_layer_set_cell_size: %.1fx%.1f",
+           cell_size.width, cell_size.height);
+    return YETTY_OK_VOID();
+}
+
 /* Ops */
 static const struct yetty_yterm_terminal_layer_ops text_layer_ops = {
     .destroy = text_layer_destroy,
     .write = text_layer_write,
     .resize_grid = text_layer_resize_grid,
+    .set_cell_size = text_layer_set_cell_size,
     .get_gpu_resource_set = text_layer_get_gpu_resource_set,
     .render = text_layer_render,
     .is_empty = text_layer_is_empty,
