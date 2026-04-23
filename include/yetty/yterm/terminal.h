@@ -21,6 +21,7 @@ struct yetty_ycore_event_loop;
 struct yetty_platform_pty;
 struct yetty_yui_view;
 struct yetty_yrender_gpu_resource_binder;
+struct yetty_yrender_target;
 
 /* Render layer function - stateless, renders layer to target texture.
  * Returns early with OK if layer is not dirty. */
@@ -62,6 +63,10 @@ struct yetty_yterm_terminal_layer_ops {
       struct yetty_yterm_terminal_layer *self, struct grid_size grid_size);
   struct yetty_yrender_gpu_resource_set_result (*get_gpu_resource_set)(
       const struct yetty_yterm_terminal_layer *self);
+  /* Render layer to target */
+  struct yetty_ycore_void_result (*render)(
+      struct yetty_yterm_terminal_layer *self,
+      struct yetty_yrender_target *target);
   /* Returns 1 if layer has no content to render (skip rendering, use
    * transparent texture) */
   int (*is_empty)(const struct yetty_yterm_terminal_layer *self);

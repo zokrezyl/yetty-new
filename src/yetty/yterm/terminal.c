@@ -209,7 +209,7 @@ terminal_render_frame(struct yetty_yterm_terminal *terminal,
     }
 
     struct yetty_ycore_void_result res =
-        layer_target->ops->render_layer(layer_target, layer);
+        layer->ops->render(layer, layer_target);
 
     if (!YETTY_IS_OK(res)) {
       yerror("terminal_render_frame: layer %zu render failed: %s", i,

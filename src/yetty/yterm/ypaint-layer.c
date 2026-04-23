@@ -8,6 +8,7 @@
 #include <yetty/ypaint-core/complex-prim-types.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/yrender/gpu-resource-set.h>
+#include <yetty/yrender/render-target.h>
 #include <yetty/ypaint-yaml/ypaint-yaml.h>
 #include <yetty/yterm/osc-args.h>
 #include <yetty/yterm/ypaint-layer.h>
@@ -94,6 +95,8 @@ static struct yetty_ycore_void_result ypaint_layer_scroll(
     struct yetty_yterm_terminal_layer *self, int lines);
 static void ypaint_layer_set_cursor(struct yetty_yterm_terminal_layer *self,
                                     int col, int row);
+static struct yetty_ycore_void_result ypaint_layer_render(
+    struct yetty_yterm_terminal_layer *self, struct yetty_yrender_target *target);
 
 /* Canvas scroll callback - propagate to other layers */
 static struct yetty_ycore_void_result
@@ -148,6 +151,7 @@ static const struct yetty_yterm_terminal_layer_ops ypaint_layer_ops = {
     .write = ypaint_layer_write,
     .resize_grid = ypaint_layer_resize_grid,
     .get_gpu_resource_set = ypaint_layer_get_gpu_resource_set,
+    .render = ypaint_layer_render,
     .is_empty = ypaint_layer_is_empty,
     .on_key = ypaint_layer_on_key,
     .on_char = ypaint_layer_on_char,
@@ -544,4 +548,47 @@ static void ypaint_layer_set_cursor(struct yetty_yterm_terminal_layer *self,
       layer->canvas,
       (struct grid_cursor_pos){.cols = (uint32_t)col, .rows = (uint32_t)row});
   ydebug("ypaint_layer_set_cursor: col=%d row=%d", col, row);
+}
+
+/* Render layer to target - simple prims + complex prims */
+static struct yetty_ycore_void_result ypaint_layer_render(
+    struct yetty_yterm_terminal_layer *self, struct yetty_yrender_target *target) {
+  struct yetty_yterm_ypaint_layer *layer =
+      (struct yetty_yterm_ypaint_layer *)self;
+
+  /* Render simple prims via render_layer */
+  struct yetty_ycore_void_result res = target->ops->render_layer(target, self);
+  if (!YETTY_IS_OK(res))
+    return res;
+
+  /* Render complex prims */
+  if (!layer->canvas)
+    return YETTY_OK_VOID();
+
+  uint32_t count = yetty_ypaint_canvas_complex_prim_count(layer->canvas);
+  if (count == 0)
+    return YETTY_OK_VOID();
+
+  uint32_t row0 = yetty_ypaint_canvas_rolling_row_0(layer->canvas);
+  struct pixel_size cell_size = yetty_ypaint_canvas_cell_get_pixel_size(layer->canvas);
+
+  for (uint32_t i = 0; i < count; i++) {
+    struct yetty_ypaint_complex_prim_instance *inst =
+        yetty_ypaint_canvas_get_complex_prim(layer->canvas, i);
+    if (!inst || !inst->render)
+      continue;
+
+    /* Calculate screen position from bounds and scroll offset */
+    float y_offset = (float)((int32_t)inst->rolling_row - (int32_t)row0) * cell_size.height;
+    float screen_x = inst->bounds.min.x;
+    float screen_y = inst->bounds.min.y + y_offset;
+
+    res = inst->render(inst, target, screen_x, screen_y);
+    if (!YETTY_IS_OK(res)) {
+      yerror("ypaint_layer_render: complex prim %u render failed: %s", i, res.error.msg);
+      /* Continue with other prims */
+    }
+  }
+
+  return YETTY_OK_VOID();
 }

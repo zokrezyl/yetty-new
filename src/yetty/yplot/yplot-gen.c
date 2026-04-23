@@ -4,6 +4,7 @@
 #include <yetty/yrender/gpu-resource-binder.h>
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/yrender/gpu-allocator.h>
+#include <yetty/yrender/render-target.h>
 #include <yetty/ypaint-core/complex-prim-types.h>
 #include <yetty/ytrace.h>
 #include <stdlib.h>
@@ -33,6 +34,8 @@ struct yplot_factory {
     struct yetty_ypaint_concrete_factory base;
     struct yetty_yrender_gpu_resource_set rs;
     struct yetty_yrender_gpu_resource_binder *binder;
+    WGPUDevice device;
+    WGPUQueue queue;
 };
 
 static struct yplot_factory *yplot_factory_from_base(struct yetty_ypaint_concrete_factory *base)
@@ -227,14 +230,65 @@ yplot_instance_render(struct yetty_ypaint_complex_prim_instance *self,
     rs->buffers[0].size = buffer_words * sizeof(uint32_t);
     rs->buffers[0].dirty = 1;
 
-    (void)target;
-    (void)x;
-    (void)y;
-
+    // Update binder with new data
     struct yetty_ycore_void_result res = factory->binder->ops->update(factory->binder);
     if (YETTY_IS_ERR(res))
         return res;
 
+    // Get target view and create render pass
+    WGPUTextureView view = target->ops->get_view(target);
+    if (!view)
+        return YETTY_ERR(yetty_ycore_void, "failed to get target view");
+
+    WGPUCommandEncoderDescriptor enc_desc = {0};
+    WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(factory->device, &enc_desc);
+    if (!encoder)
+        return YETTY_ERR(yetty_ycore_void, "failed to create encoder");
+
+    // Render pass with LoadOp=Load to preserve existing content
+    WGPURenderPassColorAttachment color_attachment = {0};
+    color_attachment.view = view;
+    color_attachment.loadOp = WGPULoadOp_Load;
+    color_attachment.storeOp = WGPUStoreOp_Store;
+    color_attachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+
+    WGPURenderPassDescriptor pass_desc = {0};
+    pass_desc.colorAttachmentCount = 1;
+    pass_desc.colorAttachments = &color_attachment;
+
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc);
+    if (!pass) {
+        wgpuCommandEncoderRelease(encoder);
+        return YETTY_ERR(yetty_ycore_void, "failed to begin render pass");
+    }
+
+    // Set viewport to instance bounds at x, y
+    float w = self->bounds.max.x - self->bounds.min.x;
+    float h = self->bounds.max.y - self->bounds.min.y;
+    wgpuRenderPassEncoderSetViewport(pass, x, y, w, h, 0.0f, 1.0f);
+    wgpuRenderPassEncoderSetScissorRect(pass, (uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h);
+
+    // Bind pipeline and draw
+    WGPURenderPipeline pipeline = factory->binder->ops->get_pipeline(factory->binder);
+    WGPUBuffer quad_vb = factory->binder->ops->get_quad_vertex_buffer(factory->binder);
+
+    if (pipeline && quad_vb) {
+        wgpuRenderPassEncoderSetPipeline(pass, pipeline);
+        factory->binder->ops->bind(factory->binder, pass, 0);
+        wgpuRenderPassEncoderSetVertexBuffer(pass, 0, quad_vb, 0, WGPU_WHOLE_SIZE);
+        wgpuRenderPassEncoderDraw(pass, 3, 1, 0, 0);  // fullscreen triangle
+    }
+
+    wgpuRenderPassEncoderEnd(pass);
+    wgpuRenderPassEncoderRelease(pass);
+
+    WGPUCommandBufferDescriptor cmd_desc = {0};
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, &cmd_desc);
+    wgpuQueueSubmit(factory->queue, 1, &cmd);
+    wgpuCommandBufferRelease(cmd);
+    wgpuCommandEncoderRelease(encoder);
+
+    ydebug("yplot_instance_render: rendered at (%.1f, %.1f) size (%.1f x %.1f)", x, y, w, h);
     return YETTY_OK_VOID();
 }
 
@@ -254,6 +308,9 @@ yplot_compile_pipeline(struct yetty_ypaint_concrete_factory *self,
         ydebug("yplot: factory already initialized");
         return YETTY_OK_VOID();
     }
+
+    factory->device = device;
+    factory->queue = queue;
 
     yplot_init_rs(factory);
 

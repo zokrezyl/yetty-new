@@ -3,6 +3,7 @@
 #include <yetty/yfont/ms-raster-font.h>
 #include <yetty/yfont/ms-msdf-font.h>
 #include <yetty/yrender/gpu-resource-set.h>
+#include <yetty/yrender/render-target.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/types.h>
 #include <yetty/ycore/util.h>
@@ -98,6 +99,8 @@ static struct yetty_yrender_gpu_resource_set_result text_layer_get_gpu_resource_
     const struct yetty_yterm_terminal_layer *self);
 static int text_layer_on_key(struct yetty_yterm_terminal_layer *self, int key, int mods);
 static int text_layer_on_char(struct yetty_yterm_terminal_layer *self, uint32_t codepoint, int mods);
+static struct yetty_ycore_void_result text_layer_render(
+    struct yetty_yterm_terminal_layer *self, struct yetty_yrender_target *target);
 
 /* VTerm callbacks */
 static int on_damage(VTermRect rect, void *user);
@@ -180,6 +183,7 @@ static const struct yetty_yterm_terminal_layer_ops text_layer_ops = {
     .write = text_layer_write,
     .resize_grid = text_layer_resize_grid,
     .get_gpu_resource_set = text_layer_get_gpu_resource_set,
+    .render = text_layer_render,
     .is_empty = text_layer_is_empty,
     .on_key = text_layer_on_key,
     .on_char = text_layer_on_char,
@@ -508,6 +512,13 @@ static struct yetty_yrender_gpu_resource_set_result text_layer_get_gpu_resource_
     }
 
     return YETTY_OK(yetty_yrender_gpu_resource_set, &text_layer->rs);
+}
+
+/* Render layer to target - delegate to render_target */
+static struct yetty_ycore_void_result text_layer_render(
+    struct yetty_yterm_terminal_layer *self, struct yetty_yrender_target *target)
+{
+    return target->ops->render_layer(target, self);
 }
 
 /* VTerm callbacks */
