@@ -180,6 +180,35 @@ def generate_c_source(schema, uniforms, buffers):
     rs->uniforms[{uniform_idx}].type = {u["render_type"]};
     rs->uniforms[{uniform_idx}].u32 = 0;''')
             uniform_idx += 1
+
+    # Visual-zoom state — tacked on AFTER schema uniforms and NOT present in
+    # the wire format. Populated by the factory's set_visual_zoom op and by
+    # instance_render (viewport_w/h read from the target each frame). The
+    # shader transforms its incoming pixel at fs_main entry so the SDF math
+    # inside plot bounds re-evaluates at the zoomed coordinate (crisp at any
+    # scale), matching text-layer / ypaint-layer / MSDF behaviour.
+    vz_scale_idx = uniform_idx
+    vz_off_x_idx = uniform_idx + 1
+    vz_off_y_idx = uniform_idx + 2
+    vp_w_idx    = uniform_idx + 3
+    vp_h_idx    = uniform_idx + 4
+    uniform_setup.append(f'''    strncpy(rs->uniforms[{vz_scale_idx}].name, "visual_zoom_scale", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[{vz_scale_idx}].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[{vz_scale_idx}].f32 = 1.0f;
+    strncpy(rs->uniforms[{vz_off_x_idx}].name, "visual_zoom_off_x", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[{vz_off_x_idx}].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[{vz_off_x_idx}].f32 = 0.0f;
+    strncpy(rs->uniforms[{vz_off_y_idx}].name, "visual_zoom_off_y", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[{vz_off_y_idx}].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[{vz_off_y_idx}].f32 = 0.0f;
+    strncpy(rs->uniforms[{vp_w_idx}].name, "viewport_w", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[{vp_w_idx}].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[{vp_w_idx}].f32 = 0.0f;
+    strncpy(rs->uniforms[{vp_h_idx}].name, "viewport_h", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[{vp_h_idx}].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[{vp_h_idx}].f32 = 0.0f;''')
+    uniform_idx += 5
+
     uniform_setup_str = '\n'.join(uniform_setup)
     total_uniform_count = uniform_idx
 
@@ -364,6 +393,19 @@ static struct yetty_ycore_void_result
     // Update uniforms from wire format
 {uniform_update_str}
 
+    // Visual-zoom viewport — read from the target every frame so the zoom
+    // transform in the shader centers on the actual pane size (the zoom
+    // scale/offsets are pushed in separately via set_visual_zoom).
+    rs->uniforms[{vp_w_idx}].f32 = target->viewport.w;
+    rs->uniforms[{vp_h_idx}].f32 = target->viewport.h;
+
+    // Override bounds_x / bounds_y with the caller-provided screen position
+    // (wire bounds are the pre-scroll origin; x,y are the post-scroll pane
+    // position the instance should render at). The shader's cull/zoom math
+    // uses these to place the plot rect correctly under scrolling.
+    rs->uniforms[0].f32 = x;
+    rs->uniforms[1].f32 = y;
+
     // Get buffer data (after uniforms and length fields)
     const uint32_t *buffer_data = payload + {buffer_data_offset};
     size_t buffer_words = payload[{uniforms_word_count}];  // first buffer length
@@ -405,11 +447,20 @@ static struct yetty_ycore_void_result
         return YETTY_ERR(yetty_ycore_void, "failed to begin render pass");
     }}
 
-    // Set viewport to instance bounds at x, y
+    // Viewport = full pane. The fragment shader applies the visual-zoom
+    // transform to its incoming pixel, checks if the transformed pixel is
+    // inside the plot's bounds rect, and either evaluates the SDF or
+    // discards. This way the SDF math runs per-fragment at the zoomed
+    // pixel — no bitmap stretching, edges stay sharp at any zoom.
+    // Instance position/size reach the shader via the bounds_* uniforms
+    // (bounds_x/y were overridden above with the scroll-adjusted x,y).
+    wgpuRenderPassEncoderSetViewport(pass, 0.0f, 0.0f,
+        target->viewport.w, target->viewport.h, 0.0f, 1.0f);
+    wgpuRenderPassEncoderSetScissorRect(pass, 0, 0,
+        (uint32_t)target->viewport.w, (uint32_t)target->viewport.h);
+
     float w = self->bounds.max.x - self->bounds.min.x;
     float h = self->bounds.max.y - self->bounds.min.y;
-    wgpuRenderPassEncoderSetViewport(pass, x, y, w, h, 0.0f, 1.0f);
-    wgpuRenderPassEncoderSetScissorRect(pass, (uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h);
 
     // Bind pipeline and draw
     WGPURenderPipeline pipeline = factory->binder->ops->get_pipeline(factory->binder);
@@ -541,6 +592,21 @@ static struct yetty_yrender_gpu_resource_set *{name}_get_shared_rs(
     return &factory->rs;
 }}
 
+static struct yetty_ycore_void_result
+{name}_set_visual_zoom(struct yetty_ypaint_concrete_factory *self,
+                       float scale, float off_x, float off_y)
+{{
+    struct {name}_factory *factory = {name}_factory_from_base(self);
+    /* All instances share this factory's rs, so writing here covers every
+     * already-created primitive. Shader transforms its pixel at fs_main entry
+     * using these values so SDF math inside plot bounds stays crisp at any
+     * zoom. */
+    factory->rs.uniforms[{vz_scale_idx}].f32 = (scale > 0.0f) ? scale : 1.0f;
+    factory->rs.uniforms[{vz_off_x_idx}].f32 = off_x;
+    factory->rs.uniforms[{vz_off_y_idx}].f32 = off_y;
+    return YETTY_OK_VOID();
+}}
+
 struct yetty_ypaint_concrete_factory *yetty_{name}_factory_create(void)
 {{
     struct {name}_factory *factory = calloc(1, sizeof(struct {name}_factory));
@@ -553,6 +619,7 @@ struct yetty_ypaint_concrete_factory *yetty_{name}_factory_create(void)
     factory->base.create_instance = {name}_create_instance;
     factory->base.destroy_instance = {name}_destroy_instance;
     factory->base.get_shared_rs = {name}_get_shared_rs;
+    factory->base.set_visual_zoom = {name}_set_visual_zoom;
 
     return &factory->base;
 }}

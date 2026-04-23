@@ -23,7 +23,13 @@
 #define U_DEFAULT_FG      6
 #define U_DEFAULT_BG      7
 #define U_FONT_TYPE       8
-#define U_COUNT           9
+/* Visual zoom state pushed in from yetty.c. Applied to the incoming pixel
+ * position at the start of fs_main — so cell lookup, glyph sampling, and
+ * MSDF/SDF math all evaluate at the *transformed* coordinate. That is the
+ * only way to zoom without turning the composite into a bitmap blur. */
+#define U_VZ_SCALE        9
+#define U_VZ_OFF          10
+#define U_COUNT           11
 
 /* Setters */
 static inline void set_grid_size(struct yetty_yrender_gpu_resource_set *rs, float cols, float rows) {
@@ -53,6 +59,12 @@ static inline void set_default_fg(struct yetty_yrender_gpu_resource_set *rs, uin
 static inline void set_default_bg(struct yetty_yrender_gpu_resource_set *rs, uint32_t c) {
     rs->uniforms[U_DEFAULT_BG].u32 = c;
 }
+static inline void set_visual_zoom(struct yetty_yrender_gpu_resource_set *rs,
+                                   float scale, float off_x, float off_y) {
+    rs->uniforms[U_VZ_SCALE].f32 = scale;
+    rs->uniforms[U_VZ_OFF].vec2[0] = off_x;
+    rs->uniforms[U_VZ_OFF].vec2[1] = off_y;
+}
 
 /* Init — names and types use the same constants */
 static void init_uniforms(struct yetty_yrender_gpu_resource_set *rs)
@@ -68,11 +80,14 @@ static void init_uniforms(struct yetty_yrender_gpu_resource_set *rs)
     rs->uniforms[U_DEFAULT_FG]     = (struct yetty_yrender_uniform){"default_fg",     YETTY_YRENDER_UNIFORM_U32};
     rs->uniforms[U_DEFAULT_BG]     = (struct yetty_yrender_uniform){"default_bg",     YETTY_YRENDER_UNIFORM_U32};
     rs->uniforms[U_FONT_TYPE]     = (struct yetty_yrender_uniform){"font_type",     YETTY_YRENDER_UNIFORM_U32};
+    rs->uniforms[U_VZ_SCALE]      = (struct yetty_yrender_uniform){"visual_zoom_scale",  YETTY_YRENDER_UNIFORM_F32};
+    rs->uniforms[U_VZ_OFF]        = (struct yetty_yrender_uniform){"visual_zoom_off",    YETTY_YRENDER_UNIFORM_VEC2};
 
     set_scale(rs, 1.0f);
     set_cursor_shape(rs, 1.0f);
     set_default_fg(rs, 0x00FFFFFFu);
     set_default_bg(rs, 0x00000000u);
+    set_visual_zoom(rs, 1.0f, 0.0f, 0.0f);
 }
 
 /* Text layer - embeds base as first member */
@@ -212,12 +227,24 @@ text_layer_set_cell_size(struct yetty_yterm_terminal_layer *self,
     return YETTY_OK_VOID();
 }
 
+static struct yetty_ycore_void_result
+text_layer_set_visual_zoom(struct yetty_yterm_terminal_layer *self,
+                           float scale, float off_x, float off_y)
+{
+    struct yetty_yterm_terminal_text_layer *text_layer =
+        container_of(self, struct yetty_yterm_terminal_text_layer, base);
+    set_visual_zoom(&text_layer->rs, scale, off_x, off_y);
+    self->dirty = 1;
+    return YETTY_OK_VOID();
+}
+
 /* Ops */
 static const struct yetty_yterm_terminal_layer_ops text_layer_ops = {
     .destroy = text_layer_destroy,
     .write = text_layer_write,
     .resize_grid = text_layer_resize_grid,
     .set_cell_size = text_layer_set_cell_size,
+    .set_visual_zoom = text_layer_set_visual_zoom,
     .get_gpu_resource_set = text_layer_get_gpu_resource_set,
     .render = text_layer_render,
     .is_empty = text_layer_is_empty,
@@ -297,8 +324,13 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
     text_layer->base.cursor_userdata = cursor_userdata;
 
     /* Create font from config */
+    /* Default MSDF: on a fresh install, try_load_config_file() runs BEFORE
+     * extract_assets writes config.yaml to disk, so this fallback is what
+     * actually ships. Raster bitmaps look fuzzy under Ctrl+Scroll (shader-level
+     * zoom just stretches the atlas); MSDF re-evaluates per fragment and
+     * stays crisp at any scale. */
     const char *render_method = config->ops->get_string(
-        config, YETTY_YCONFIG_KEY_TERMINAL_FONT_RENDER_METHOD, "raster");
+        config, YETTY_YCONFIG_KEY_TERMINAL_FONT_RENDER_METHOD, "msdf");
     ydebug("text_layer: render_method='%s'", render_method);
     struct yetty_font_ms_font_result font_res;
     if (strcmp(render_method, "msdf") == 0) {

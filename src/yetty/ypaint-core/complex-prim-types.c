@@ -218,6 +218,25 @@ yetty_ypaint_complex_prim_factory_create_instance(
 }
 
 //=============================================================================
+// Visual zoom fan-out — called by ypaint-layer when the visual zoom changes.
+// Each concrete factory writes the scale/offsets into its own shared uniforms
+// so its fragment shader can transform the incoming pixel at fs_main entry.
+//=============================================================================
+
+void yetty_ypaint_complex_prim_factory_set_visual_zoom(
+	struct yetty_ypaint_complex_prim_factory *factory,
+	float scale, float offset_x, float offset_y)
+{
+	if (!factory)
+		return;
+	for (uint32_t i = 0; i < factory->count; i++) {
+		struct yetty_ypaint_concrete_factory *cf = factory->factories[i];
+		if (cf && cf->set_visual_zoom)
+			cf->set_visual_zoom(cf, scale, offset_x, offset_y);
+	}
+}
+
+//=============================================================================
 // Instance destruction (uses back-pointer)
 //=============================================================================
 

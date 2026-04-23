@@ -58,10 +58,16 @@ enum yetty_ycore_event_type {
     YETTY_EVENT_SHUTDOWN,
     /* Named zoom events (produced from raw SCROLL + modifier combinations by
      * yetty_event_handler; decoupled so rpc/kb-mapping can inject them too).
-     * ZOOM_VISUAL      = non-intrusive shader-level zoom (uniform only).
-     * ZOOM_VISUAL_PAN  = pan the visually-zoomed view (drag translated).
-     * ZOOM_CELL_SIZE   = structural zoom (changes cell pixel size → cols/rows). */
+     * ZOOM_VISUAL        = input: scale delta + anchor, consumed by yetty.
+     * ZOOM_VISUAL_APPLY  = output: computed {scale, off_x, off_y}, forwarded
+     *                      through the workspace so each terminal layer can
+     *                      push the values into its fragment-shader uniforms.
+     *                      MSDF/SDF is re-evaluated per fragment, so glyphs
+     *                      stay crisp at any zoom level.
+     * ZOOM_VISUAL_PAN    = pan the visually-zoomed view (drag translated).
+     * ZOOM_CELL_SIZE     = structural zoom (changes cell pixel size → cols/rows). */
     YETTY_EVENT_ZOOM_VISUAL,
+    YETTY_EVENT_ZOOM_VISUAL_APPLY,
     YETTY_EVENT_ZOOM_VISUAL_PAN,
     YETTY_EVENT_ZOOM_CELL_SIZE,
     /* Must be last - used for array sizing */
@@ -181,6 +187,12 @@ struct yetty_ycore_event_zoom_visual {
     float anchor_y;
 };
 
+struct yetty_ycore_event_zoom_visual_apply {
+    float scale;
+    float offset_x;
+    float offset_y;
+};
+
 struct yetty_ycore_event_zoom_visual_pan {
     float dx; /* screen-space pixel delta (positive = dragged right) */
     float dy; /* screen-space pixel delta (positive = dragged down)  */
@@ -214,6 +226,7 @@ struct yetty_ycore_event {
         struct yetty_ycore_event_card_repack card_repack;
         struct yetty_ycore_event_set_frame_rate set_frame_rate;
         struct yetty_ycore_event_zoom_visual zoom_visual;
+        struct yetty_ycore_event_zoom_visual_apply zoom_visual_apply;
         struct yetty_ycore_event_zoom_visual_pan zoom_visual_pan;
         struct yetty_ycore_event_zoom_cell_size zoom_cell_size;
     };

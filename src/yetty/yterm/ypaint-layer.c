@@ -22,7 +22,9 @@
 #define U_CELL_SIZE 1
 #define U_ROLLING_ROW_0 2
 #define U_PRIM_COUNT 3
-#define U_COUNT 4
+#define U_VZ_SCALE 4
+#define U_VZ_OFF 5
+#define U_COUNT 6
 
 /* Setters */
 static inline void set_grid_size(struct yetty_yrender_gpu_resource_set *rs,
@@ -43,6 +45,12 @@ static inline void set_prim_count(struct yetty_yrender_gpu_resource_set *rs,
                                   uint32_t count) {
   rs->uniforms[U_PRIM_COUNT].u32 = count;
 }
+static inline void set_visual_zoom(struct yetty_yrender_gpu_resource_set *rs,
+                                   float scale, float off_x, float off_y) {
+  rs->uniforms[U_VZ_SCALE].f32 = scale;
+  rs->uniforms[U_VZ_OFF].vec2[0] = off_x;
+  rs->uniforms[U_VZ_OFF].vec2[1] = off_y;
+}
 
 /* Init uniforms */
 static void init_uniforms(struct yetty_yrender_gpu_resource_set *rs) {
@@ -56,9 +64,14 @@ static void init_uniforms(struct yetty_yrender_gpu_resource_set *rs) {
       "ypaint_rolling_row_0", YETTY_YRENDER_UNIFORM_U32};
   rs->uniforms[U_PRIM_COUNT] = (struct yetty_yrender_uniform){
       "ypaint_prim_count", YETTY_YRENDER_UNIFORM_U32};
+  rs->uniforms[U_VZ_SCALE] = (struct yetty_yrender_uniform){
+      "ypaint_visual_zoom_scale", YETTY_YRENDER_UNIFORM_F32};
+  rs->uniforms[U_VZ_OFF] = (struct yetty_yrender_uniform){
+      "ypaint_visual_zoom_off", YETTY_YRENDER_UNIFORM_VEC2};
 
   set_rolling_row_0(rs, 0);
   set_prim_count(rs, 0);
+  set_visual_zoom(rs, 1.0f, 0.0f, 0.0f);
 }
 
 /* YPaint layer - embeds base as first member */
@@ -166,12 +179,34 @@ ypaint_layer_set_cell_size(struct yetty_yterm_terminal_layer *self,
     return YETTY_OK_VOID();
 }
 
+static struct yetty_ycore_void_result
+ypaint_layer_set_visual_zoom(struct yetty_yterm_terminal_layer *self,
+                             float scale, float off_x, float off_y)
+{
+    struct yetty_yterm_ypaint_layer *layer =
+        (struct yetty_yterm_ypaint_layer *)self;
+    set_visual_zoom(&layer->rs, scale, off_x, off_y);
+    self->dirty = 1;
+
+    /* Complex primitives (yplot / yimage / …) render through their own
+     * pipelines with their own fragment shaders — they don't go through the
+     * ypaint-layer shader. Push the zoom into every concrete factory's shared
+     * uniforms so each type's shader can apply the same transform. */
+    if (layer->canvas) {
+        struct yetty_ypaint_complex_prim_factory *f =
+            yetty_ypaint_canvas_get_complex_prim_factory(layer->canvas);
+        yetty_ypaint_complex_prim_factory_set_visual_zoom(f, scale, off_x, off_y);
+    }
+    return YETTY_OK_VOID();
+}
+
 /* Ops */
 static const struct yetty_yterm_terminal_layer_ops ypaint_layer_ops = {
     .destroy = ypaint_layer_destroy,
     .write = ypaint_layer_write,
     .resize_grid = ypaint_layer_resize_grid,
     .set_cell_size = ypaint_layer_set_cell_size,
+    .set_visual_zoom = ypaint_layer_set_visual_zoom,
     .get_gpu_resource_set = ypaint_layer_get_gpu_resource_set,
     .render = ypaint_layer_render,
     .is_empty = ypaint_layer_is_empty,

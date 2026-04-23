@@ -177,6 +177,26 @@ static struct yetty_ycore_int_result yetty_event_handler(
         /* No zoom modifier — fall through to workspace forwarding below. */
     }
 
+    /* While visual zoom is active, the keyboard is captured: Enter and Esc
+     * exit the zoom; every other key/char event is silently swallowed so the
+     * shell under the terminal doesn't see a phantom keystroke while the
+     * user is just trying to look around. */
+    if (yetty->visual_zoom_scale > 1.0f &&
+        (event->type == YETTY_EVENT_KEY_DOWN ||
+         event->type == YETTY_EVENT_KEY_UP   ||
+         event->type == YETTY_EVENT_CHAR)) {
+        if (event->type == YETTY_EVENT_KEY_DOWN &&
+            (event->key.key == 256 /* ESC */ ||
+             event->key.key == 257 /* ENTER */)) {
+            struct yetty_ycore_event ev = {0};
+            ev.type = YETTY_EVENT_ZOOM_VISUAL;
+            ev.zoom_visual.reset = 1;
+            yetty_post_event_async(yetty, &ev);
+            ydebug("yetty: visual zoom EXIT (key=%d)", event->key.key);
+        }
+        return YETTY_OK(yetty_ycore_int, 1);
+    }
+
     /* Mouse drag translation while visual zoom is active. Button-0 down starts
      * a drag; subsequent moves emit ZOOM_VISUAL_PAN with the pixel delta; up
      * ends it. We swallow these events so the terminal underneath doesn't see
@@ -268,19 +288,21 @@ static struct yetty_ycore_int_result yetty_event_handler(
             }
         }
 
-        ydebug("yetty: ZOOM_VISUAL scale=%.2f off=(%.1f,%.1f) rt=%p",
+        ydebug("yetty: ZOOM_VISUAL scale=%.2f off=(%.1f,%.1f)",
                yetty->visual_zoom_scale,
-               yetty->visual_zoom_offset_x, yetty->visual_zoom_offset_y,
-               (void *)yetty->render_target);
-        if (yetty->render_target && yetty->render_target->ops->set_visual_zoom) {
-            yetty->render_target->ops->set_visual_zoom(
-                yetty->render_target,
-                yetty->visual_zoom_scale,
-                yetty->visual_zoom_offset_x,
-                yetty->visual_zoom_offset_y);
-        } else {
-            yerror("yetty: ZOOM_VISUAL: set_visual_zoom not available on rt=%p",
-                   (void *)yetty->render_target);
+               yetty->visual_zoom_offset_x, yetty->visual_zoom_offset_y);
+        /* Push the zoom into every layer's own uniforms so each fragment
+         * shader re-evaluates MSDF/SDF at the transformed pixel. Doing this
+         * at the blend stage was a post-rasterization bitmap stretch and
+         * produced blurry text at large scales. */
+        {
+            struct yetty_ycore_event apply = {0};
+            apply.type = YETTY_EVENT_ZOOM_VISUAL_APPLY;
+            apply.zoom_visual_apply.scale    = yetty->visual_zoom_scale;
+            apply.zoom_visual_apply.offset_x = yetty->visual_zoom_offset_x;
+            apply.zoom_visual_apply.offset_y = yetty->visual_zoom_offset_y;
+            if (yetty->workspace)
+                yetty_yui_workspace_on_event(yetty->workspace, &apply);
         }
         if (yetty->event_loop && yetty->event_loop->ops->request_render)
             yetty->event_loop->ops->request_render(yetty->event_loop);
@@ -309,12 +331,15 @@ static struct yetty_ycore_int_result yetty_event_handler(
             yetty->visual_zoom_offset_y = yetty_clampf(
                 yetty->visual_zoom_offset_y, -max_off_y, max_off_y);
 
-            if (yetty->render_target && yetty->render_target->ops->set_visual_zoom)
-                yetty->render_target->ops->set_visual_zoom(
-                    yetty->render_target,
-                    yetty->visual_zoom_scale,
-                    yetty->visual_zoom_offset_x,
-                    yetty->visual_zoom_offset_y);
+            {
+            struct yetty_ycore_event apply = {0};
+            apply.type = YETTY_EVENT_ZOOM_VISUAL_APPLY;
+            apply.zoom_visual_apply.scale    = yetty->visual_zoom_scale;
+            apply.zoom_visual_apply.offset_x = yetty->visual_zoom_offset_x;
+            apply.zoom_visual_apply.offset_y = yetty->visual_zoom_offset_y;
+            if (yetty->workspace)
+                yetty_yui_workspace_on_event(yetty->workspace, &apply);
+        }
             if (yetty->event_loop && yetty->event_loop->ops->request_render)
                 yetty->event_loop->ops->request_render(yetty->event_loop);
         }
@@ -432,6 +457,10 @@ static struct yetty_ycore_void_result register_event_listeners(struct yetty_yett
     res = el->ops->register_listener(el, YETTY_EVENT_ZOOM_VISUAL, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
     res = el->ops->register_listener(el, YETTY_EVENT_ZOOM_VISUAL_PAN, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    /* ZOOM_VISUAL_APPLY is forwarded via workspace_on_event, not dispatched,
+     * but register a listener so the event-loop knows the type exists. */
+    res = el->ops->register_listener(el, YETTY_EVENT_ZOOM_VISUAL_APPLY, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
     res = el->ops->register_listener(el, YETTY_EVENT_ZOOM_CELL_SIZE, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;

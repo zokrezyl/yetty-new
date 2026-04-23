@@ -720,6 +720,20 @@ terminal_view_on_event(struct yetty_yui_view *view,
     return YETTY_OK(yetty_ycore_int, 1);
   }
 
+  case YETTY_EVENT_ZOOM_VISUAL_APPLY: {
+    float scale = event->zoom_visual_apply.scale;
+    float ox    = event->zoom_visual_apply.offset_x;
+    float oy    = event->zoom_visual_apply.offset_y;
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+      struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
+      if (layer && layer->ops && layer->ops->set_visual_zoom)
+        layer->ops->set_visual_zoom(layer, scale, ox, oy);
+    }
+    ydebug("terminal: ZOOM_VISUAL_APPLY scale=%.2f off=(%.1f,%.1f)",
+           scale, ox, oy);
+    return YETTY_OK(yetty_ycore_int, 1);
+  }
+
   case YETTY_EVENT_SHUTDOWN:
     ydebug("terminal: SHUTDOWN received");
     terminal->shutting_down = 1;

@@ -212,8 +212,6 @@ fn ypaint_unpack_color(packed: u32) -> vec4<f32> {
 // =============================================================================
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let pixel_pos = input.position.xy;
-
     let prim_count = uniforms.ypaint_scroll_ypaint_prim_count;
     let grid_size = uniforms.ypaint_scroll_ypaint_grid_size;
     let cell_size = uniforms.ypaint_scroll_ypaint_cell_size;
@@ -232,6 +230,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Grid pixel bounds
     let grid_pixel_w = grid_size.x * cell_size.x;
     let grid_pixel_h = grid_size.y * cell_size.y;
+
+    // Visual zoom — transform screen pixel to source pixel BEFORE any cell
+    // lookup or SDF evaluation. SDFs/MSDFs are re-evaluated per fragment so
+    // edges stay crisp at any scale. Identity when scale==1.
+    let vz_scale = uniforms.ypaint_scroll_ypaint_visual_zoom_scale;
+    let vz_off   = uniforms.ypaint_scroll_ypaint_visual_zoom_off;
+    let vz_center = vec2<f32>(grid_pixel_w * 0.5, grid_pixel_h * 0.5);
+    let pixel_pos = (input.position.xy - vz_center) / max(vz_scale, 0.0001)
+                  + vz_center + vz_off;
 
     // Outside grid = transparent
     if (pixel_pos.x < 0.0 || pixel_pos.y < 0.0 ||

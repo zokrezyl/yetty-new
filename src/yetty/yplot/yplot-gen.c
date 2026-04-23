@@ -171,7 +171,22 @@ static void yplot_init_rs(struct yplot_factory *factory)
     strncpy(rs->uniforms[17].name, "colors_7", YETTY_YRENDER_NAME_MAX - 1);
     rs->uniforms[17].type = YETTY_YRENDER_UNIFORM_U32;
     rs->uniforms[17].u32 = 0;
-    rs->uniform_count = 18;
+    strncpy(rs->uniforms[18].name, "visual_zoom_scale", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[18].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[18].f32 = 1.0f;
+    strncpy(rs->uniforms[19].name, "visual_zoom_off_x", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[19].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[19].f32 = 0.0f;
+    strncpy(rs->uniforms[20].name, "visual_zoom_off_y", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[20].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[20].f32 = 0.0f;
+    strncpy(rs->uniforms[21].name, "viewport_w", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[21].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[21].f32 = 0.0f;
+    strncpy(rs->uniforms[22].name, "viewport_h", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[22].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[22].f32 = 0.0f;
+    rs->uniform_count = 23;
 
     // Setup storage buffer for buffer data
     rs->buffer_count = 1;
@@ -221,6 +236,19 @@ yplot_instance_render(struct yetty_ypaint_complex_prim_instance *self,
     rs->uniforms[16].u32 = payload[16];
     rs->uniforms[17].u32 = payload[17];
 
+    // Visual-zoom viewport — read from the target every frame so the zoom
+    // transform in the shader centers on the actual pane size (the zoom
+    // scale/offsets are pushed in separately via set_visual_zoom).
+    rs->uniforms[21].f32 = target->viewport.w;
+    rs->uniforms[22].f32 = target->viewport.h;
+
+    // Override bounds_x / bounds_y with the caller-provided screen position
+    // (wire bounds are the pre-scroll origin; x,y are the post-scroll pane
+    // position the instance should render at). The shader's cull/zoom math
+    // uses these to place the plot rect correctly under scrolling.
+    rs->uniforms[0].f32 = x;
+    rs->uniforms[1].f32 = y;
+
     // Get buffer data (after uniforms and length fields)
     const uint32_t *buffer_data = payload + 19;
     size_t buffer_words = payload[18];  // first buffer length
@@ -262,11 +290,20 @@ yplot_instance_render(struct yetty_ypaint_complex_prim_instance *self,
         return YETTY_ERR(yetty_ycore_void, "failed to begin render pass");
     }
 
-    // Set viewport to instance bounds at x, y
+    // Viewport = full pane. The fragment shader applies the visual-zoom
+    // transform to its incoming pixel, checks if the transformed pixel is
+    // inside the plot's bounds rect, and either evaluates the SDF or
+    // discards. This way the SDF math runs per-fragment at the zoomed
+    // pixel — no bitmap stretching, edges stay sharp at any zoom.
+    // Instance position/size reach the shader via the bounds_* uniforms
+    // (bounds_x/y were overridden above with the scroll-adjusted x,y).
+    wgpuRenderPassEncoderSetViewport(pass, 0.0f, 0.0f,
+        target->viewport.w, target->viewport.h, 0.0f, 1.0f);
+    wgpuRenderPassEncoderSetScissorRect(pass, 0, 0,
+        (uint32_t)target->viewport.w, (uint32_t)target->viewport.h);
+
     float w = self->bounds.max.x - self->bounds.min.x;
     float h = self->bounds.max.y - self->bounds.min.y;
-    wgpuRenderPassEncoderSetViewport(pass, x, y, w, h, 0.0f, 1.0f);
-    wgpuRenderPassEncoderSetScissorRect(pass, (uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h);
 
     // Bind pipeline and draw
     WGPURenderPipeline pipeline = factory->binder->ops->get_pipeline(factory->binder);
@@ -398,6 +435,21 @@ static struct yetty_yrender_gpu_resource_set *yplot_get_shared_rs(
     return &factory->rs;
 }
 
+static struct yetty_ycore_void_result
+yplot_set_visual_zoom(struct yetty_ypaint_concrete_factory *self,
+                       float scale, float off_x, float off_y)
+{
+    struct yplot_factory *factory = yplot_factory_from_base(self);
+    /* All instances share this factory's rs, so writing here covers every
+     * already-created primitive. Shader transforms its pixel at fs_main entry
+     * using these values so SDF math inside plot bounds stays crisp at any
+     * zoom. */
+    factory->rs.uniforms[18].f32 = (scale > 0.0f) ? scale : 1.0f;
+    factory->rs.uniforms[19].f32 = off_x;
+    factory->rs.uniforms[20].f32 = off_y;
+    return YETTY_OK_VOID();
+}
+
 struct yetty_ypaint_concrete_factory *yetty_yplot_factory_create(void)
 {
     struct yplot_factory *factory = calloc(1, sizeof(struct yplot_factory));
@@ -410,6 +462,7 @@ struct yetty_ypaint_concrete_factory *yetty_yplot_factory_create(void)
     factory->base.create_instance = yplot_create_instance;
     factory->base.destroy_instance = yplot_destroy_instance;
     factory->base.get_shared_rs = yplot_get_shared_rs;
+    factory->base.set_visual_zoom = yplot_set_visual_zoom;
 
     return &factory->base;
 }
