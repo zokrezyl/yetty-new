@@ -13,6 +13,7 @@
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/yfont/font.h>
 #include <yetty/yfont/msdf-font.h>
+#include <yetty/yfont/raster-font.h>
 #include <yetty/ysdf/types.gen.h>
 #include <yetty/yconfig.h>
 #include <yetty/yetty.h>
@@ -136,8 +137,22 @@ struct yetty_ypaint_canvas {
   // Default font for text spans with font_id = -1
   struct yetty_font_font *default_font;
 
+  // Font kind selection for per-buffer fonts created from font blobs
+  // 0 = MSDF (default, CDB-based), 1 = raster (TTF-based, FreeType).
+  int font_render_method;
+
+  // Base size (pixels) used when constructing raster fonts.
+  float raster_base_size;
+
   // Shaders directory for creating fonts from buffers
   char shaders_dir[512];
+
+  // Fonts directory (for deriving TTF paths in raster mode)
+  char fonts_dir[512];
+
+  // Font family used when resolving default font and buffer font names
+  // that aren't absolute paths.
+  char font_family[128];
 
   // Flyweight registry for primitive handlers (SDF prims)
   struct yetty_ypaint_flyweight_registry *flyweight_registry;
@@ -410,6 +425,74 @@ line_buffer_pop_front(struct yetty_ypaint_canvas_line_buffer *buf,
 }
 
 //=============================================================================
+// Font construction helper
+//=============================================================================
+
+/* Decide whether a font-blob name resolves as a raster (TTF) or MSDF (CDB)
+ * source. Looks at the file extension so a single buffer can mix both. Falls
+ * back to the canvas-wide render method when the extension is unknown. */
+static int blob_is_raster(const char *name, int canvas_method) {
+  if (name) {
+    size_t n = strlen(name);
+    if (n >= 4) {
+      const char *ext = name + n - 4;
+      if (strcasecmp(ext, ".ttf") == 0 || strcasecmp(ext, ".otf") == 0)
+        return 1;
+      if (strcasecmp(ext, ".cdb") == 0)
+        return 0;
+    }
+  }
+  return canvas_method;
+}
+
+/* Construct a yetty_font_font for the given font family. `method` = 0 → MSDF,
+ * 1 → raster. Looks up paths relative to the canvas's fonts/shaders dirs. */
+static struct yetty_font_font_result
+ypaint_canvas_make_default_font(const struct yetty_ypaint_canvas *canvas) {
+  char shader_path[768];
+  if (canvas->font_render_method == 1) {
+    char ttf_path[768];
+    snprintf(ttf_path, sizeof(ttf_path), "%s/%s-Regular.ttf",
+             canvas->fonts_dir, canvas->font_family);
+    snprintf(shader_path, sizeof(shader_path), "%s/raster-font.wgsl",
+             canvas->shaders_dir);
+    ydebug("ypaint_canvas: default raster font ttf='%s' shader='%s'",
+           ttf_path, shader_path);
+    return yetty_font_raster_font_create_from_file(ttf_path, shader_path,
+                                                   canvas->raster_base_size);
+  }
+  char cdb_path[768];
+  snprintf(cdb_path, sizeof(cdb_path), "%s/../msdf-fonts/%s-Regular.cdb",
+           canvas->fonts_dir, canvas->font_family);
+  snprintf(shader_path, sizeof(shader_path), "%s/msdf-font.wgsl",
+           canvas->shaders_dir);
+  ydebug("ypaint_canvas: default msdf font cdb='%s' shader='%s'",
+         cdb_path, shader_path);
+  return yetty_font_msdf_font_create(cdb_path, shader_path);
+}
+
+/* Construct a yetty_font_font for a buffer-supplied font blob. The blob's
+ * `name` holds the source path; its extension decides which backend to use,
+ * falling back to the canvas-configured method. */
+static struct yetty_font_font_result
+ypaint_canvas_make_blob_font(const struct yetty_ypaint_canvas *canvas,
+                             const char *blob_name) {
+  if (!blob_name || !blob_name[0])
+    return YETTY_ERR(yetty_font_font, "font blob name is empty");
+
+  char shader_path[768];
+  if (blob_is_raster(blob_name, canvas->font_render_method)) {
+    snprintf(shader_path, sizeof(shader_path), "%s/raster-font.wgsl",
+             canvas->shaders_dir);
+    return yetty_font_raster_font_create_from_file(blob_name, shader_path,
+                                                   canvas->raster_base_size);
+  }
+  snprintf(shader_path, sizeof(shader_path), "%s/msdf-font.wgsl",
+           canvas->shaders_dir);
+  return yetty_font_msdf_font_create(blob_name, shader_path);
+}
+
+//=============================================================================
 // Canvas implementation
 //=============================================================================
 
@@ -480,21 +563,26 @@ yetty_ypaint_canvas_create(bool scrolling_mode,
     return NULL;
   }
 
-  /* Create default MSDF font for text spans (font_id = -1) */
+  /* Create default font for text spans (font_id = -1).
+   * Backend (MSDF vs raster) is selected via ypaint/font/render-method.
+   * Default is "msdf" to preserve existing rendering. */
   struct yetty_yconfig *config = context->app_context.config;
   const char *fonts_dir = config->ops->get_string(config, "paths/fonts", "");
   const char *shaders_dir = config->ops->get_string(config, "paths/shaders", "");
   const char *font_family = config->ops->font_family(config);
   if (!font_family || strcmp(font_family, "default") == 0)
     font_family = "DejaVuSansMNerdFontMono";
-  char cdb_path[512];
-  char shader_path[512];
-  snprintf(cdb_path, sizeof(cdb_path), "%s/../msdf-fonts/%s-Regular.cdb",
-           fonts_dir, font_family);
-  snprintf(shader_path, sizeof(shader_path), "%s/msdf-font.wgsl", shaders_dir);
+  const char *render_method = config->ops->get_string(
+      config, "ypaint/font/render-method", "msdf");
+
   strncpy(canvas->shaders_dir, shaders_dir, sizeof(canvas->shaders_dir) - 1);
-  ydebug("ypaint_canvas: default font cdb_path='%s' shader='%s'", cdb_path, shader_path);
-  struct yetty_font_font_result font_res = yetty_font_msdf_font_create(cdb_path, shader_path);
+  strncpy(canvas->fonts_dir, fonts_dir, sizeof(canvas->fonts_dir) - 1);
+  strncpy(canvas->font_family, font_family, sizeof(canvas->font_family) - 1);
+  canvas->font_render_method = (strcmp(render_method, "raster") == 0) ? 1 : 0;
+  canvas->raster_base_size = 32.0f;
+
+  ydebug("ypaint_canvas: font render_method='%s'", render_method);
+  struct yetty_font_font_result font_res = ypaint_canvas_make_default_font(canvas);
   if (YETTY_IS_OK(font_res)) {
     canvas->default_font = font_res.value;
     ydebug("ypaint_canvas: default font created");
@@ -993,7 +1081,9 @@ yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
     }
   } // end if (has_sdf_primitives)
 
-  // PASS 3: Process font blobs → create MSDF font objects
+  // PASS 3: Process font blobs → create font objects.
+  // Font kind (MSDF vs raster) is decided by the blob name's extension;
+  // unrecognised extensions fall back to the canvas-configured render method.
   uint32_t font_count = yetty_ypaint_core_buffer_font_count(buffer);
   struct yetty_font_font **fonts = NULL;
   if (font_count > 0) {
@@ -1002,13 +1092,8 @@ yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
       const struct yetty_font_blob *fb =
           yetty_ypaint_core_buffer_get_font(buffer, i);
       if (!fb || !fb->named_buf.buf.data) continue;
-      // For now, fonts come as pre-built CDB paths in the name field
-      // TODO: support inline TTF → MSDF generation
-      char font_shader_path[512];
-      snprintf(font_shader_path, sizeof(font_shader_path), "%s/msdf-font.wgsl",
-               canvas->shaders_dir);
       struct yetty_font_font_result fr =
-          yetty_font_msdf_font_create(fb->named_buf.name, font_shader_path);
+          ypaint_canvas_make_blob_font(canvas, fb->named_buf.name);
       if (YETTY_IS_ERR(fr)) {
         yerror("add_buffer: font creation failed: %s", fr.error.msg);
         free(fonts);

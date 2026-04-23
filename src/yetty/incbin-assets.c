@@ -333,12 +333,16 @@ int yetty_incbin_assets_extract_data_to(struct yetty_incbin_assets *assets,
   return 1;
 }
 
-/* Extract config assets to config directory */
+/* Extract config assets to config directory.
+ * Assets are registered by the build with prefix "yconfig/" (see
+ * incbin_add_directory in build-tools/cmake/targets/shared.cmake); the
+ * prefix must match here or extraction silently matches zero entries and
+ * still writes the version marker, wedging all future runs. */
 int yetty_incbin_assets_extract_config_to(struct yetty_incbin_assets *assets,
                                           const char *config_dir) {
   ydebug("extract_config_to: starting extraction to %s", config_dir);
 
-  if (!extract_with_prefix(assets, "config/", config_dir))
+  if (!extract_with_prefix(assets, "yconfig/", config_dir))
     return 0;
 
   write_marker(config_dir);

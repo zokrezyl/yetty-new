@@ -43,6 +43,16 @@ terminal:
       # Font size in pixels (for msdf)
       size: 14
 
+# ─────────────────────────────────────────────────────────────────────────────
+# YPaint (non-monospace font used for ypaint text spans)
+# ─────────────────────────────────────────────────────────────────────────────
+ypaint:
+  font:
+    # Backend for text spans rendered via the ypaint layer.
+    #   msdf   - MSDF atlas (CDB-based, scales smoothly)
+    #   raster - FreeType-rasterized R8 atlas (baseline for comparison)
+    render-method: "msdf"
+
 scrollback:
   # Number of lines to keep in scrollback buffer
   lines: 10000
