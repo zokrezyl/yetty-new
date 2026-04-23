@@ -690,6 +690,75 @@ static void parse_vm_args(struct config_impl *impl, int argc, char *argv[])
     }
 }
 
+/* Parse command line for --ssh flag
+ *
+ * Accepts optional "user@host[:port]" target that follows the flag. */
+static int parse_ssh_target(struct config_impl *impl, const char *target)
+{
+    const char *at, *colon;
+    char key[MAX_KEY_LEN];
+    char user[MAX_VALUE_LEN];
+    char host[MAX_VALUE_LEN];
+    char port[32];
+    size_t user_len, host_len;
+    struct config_node *parent;
+
+    at = strchr(target, '@');
+    if (!at || at == target)
+        return 0;
+
+    user_len = (size_t)(at - target);
+    if (user_len >= sizeof(user))
+        return 0;
+    memcpy(user, target, user_len);
+    user[user_len] = '\0';
+
+    colon = strchr(at + 1, ':');
+    if (colon) {
+        host_len = (size_t)(colon - (at + 1));
+        snprintf(port, sizeof(port), "%s", colon + 1);
+    } else {
+        host_len = strlen(at + 1);
+        port[0] = '\0';
+    }
+    if (host_len == 0 || host_len >= sizeof(host))
+        return 0;
+    memcpy(host, at + 1, host_len);
+    host[host_len] = '\0';
+
+    parent = navigate_or_create(impl->root, "ssh/username", key);
+    if (parent) node_set_value(parent, key, user);
+
+    parent = navigate_or_create(impl->root, "ssh/host", key);
+    if (parent) node_set_value(parent, key, host);
+
+    if (port[0]) {
+        parent = navigate_or_create(impl->root, "ssh/port", key);
+        if (parent) node_set_value(parent, key, port);
+    }
+    return 1;
+}
+
+static void parse_ssh_args(struct config_impl *impl, int argc, char *argv[])
+{
+    char key[MAX_KEY_LEN];
+    struct config_node *parent;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--ssh") != 0)
+            continue;
+
+        /* Optional "user@host[:port]" follows if it isn't another flag */
+        if (i + 1 < argc && argv[i + 1][0] != '-' &&
+            parse_ssh_target(impl, argv[i + 1])) {
+            i++;
+        }
+        parent = navigate_or_create(impl->root, YETTY_YCONFIG_KEY_SSH, key);
+        if (parent)
+            node_set_value(parent, key, "true");
+    }
+}
+
 /* Public create function */
 
 struct yetty_yconfig_result yetty_yconfig_create(int argc, char *argv[],
@@ -712,6 +781,7 @@ struct yetty_yconfig_result yetty_yconfig_create(int argc, char *argv[],
     parse_arg_to_config(impl, argc, argv, NULL, "--rpc-host", YETTY_YCONFIG_KEY_RPC_HOST);
     parse_arg_to_config(impl, argc, argv, "-r", "--rpc-port", YETTY_YCONFIG_KEY_RPC_PORT);
     parse_vm_args(impl, argc, argv);
+    parse_ssh_args(impl, argc, argv);
 
     return YETTY_OK(yetty_yconfig, &impl->base);
 }

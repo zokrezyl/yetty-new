@@ -71,6 +71,7 @@ struct yetty_yconfig {
 #define YETTY_YCONFIG_KEY_RPC_SOCKET_PATH "rpc/socket-path"
 #define YETTY_YCONFIG_KEY_TEMU "temu"
 #define YETTY_YCONFIG_KEY_QEMU "qemu"
+#define YETTY_YCONFIG_KEY_SSH  "ssh/enabled"
 
 /* Create config */
 struct yetty_yconfig_result yetty_yconfig_create(int argc, char *argv[],

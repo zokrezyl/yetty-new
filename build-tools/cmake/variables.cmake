@@ -41,7 +41,7 @@ option(YETTY_ENABLE_LIB_MINIMP4     "minimp4 — MP4 container"               OF
 # Misc
 option(YETTY_ENABLE_LIB_TREESITTER  "tree-sitter — parsing"                 OFF)
 option(YETTY_ENABLE_LIB_WASM3       "wasm3 — WASM interpreter"              OFF)
-option(YETTY_ENABLE_LIB_LIBSSH2     "libssh2 — SSH protocol"                OFF)
+option(YETTY_ENABLE_LIB_LIBSSH2     "libssh2 — SSH protocol"                ON)
 option(YETTY_ENABLE_LIB_THORVG      "thorvg — SVG/Lottie rendering"         OFF)
 
 # Platform-conditional (desktop only: linux, macos, windows)
@@ -88,7 +88,7 @@ option(YETTY_ENABLE_FEATURE_YVIDEO    "yvideo — video codec support"         O
 # Network / connectivity
 option(YETTY_ENABLE_FEATURE_YVNC       "vnc — VNC client/server"              ON)
 option(YETTY_ENABLE_FEATURE_TELNET    "telnet — telnet connectivity"         ON)
-option(YETTY_ENABLE_FEATURE_SSH       "ssh — SSH connectivity"               OFF)
+option(YETTY_ENABLE_FEATURE_SSH       "ssh — SSH connectivity"               ON)
 option(YETTY_ENABLE_FEATURE_YRPC      "yrpc — msgpack-RPC interface"         ON)
 
 # Misc
