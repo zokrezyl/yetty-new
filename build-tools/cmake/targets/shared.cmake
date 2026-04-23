@@ -370,21 +370,9 @@ function(yetty_embed_assets TARGET)
         incbin_add_directory(${TARGET} "yemu" "${INCBIN_YEMU_DIR}" "*" FALSE)
     endif()
 
-    # Embed QEMU binary if enabled
-    # QEMU is built at configure time, then embedded via incbin_add_directory
+    # Embed QEMU binary if enabled (built by qemu_build() in qemu.cmake)
     if(YETTY_ENABLE_LIB_QEMU)
-        set(QEMU_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets/qemu")
-        set(INCBIN_QEMU_DIR "${CMAKE_BINARY_DIR}/incbin-qemu")
-
-        # Create incbin staging directory and copy QEMU binary
-        file(MAKE_DIRECTORY "${INCBIN_QEMU_DIR}")
-
-        if(EXISTS "${QEMU_ASSETS_DIR}/qemu-system-riscv64")
-            file(COPY "${QEMU_ASSETS_DIR}/qemu-system-riscv64" DESTINATION "${INCBIN_QEMU_DIR}")
-        endif()
-
-        # Embed QEMU binary (not compressed - executable)
-        incbin_add_directory(${TARGET} "qemu" "${INCBIN_QEMU_DIR}" "*" FALSE)
+        qemu_embed_runtime(${TARGET})
     endif()
 
     # Make manifest headers available
