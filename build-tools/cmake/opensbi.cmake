@@ -14,8 +14,8 @@ set(OPENSBI_VERSION "1.4" CACHE STRING "OpenSBI version")
 # URL
 set(OPENSBI_URL "https://github.com/riscv-software-src/opensbi/archive/refs/tags/v${OPENSBI_VERSION}.tar.gz")
 
-# Output path
-set(OPENSBI_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets/tinyemu" CACHE PATH "OpenSBI output directory")
+# Output path (shared RISC-V runtime assets — used by both TinyEMU and QEMU)
+set(OPENSBI_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets/yemu" CACHE PATH "OpenSBI output directory")
 
 # Cross-compiler (same as kernel)
 set(OPENSBI_CROSS_COMPILE "riscv64-linux-gnu-" CACHE STRING "Cross-compiler prefix for RISC-V")
@@ -92,14 +92,23 @@ function(opensbi_build)
         message(FATAL_ERROR "Failed to build OpenSBI")
     endif()
 
-    # Copy output
+    # Copy fw_jump.elf (for TinyEMU)
     file(COPY_FILE
         ${_SOURCE_DIR}/build/platform/generic/firmware/fw_jump.elf
         ${_OUTPUT}
     )
 
-    # Export path
+    # Copy fw_dynamic.bin (for QEMU)
+    set(_FW_DYNAMIC_SRC "${_SOURCE_DIR}/build/platform/generic/firmware/fw_dynamic.bin")
+    set(_FW_DYNAMIC_DST "${OPENSBI_OUTPUT_DIR}/opensbi-fw_dynamic.bin")
+    if(EXISTS "${_FW_DYNAMIC_SRC}")
+        file(COPY_FILE "${_FW_DYNAMIC_SRC}" "${_FW_DYNAMIC_DST}")
+        message(STATUS "OpenSBI: copied fw_dynamic.bin for QEMU")
+    endif()
+
+    # Export paths
     set(TINYEMU_OPENSBI_PATH "${_OUTPUT}" CACHE FILEPATH "" FORCE)
+    set(QEMU_OPENSBI_PATH "${_FW_DYNAMIC_DST}" CACHE FILEPATH "" FORCE)
 
     message(STATUS "OpenSBI v${OPENSBI_VERSION} built: ${_OUTPUT}")
 endfunction()

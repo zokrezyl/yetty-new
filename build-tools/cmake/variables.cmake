@@ -50,6 +50,7 @@ option(YETTY_ENABLE_LIB_LIBMAGIC    "libmagic — file type detection"         O
 
 # Virtual machine (--virtual flag: run shell in RISC-V Linux VM)
 option(YETTY_ENABLE_LIB_TINYEMU     "tinyemu — RISC-V emulator for --virtual" ON)
+option(YETTY_ENABLE_LIB_QEMU        "qemu — QEMU RISC-V emulator (via telnet)" ON)
 
 #-----------------------------------------------------------------------------
 # Features (internal source directories / modules)

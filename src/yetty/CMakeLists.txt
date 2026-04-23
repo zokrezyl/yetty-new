@@ -171,6 +171,10 @@ if(YETTY_ENABLE_FEATURE_TELNET)
     add_subdirectory(ytelnet)
 endif()
 
+if(YETTY_ENABLE_LIB_QEMU)
+    add_subdirectory(yqemu)
+endif()
+
 if(YETTY_ENABLE_FEATURE_SSH)
     add_subdirectory(ssh)
 endif()

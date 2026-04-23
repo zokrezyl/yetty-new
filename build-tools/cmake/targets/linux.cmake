@@ -10,13 +10,23 @@ if(YETTY_ENABLE_LIB_LIBMAGIC)
     include(${YETTY_ROOT}/build-tools/cmake/Libmagic.cmake)
 endif()
 
-# TinyEMU - RISC-V emulator for --virtual flag
+# TinyEMU - in-process RISC-V emulator for --temu flag
 if(YETTY_ENABLE_LIB_TINYEMU)
     include(${YETTY_ROOT}/build-tools/cmake/tinyemu.cmake)
     include(${YETTY_ROOT}/build-tools/cmake/tinyemu-runtime.cmake)
+endif()
+
+# Shared RISC-V runtime: OpenSBI firmware, Linux kernel, Alpine rootfs.
+# Needed by either --temu (TinyEMU) or --qemu (external QEMU via telnet).
+if(YETTY_ENABLE_LIB_TINYEMU OR YETTY_ENABLE_LIB_QEMU)
     include(${YETTY_ROOT}/build-tools/cmake/opensbi.cmake)
     include(${YETTY_ROOT}/build-tools/cmake/linux-kernel.cmake)
     include(${YETTY_ROOT}/build-tools/cmake/alpine-rootfs.cmake)
+endif()
+
+# QEMU - external RISC-V emulator (accessed via telnet) for --qemu flag
+if(YETTY_ENABLE_LIB_QEMU)
+    include(${YETTY_ROOT}/build-tools/cmake/qemu.cmake)
 endif()
 
 # Desktop-specific subdirectories
@@ -38,7 +48,8 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-window.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-clipboard-manager.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/libuv-event-loop.c
-    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pty.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/fork-pty.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pty-factory.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pipe.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
@@ -65,18 +76,20 @@ add_executable(yetty
 
 target_include_directories(yetty PRIVATE ${YETTY_INCLUDES} ${YETTY_RENDERER_INCLUDES} ${JPEG_INCLUDE_DIRS} ${BROTLI_INCLUDE_DIR})
 
-# TinyEMU: Build kernel, download rootfs BEFORE embedding assets
-if(YETTY_ENABLE_LIB_TINYEMU)
-    # Build OpenSBI firmware
+# Build shared RISC-V runtime (OpenSBI, Linux kernel, Alpine rootfs) BEFORE
+# embedding assets. These live in ${CMAKE_BINARY_DIR}/assets/yemu and are
+# shared between --temu and --qemu modes. The .cfg is created at runtime in
+# the user config dir (see tinyemu-pty.c), not here.
+if(YETTY_ENABLE_LIB_TINYEMU OR YETTY_ENABLE_LIB_QEMU)
     opensbi_build()
-
-    # Build Linux kernel for RISC-V (requires cross-compiler)
     linux_kernel_build()
-
-    # Download Alpine rootfs
     alpine_rootfs_download()
     alpine_rootfs_create_image()
-    alpine_rootfs_create_config()
+endif()
+
+# QEMU: Build at configure time BEFORE embedding assets
+if(YETTY_ENABLE_LIB_QEMU)
+    qemu_build()
 endif()
 
 # Embed all assets (logo, shaders, fonts, CDB files, TinyEMU)
@@ -96,6 +109,7 @@ target_compile_definitions(yetty PRIVATE
     YETTY_HAS_VNC=1
     $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:YETTY_HAS_TINYEMU=1>
     $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:CONFIG_SLIRP>
+    $<$<BOOL:${YETTY_ENABLE_LIB_QEMU}>:YETTY_HAS_QEMU=1>
 )
 
 set_target_properties(yetty PROPERTIES ENABLE_EXPORTS TRUE)
@@ -126,6 +140,8 @@ target_link_libraries(yetty PRIVATE
     ${BROTLIDEC_LIBRARIES}
     ${FONTCONFIG_LINK_LIBS}
     $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:tinyemu>
+    $<$<BOOL:${YETTY_ENABLE_LIB_QEMU}>:yetty_qemu>
+    yetty_telnet
     rt
     util
 )

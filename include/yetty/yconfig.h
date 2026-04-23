@@ -69,7 +69,8 @@ struct yetty_config {
 #define YETTY_CONFIG_KEY_RPC_HOST "rpc/host"
 #define YETTY_CONFIG_KEY_RPC_PORT "rpc/port"
 #define YETTY_CONFIG_KEY_RPC_SOCKET_PATH "rpc/socket-path"
-#define YETTY_CONFIG_KEY_VIRTUAL "virtual"
+#define YETTY_CONFIG_KEY_TEMU "temu"
+#define YETTY_CONFIG_KEY_QEMU "qemu"
 
 /* Create config */
 struct yetty_config_result yetty_config_create(int argc, char *argv[],
