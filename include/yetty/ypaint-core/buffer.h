@@ -27,11 +27,28 @@ struct yetty_ypaint_core_buffer;
 
 YETTY_YRESULT_DECLARE(yetty_ypaint_core_buffer, struct yetty_ypaint_core_buffer *);
 
+// Optional context provided at create time — known up-front by producers
+// (e.g. the PDF renderer computes scene bounds in a MediaBox pre-pass before
+// any primitives are emitted). Pass NULL to create with defaults.
+struct yetty_ypaint_core_buffer_config {
+    float scene_min_x;
+    float scene_min_y;
+    float scene_max_x;
+    float scene_max_y;
+};
+
 // Create/destroy
-struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(void);
+struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(
+    const struct yetty_ypaint_core_buffer_config *config);
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
     const struct yetty_ycore_buffer *base64_buf);
 void yetty_ypaint_core_buffer_destroy(struct yetty_ypaint_core_buffer *buf);
+
+// Scene bounds accessors (populated from config at create time, 0s otherwise)
+float yetty_ypaint_core_buffer_scene_min_x(const struct yetty_ypaint_core_buffer *buf);
+float yetty_ypaint_core_buffer_scene_min_y(const struct yetty_ypaint_core_buffer *buf);
+float yetty_ypaint_core_buffer_scene_max_x(const struct yetty_ypaint_core_buffer *buf);
+float yetty_ypaint_core_buffer_scene_max_y(const struct yetty_ypaint_core_buffer *buf);
 
 // Clear all data (keeps allocation)
 void yetty_ypaint_core_buffer_clear(struct yetty_ypaint_core_buffer *buf);

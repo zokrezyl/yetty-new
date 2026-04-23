@@ -98,6 +98,10 @@ if(YETTY_ENABLE_LIB_ZLIB)
     include(${YETTY_ROOT}/build-tools/cmake/libs/zlib.cmake)
 endif()
 
+if(YETTY_ENABLE_LIB_PDFIO)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/pdfio.cmake)
+endif()
+
 if(YETTY_ENABLE_LIB_LIBPNG)
     include(${YETTY_ROOT}/build-tools/cmake/libs/libpng.cmake)
 endif()
@@ -148,6 +152,14 @@ endif()
 
 # Add src/yetty (populates YETTY_SOURCES, YETTY_CORE_SOURCES, builds feature libraries)
 add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
+
+# Unit tests (opt-in)
+if(YETTY_ENABLE_FEATURE_TESTS)
+    enable_testing()
+    if(YETTY_ENABLE_FEATURE_YPDF)
+        add_subdirectory(${YETTY_ROOT}/test/ut/ypdf ${CMAKE_BINARY_DIR}/test/ut/ypdf)
+    endif()
+endif()
 
 # Common include directories
 set(YETTY_INCLUDES
@@ -307,6 +319,7 @@ function(yetty_embed_assets TARGET)
     file(RENAME "${INCBIN_DATA_DIR}/shaders/blend.wgsl" "${INCBIN_DATA_DIR}/shaders/blender.wgsl")
     file(COPY "${YETTY_ROOT}/src/yetty/yfont/ms-msdf-font.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
     file(COPY "${YETTY_ROOT}/src/yetty/yfont/msdf-font.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
+    file(COPY "${YETTY_ROOT}/src/yetty/yfont/ms-raster-font.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
     file(COPY "${YETTY_ROOT}/src/yetty/yfont/raster-font.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
 
     # Copy fonts

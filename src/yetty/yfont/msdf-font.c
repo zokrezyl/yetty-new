@@ -249,6 +249,97 @@ static float msdf_get_base_size(const struct yetty_font_font *self)
 	return f ? f->base_size : 32.0f;
 }
 
+/* Read only the glyph header from CDB (no atlas allocation). */
+static struct float_result
+msdf_read_advance_units(struct msdf_font *f, uint32_t cp)
+{
+	uint32_t key = cp;
+	void *data = NULL;
+	size_t data_len = 0;
+
+	struct yetty_ycore_void_result res =
+		yetty_ycdb_reader_get(f->cdb, &key, sizeof(key), &data, &data_len);
+	if (YETTY_IS_ERR(res))
+		return YETTY_ERR(float, res.error.msg);
+	if (!data)
+		return YETTY_ERR(float, "glyph not found");
+	if (data_len < sizeof(struct yetty_ymsdf_gen_glyph_header)) {
+		free(data);
+		return YETTY_ERR(float, "glyph data too small");
+	}
+
+	struct yetty_ymsdf_gen_glyph_header hdr;
+	memcpy(&hdr, data, sizeof(hdr));
+	free(data);
+	return YETTY_OK(float, hdr.advance);
+}
+
+static struct float_result
+msdf_get_advance(struct yetty_font_font *self, uint32_t cp, float font_size)
+{
+	struct msdf_font *f = (struct msdf_font *)self;
+	if (!f)
+		return YETTY_ERR(float, "font is NULL");
+	if (f->base_size <= 0.0f)
+		return YETTY_ERR(float, "invalid base size");
+
+	struct float_result adv = msdf_read_advance_units(f, cp);
+	if (YETTY_IS_ERR(adv))
+		return adv;
+
+	/* CDB stores advance in pixels at base_size. Scale to requested size. */
+	return YETTY_OK(float, adv.value * font_size / f->base_size);
+}
+
+static struct float_result
+msdf_measure_text(struct yetty_font_font *self, const char *utf8, size_t len,
+		  float font_size)
+{
+	struct msdf_font *f = (struct msdf_font *)self;
+	if (!f)
+		return YETTY_ERR(float, "font is NULL");
+	if (!utf8)
+		return YETTY_ERR(float, "utf8 is NULL");
+	if (f->base_size <= 0.0f)
+		return YETTY_ERR(float, "invalid base size");
+
+	const uint8_t *p = (const uint8_t *)utf8;
+	const uint8_t *end = p + len;
+	float total = 0.0f;
+
+	while (p < end) {
+		uint32_t cp = 0;
+		uint8_t b = *p;
+		if ((b & 0x80) == 0) {
+			cp = b;
+			p += 1;
+		} else if ((b & 0xE0) == 0xC0 && p + 1 < end) {
+			cp = ((uint32_t)(b & 0x1F) << 6) | (p[1] & 0x3F);
+			p += 2;
+		} else if ((b & 0xF0) == 0xE0 && p + 2 < end) {
+			cp = ((uint32_t)(b & 0x0F) << 12) |
+			     ((uint32_t)(p[1] & 0x3F) << 6) |
+			     (p[2] & 0x3F);
+			p += 3;
+		} else if ((b & 0xF8) == 0xF0 && p + 3 < end) {
+			cp = ((uint32_t)(b & 0x07) << 18) |
+			     ((uint32_t)(p[1] & 0x3F) << 12) |
+			     ((uint32_t)(p[2] & 0x3F) << 6) |
+			     (p[3] & 0x3F);
+			p += 4;
+		} else {
+			p += 1;
+			continue;
+		}
+
+		struct float_result adv = msdf_read_advance_units(f, cp);
+		if (YETTY_IS_OK(adv))
+			total += adv.value;
+	}
+
+	return YETTY_OK(float, total * font_size / f->base_size);
+}
+
 static int msdf_is_dirty(const struct yetty_font_font *self)
 {
 	return ((const struct msdf_font *)self)->dirty;
@@ -287,6 +378,8 @@ static const struct yetty_font_font_ops msdf_font_ops = {
 	.get_glyph_index_styled = msdf_get_glyph_index_styled,
 	.load_glyphs = msdf_load_glyphs,
 	.load_basic_latin = msdf_load_basic_latin,
+	.get_advance = msdf_get_advance,
+	.measure_text = msdf_measure_text,
 	.get_base_size = msdf_get_base_size,
 	.is_dirty = msdf_is_dirty,
 	.get_gpu_resource_set = msdf_get_gpu_resource_set,

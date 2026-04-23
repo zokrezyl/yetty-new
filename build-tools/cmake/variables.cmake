@@ -47,6 +47,7 @@ option(YETTY_ENABLE_LIB_THORVG      "thorvg — SVG/Lottie rendering"         OF
 # Platform-conditional (desktop only: linux, macos, windows)
 option(YETTY_ENABLE_LIB_GLFW        "glfw — windowing (desktop only)"       ON)
 option(YETTY_ENABLE_LIB_LIBMAGIC    "libmagic — file type detection"         OFF)
+option(YETTY_ENABLE_LIB_PDFIO       "pdfio — PDF parsing (C)"                ON)
 
 # Virtual machine (--virtual flag: run shell in RISC-V Linux VM)
 option(YETTY_ENABLE_LIB_TINYEMU     "tinyemu — RISC-V emulator for --virtual" ON)
@@ -98,11 +99,17 @@ option(YETTY_ENABLE_FEATURE_YFSVM     "yfsvm — fragment shader VM"           O
 option(YETTY_ENABLE_FEATURE_YIMAGE    "yimage — image complex primitive"     ON)
 option(YETTY_ENABLE_FEATURE_YMSDF_GEN "ymsdf-gen — MSDF glyph generator"    ON)
 option(YETTY_ENABLE_FEATURE_YCAT      "ycat — file viewer"                   OFF)
+option(YETTY_ENABLE_FEATURE_YPDF      "ypdf — PDF to ypaint buffer"          ON)
 
 # Build pipeline
 option(YETTY_ENABLE_FEATURE_ASSETS    "assets — runtime asset copying"       ON)
 option(YETTY_ENABLE_FEATURE_CDB_GEN   "cdb-gen — CDB font generation"       ON)
-option(YETTY_ENABLE_FEATURE_TESTS     "tests — unit tests"                   OFF)
+# Tests on by default for Linux desktop builds.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT EMSCRIPTEN AND NOT YETTY_ANDROID AND NOT YETTY_IOS)
+    option(YETTY_ENABLE_FEATURE_TESTS "tests — unit tests"                   ON)
+else()
+    option(YETTY_ENABLE_FEATURE_TESTS "tests — unit tests"                   OFF)
+endif()
 option(YETTY_ENABLE_FEATURE_DEMO      "demo — demo programs"                 OFF)
 
 # Tools (each tool has its own option)

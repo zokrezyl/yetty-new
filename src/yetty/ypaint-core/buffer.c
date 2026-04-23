@@ -19,6 +19,8 @@ struct yetty_ypaint_core_buffer {
 
   struct yetty_text_span text_spans[YPAINT_MAX_TEXT_SPANS];
   uint32_t text_span_count;
+
+  float scene_min_x, scene_min_y, scene_max_x, scene_max_y;
 };
 
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
@@ -50,7 +52,8 @@ struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base
   return YETTY_OK(yetty_ypaint_core_buffer, buf);
 }
 
-struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(void) {
+struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(
+    const struct yetty_ypaint_core_buffer_config *config) {
   struct yetty_ypaint_core_buffer *buf =
       calloc(1, sizeof(struct yetty_ypaint_core_buffer));
   if (!buf)
@@ -67,7 +70,27 @@ struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(void) {
   strncpy(buf->primitives.name, "prims",
           YETTY_YCORE_NAMED_BUFFER_MAX_NAME_LENGTH - 1);
 
+  if (config) {
+    buf->scene_min_x = config->scene_min_x;
+    buf->scene_min_y = config->scene_min_y;
+    buf->scene_max_x = config->scene_max_x;
+    buf->scene_max_y = config->scene_max_y;
+  }
+
   return YETTY_OK(yetty_ypaint_core_buffer, buf);
+}
+
+float yetty_ypaint_core_buffer_scene_min_x(const struct yetty_ypaint_core_buffer *buf) {
+  return buf ? buf->scene_min_x : 0.0f;
+}
+float yetty_ypaint_core_buffer_scene_min_y(const struct yetty_ypaint_core_buffer *buf) {
+  return buf ? buf->scene_min_y : 0.0f;
+}
+float yetty_ypaint_core_buffer_scene_max_x(const struct yetty_ypaint_core_buffer *buf) {
+  return buf ? buf->scene_max_x : 0.0f;
+}
+float yetty_ypaint_core_buffer_scene_max_y(const struct yetty_ypaint_core_buffer *buf) {
+  return buf ? buf->scene_max_y : 0.0f;
 }
 
 void yetty_ypaint_core_buffer_destroy(struct yetty_ypaint_core_buffer *buf) {

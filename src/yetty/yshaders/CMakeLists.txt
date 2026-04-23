@@ -9,6 +9,7 @@ file(GLOB_RECURSE SHADER_FILES
 
 # Module shaders (embedded via incbin on native, loaded from assets on webasm)
 set(MODULE_SHADERS
+    ${CMAKE_SOURCE_DIR}/src/yetty/yfont/ms-raster-font.wgsl
     ${CMAKE_SOURCE_DIR}/src/yetty/yfont/raster-font.wgsl
     ${CMAKE_SOURCE_DIR}/src/yetty/yfont/ms-msdf-font.wgsl
     ${CMAKE_SOURCE_DIR}/src/yetty/yfont/msdf-font.wgsl
