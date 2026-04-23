@@ -181,17 +181,21 @@ def generate_c_source(schema, uniforms, buffers):
     rs->uniforms[{uniform_idx}].u32 = 0;''')
             uniform_idx += 1
 
-    # Visual-zoom state — tacked on AFTER schema uniforms and NOT present in
-    # the wire format. Populated by the factory's set_visual_zoom op and by
-    # instance_render (viewport_w/h read from the target each frame). The
-    # shader transforms its incoming pixel at fs_main entry so the SDF math
-    # inside plot bounds re-evaluates at the zoomed coordinate (crisp at any
-    # scale), matching text-layer / ypaint-layer / MSDF behaviour.
+    # Zoom state — tacked on AFTER schema uniforms and NOT present in the wire
+    # format. Two independent uniform pairs with SEPARATE semantics:
+    #   visual_zoom_* : non-intrusive (Ctrl+Scroll, mouse-anchored)
+    #   cell_zoom_*   : intrusive (Ctrl+Shift+Scroll, cell-size scale)
+    # Plus viewport_w/h (read from the target each frame). Shader composes
+    # both transforms at fs_main entry — SDF math re-evaluates at the zoomed
+    # coordinate, crisp at any scale.
     vz_scale_idx = uniform_idx
     vz_off_x_idx = uniform_idx + 1
     vz_off_y_idx = uniform_idx + 2
-    vp_w_idx    = uniform_idx + 3
-    vp_h_idx    = uniform_idx + 4
+    cz_scale_idx = uniform_idx + 3
+    cz_off_x_idx = uniform_idx + 4
+    cz_off_y_idx = uniform_idx + 5
+    vp_w_idx    = uniform_idx + 6
+    vp_h_idx    = uniform_idx + 7
     uniform_setup.append(f'''    strncpy(rs->uniforms[{vz_scale_idx}].name, "visual_zoom_scale", YETTY_YRENDER_NAME_MAX - 1);
     rs->uniforms[{vz_scale_idx}].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[{vz_scale_idx}].f32 = 1.0f;
@@ -201,13 +205,22 @@ def generate_c_source(schema, uniforms, buffers):
     strncpy(rs->uniforms[{vz_off_y_idx}].name, "visual_zoom_off_y", YETTY_YRENDER_NAME_MAX - 1);
     rs->uniforms[{vz_off_y_idx}].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[{vz_off_y_idx}].f32 = 0.0f;
+    strncpy(rs->uniforms[{cz_scale_idx}].name, "cell_zoom_scale", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[{cz_scale_idx}].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[{cz_scale_idx}].f32 = 1.0f;
+    strncpy(rs->uniforms[{cz_off_x_idx}].name, "cell_zoom_off_x", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[{cz_off_x_idx}].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[{cz_off_x_idx}].f32 = 0.0f;
+    strncpy(rs->uniforms[{cz_off_y_idx}].name, "cell_zoom_off_y", YETTY_YRENDER_NAME_MAX - 1);
+    rs->uniforms[{cz_off_y_idx}].type = YETTY_YRENDER_UNIFORM_F32;
+    rs->uniforms[{cz_off_y_idx}].f32 = 0.0f;
     strncpy(rs->uniforms[{vp_w_idx}].name, "viewport_w", YETTY_YRENDER_NAME_MAX - 1);
     rs->uniforms[{vp_w_idx}].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[{vp_w_idx}].f32 = 0.0f;
     strncpy(rs->uniforms[{vp_h_idx}].name, "viewport_h", YETTY_YRENDER_NAME_MAX - 1);
     rs->uniforms[{vp_h_idx}].type = YETTY_YRENDER_UNIFORM_F32;
     rs->uniforms[{vp_h_idx}].f32 = 0.0f;''')
-    uniform_idx += 5
+    uniform_idx += 8
 
     uniform_setup_str = '\n'.join(uniform_setup)
     total_uniform_count = uniform_idx
@@ -607,6 +620,19 @@ static struct yetty_ycore_void_result
     return YETTY_OK_VOID();
 }}
 
+static struct yetty_ycore_void_result
+{name}_set_cell_zoom(struct yetty_ypaint_concrete_factory *self,
+                     float scale, float off_x, float off_y)
+{{
+    struct {name}_factory *factory = {name}_factory_from_base(self);
+    /* Separate uniform pair from visual_zoom — the shader composes both. */
+    factory->rs.uniforms[{cz_scale_idx}].f32 = (scale > 0.0f) ? scale : 1.0f;
+    factory->rs.uniforms[{cz_off_x_idx}].f32 = off_x;
+    factory->rs.uniforms[{cz_off_y_idx}].f32 = off_y;
+    ydebug("{name}_set_cell_zoom: scale=%.3f off=(%.1f,%.1f)", scale, off_x, off_y);
+    return YETTY_OK_VOID();
+}}
+
 struct yetty_ypaint_concrete_factory *yetty_{name}_factory_create(void)
 {{
     struct {name}_factory *factory = calloc(1, sizeof(struct {name}_factory));
@@ -620,6 +646,7 @@ struct yetty_ypaint_concrete_factory *yetty_{name}_factory_create(void)
     factory->base.destroy_instance = {name}_destroy_instance;
     factory->base.get_shared_rs = {name}_get_shared_rs;
     factory->base.set_visual_zoom = {name}_set_visual_zoom;
+    factory->base.set_cell_zoom = {name}_set_cell_zoom;
 
     return &factory->base;
 }}

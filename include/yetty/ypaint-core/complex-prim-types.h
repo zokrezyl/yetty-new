@@ -132,6 +132,15 @@ struct yetty_ypaint_concrete_factory {
 	struct yetty_ycore_void_result (*set_visual_zoom)(
 		struct yetty_ypaint_concrete_factory *self,
 		float scale, float offset_x, float offset_y);
+
+	// Push "intrusive" cell-size zoom. Semantically SEPARATE from set_visual_zoom
+	// — cell_zoom tracks the cumulative ratio between the current and baseline
+	// cell size, visual_zoom tracks Ctrl+Scroll mouse-anchored zoom. The shader
+	// applies them as two independent transforms so they can be reset without
+	// interfering with each other.
+	struct yetty_ycore_void_result (*set_cell_zoom)(
+		struct yetty_ypaint_concrete_factory *self,
+		float scale, float offset_x, float offset_y);
 };
 
 //=============================================================================
@@ -178,6 +187,12 @@ void yetty_ypaint_complex_prim_instance_destroy(
 // yimage, ...). Safe to call with no registrations. Concrete factories that
 // don't implement set_visual_zoom are silently skipped.
 void yetty_ypaint_complex_prim_factory_set_visual_zoom(
+	struct yetty_ypaint_complex_prim_factory *factory,
+	float scale, float offset_x, float offset_y);
+
+// Fan out "intrusive" cell-zoom state the same way (separate uniforms,
+// separate semantics — see set_cell_zoom in the concrete factory ops).
+void yetty_ypaint_complex_prim_factory_set_cell_zoom(
 	struct yetty_ypaint_complex_prim_factory *factory,
 	float scale, float offset_x, float offset_y);
 
