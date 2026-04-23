@@ -65,8 +65,8 @@ struct yetty_vnc_client {
 	WGPUTextureFormat surface_format;
 
 	/* Event loop for async I/O */
-	struct yetty_core_event_loop *event_loop;
-	yetty_core_tcp_client_id tcp_client_id;
+	struct yetty_ycore_event_loop *event_loop;
+	yetty_ycore_tcp_client_id tcp_client_id;
 	struct yetty_tcp_conn *conn;
 
 	/* Connection state */
@@ -133,9 +133,9 @@ static double get_time_sec(void)
 	return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
-static struct yetty_core_void_result ensure_resources(
+static struct yetty_ycore_void_result ensure_resources(
 	struct yetty_vnc_client *client, uint16_t width, uint16_t height);
-static struct yetty_core_void_result create_pipeline(
+static struct yetty_ycore_void_result create_pipeline(
 	struct yetty_vnc_client *client);
 
 /*===========================================================================
@@ -614,7 +614,7 @@ static void vnc_client_on_disconnect(void *ctx)
 struct yetty_vnc_client_ptr_result
 yetty_vnc_client_create(WGPUDevice device, WGPUQueue queue,
 			WGPUTextureFormat surface_format,
-			struct yetty_core_event_loop *event_loop,
+			struct yetty_ycore_event_loop *event_loop,
 			uint16_t width, uint16_t height)
 {
 	ydebug("VNC client: create called, device=%p queue=%p event_loop=%p %ux%u",
@@ -667,7 +667,7 @@ yetty_vnc_client_create(WGPUDevice device, WGPUQueue queue,
 
 	/* Create initial GPU resources */
 	if (width > 0 && height > 0) {
-		struct yetty_core_void_result res = ensure_resources(client, width, height);
+		struct yetty_ycore_void_result res = ensure_resources(client, width, height);
 		if (!YETTY_IS_OK(res)) {
 			tjDestroy(client->jpeg_decompressor);
 			free(client->tile_pixels);
@@ -710,16 +710,16 @@ void yetty_vnc_client_destroy(struct yetty_vnc_client *client)
 	free(client);
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_connect(struct yetty_vnc_client *client, const char *host,
 			 uint16_t port)
 {
 	ydebug("VNC client: connect called, host=%s port=%u", host, port);
 
 	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+		return YETTY_ERR(yetty_ycore_void, "null client");
 	if (client->connected)
-		return YETTY_ERR(yetty_core_void, "already connected");
+		return YETTY_ERR(yetty_ycore_void, "already connected");
 
 	/* Reset recv state */
 	client->recv_state = RECV_FRAME_HEADER;
@@ -739,12 +739,12 @@ yetty_vnc_client_connect(struct yetty_vnc_client *client, const char *host,
 
 	/* Create TCP client (starts connecting immediately) */
 	ydebug("VNC client: calling event_loop->create_tcp_client");
-	struct yetty_core_tcp_client_id_result id_res =
+	struct yetty_ycore_tcp_client_id_result id_res =
 		client->event_loop->ops->create_tcp_client(
 			client->event_loop, host, port, &callbacks);
 	if (!YETTY_IS_OK(id_res)) {
 		ydebug("VNC client: create_tcp_client failed: %s", id_res.error.msg);
-		return YETTY_ERR(yetty_core_void, "failed to create TCP client");
+		return YETTY_ERR(yetty_ycore_void, "failed to create TCP client");
 	}
 
 	client->tcp_client_id = id_res.value;
@@ -753,7 +753,7 @@ yetty_vnc_client_connect(struct yetty_vnc_client *client, const char *host,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_disconnect(struct yetty_vnc_client *client)
 {
 	if (!client)
@@ -790,7 +790,7 @@ uint16_t yetty_vnc_client_height(const struct yetty_vnc_client *client)
  * GPU Resources
  *===========================================================================*/
 
-static struct yetty_core_void_result ensure_resources(
+static struct yetty_ycore_void_result ensure_resources(
 	struct yetty_vnc_client *client, uint16_t width, uint16_t height)
 {
 	if (client->texture_width == width &&
@@ -826,7 +826,7 @@ static struct yetty_core_void_result ensure_resources(
 
 	client->texture = wgpuDeviceCreateTexture(client->device, &tex_desc);
 	if (!client->texture)
-		return YETTY_ERR(yetty_core_void, "failed to create texture");
+		return YETTY_ERR(yetty_ycore_void, "failed to create texture");
 
 	/* Clear texture to black with alpha */
 	size_t pixel_count = width * height;
@@ -849,7 +849,7 @@ static struct yetty_core_void_result ensure_resources(
 	/* Create texture view */
 	client->texture_view = wgpuTextureCreateView(client->texture, NULL);
 	if (!client->texture_view)
-		return YETTY_ERR(yetty_core_void, "failed to create texture view");
+		return YETTY_ERR(yetty_ycore_void, "failed to create texture view");
 
 	/* Create sampler if needed */
 	if (!client->sampler) {
@@ -865,7 +865,7 @@ static struct yetty_core_void_result ensure_resources(
 
 	/* Create pipeline if needed */
 	if (!client->pipeline) {
-		struct yetty_core_void_result res = create_pipeline(client);
+		struct yetty_ycore_void_result res = create_pipeline(client);
 		if (!YETTY_IS_OK(res))
 			return res;
 	}
@@ -887,7 +887,7 @@ static struct yetty_core_void_result ensure_resources(
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result create_pipeline(struct yetty_vnc_client *client)
+static struct yetty_ycore_void_result create_pipeline(struct yetty_vnc_client *client)
 {
 	/* Create shader */
 	WGPUShaderSourceWGSL wgsl_desc = {0};
@@ -899,7 +899,7 @@ static struct yetty_core_void_result create_pipeline(struct yetty_vnc_client *cl
 
 	WGPUShaderModule shader = wgpuDeviceCreateShaderModule(client->device, &shader_desc);
 	if (!shader)
-		return YETTY_ERR(yetty_core_void, "failed to create shader");
+		return YETTY_ERR(yetty_ycore_void, "failed to create shader");
 
 	/* Bind group layout */
 	WGPUBindGroupLayoutEntry entries[2] = {0};
@@ -949,7 +949,7 @@ static struct yetty_core_void_result create_pipeline(struct yetty_vnc_client *cl
 	wgpuPipelineLayoutRelease(layout);
 
 	if (!client->pipeline)
-		return YETTY_ERR(yetty_core_void, "failed to create pipeline");
+		return YETTY_ERR(yetty_ycore_void, "failed to create pipeline");
 
 	return YETTY_OK_VOID();
 }
@@ -958,7 +958,7 @@ static struct yetty_core_void_result create_pipeline(struct yetty_vnc_client *cl
  * Rendering
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_update_texture(struct yetty_vnc_client *client)
 {
 	(void)client;
@@ -966,7 +966,7 @@ yetty_vnc_client_update_texture(struct yetty_vnc_client *client)
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_render(struct yetty_vnc_client *client,
 			WGPURenderPassEncoder pass,
 			uint32_t viewport_width, uint32_t viewport_height)
@@ -975,7 +975,7 @@ yetty_vnc_client_render(struct yetty_vnc_client *client,
 	(void)viewport_height;
 
 	if (!client || !client->pipeline || !client->bind_group)
-		return YETTY_ERR(yetty_core_void, "resources not ready");
+		return YETTY_ERR(yetty_ycore_void, "resources not ready");
 
 	wgpuRenderPassEncoderSetPipeline(pass, client->pipeline);
 	wgpuRenderPassEncoderSetBindGroup(pass, 0, client->bind_group, 0, NULL);
@@ -988,12 +988,12 @@ yetty_vnc_client_render(struct yetty_vnc_client *client,
  * Input sending
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_mouse_move(struct yetty_vnc_client *client,
 				 int16_t x, int16_t y, uint8_t buttons)
 {
 	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+		return YETTY_ERR(yetty_ycore_void, "null client");
 
 	struct vnc_input_header hdr = {0};
 	hdr.type = VNC_INPUT_MOUSE_MOVE;
@@ -1012,13 +1012,13 @@ yetty_vnc_client_send_mouse_move(struct yetty_vnc_client *client,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_mouse_button(struct yetty_vnc_client *client,
 				   int16_t x, int16_t y, uint8_t button,
 				   int pressed, uint8_t mods)
 {
 	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+		return YETTY_ERR(yetty_ycore_void, "null client");
 
 	struct vnc_input_header hdr = {0};
 	hdr.type = VNC_INPUT_MOUSE_BUTTON;
@@ -1039,13 +1039,13 @@ yetty_vnc_client_send_mouse_button(struct yetty_vnc_client *client,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_mouse_scroll(struct yetty_vnc_client *client,
 				   int16_t x, int16_t y, int16_t dx, int16_t dy,
 				   uint8_t buttons)
 {
 	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+		return YETTY_ERR(yetty_ycore_void, "null client");
 
 	struct vnc_input_header hdr = {0};
 	hdr.type = VNC_INPUT_MOUSE_SCROLL;
@@ -1066,13 +1066,13 @@ yetty_vnc_client_send_mouse_scroll(struct yetty_vnc_client *client,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_key_down(struct yetty_vnc_client *client,
 			       uint32_t keycode, uint32_t scancode,
 			       uint8_t mods)
 {
 	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+		return YETTY_ERR(yetty_ycore_void, "null client");
 
 	struct vnc_input_header hdr = {0};
 	hdr.type = VNC_INPUT_KEY_DOWN;
@@ -1091,13 +1091,13 @@ yetty_vnc_client_send_key_down(struct yetty_vnc_client *client,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_key_up(struct yetty_vnc_client *client,
 			     uint32_t keycode, uint32_t scancode,
 			     uint8_t mods)
 {
 	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+		return YETTY_ERR(yetty_ycore_void, "null client");
 
 	struct vnc_input_header hdr = {0};
 	hdr.type = VNC_INPUT_KEY_UP;
@@ -1116,12 +1116,12 @@ yetty_vnc_client_send_key_up(struct yetty_vnc_client *client,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_char_with_mods(struct yetty_vnc_client *client,
 				     uint32_t codepoint, uint8_t mods)
 {
 	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+		return YETTY_ERR(yetty_ycore_void, "null client");
 
 	struct vnc_input_header hdr = {0};
 	hdr.type = VNC_INPUT_CHAR_WITH_MODS;
@@ -1139,12 +1139,12 @@ yetty_vnc_client_send_char_with_mods(struct yetty_vnc_client *client,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_resize(struct yetty_vnc_client *client,
 			     uint16_t width, uint16_t height)
 {
 	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+		return YETTY_ERR(yetty_ycore_void, "null client");
 
 	ydebug("VNC client send resize: %ux%u", width, height);
 
@@ -1164,11 +1164,11 @@ yetty_vnc_client_send_resize(struct yetty_vnc_client *client,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_send_frame_ack(struct yetty_vnc_client *client)
 {
 	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+		return YETTY_ERR(yetty_ycore_void, "null client");
 
 	struct vnc_input_header hdr = {0};
 	hdr.type = VNC_INPUT_FRAME_ACK;
@@ -1233,13 +1233,13 @@ void yetty_vnc_client_set_reconnect_params(struct yetty_vnc_client *client,
 	client->reconnect_port = port;
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_client_reconnect(struct yetty_vnc_client *client)
 {
 	if (!client)
-		return YETTY_ERR(yetty_core_void, "null client");
+		return YETTY_ERR(yetty_ycore_void, "null client");
 	if (!client->reconnect_host)
-		return YETTY_ERR(yetty_core_void, "no reconnect params set");
+		return YETTY_ERR(yetty_ycore_void, "no reconnect params set");
 
 	ydebug("VNC client reconnecting to %s:%u", client->reconnect_host,
 	       client->reconnect_port);

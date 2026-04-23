@@ -12,8 +12,8 @@
 #include <stdlib.h>
 
 struct render_target_vnc {
-	struct yetty_render_target base;
-	struct yetty_render_target *inner;  /* Texture target for actual rendering */
+	struct yetty_yrender_target base;
+	struct yetty_yrender_target *inner;  /* Texture target for actual rendering */
 	struct yetty_vnc_server *vnc_server;
 	WGPUSurface surface;  /* NULL for headless, non-NULL for mirror */
 };
@@ -22,7 +22,7 @@ struct render_target_vnc {
  * Destroy
  *===========================================================================*/
 
-static void render_target_vnc_destroy(struct yetty_render_target *self)
+static void render_target_vnc_destroy(struct yetty_yrender_target *self)
 {
 	struct render_target_vnc *rt = (struct render_target_vnc *)self;
 
@@ -36,31 +36,31 @@ static void render_target_vnc_destroy(struct yetty_render_target *self)
  * Delegated operations
  *===========================================================================*/
 
-static struct yetty_core_void_result
-render_target_vnc_clear(struct yetty_render_target *self)
+static struct yetty_ycore_void_result
+render_target_vnc_clear(struct yetty_yrender_target *self)
 {
 	struct render_target_vnc *rt = (struct render_target_vnc *)self;
 	return rt->inner->ops->clear(rt->inner);
 }
 
-static struct yetty_core_void_result
-render_target_vnc_render_layer(struct yetty_render_target *self,
-			       struct yetty_term_terminal_layer *layer)
+static struct yetty_ycore_void_result
+render_target_vnc_render_layer(struct yetty_yrender_target *self,
+			       struct yetty_yterm_terminal_layer *layer)
 {
 	struct render_target_vnc *rt = (struct render_target_vnc *)self;
 	return rt->inner->ops->render_layer(rt->inner, layer);
 }
 
-static struct yetty_core_void_result
-render_target_vnc_blend(struct yetty_render_target *self,
-			struct yetty_render_target **sources, size_t count)
+static struct yetty_ycore_void_result
+render_target_vnc_blend(struct yetty_yrender_target *self,
+			struct yetty_yrender_target **sources, size_t count)
 {
 	struct render_target_vnc *rt = (struct render_target_vnc *)self;
 	return rt->inner->ops->blend(rt->inner, sources, count);
 }
 
 static WGPUTextureView
-render_target_vnc_get_view(const struct yetty_render_target *self)
+render_target_vnc_get_view(const struct yetty_yrender_target *self)
 {
 	const struct render_target_vnc *rt =
 		(const struct render_target_vnc *)self;
@@ -68,16 +68,16 @@ render_target_vnc_get_view(const struct yetty_render_target *self)
 }
 
 static WGPUTexture
-render_target_vnc_get_texture(const struct yetty_render_target *self)
+render_target_vnc_get_texture(const struct yetty_yrender_target *self)
 {
 	const struct render_target_vnc *rt =
 		(const struct render_target_vnc *)self;
 	return rt->inner->ops->get_texture(rt->inner);
 }
 
-static struct yetty_core_void_result
-render_target_vnc_resize(struct yetty_render_target *self,
-			 struct yetty_render_viewport viewport)
+static struct yetty_ycore_void_result
+render_target_vnc_resize(struct yetty_yrender_target *self,
+			 struct yetty_yrender_viewport viewport)
 {
 	struct render_target_vnc *rt = (struct render_target_vnc *)self;
 	rt->base.viewport = viewport;
@@ -88,11 +88,11 @@ render_target_vnc_resize(struct yetty_render_target *self,
  * Present - send to VNC and optionally to surface
  *===========================================================================*/
 
-static struct yetty_core_void_result
-render_target_vnc_present(struct yetty_render_target *self)
+static struct yetty_ycore_void_result
+render_target_vnc_present(struct yetty_yrender_target *self)
 {
 	struct render_target_vnc *rt = (struct render_target_vnc *)self;
-	struct yetty_core_void_result res;
+	struct yetty_ycore_void_result res;
 
 	int has_clients = rt->vnc_server ? yetty_vnc_server_has_clients(rt->vnc_server) : 0;
 	ytrace("vnc_render_target_present: vnc_server=%p has_clients=%d",
@@ -127,7 +127,7 @@ render_target_vnc_present(struct yetty_render_target *self)
  * vtable and create
  *===========================================================================*/
 
-static const struct yetty_render_target_ops render_target_vnc_ops = {
+static const struct yetty_yrender_target_ops render_target_vnc_ops = {
 	.destroy = render_target_vnc_destroy,
 	.clear = render_target_vnc_clear,
 	.render_layer = render_target_vnc_render_layer,
@@ -138,17 +138,17 @@ static const struct yetty_render_target_ops render_target_vnc_ops = {
 	.resize = render_target_vnc_resize,
 };
 
-struct yetty_render_target_ptr_result
-yetty_render_target_vnc_create(WGPUDevice device, WGPUQueue queue,
+struct yetty_yrender_target_ptr_result
+yetty_yrender_target_vnc_create(WGPUDevice device, WGPUQueue queue,
 			       WGPUTextureFormat format,
-			       struct yetty_render_gpu_allocator *allocator,
+			       struct yetty_yrender_gpu_allocator *allocator,
 			       WGPUSurface surface,
 			       struct yetty_vnc_server *vnc_server,
-			       struct yetty_render_viewport viewport)
+			       struct yetty_yrender_viewport viewport)
 {
 	struct render_target_vnc *rt = calloc(1, sizeof(*rt));
 	if (!rt)
-		return YETTY_ERR(yetty_render_target_ptr,
+		return YETTY_ERR(yetty_yrender_target_ptr,
 				 "failed to allocate vnc render target");
 
 	rt->base.ops = &render_target_vnc_ops;
@@ -157,8 +157,8 @@ yetty_render_target_vnc_create(WGPUDevice device, WGPUQueue queue,
 	rt->surface = surface;
 
 	/* Create inner texture target */
-	struct yetty_render_target_ptr_result inner_res =
-		yetty_render_target_texture_create(device, queue, format,
+	struct yetty_yrender_target_ptr_result inner_res =
+		yetty_yrender_target_texture_create(device, queue, format,
 						   allocator, surface, viewport);
 	if (!YETTY_IS_OK(inner_res)) {
 		free(rt);
@@ -166,7 +166,7 @@ yetty_render_target_vnc_create(WGPUDevice device, WGPUQueue queue,
 	}
 	rt->inner = inner_res.value;
 
-	ydebug("yetty_render_target_vnc_create: %.0fx%.0f surface=%p vnc=%p",
+	ydebug("yetty_yrender_target_vnc_create: %.0fx%.0f surface=%p vnc=%p",
 	       viewport.w, viewport.h, (void *)surface, (void *)vnc_server);
-	return YETTY_OK(yetty_render_target_ptr, &rt->base);
+	return YETTY_OK(yetty_yrender_target_ptr, &rt->base);
 }

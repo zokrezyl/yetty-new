@@ -1,5 +1,5 @@
-#ifndef YETTY_FONT_FONT_H
-#define YETTY_FONT_FONT_H
+#ifndef YETTY_YFONT_FONT_H
+#define YETTY_YFONT_FONT_H
 
 /*
  * yetty_font_font - Non-monospace font interface
@@ -23,13 +23,13 @@ struct yetty_font_font;
 
 /* Font style */
 enum yetty_font_style {
-	YETTY_FONT_STYLE_REGULAR     = 0,
-	YETTY_FONT_STYLE_BOLD        = 1,
-	YETTY_FONT_STYLE_ITALIC      = 2,
-	YETTY_FONT_STYLE_BOLD_ITALIC = 3,
+	YETTY_YFONT_STYLE_REGULAR     = 0,
+	YETTY_YFONT_STYLE_BOLD        = 1,
+	YETTY_YFONT_STYLE_ITALIC      = 2,
+	YETTY_YFONT_STYLE_BOLD_ITALIC = 3,
 };
 
-YETTY_RESULT_DECLARE(yetty_font_font, struct yetty_font_font *);
+YETTY_YRESULT_DECLARE(yetty_font_font, struct yetty_font_font *);
 
 /* Font ops */
 struct yetty_font_font_ops {
@@ -43,10 +43,10 @@ struct yetty_font_font_ops {
 						       enum yetty_font_style style);
 
 	/* Glyph loading */
-	struct yetty_core_void_result (*load_glyphs)(struct yetty_font_font *self,
+	struct yetty_ycore_void_result (*load_glyphs)(struct yetty_font_font *self,
 						     const uint32_t *codepoints,
 						     size_t count);
-	struct yetty_core_void_result (*load_basic_latin)(struct yetty_font_font *self);
+	struct yetty_ycore_void_result (*load_basic_latin)(struct yetty_font_font *self);
 
 	/* Base size the CDB was generated at */
 	float (*get_base_size)(const struct yetty_font_font *self);
@@ -55,7 +55,7 @@ struct yetty_font_font_ops {
 	int (*is_dirty)(const struct yetty_font_font *self);
 
 	/* GPU resources — clears dirty internally */
-	struct yetty_render_gpu_resource_set_result
+	struct yetty_yrender_gpu_resource_set_result
 	(*get_gpu_resource_set)(struct yetty_font_font *self);
 };
 
@@ -68,4 +68,4 @@ struct yetty_font_font {
 }
 #endif
 
-#endif /* YETTY_FONT_FONT_H */
+#endif /* YETTY_YFONT_FONT_H */

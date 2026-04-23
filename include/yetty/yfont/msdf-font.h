@@ -1,5 +1,5 @@
-#ifndef YETTY_FONT_MSDF_FONT_H
-#define YETTY_FONT_MSDF_FONT_H
+#ifndef YETTY_YFONT_MSDF_FONT_H
+#define YETTY_YFONT_MSDF_FONT_H
 
 #include <yetty/yfont/font.h>
 
@@ -17,4 +17,4 @@ yetty_font_msdf_font_create(const char *cdb_path, const char *shader_path);
 }
 #endif
 
-#endif /* YETTY_FONT_MSDF_FONT_H */
+#endif /* YETTY_YFONT_MSDF_FONT_H */

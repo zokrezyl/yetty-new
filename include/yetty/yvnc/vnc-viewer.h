@@ -12,7 +12,7 @@ struct yetty_vnc_viewer;
 struct yetty_context;
 
 /* Result type */
-YETTY_RESULT_DECLARE(yetty_vnc_viewer_ptr, struct yetty_vnc_viewer *);
+YETTY_YRESULT_DECLARE(yetty_vnc_viewer_ptr, struct yetty_vnc_viewer *);
 
 /* Create VNC viewer - connects to host:port */
 struct yetty_vnc_viewer_ptr_result

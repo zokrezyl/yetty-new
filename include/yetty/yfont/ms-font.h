@@ -1,5 +1,5 @@
-#ifndef YETTY_FONT_MS_FONT_H
-#define YETTY_FONT_MS_FONT_H
+#ifndef YETTY_YFONT_MS_FONT_H
+#define YETTY_YFONT_MS_FONT_H
 
 /*
  * yetty_font_ms_font - Monospace font interface
@@ -22,13 +22,13 @@ struct yetty_font_ms_font;
 
 /* Font style */
 enum yetty_font_ms_style {
-	YETTY_FONT_MS_STYLE_REGULAR     = 0,
-	YETTY_FONT_MS_STYLE_BOLD        = 1,
-	YETTY_FONT_MS_STYLE_ITALIC      = 2,
-	YETTY_FONT_MS_STYLE_BOLD_ITALIC = 3,
+	YETTY_YFONT_MS_STYLE_REGULAR     = 0,
+	YETTY_YFONT_MS_STYLE_BOLD        = 1,
+	YETTY_YFONT_MS_STYLE_ITALIC      = 2,
+	YETTY_YFONT_MS_STYLE_BOLD_ITALIC = 3,
 };
 
-YETTY_RESULT_DECLARE(yetty_font_ms_font, struct yetty_font_ms_font *);
+YETTY_YRESULT_DECLARE(yetty_font_ms_font, struct yetty_font_ms_font *);
 
 struct yetty_font_ms_font_ops {
 	void (*destroy)(struct yetty_font_ms_font *self);
@@ -44,20 +44,20 @@ struct yetty_font_ms_font_ops {
 						       enum yetty_font_ms_style style);
 
 	/* Resize — changes font size, recalculates cell size */
-	struct yetty_core_void_result (*resize)(struct yetty_font_ms_font *self,
+	struct yetty_ycore_void_result (*resize)(struct yetty_font_ms_font *self,
 						float font_size);
 
 	/* Glyph loading */
-	struct yetty_core_void_result (*load_glyphs)(struct yetty_font_ms_font *self,
+	struct yetty_ycore_void_result (*load_glyphs)(struct yetty_font_ms_font *self,
 						     const uint32_t *codepoints,
 						     size_t count);
-	struct yetty_core_void_result (*load_basic_latin)(struct yetty_font_ms_font *self);
+	struct yetty_ycore_void_result (*load_basic_latin)(struct yetty_font_ms_font *self);
 
 	/* Dirty tracking */
 	int (*is_dirty)(const struct yetty_font_ms_font *self);
 
 	/* GPU resources — clears dirty internally */
-	struct yetty_render_gpu_resource_set_result
+	struct yetty_yrender_gpu_resource_set_result
 	(*get_gpu_resource_set)(struct yetty_font_ms_font *self);
 };
 
@@ -69,4 +69,4 @@ struct yetty_font_ms_font {
 }
 #endif
 
-#endif /* YETTY_FONT_MS_FONT_H */
+#endif /* YETTY_YFONT_MS_FONT_H */

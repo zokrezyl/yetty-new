@@ -3,7 +3,7 @@
 #include <webgpu/webgpu.h>
 #include <android/native_window.h>
 
-WGPUSurface yetty_platform_create_surface_from_window(WGPUInstance instance, ANativeWindow *window)
+WGPUSurface yetty_yplatform_create_surface_from_window(WGPUInstance instance, ANativeWindow *window)
 {
     WGPUSurfaceSourceAndroidNativeWindow android_source = {0};
     WGPUSurfaceDescriptor surface_desc = {0};

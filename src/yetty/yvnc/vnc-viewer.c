@@ -28,12 +28,12 @@ struct yetty_vnc_viewer {
  *===========================================================================*/
 
 static void vnc_viewer_view_destroy(struct yetty_yui_view *view);
-static struct yetty_core_void_result vnc_viewer_view_render(
-	struct yetty_yui_view *view, struct yetty_render_target *render_target);
+static struct yetty_ycore_void_result vnc_viewer_view_render(
+	struct yetty_yui_view *view, struct yetty_yrender_target *render_target);
 static void vnc_viewer_view_set_bounds(struct yetty_yui_view *view,
 				       struct yetty_yui_rect bounds);
-static struct yetty_core_int_result vnc_viewer_view_on_event(
-	struct yetty_yui_view *view, const struct yetty_core_event *event);
+static struct yetty_ycore_int_result vnc_viewer_view_on_event(
+	struct yetty_yui_view *view, const struct yetty_ycore_event *event);
 
 static const struct yetty_yui_view_ops vnc_viewer_view_ops = {
 	.destroy = vnc_viewer_view_destroy,
@@ -86,15 +86,15 @@ static void vnc_viewer_view_destroy(struct yetty_yui_view *view)
 	free(viewer);
 }
 
-static struct yetty_core_void_result vnc_viewer_view_render(
-	struct yetty_yui_view *view, struct yetty_render_target *render_target)
+static struct yetty_ycore_void_result vnc_viewer_view_render(
+	struct yetty_yui_view *view, struct yetty_yrender_target *render_target)
 {
 	struct yetty_vnc_viewer *viewer = (struct yetty_vnc_viewer *)view;
 
 	ydebug("vnc_viewer_render: client=%p", (void *)viewer->client);
 
 	if (!viewer->client)
-		return YETTY_ERR(yetty_core_void, "no VNC client");
+		return YETTY_ERR(yetty_ycore_void, "no VNC client");
 
 	int is_connected = yetty_vnc_client_is_connected(viewer->client);
 	ydebug("vnc_viewer_render: is_connected=%d", is_connected);
@@ -103,7 +103,7 @@ static struct yetty_core_void_result vnc_viewer_view_render(
 		return YETTY_OK_VOID();
 
 	/* Update texture with any received tiles */
-	struct yetty_core_void_result res =
+	struct yetty_ycore_void_result res =
 		yetty_vnc_client_update_texture(viewer->client);
 	if (!YETTY_IS_OK(res)) {
 		ydebug("vnc_viewer: update_texture failed: %s", res.error.msg);
@@ -116,7 +116,7 @@ static struct yetty_core_void_result vnc_viewer_view_render(
 	/* Get big render target's view */
 	WGPUTextureView target_view = render_target->ops->get_view(render_target);
 	if (!target_view)
-		return YETTY_ERR(yetty_core_void, "no target view");
+		return YETTY_ERR(yetty_ycore_void, "no target view");
 
 	/* Create command encoder */
 	WGPUDevice device = viewer->context.gpu_context.device;
@@ -125,7 +125,7 @@ static struct yetty_core_void_result vnc_viewer_view_render(
 	WGPUCommandEncoderDescriptor enc_desc = {0};
 	WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(device, &enc_desc);
 	if (!encoder)
-		return YETTY_ERR(yetty_core_void, "failed to create encoder");
+		return YETTY_ERR(yetty_ycore_void, "failed to create encoder");
 
 	/* Create render pass targeting the big render target */
 	WGPURenderPassColorAttachment color_attachment = {0};
@@ -141,7 +141,7 @@ static struct yetty_core_void_result vnc_viewer_view_render(
 	WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(encoder, &pass_desc);
 	if (!pass) {
 		wgpuCommandEncoderRelease(encoder);
-		return YETTY_ERR(yetty_core_void, "failed to begin render pass");
+		return YETTY_ERR(yetty_ycore_void, "failed to begin render pass");
 	}
 
 	/* Set viewport to viewer bounds within the big target */
@@ -194,8 +194,8 @@ static void vnc_viewer_view_set_bounds(struct yetty_yui_view *view,
 	ydebug("vnc_viewer: set_bounds %.0fx%.0f", bounds.w, bounds.h);
 }
 
-static struct yetty_core_int_result vnc_viewer_view_on_event(
-	struct yetty_yui_view *view, const struct yetty_core_event *event)
+static struct yetty_ycore_int_result vnc_viewer_view_on_event(
+	struct yetty_yui_view *view, const struct yetty_ycore_event *event)
 {
 	struct yetty_vnc_viewer *viewer = (struct yetty_vnc_viewer *)view;
 
@@ -204,7 +204,7 @@ static struct yetty_core_int_result vnc_viewer_view_on_event(
 	       viewer->client ? yetty_vnc_client_is_connected(viewer->client) : -1);
 
 	if (!viewer->client || !yetty_vnc_client_is_connected(viewer->client))
-		return YETTY_OK(yetty_core_int, 0);
+		return YETTY_OK(yetty_ycore_int, 0);
 
 	/* Transform coordinates relative to view bounds */
 	float rel_x = 0, rel_y = 0;
@@ -216,20 +216,20 @@ static struct yetty_core_int_result vnc_viewer_view_on_event(
 					       event->key.key,
 					       event->key.scancode,
 					       event->key.mods);
-		return YETTY_OK(yetty_core_int, 1);
+		return YETTY_OK(yetty_ycore_int, 1);
 
 	case YETTY_EVENT_KEY_UP:
 		yetty_vnc_client_send_key_up(viewer->client,
 					     event->key.key,
 					     event->key.scancode,
 					     event->key.mods);
-		return YETTY_OK(yetty_core_int, 1);
+		return YETTY_OK(yetty_ycore_int, 1);
 
 	case YETTY_EVENT_CHAR:
 		yetty_vnc_client_send_char_with_mods(viewer->client,
 						     event->chr.codepoint,
 						     (uint8_t)event->chr.mods);
-		return YETTY_OK(yetty_core_int, 1);
+		return YETTY_OK(yetty_ycore_int, 1);
 
 	case YETTY_EVENT_MOUSE_MOVE:
 		rel_x = event->mouse.x - b.x;
@@ -238,7 +238,7 @@ static struct yetty_core_int_result vnc_viewer_view_on_event(
 						 (int16_t)rel_x,
 						 (int16_t)rel_y,
 						 0);
-		return YETTY_OK(yetty_core_int, 1);
+		return YETTY_OK(yetty_ycore_int, 1);
 
 	case YETTY_EVENT_MOUSE_DOWN:
 		rel_x = event->mouse.x - b.x;
@@ -248,7 +248,7 @@ static struct yetty_core_int_result vnc_viewer_view_on_event(
 						   (int16_t)rel_y,
 						   (uint8_t)event->mouse.button,
 						   1, 0);
-		return YETTY_OK(yetty_core_int, 1);
+		return YETTY_OK(yetty_ycore_int, 1);
 
 	case YETTY_EVENT_MOUSE_UP:
 		rel_x = event->mouse.x - b.x;
@@ -258,7 +258,7 @@ static struct yetty_core_int_result vnc_viewer_view_on_event(
 						   (int16_t)rel_y,
 						   (uint8_t)event->mouse.button,
 						   0, 0);
-		return YETTY_OK(yetty_core_int, 1);
+		return YETTY_OK(yetty_ycore_int, 1);
 
 	case YETTY_EVENT_SCROLL:
 		rel_x = event->scroll.x - b.x;
@@ -269,13 +269,13 @@ static struct yetty_core_int_result vnc_viewer_view_on_event(
 						   (int16_t)event->scroll.dx,
 						   (int16_t)event->scroll.dy,
 						   0);
-		return YETTY_OK(yetty_core_int, 1);
+		return YETTY_OK(yetty_ycore_int, 1);
 
 	default:
 		break;
 	}
 
-	return YETTY_OK(yetty_core_int, 0);
+	return YETTY_OK(yetty_ycore_int, 0);
 }
 
 /*=============================================================================
@@ -337,7 +337,7 @@ yetty_vnc_viewer_create(const char *host, uint16_t port,
 	yetty_vnc_client_set_on_disconnected(viewer->client, on_disconnected_callback, viewer);
 
 	/* Connect to server */
-	struct yetty_core_void_result conn_res =
+	struct yetty_ycore_void_result conn_res =
 		yetty_vnc_client_connect(viewer->client, host, port);
 	if (!YETTY_IS_OK(conn_res)) {
 		yetty_vnc_client_destroy(viewer->client);

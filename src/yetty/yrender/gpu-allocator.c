@@ -18,7 +18,7 @@ struct allocation {
 };
 
 struct gpu_allocator_impl {
-    struct yetty_render_gpu_allocator base;
+    struct yetty_yrender_gpu_allocator base;
     WGPUDevice device;
     struct allocation allocations[MAX_ALLOCATIONS];
     size_t allocation_count;
@@ -26,16 +26,16 @@ struct gpu_allocator_impl {
 };
 
 /* Forward declarations */
-static void gpu_allocator_destroy(struct yetty_render_gpu_allocator *self);
-static WGPUBuffer gpu_allocator_create_buffer(struct yetty_render_gpu_allocator *self,
+static void gpu_allocator_destroy(struct yetty_yrender_gpu_allocator *self);
+static WGPUBuffer gpu_allocator_create_buffer(struct yetty_yrender_gpu_allocator *self,
                                                const WGPUBufferDescriptor *desc);
-static void gpu_allocator_release_buffer(struct yetty_render_gpu_allocator *self, WGPUBuffer buffer);
-static WGPUTexture gpu_allocator_create_texture(struct yetty_render_gpu_allocator *self,
+static void gpu_allocator_release_buffer(struct yetty_yrender_gpu_allocator *self, WGPUBuffer buffer);
+static WGPUTexture gpu_allocator_create_texture(struct yetty_yrender_gpu_allocator *self,
                                                  const WGPUTextureDescriptor *desc);
-static void gpu_allocator_release_texture(struct yetty_render_gpu_allocator *self, WGPUTexture texture);
-static uint64_t gpu_allocator_total_allocated_bytes(const struct yetty_render_gpu_allocator *self);
+static void gpu_allocator_release_texture(struct yetty_yrender_gpu_allocator *self, WGPUTexture texture);
+static uint64_t gpu_allocator_total_allocated_bytes(const struct yetty_yrender_gpu_allocator *self);
 
-static const struct yetty_render_gpu_allocator_ops gpu_allocator_ops = {
+static const struct yetty_yrender_gpu_allocator_ops gpu_allocator_ops = {
     .destroy = gpu_allocator_destroy,
     .create_buffer = gpu_allocator_create_buffer,
     .release_buffer = gpu_allocator_release_buffer,
@@ -75,13 +75,13 @@ static uint32_t bytes_per_pixel(WGPUTextureFormat format)
     }
 }
 
-static void gpu_allocator_destroy(struct yetty_render_gpu_allocator *self)
+static void gpu_allocator_destroy(struct yetty_yrender_gpu_allocator *self)
 {
     struct gpu_allocator_impl *impl = (struct gpu_allocator_impl *)self;
     free(impl);
 }
 
-static WGPUBuffer gpu_allocator_create_buffer(struct yetty_render_gpu_allocator *self,
+static WGPUBuffer gpu_allocator_create_buffer(struct yetty_yrender_gpu_allocator *self,
                                                const WGPUBufferDescriptor *desc)
 {
     struct gpu_allocator_impl *impl = (struct gpu_allocator_impl *)self;
@@ -110,7 +110,7 @@ static WGPUBuffer gpu_allocator_create_buffer(struct yetty_render_gpu_allocator 
     return buffer;
 }
 
-static void gpu_allocator_release_buffer(struct yetty_render_gpu_allocator *self, WGPUBuffer buffer)
+static void gpu_allocator_release_buffer(struct yetty_yrender_gpu_allocator *self, WGPUBuffer buffer)
 {
     struct gpu_allocator_impl *impl = (struct gpu_allocator_impl *)self;
 
@@ -135,7 +135,7 @@ static void gpu_allocator_release_buffer(struct yetty_render_gpu_allocator *self
     wgpuBufferRelease(buffer);
 }
 
-static WGPUTexture gpu_allocator_create_texture(struct yetty_render_gpu_allocator *self,
+static WGPUTexture gpu_allocator_create_texture(struct yetty_yrender_gpu_allocator *self,
                                                  const WGPUTextureDescriptor *desc)
 {
     struct gpu_allocator_impl *impl = (struct gpu_allocator_impl *)self;
@@ -168,7 +168,7 @@ static WGPUTexture gpu_allocator_create_texture(struct yetty_render_gpu_allocato
     return texture;
 }
 
-static void gpu_allocator_release_texture(struct yetty_render_gpu_allocator *self, WGPUTexture texture)
+static void gpu_allocator_release_texture(struct yetty_yrender_gpu_allocator *self, WGPUTexture texture)
 {
     struct gpu_allocator_impl *impl = (struct gpu_allocator_impl *)self;
 
@@ -193,23 +193,23 @@ static void gpu_allocator_release_texture(struct yetty_render_gpu_allocator *sel
     wgpuTextureRelease(texture);
 }
 
-static uint64_t gpu_allocator_total_allocated_bytes(const struct yetty_render_gpu_allocator *self)
+static uint64_t gpu_allocator_total_allocated_bytes(const struct yetty_yrender_gpu_allocator *self)
 {
     const struct gpu_allocator_impl *impl = (const struct gpu_allocator_impl *)self;
     return impl->total_bytes;
 }
 
-struct yetty_render_gpu_allocator_result yetty_render_gpu_allocator_create(WGPUDevice device)
+struct yetty_yrender_gpu_allocator_result yetty_yrender_gpu_allocator_create(WGPUDevice device)
 {
     if (!device)
-        return YETTY_ERR(yetty_render_gpu_allocator, "device is null");
+        return YETTY_ERR(yetty_yrender_gpu_allocator, "device is null");
 
     struct gpu_allocator_impl *impl = calloc(1, sizeof(struct gpu_allocator_impl));
     if (!impl)
-        return YETTY_ERR(yetty_render_gpu_allocator, "failed to allocate");
+        return YETTY_ERR(yetty_yrender_gpu_allocator, "failed to allocate");
 
     impl->base.ops = &gpu_allocator_ops;
     impl->device = device;
 
-    return YETTY_OK(yetty_render_gpu_allocator, &impl->base);
+    return YETTY_OK(yetty_yrender_gpu_allocator, &impl->base);
 }

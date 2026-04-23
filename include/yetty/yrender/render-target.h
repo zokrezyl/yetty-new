@@ -1,5 +1,5 @@
-#ifndef YETTY_RENDER_TARGET_H
-#define YETTY_RENDER_TARGET_H
+#ifndef YETTY_YRENDER__TARGET_H
+#define YETTY_YRENDER__TARGET_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -10,16 +10,16 @@
 extern "C" {
 #endif
 
-struct yetty_render_target;
-struct yetty_term_terminal_layer;
-struct yetty_render_gpu_allocator;
+struct yetty_yrender_target;
+struct yetty_yterm_terminal_layer;
+struct yetty_yrender_gpu_allocator;
 struct yetty_gpu_context;
 
 /* Result type */
-YETTY_RESULT_DECLARE(yetty_render_target_ptr, struct yetty_render_target *);
+YETTY_YRESULT_DECLARE(yetty_yrender_target_ptr, struct yetty_yrender_target *);
 
 /* Viewport - position and size */
-struct yetty_render_viewport {
+struct yetty_yrender_viewport {
 	float x, y, w, h;
 };
 
@@ -33,44 +33,44 @@ struct yetty_render_viewport {
  * - Final level: present() outputs to surface/vnc/ymux
  *===========================================================================*/
 
-struct yetty_render_target_ops {
-	void (*destroy)(struct yetty_render_target *self);
+struct yetty_yrender_target_ops {
+	void (*destroy)(struct yetty_yrender_target *self);
 
 	/* Clear the target to a solid color */
-	struct yetty_core_void_result (*clear)(
-		struct yetty_render_target *self);
+	struct yetty_ycore_void_result (*clear)(
+		struct yetty_yrender_target *self);
 
 	/* Render single terminal layer to this target */
-	struct yetty_core_void_result (*render_layer)(
-		struct yetty_render_target *self,
-		struct yetty_term_terminal_layer *layer);
+	struct yetty_ycore_void_result (*render_layer)(
+		struct yetty_yrender_target *self,
+		struct yetty_yterm_terminal_layer *layer);
 
 	/* Blend multiple source targets into this target */
-	struct yetty_core_void_result (*blend)(
-		struct yetty_render_target *self,
-		struct yetty_render_target **sources,
+	struct yetty_ycore_void_result (*blend)(
+		struct yetty_yrender_target *self,
+		struct yetty_yrender_target **sources,
 		size_t count);
 
 	/* Present this target's content to final destination (surface/vnc/ymux) */
-	struct yetty_core_void_result (*present)(
-		struct yetty_render_target *self);
+	struct yetty_ycore_void_result (*present)(
+		struct yetty_yrender_target *self);
 
 	/* Get texture view for blending */
-	WGPUTextureView (*get_view)(const struct yetty_render_target *self);
+	WGPUTextureView (*get_view)(const struct yetty_yrender_target *self);
 
 	/* Get texture for VNC/other use */
-	WGPUTexture (*get_texture)(const struct yetty_render_target *self);
+	WGPUTexture (*get_texture)(const struct yetty_yrender_target *self);
 
 	/* Resize/reposition the target */
-	struct yetty_core_void_result (*resize)(
-		struct yetty_render_target *self,
-		struct yetty_render_viewport viewport);
+	struct yetty_ycore_void_result (*resize)(
+		struct yetty_yrender_target *self,
+		struct yetty_yrender_viewport viewport);
 };
 
 /* Render target base - embed as first member in subclasses */
-struct yetty_render_target {
-	const struct yetty_render_target_ops *ops;
-	struct yetty_render_viewport viewport;
+struct yetty_yrender_target {
+	const struct yetty_yrender_target_ops *ops;
+	struct yetty_yrender_viewport viewport;
 };
 
 /*=============================================================================
@@ -85,13 +85,13 @@ struct yetty_render_target {
  * If surface is NULL, present() returns error.
  *===========================================================================*/
 
-struct yetty_render_target_ptr_result yetty_render_target_texture_create(
+struct yetty_yrender_target_ptr_result yetty_yrender_target_texture_create(
 	WGPUDevice device,
 	WGPUQueue queue,
 	WGPUTextureFormat format,
-	struct yetty_render_gpu_allocator *allocator,
+	struct yetty_yrender_gpu_allocator *allocator,
 	WGPUSurface surface,  /* NULL for layer/terminal targets */
-	struct yetty_render_viewport viewport);
+	struct yetty_yrender_viewport viewport);
 
 /*=============================================================================
  * VNC render target - renders to texture and sends to VNC clients
@@ -106,17 +106,17 @@ struct yetty_render_target_ptr_result yetty_render_target_texture_create(
 
 struct yetty_vnc_server;
 
-struct yetty_render_target_ptr_result yetty_render_target_vnc_create(
+struct yetty_yrender_target_ptr_result yetty_yrender_target_vnc_create(
 	WGPUDevice device,
 	WGPUQueue queue,
 	WGPUTextureFormat format,
-	struct yetty_render_gpu_allocator *allocator,
+	struct yetty_yrender_gpu_allocator *allocator,
 	WGPUSurface surface,  /* NULL for headless, non-NULL for mirror */
 	struct yetty_vnc_server *vnc_server,
-	struct yetty_render_viewport viewport);
+	struct yetty_yrender_viewport viewport);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* YETTY_RENDER_TARGET_H */
+#endif /* YETTY_YRENDER__TARGET_H */

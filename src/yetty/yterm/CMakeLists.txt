@@ -1,4 +1,4 @@
-add_library(yetty_term
+add_library(yetty_yterm
     terminal.c
     text-layer.c
     ypaint-layer.c
@@ -6,11 +6,11 @@ add_library(yetty_term
     osc-args.c
 )
 
-target_include_directories(yetty_term PUBLIC
+target_include_directories(yetty_yterm PUBLIC
     ${YETTY_ROOT}/include
 )
 
-target_link_libraries(yetty_term
+target_link_libraries(yetty_yterm
     vterm
     webgpu
     yetty_ypaint_core
@@ -20,7 +20,7 @@ target_link_libraries(yetty_term
 )
 
 # Embed shaders via incbin (or stubs on Emscripten)
-incbin_add_resources(yetty_term
+incbin_add_resources(yetty_yterm
     text_layer_shader "${CMAKE_CURRENT_SOURCE_DIR}/text-layer.wgsl"
     ypaint_layer_shader "${CMAKE_CURRENT_SOURCE_DIR}/ypaint-layer.wgsl"
 )

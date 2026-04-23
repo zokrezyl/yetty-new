@@ -25,12 +25,12 @@ struct yetty_ypaint_id_result {
 
 struct yetty_ypaint_core_buffer;
 
-YETTY_RESULT_DECLARE(yetty_ypaint_core_buffer, struct yetty_ypaint_core_buffer *);
+YETTY_YRESULT_DECLARE(yetty_ypaint_core_buffer, struct yetty_ypaint_core_buffer *);
 
 // Create/destroy
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(void);
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
-    const struct yetty_core_buffer *base64_buf);
+    const struct yetty_ycore_buffer *base64_buf);
 void yetty_ypaint_core_buffer_destroy(struct yetty_ypaint_core_buffer *buf);
 
 // Clear all data (keeps allocation)
@@ -46,7 +46,7 @@ struct yetty_ypaint_core_primitive_iter {
     struct yetty_ypaint_prim_flyweight fw;
 };
 
-YETTY_RESULT_DECLARE(yetty_ypaint_core_primitive_iter, struct yetty_ypaint_core_primitive_iter);
+YETTY_YRESULT_DECLARE(yetty_ypaint_core_primitive_iter, struct yetty_ypaint_core_primitive_iter);
 
 struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_first(
     const struct yetty_ypaint_core_buffer *buf,
@@ -62,9 +62,9 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_nex
  *===========================================================================*/
 
 /* Add font TTF data to buffer. Returns fontId for use in text spans. */
-struct yetty_core_int_result
+struct yetty_ycore_int_result
 yetty_ypaint_core_buffer_add_font(struct yetty_ypaint_core_buffer *buf,
-                                  const struct yetty_core_buffer *ttf_data,
+                                  const struct yetty_ycore_buffer *ttf_data,
                                   const char *name);
 
 uint32_t yetty_ypaint_core_buffer_font_count(
@@ -77,10 +77,10 @@ const struct yetty_font_blob *yetty_ypaint_core_buffer_get_font(
  * Text span storage
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_core_buffer_add_text(struct yetty_ypaint_core_buffer *buf,
                                   float x, float y,
-                                  const struct yetty_core_buffer *text,
+                                  const struct yetty_ycore_buffer *text,
                                   float font_size, uint32_t color,
                                   uint32_t layer, int32_t font_id,
                                   float rotation);

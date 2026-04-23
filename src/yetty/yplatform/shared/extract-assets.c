@@ -8,8 +8,8 @@
 #include <unistd.h>
 
 /* Forward declarations - implemented in platform-paths.c */
-const char *yetty_platform_get_data_dir(void);
-const char *yetty_platform_get_config_dir(void);
+const char *yetty_yplatform_get_data_dir(void);
+const char *yetty_yplatform_get_config_dir(void);
 
 /* Forward declaration - implemented by incbin-assets.c */
 struct yetty_incbin_assets;
@@ -21,7 +21,7 @@ int yetty_incbin_assets_extract_config_to(struct yetty_incbin_assets *assets, co
 int yetty_incbin_assets_extract_tinyemu_to(struct yetty_incbin_assets *assets, const char *data_dir);
 int yetty_incbin_assets_has_tinyemu(struct yetty_incbin_assets *assets);
 
-struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config *config)
+struct yetty_ycore_void_result yetty_yplatform_extract_assets(struct yetty_yconfig *config)
 {
     const char *data_dir;
     const char *config_dir;
@@ -30,8 +30,8 @@ struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config 
 
     (void)config;
 
-    data_dir = yetty_platform_get_data_dir();
-    config_dir = yetty_platform_get_config_dir();
+    data_dir = yetty_yplatform_get_data_dir();
+    config_dir = yetty_yplatform_get_config_dir();
 
     if (!data_dir || !data_dir[0])
         return YETTY_OK_VOID();
@@ -45,7 +45,7 @@ struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config 
     if (needs_extract) {
         if (!yetty_incbin_assets_extract_data_to(assets, data_dir)) {
             yetty_incbin_assets_destroy(assets);
-            return YETTY_ERR(yetty_core_void, "failed to extract data assets");
+            return YETTY_ERR(yetty_ycore_void, "failed to extract data assets");
         }
     }
 
@@ -55,7 +55,7 @@ struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config 
         if (needs_extract) {
             if (!yetty_incbin_assets_extract_config_to(assets, config_dir)) {
                 yetty_incbin_assets_destroy(assets);
-                return YETTY_ERR(yetty_core_void, "failed to extract config assets");
+                return YETTY_ERR(yetty_ycore_void, "failed to extract config assets");
             }
         }
     }
@@ -67,7 +67,7 @@ struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config 
         if (access(tinyemu_cfg, F_OK) != 0) {
             if (!yetty_incbin_assets_extract_tinyemu_to(assets, data_dir)) {
                 yetty_incbin_assets_destroy(assets);
-                return YETTY_ERR(yetty_core_void, "failed to extract tinyemu assets");
+                return YETTY_ERR(yetty_ycore_void, "failed to extract tinyemu assets");
             }
         }
     }

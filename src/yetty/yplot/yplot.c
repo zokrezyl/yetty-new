@@ -17,22 +17,22 @@ extern const unsigned int gyplot_shaderSize;
 // Static shader-only resource set (always included for yplot_render function)
 //=============================================================================
 
-static struct yetty_render_gpu_resource_set yplot_static_shader_rs;
+static struct yetty_yrender_gpu_resource_set yplot_static_shader_rs;
 static bool yplot_static_shader_rs_initialized = false;
 
-const struct yetty_render_gpu_resource_set *yetty_yplot_get_shader_resource_set(void)
+const struct yetty_yrender_gpu_resource_set *yetty_yplot_get_shader_resource_set(void)
 {
     if (!yplot_static_shader_rs_initialized) {
         memset(&yplot_static_shader_rs, 0, sizeof(yplot_static_shader_rs));
-        yetty_render_shader_code_set(&yplot_static_shader_rs.shader,
+        yetty_yrender_shader_code_set(&yplot_static_shader_rs.shader,
             (const char *)gyplot_shaderData, gyplot_shaderSize);
 
         /* Include yfsvm shader as child (yplot depends on yfsvm_execute) */
-        const struct yetty_render_gpu_resource_set *yfsvm_rs =
+        const struct yetty_yrender_gpu_resource_set *yfsvm_rs =
             yetty_yfsvm_get_shader_resource_set();
         if (yfsvm_rs) {
             yplot_static_shader_rs.children[0] =
-                (struct yetty_render_gpu_resource_set *)yfsvm_rs;
+                (struct yetty_yrender_gpu_resource_set *)yfsvm_rs;
             yplot_static_shader_rs.children_count = 1;
         }
 
@@ -72,7 +72,7 @@ const struct yetty_render_gpu_resource_set *yetty_yplot_get_shader_resource_set(
 //=============================================================================
 
 struct yplot_wire_cache {
-    struct yetty_render_gpu_resource_set rs;
+    struct yetty_yrender_gpu_resource_set rs;
     /* bytecode/colors are inline in primitive buffer, no separate buffers needed */
 };
 
@@ -99,7 +99,7 @@ yplot_wire_get_aabb(const uint8_t *data, uint32_t payload_size)
     return YETTY_OK(rectangle, rect);
 }
 
-static struct yetty_render_gpu_resource_set_result
+static struct yetty_yrender_gpu_resource_set_result
 yplot_wire_get_gpu_resource_set(const uint8_t *data, uint32_t payload_size,
                                  void **cache_ptr)
 {
@@ -114,13 +114,13 @@ yplot_wire_get_gpu_resource_set(const uint8_t *data, uint32_t payload_size,
     if (!cache) {
         cache = calloc(1, sizeof(struct yplot_wire_cache));
         if (!cache)
-            return YETTY_ERR(yetty_render_gpu_resource_set, "alloc failed");
+            return YETTY_ERR(yetty_yrender_gpu_resource_set, "alloc failed");
         *cache_ptr = cache;
-        strncpy(cache->rs.namespace, "yplot_instance", YETTY_RENDER_NAME_MAX - 1);
+        strncpy(cache->rs.namespace, "yplot_instance", YETTY_YRENDER__NAME_MAX - 1);
         cache->rs.buffer_count = 0;
     }
 
-    return YETTY_OK(yetty_render_gpu_resource_set, &cache->rs);
+    return YETTY_OK(yetty_yrender_gpu_resource_set, &cache->rs);
 }
 
 static void yplot_wire_destroy_cache(void *cache_ptr)
@@ -145,12 +145,12 @@ static const struct yetty_ypaint_complex_prim_runtime_ops yplot_runtime_ops = {
 // Flyweight handler for buffer iteration
 //=============================================================================
 
-static struct yetty_core_size_result yplot_prim_size(const uint32_t *prim)
+static struct yetty_ycore_size_result yplot_prim_size(const uint32_t *prim)
 {
     // FAM format: [type:u32][payload_size:u32][payload...]
     uint32_t payload_size = prim[1];
     size_t total = sizeof(uint32_t) * 2 + payload_size;
-    return YETTY_OK(yetty_core_size, total);
+    return YETTY_OK(yetty_ycore_size, total);
 }
 
 static struct rectangle_result yplot_prim_aabb(const uint32_t *prim)
@@ -166,7 +166,7 @@ static void yplot_prim_destroy(void *cache)
     yplot_wire_destroy_cache(cache);
 }
 
-static struct yetty_render_gpu_resource_set_result
+static struct yetty_yrender_gpu_resource_set_result
 yplot_prim_get_gpu_resource_set(const uint32_t *prim, void **cache_ptr)
 {
     // FAM format: [type:u32][payload_size:u32][payload...]
@@ -243,9 +243,9 @@ struct yetty_yplot_yplot {
 
     float bounds_x, bounds_y, bounds_w, bounds_h;
 
-    struct yetty_render_gpu_resource_set resource_set;
-    struct yetty_render_buffer bytecode_buffer;
-    struct yetty_render_buffer color_buffer;
+    struct yetty_yrender_gpu_resource_set resource_set;
+    struct yetty_yrender_buffer bytecode_buffer;
+    struct yetty_yrender_buffer color_buffer;
 
     bool dirty;
 };
@@ -255,7 +255,7 @@ struct yetty_yplot_yplot {
 //=============================================================================
 
 static void yplot_destroy(struct yetty_ypaint_core_complex_prim *self);
-static struct yetty_render_gpu_resource_set_result
+static struct yetty_yrender_gpu_resource_set_result
 yplot_get_gpu_resource_set(struct yetty_ypaint_core_complex_prim *self);
 
 static const struct yetty_ypaint_core_complex_prim_ops yplot_ops = {
@@ -343,20 +343,20 @@ static void yplot_destroy(struct yetty_ypaint_core_complex_prim *self)
 // Bytecode
 //=============================================================================
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yplot_yplot_set_bytecode(struct yetty_yplot_yplot *plot,
                                const uint32_t *bytecode,
                                uint32_t word_count)
 {
     if (!plot)
-        return YETTY_ERR(yetty_core_void, "null plot");
+        return YETTY_ERR(yetty_ycore_void, "null plot");
     if (!bytecode || word_count < 4)
-        return YETTY_ERR(yetty_core_void, "invalid bytecode");
+        return YETTY_ERR(yetty_ycore_void, "invalid bytecode");
 
     free(plot->bytecode);
     plot->bytecode = malloc(word_count * sizeof(uint32_t));
     if (!plot->bytecode)
-        return YETTY_ERR(yetty_core_void, "allocation failed");
+        return YETTY_ERR(yetty_ycore_void, "allocation failed");
 
     memcpy(plot->bytecode, bytecode, word_count * sizeof(uint32_t));
     plot->bytecode_word_count = word_count;
@@ -389,27 +389,27 @@ uint32_t yetty_yplot_yplot_function_count(struct yetty_yplot_yplot *plot)
 // Function styling
 //=============================================================================
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yplot_yplot_set_function_color(struct yetty_yplot_yplot *plot,
                                       uint32_t index, uint32_t color)
 {
     if (!plot)
-        return YETTY_ERR(yetty_core_void, "null plot");
+        return YETTY_ERR(yetty_ycore_void, "null plot");
     if (index >= YETTY_YPLOT_MAX_FUNCTIONS)
-        return YETTY_ERR(yetty_core_void, "index out of range");
+        return YETTY_ERR(yetty_ycore_void, "index out of range");
     plot->functions[index].color = color;
     plot->dirty = true;
     return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yplot_yplot_set_function_visible(struct yetty_yplot_yplot *plot,
                                         uint32_t index, bool visible)
 {
     if (!plot)
-        return YETTY_ERR(yetty_core_void, "null plot");
+        return YETTY_ERR(yetty_ycore_void, "null plot");
     if (index >= YETTY_YPLOT_MAX_FUNCTIONS)
-        return YETTY_ERR(yetty_core_void, "index out of range");
+        return YETTY_ERR(yetty_ycore_void, "index out of range");
     plot->functions[index].visible = visible;
     plot->dirty = true;
     return YETTY_OK_VOID();
@@ -507,11 +507,11 @@ void yetty_yplot_yplot_clear_dirty(struct yetty_yplot_yplot *plot)
     if (plot) plot->dirty = false;
 }
 
-struct yetty_render_gpu_resource_set_result
+struct yetty_yrender_gpu_resource_set_result
 yetty_yplot_yplot_get_gpu_resource_set(struct yetty_yplot_yplot *plot)
 {
     if (!plot)
-        return YETTY_ERR(yetty_render_gpu_resource_set, "null plot");
+        return YETTY_ERR(yetty_yrender_gpu_resource_set, "null plot");
 
     // Update bytecode buffer
     if (plot->bytecode && plot->bytecode_word_count > 0) {
@@ -539,24 +539,24 @@ yetty_yplot_yplot_get_gpu_resource_set(struct yetty_yplot_yplot *plot)
 
     // Build resource set
     memset(&plot->resource_set, 0, sizeof(plot->resource_set));
-    strncpy(plot->resource_set.namespace, "yplot", YETTY_RENDER_NAME_MAX - 1);
+    strncpy(plot->resource_set.namespace, "yplot", YETTY_YRENDER__NAME_MAX - 1);
 
     if (plot->bytecode_buffer.size > 0) {
         plot->resource_set.buffers[plot->resource_set.buffer_count] = plot->bytecode_buffer;
         strncpy(plot->resource_set.buffers[plot->resource_set.buffer_count].name,
-                "bytecode", YETTY_RENDER_NAME_MAX - 1);
+                "bytecode", YETTY_YRENDER__NAME_MAX - 1);
         plot->resource_set.buffer_count++;
     }
 
     plot->resource_set.buffers[plot->resource_set.buffer_count] = plot->color_buffer;
     strncpy(plot->resource_set.buffers[plot->resource_set.buffer_count].name,
-            "colors", YETTY_RENDER_NAME_MAX - 1);
+            "colors", YETTY_YRENDER__NAME_MAX - 1);
     plot->resource_set.buffer_count++;
 
-    return YETTY_OK(yetty_render_gpu_resource_set, &plot->resource_set);
+    return YETTY_OK(yetty_yrender_gpu_resource_set, &plot->resource_set);
 }
 
-static struct yetty_render_gpu_resource_set_result
+static struct yetty_yrender_gpu_resource_set_result
 yplot_get_gpu_resource_set(struct yetty_ypaint_core_complex_prim *self)
 {
     return yetty_yplot_yplot_get_gpu_resource_set((struct yetty_yplot_yplot *)self);
@@ -665,11 +665,11 @@ static int hex_digit(char c)
     return -1;
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yplot_parse_color(const char *color_str, uint32_t *out_color)
 {
     if (!color_str || !out_color)
-        return YETTY_ERR(yetty_core_void, "null argument");
+        return YETTY_ERR(yetty_ycore_void, "null argument");
 
     const char *p = color_str;
     if (*p == '#') p++;
@@ -679,7 +679,7 @@ yetty_yplot_parse_color(const char *color_str, uint32_t *out_color)
     while (*p && hex_digit(*p) >= 0) { len++; p++; }
 
     if (len != 6 && len != 8)
-        return YETTY_ERR(yetty_core_void, "color must be 6 or 8 hex digits");
+        return YETTY_ERR(yetty_ycore_void, "color must be 6 or 8 hex digits");
 
     uint32_t value = 0;
     p = start;

@@ -12,11 +12,11 @@ Yetty C code follows Linux kernel coding guidelines.
 Full hierarchy in names: `project_module_component_subcomponent`
 
 ```c
-struct yetty_term_terminal
-struct yetty_term_terminal_layer
-struct yetty_term_terminal_layer_ops
-yetty_term_terminal_create()
-yetty_term_terminal_layer_create()
+struct yetty_yterm_terminal
+struct yetty_yterm_terminal_layer
+struct yetty_yterm_terminal_layer_ops
+yetty_yterm_terminal_create()
+yetty_yterm_terminal_layer_create()
 ```
 
 ## No Typedefs for Structs
@@ -25,10 +25,10 @@ Always use explicit `struct`:
 
 ```c
 /* Good */
-struct yetty_term_terminal_layer *layer;
+struct yetty_yterm_terminal_layer *layer;
 
 /* Bad */
-yetty_term_terminal_layer_t *layer;
+yetty_yterm_terminal_layer_t *layer;
 ```
 
 ## Polymorphism
@@ -39,15 +39,15 @@ Separate ops struct from object struct:
 
 ```c
 /* Vtable */
-struct yetty_term_terminal_layer_ops {
-    void (*destroy)(struct yetty_term_terminal_layer *self);
-    void (*write)(struct yetty_term_terminal_layer *self, const char *data, size_t len);
-    void (*resize)(struct yetty_term_terminal_layer *self, uint32_t cols, uint32_t rows);
+struct yetty_yterm_terminal_layer_ops {
+    void (*destroy)(struct yetty_yterm_terminal_layer *self);
+    void (*write)(struct yetty_yterm_terminal_layer *self, const char *data, size_t len);
+    void (*resize)(struct yetty_yterm_terminal_layer *self, uint32_t cols, uint32_t rows);
 };
 
 /* Object */
-struct yetty_term_terminal_layer {
-    const struct yetty_term_terminal_layer_ops *ops;
+struct yetty_yterm_terminal_layer {
+    const struct yetty_yterm_terminal_layer_ops *ops;
     uint32_t cols;
     uint32_t rows;
     float cell_width;
@@ -62,8 +62,8 @@ Embed base struct as FIRST member. No `void *priv` pointers.
 
 ```c
 /* Base */
-struct yetty_term_terminal_layer {
-    const struct yetty_term_terminal_layer_ops *ops;
+struct yetty_yterm_terminal_layer {
+    const struct yetty_yterm_terminal_layer_ops *ops;
     uint32_t cols;
     uint32_t rows;
     float cell_width;
@@ -72,8 +72,8 @@ struct yetty_term_terminal_layer {
 };
 
 /* Subclass */
-struct yetty_term_terminal_text_layer {
-    struct yetty_term_terminal_layer base;  /* MUST be first */
+struct yetty_yterm_terminal_text_layer {
+    struct yetty_yterm_terminal_layer base;  /* MUST be first */
     VTerm *vterm;
     VTermScreen *screen;
 };
@@ -83,11 +83,11 @@ struct yetty_term_terminal_text_layer {
 
 ```c
 /* Upcast - direct */
-struct yetty_term_terminal_layer *layer = &text_layer->base;
+struct yetty_yterm_terminal_layer *layer = &text_layer->base;
 
 /* Downcast - container_of */
-struct yetty_term_terminal_text_layer *text_layer =
-    container_of(layer, struct yetty_term_terminal_text_layer, base);
+struct yetty_yterm_terminal_text_layer *text_layer =
+    container_of(layer, struct yetty_yterm_terminal_text_layer, base);
 ```
 
 ### Usage
@@ -103,11 +103,11 @@ Space after `*`, attached to variable name:
 
 ```c
 /* Good */
-struct yetty_term_terminal_layer *layer;
+struct yetty_yterm_terminal_layer *layer;
 const char *data;
 
 /* Bad */
-struct yetty_term_terminal_layer* layer;
+struct yetty_yterm_terminal_layer* layer;
 ```
 
 ## Memory Allocation
@@ -116,11 +116,11 @@ Use `calloc` for zeroed memory. Use explicit struct name in sizeof:
 
 ```c
 /* Good */
-layer = calloc(1, sizeof(struct yetty_term_terminal_text_layer));
+layer = calloc(1, sizeof(struct yetty_yterm_terminal_text_layer));
 
 /* Bad */
 layer = calloc(1, sizeof(*layer));
-layer = malloc(sizeof(struct yetty_term_terminal_text_layer));
+layer = malloc(sizeof(struct yetty_yterm_terminal_text_layer));
 ```
 
 ## Object Lifecycle: create/destroy
@@ -143,7 +143,7 @@ void yetty_thing_destroy(struct yetty_thing *thing);
 4. **No return value**: void, errors logged but not returned
 
 ```c
-void yetty_term_terminal_destroy(struct yetty_term_terminal *terminal)
+void yetty_yterm_terminal_destroy(struct yetty_yterm_terminal *terminal)
 {
     if (!terminal)
         return;
@@ -177,13 +177,13 @@ Window close → SHUTDOWN event → event_loop stops → caller destroys termina
 
 **Rule: Any C function that can error must return a Result type, even if the success value is void.**
 
-For void functions that can fail, use `struct yetty_core_void_result`:
+For void functions that can fail, use `struct yetty_ycore_void_result`:
 
 ```c
-struct yetty_core_void_result yetty_thing_init(struct yetty_thing *thing)
+struct yetty_ycore_void_result yetty_thing_init(struct yetty_thing *thing)
 {
     if (!thing)
-        return YETTY_ERR(yetty_core_void, "thing is NULL");
+        return YETTY_ERR(yetty_ycore_void, "thing is NULL");
 
     /* ... initialization ... */
 
@@ -191,32 +191,32 @@ struct yetty_core_void_result yetty_thing_init(struct yetty_thing *thing)
 }
 ```
 
-Each module declares its own result types using `YETTY_RESULT_DECLARE`:
+Each module declares its own result types using `YETTY_YRESULT_DECLARE`:
 
 ```c
 /* In terminal.h */
-YETTY_RESULT_DECLARE(yetty_term_terminal, struct yetty_term_terminal *);
-YETTY_RESULT_DECLARE(yetty_term_terminal_layer, struct yetty_term_terminal_layer *);
+YETTY_YRESULT_DECLARE(yetty_yterm_terminal, struct yetty_yterm_terminal *);
+YETTY_YRESULT_DECLARE(yetty_yterm_terminal_layer, struct yetty_yterm_terminal_layer *);
 
-/* Generates: struct yetty_term_terminal_result, struct yetty_term_terminal_layer_result */
+/* Generates: struct yetty_yterm_terminal_result, struct yetty_yterm_terminal_layer_result */
 
 /* Usage */
-struct yetty_term_terminal_result yetty_term_terminal_create(uint32_t cols, uint32_t rows)
+struct yetty_yterm_terminal_result yetty_yterm_terminal_create(uint32_t cols, uint32_t rows)
 {
-    struct yetty_term_terminal *terminal;
+    struct yetty_yterm_terminal *terminal;
 
-    terminal = calloc(1, sizeof(struct yetty_term_terminal));
+    terminal = calloc(1, sizeof(struct yetty_yterm_terminal));
     if (!terminal)
-        return YETTY_ERR(yetty_term_terminal, YETTY_ERR_NOMEM, "allocation failed");
+        return YETTY_ERR(yetty_yterm_terminal, YETTY_ERR_NOMEM, "allocation failed");
 
-    return YETTY_OK(yetty_term_terminal, terminal);
+    return YETTY_OK(yetty_yterm_terminal, terminal);
 }
 
 /* Checking results */
-struct yetty_term_terminal_result res = yetty_term_terminal_create(80, 24);
+struct yetty_yterm_terminal_result res = yetty_yterm_terminal_create(80, 24);
 if (YETTY_IS_ERR(res)) {
     printf("error: %s\n", res.error.msg);
     return;
 }
-struct yetty_term_terminal *terminal = res.value;
+struct yetty_yterm_terminal *terminal = res.value;
 ```

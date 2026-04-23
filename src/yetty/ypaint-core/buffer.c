@@ -12,7 +12,7 @@
 
 // YPaint buffer - contains primitive data, fonts, text spans
 struct yetty_ypaint_core_buffer {
-  struct yetty_core_named_buffer primitives;
+  struct yetty_ycore_named_buffer primitives;
 
   struct yetty_font_blob fonts[YPAINT_MAX_FONTS];
   uint32_t font_count;
@@ -22,7 +22,7 @@ struct yetty_ypaint_core_buffer {
 };
 
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
-    const struct yetty_core_buffer *base64_buf) {
+    const struct yetty_ycore_buffer *base64_buf) {
   if (!base64_buf || !base64_buf->data || base64_buf->size == 0)
     return YETTY_ERR(yetty_ypaint_core_buffer, "null or empty base64 buffer");
 
@@ -40,10 +40,10 @@ struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base
     return YETTY_ERR(yetty_ypaint_core_buffer, "calloc for data failed");
   }
   buf->primitives.buf.capacity = decoded_cap;
-  strncpy(buf->primitives.name, "prims", YETTY_CORE_NAMED_BUFFER_MAX_NAME_LENGTH - 1);
+  strncpy(buf->primitives.name, "prims", YETTY_YCORE_NAMED_BUFFER_MAX_NAME_LENGTH - 1);
 
   // Decode using existing util function
-  buf->primitives.buf.size = yetty_core_base64_decode(
+  buf->primitives.buf.size = yetty_ycore_base64_decode(
       (const char *)base64_buf->data, base64_buf->size,
       (char *)buf->primitives.buf.data, decoded_cap);
 
@@ -65,7 +65,7 @@ struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(void) {
   buf->primitives.buf.capacity = YPAINT_BUFFER_INITIAL_CAPACITY;
   buf->primitives.buf.size = 0;
   strncpy(buf->primitives.name, "prims",
-          YETTY_CORE_NAMED_BUFFER_MAX_NAME_LENGTH - 1);
+          YETTY_YCORE_NAMED_BUFFER_MAX_NAME_LENGTH - 1);
 
   return YETTY_OK(yetty_ypaint_core_buffer, buf);
 }
@@ -166,7 +166,7 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_nex
 
   const uint8_t *base = buf->primitives.buf.data;
   size_t buf_size = buf->primitives.buf.size;
-  struct yetty_core_size_result size_res = iter->fw.ops->size(iter->fw.data);
+  struct yetty_ycore_size_result size_res = iter->fw.ops->size(iter->fw.data);
   if (YETTY_IS_ERR(size_res))
     return YETTY_ERR(yetty_ypaint_core_primitive_iter, size_res.error.msg);
   const uint32_t *next = (const uint32_t *)((const uint8_t *)iter->fw.data + size_res.value);
@@ -187,17 +187,17 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_nex
  * Font blob storage
  *===========================================================================*/
 
-struct yetty_core_int_result
+struct yetty_ycore_int_result
 yetty_ypaint_core_buffer_add_font(struct yetty_ypaint_core_buffer *buf,
-                                  const struct yetty_core_buffer *ttf_data,
+                                  const struct yetty_ycore_buffer *ttf_data,
                                   const char *name)
 {
   if (!buf)
-    return YETTY_ERR(yetty_core_int, "buf is NULL");
+    return YETTY_ERR(yetty_ycore_int, "buf is NULL");
   if (!ttf_data || !ttf_data->data || ttf_data->size == 0)
-    return YETTY_ERR(yetty_core_int, "ttf_data is empty");
+    return YETTY_ERR(yetty_ycore_int, "ttf_data is empty");
   if (buf->font_count >= YPAINT_MAX_FONTS)
-    return YETTY_ERR(yetty_core_int, "max fonts reached");
+    return YETTY_ERR(yetty_ycore_int, "max fonts reached");
 
   struct yetty_font_blob *fb = &buf->fonts[buf->font_count];
   fb->font_id = (int32_t)buf->font_count;
@@ -205,19 +205,19 @@ yetty_ypaint_core_buffer_add_font(struct yetty_ypaint_core_buffer *buf,
   /* Copy TTF data */
   fb->named_buf.buf.data = malloc(ttf_data->size);
   if (!fb->named_buf.buf.data)
-    return YETTY_ERR(yetty_core_int, "allocation failed");
+    return YETTY_ERR(yetty_ycore_int, "allocation failed");
   memcpy(fb->named_buf.buf.data, ttf_data->data, ttf_data->size);
   fb->named_buf.buf.size = ttf_data->size;
   fb->named_buf.buf.capacity = ttf_data->size;
 
   if (name) {
     strncpy(fb->named_buf.name, name,
-            YETTY_CORE_NAMED_BUFFER_MAX_NAME_LENGTH - 1);
+            YETTY_YCORE_NAMED_BUFFER_MAX_NAME_LENGTH - 1);
   }
 
   int id = (int)buf->font_count;
   buf->font_count++;
-  return YETTY_OK(yetty_core_int, id);
+  return YETTY_OK(yetty_ycore_int, id);
 }
 
 uint32_t yetty_ypaint_core_buffer_font_count(
@@ -238,20 +238,20 @@ const struct yetty_font_blob *yetty_ypaint_core_buffer_get_font(
  * Text span storage
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ypaint_core_buffer_add_text(struct yetty_ypaint_core_buffer *buf,
                                   float x, float y,
-                                  const struct yetty_core_buffer *text,
+                                  const struct yetty_ycore_buffer *text,
                                   float font_size, uint32_t color,
                                   uint32_t layer, int32_t font_id,
                                   float rotation)
 {
   if (!buf)
-    return YETTY_ERR(yetty_core_void, "buf is NULL");
+    return YETTY_ERR(yetty_ycore_void, "buf is NULL");
   if (!text || !text->data || text->size == 0)
-    return YETTY_ERR(yetty_core_void, "text is empty");
+    return YETTY_ERR(yetty_ycore_void, "text is empty");
   if (buf->text_span_count >= YPAINT_MAX_TEXT_SPANS)
-    return YETTY_ERR(yetty_core_void, "max text spans reached");
+    return YETTY_ERR(yetty_ycore_void, "max text spans reached");
 
   struct yetty_text_span *ts = &buf->text_spans[buf->text_span_count];
   ts->x = x;
@@ -268,7 +268,7 @@ yetty_ypaint_core_buffer_add_text(struct yetty_ypaint_core_buffer *buf,
   /* Copy text data */
   ts->named_buf.buf.data = malloc(text->size);
   if (!ts->named_buf.buf.data)
-    return YETTY_ERR(yetty_core_void, "allocation failed");
+    return YETTY_ERR(yetty_ycore_void, "allocation failed");
   memcpy(ts->named_buf.buf.data, text->data, text->size);
   ts->named_buf.buf.size = text->size;
   ts->named_buf.buf.capacity = text->size;

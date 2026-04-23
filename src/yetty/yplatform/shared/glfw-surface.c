@@ -4,7 +4,7 @@
 #include <GLFW/glfw3.h>
 #include <glfw3webgpu.h>
 
-WGPUSurface yetty_platform_create_surface(WGPUInstance instance, GLFWwindow *window)
+WGPUSurface yetty_yplatform_create_surface(WGPUInstance instance, GLFWwindow *window)
 {
     if (!instance || !window)
         return NULL;

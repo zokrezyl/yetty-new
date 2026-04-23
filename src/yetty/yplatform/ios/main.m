@@ -16,9 +16,9 @@
 #include <yetty/ytrace.h>
 
 /* Forward declarations */
-const char *yetty_platform_get_cache_dir(void);
-const char *yetty_platform_get_runtime_dir(void);
-WGPUSurface yetty_platform_create_surface_from_layer(WGPUInstance instance, CAMetalLayer *layer);
+const char *yetty_yplatform_get_cache_dir(void);
+const char *yetty_yplatform_get_runtime_dir(void);
+WGPUSurface yetty_yplatform_create_surface_from_layer(WGPUInstance instance, CAMetalLayer *layer);
 
 /* YettyMetalView - UIView backed by CAMetalLayer */
 @interface YettyMetalView : UIView
@@ -67,9 +67,9 @@ static void *render_thread_func(void *arg)
 @interface YettyViewController : UIViewController <UIKeyInput> {
     YettyMetalView *_metalView;
     struct yetty_yetty *_yetty;
-    struct yetty_platform_input_pipe *_pipe;
-    struct yetty_config *_config;
-    struct yetty_platform_pty_factory *_ptyFactory;
+    struct yetty_yplatform_input_pipe *_pipe;
+    struct yetty_yconfig *_config;
+    struct yetty_yplatform_pty_factory *_ptyFactory;
     WGPUInstance _instance;
     WGPUSurface _surface;
     pthread_t _renderThread;
@@ -95,8 +95,8 @@ static void *render_thread_func(void *arg)
 - (void)initializeYetty {
     ydebug("initializeYetty starting");
 
-    const char *cache_dir = yetty_platform_get_cache_dir();
-    const char *runtime_dir = yetty_platform_get_runtime_dir();
+    const char *cache_dir = yetty_yplatform_get_cache_dir();
+    const char *runtime_dir = yetty_yplatform_get_runtime_dir();
     ydebug("cache_dir=%s runtime_dir=%s", cache_dir, runtime_dir);
 
     static char shaders_dir[512];
@@ -104,7 +104,7 @@ static void *render_thread_func(void *arg)
     snprintf(shaders_dir, sizeof(shaders_dir), "%s/shaders", cache_dir);
     snprintf(fonts_dir, sizeof(fonts_dir), "%s/fonts", cache_dir);
 
-    struct yetty_platform_paths paths = {
+    struct yetty_yplatform_paths paths = {
         .shaders_dir = shaders_dir,
         .fonts_dir = fonts_dir,
         .runtime_dir = runtime_dir,
@@ -113,7 +113,7 @@ static void *render_thread_func(void *arg)
 
     /* Config */
     ydebug("creating config");
-    struct yetty_config_result config_result = yetty_config_create(0, NULL, &paths);
+    struct yetty_yconfig_result config_result = yetty_yconfig_create(0, NULL, &paths);
     if (!YETTY_IS_OK(config_result)) {
         yerror("failed to create config: %s", config_result.error);
         return;
@@ -123,12 +123,12 @@ static void *render_thread_func(void *arg)
 
     /* Extract embedded assets (fonts, shaders) to cache */
     ydebug("extracting assets");
-    yetty_platform_extract_assets(_config);
+    yetty_yplatform_extract_assets(_config);
     ydebug("assets extracted");
 
     /* Platform input pipe */
     ydebug("creating input pipe");
-    struct yetty_platform_input_pipe_result pipe_result = yetty_platform_input_pipe_create();
+    struct yetty_yplatform_input_pipe_result pipe_result = yetty_yplatform_input_pipe_create();
     if (!YETTY_IS_OK(pipe_result)) {
         yerror("failed to create input pipe: %s", pipe_result.error);
         return;
@@ -138,7 +138,7 @@ static void *render_thread_func(void *arg)
 
     /* PTY factory */
     ydebug("creating PTY factory");
-    struct yetty_platform_pty_factory_result pty_result = yetty_platform_pty_factory_create(_config, NULL);
+    struct yetty_yplatform_pty_factory_result pty_result = yetty_yplatform_pty_factory_create(_config, NULL);
     if (!YETTY_IS_OK(pty_result)) {
         yerror("failed to create PTY factory: %s", pty_result.error);
         return;
@@ -157,7 +157,7 @@ static void *render_thread_func(void *arg)
 
     /* Surface */
     ydebug("creating surface");
-    _surface = yetty_platform_create_surface_from_layer(_instance, _metalView.metalLayer);
+    _surface = yetty_yplatform_create_surface_from_layer(_instance, _metalView.metalLayer);
     if (!_surface) {
         yerror("failed to create surface");
         return;
@@ -206,7 +206,7 @@ static void *render_thread_func(void *arg)
     {
         CGSize size = _metalView.bounds.size;
         CGFloat scale = _metalView.metalLayer.contentsScale;
-        struct yetty_core_event ev = {0};
+        struct yetty_ycore_event ev = {0};
         ev.type = YETTY_EVENT_RESIZE;
         ev.resize.width = (float)(size.width * scale);
         ev.resize.height = (float)(size.height * scale);
@@ -237,7 +237,7 @@ static void *render_thread_func(void *arg)
     NSUInteger len = [text length];
     for (NSUInteger i = 0; i < len; i++) {
         unichar ch = [text characterAtIndex:i];
-        struct yetty_core_event ev = {0};
+        struct yetty_ycore_event ev = {0};
         ev.type = YETTY_EVENT_CHAR;
         ev.chr.codepoint = (uint32_t)ch;
         ev.chr.mods = 0;
@@ -251,7 +251,7 @@ static void *render_thread_func(void *arg)
     ydebug("deleteBackward");
 
     /* Send backspace key event (GLFW_KEY_BACKSPACE = 259) */
-    struct yetty_core_event ev = {0};
+    struct yetty_ycore_event ev = {0};
     ev.type = YETTY_EVENT_KEY_DOWN;
     ev.key.key = 259;
     ev.key.mods = 0;
@@ -269,7 +269,7 @@ static void *render_thread_func(void *arg)
     _metalView.metalLayer.drawableSize = size;
 
     if (_pipe) {
-        struct yetty_core_event ev = {0};
+        struct yetty_ycore_event ev = {0};
         ev.type = YETTY_EVENT_RESIZE;
         ev.resize.width = (float)size.width;
         ev.resize.height = (float)size.height;
@@ -285,7 +285,7 @@ static void *render_thread_func(void *arg)
     CGPoint loc = [touch locationInView:_metalView];
     CGFloat scale = _metalView.metalLayer.contentsScale;
 
-    struct yetty_core_event ev = {0};
+    struct yetty_ycore_event ev = {0};
     ev.type = YETTY_EVENT_MOUSE_DOWN;
     ev.mouse.x = (float)(loc.x * scale);
     ev.mouse.y = (float)(loc.y * scale);
@@ -302,7 +302,7 @@ static void *render_thread_func(void *arg)
     CGPoint loc = [touch locationInView:_metalView];
     CGFloat scale = _metalView.metalLayer.contentsScale;
 
-    struct yetty_core_event ev = {0};
+    struct yetty_ycore_event ev = {0};
     ev.type = YETTY_EVENT_MOUSE_MOVE;
     ev.mouse.x = (float)(loc.x * scale);
     ev.mouse.y = (float)(loc.y * scale);
@@ -317,7 +317,7 @@ static void *render_thread_func(void *arg)
     CGPoint loc = [touch locationInView:_metalView];
     CGFloat scale = _metalView.metalLayer.contentsScale;
 
-    struct yetty_core_event ev = {0};
+    struct yetty_ycore_event ev = {0};
     ev.type = YETTY_EVENT_MOUSE_UP;
     ev.mouse.x = (float)(loc.x * scale);
     ev.mouse.y = (float)(loc.y * scale);

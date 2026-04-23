@@ -20,17 +20,17 @@
 #include <yetty/ytrace.h>
 
 /* Forward declarations - implemented in other platform files */
-const char *yetty_platform_get_cache_dir(void);
-const char *yetty_platform_get_data_dir(void);
-const char *yetty_platform_get_config_dir(void);
-const char *yetty_platform_get_runtime_dir(void);
+const char *yetty_yplatform_get_cache_dir(void);
+const char *yetty_yplatform_get_data_dir(void);
+const char *yetty_yplatform_get_config_dir(void);
+const char *yetty_yplatform_get_runtime_dir(void);
 
-GLFWwindow *yetty_platform_create_window(int width, int height, const char *title);
-void yetty_platform_destroy_window(GLFWwindow *window);
-void yetty_platform_get_framebuffer_size(GLFWwindow *window, int *width, int *height);
-WGPUSurface yetty_platform_create_surface(WGPUInstance instance, GLFWwindow *window);
-void yetty_platform_setup_window_callbacks(GLFWwindow *window);
-void yetty_platform_run_os_event_loop(GLFWwindow *window, int *running);
+GLFWwindow *yetty_yplatform_create_window(int width, int height, const char *title);
+void yetty_yplatform_destroy_window(GLFWwindow *window);
+void yetty_yplatform_get_framebuffer_size(GLFWwindow *window, int *width, int *height);
+WGPUSurface yetty_yplatform_create_surface(WGPUInstance instance, GLFWwindow *window);
+void yetty_yplatform_setup_window_callbacks(GLFWwindow *window);
+void yetty_yplatform_run_os_event_loop(GLFWwindow *window, int *running);
 
 /* Render thread args */
 struct render_thread_args {
@@ -43,7 +43,7 @@ struct render_thread_args {
 static int render_thread_func(void *arg)
 {
     struct render_thread_args *args = arg;
-    struct yetty_core_void_result res = yetty_run(args->yetty);
+    struct yetty_ycore_void_result res = yetty_run(args->yetty);
 
     args->result = YETTY_IS_OK(res) ? 0 : 1;
     *(args->running) = 0;
@@ -79,14 +79,14 @@ static void print_usage(const char *prog)
     fprintf(stderr, "  -h, --help             Show this help\n");
 }
 
-static void parse_cmdline(int argc, char **argv, struct yetty_config *config)
+static void parse_cmdline(int argc, char **argv, struct yetty_yconfig *config)
 {
     optind = 1; /* reset getopt */
     int c;
     while ((c = getopt_long(argc, argv, "c:e:sHp:C:h", long_options, NULL)) != -1) {
         switch (c) {
         case 'c':
-            /* config file already handled by yetty_config_create */
+            /* config file already handled by yetty_yconfig_create */
             break;
         case 'e':
             config->ops->set_string(config, "shell/command", optarg);
@@ -121,9 +121,9 @@ int main(int argc, char **argv)
     }
 
     /* Platform paths */
-    const char *cache_dir = yetty_platform_get_cache_dir();
-    const char *data_dir = yetty_platform_get_data_dir();
-    const char *runtime_dir = yetty_platform_get_runtime_dir();
+    const char *cache_dir = yetty_yplatform_get_cache_dir();
+    const char *data_dir = yetty_yplatform_get_data_dir();
+    const char *runtime_dir = yetty_yplatform_get_runtime_dir();
 
     char shaders_dir[512];
     char fonts_dir[512];
@@ -135,7 +135,7 @@ int main(int argc, char **argv)
     yplatform_mkdir_p(runtime_dir);
     yplatform_mkdir_p(fonts_dir);
 
-    struct yetty_platform_paths paths = {
+    struct yetty_yplatform_paths paths = {
         .shaders_dir = shaders_dir,
         .fonts_dir = fonts_dir,
         .runtime_dir = runtime_dir,
@@ -143,19 +143,19 @@ int main(int argc, char **argv)
     };
 
     /* Config */
-    struct yetty_config_result config_result = yetty_config_create(argc, argv, &paths);
+    struct yetty_yconfig_result config_result = yetty_yconfig_create(argc, argv, &paths);
     if (!YETTY_IS_OK(config_result)) {
         fprintf(stderr, "Failed to create config\n");
         glfwTerminate();
         return 1;
     }
-    struct yetty_config *config = config_result.value;
+    struct yetty_yconfig *config = config_result.value;
 
     /* Parse command line arguments into config */
     parse_cmdline(argc, argv, config);
 
     /* Extract assets */
-    yetty_platform_extract_assets(config);
+    yetty_yplatform_extract_assets(config);
     ydebug("main: assets extracted");
 
     /* Check for headless mode */
@@ -170,7 +170,7 @@ int main(int argc, char **argv)
     GLFWwindow *window = NULL;
     if (!headless) {
         ydebug("main: creating window %dx%d", width, height);
-        window = yetty_platform_create_window(width, height, "yetty");
+        window = yetty_yplatform_create_window(width, height, "yetty");
         if (!window) {
             fprintf(stderr, "Failed to create window\n");
             config->ops->destroy(config);
@@ -178,7 +178,7 @@ int main(int argc, char **argv)
             return 1;
         }
         ydebug("main: window created");
-        yetty_platform_setup_window_callbacks(window);
+        yetty_yplatform_setup_window_callbacks(window);
         ydebug("main: window callbacks set up");
     } else {
         ydebug("main: headless mode, skipping window creation");
@@ -187,33 +187,33 @@ int main(int argc, char **argv)
     /* Platform input pipe */
     ydebug("main: creating platform input pipe");
     fflush(stderr);
-    struct yetty_platform_input_pipe_result pipe_result = yetty_platform_input_pipe_create();
+    struct yetty_yplatform_input_pipe_result pipe_result = yetty_yplatform_input_pipe_create();
     ydebug("main: platform input pipe created, ok=%d", pipe_result.ok);
     if (!YETTY_IS_OK(pipe_result)) {
         fprintf(stderr, "Failed to create platform input pipe\n");
         if (window)
-            yetty_platform_destroy_window(window);
+            yetty_yplatform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
     }
-    struct yetty_platform_input_pipe *platform_input_pipe = pipe_result.value;
+    struct yetty_yplatform_input_pipe *platform_input_pipe = pipe_result.value;
     if (window)
         glfwSetWindowUserPointer(window, platform_input_pipe);
 
     /* PTY factory */
     ydebug("main: creating PTY factory");
-    struct yetty_platform_pty_factory_result pty_factory_result = yetty_platform_pty_factory_create(config, NULL);
+    struct yetty_yplatform_pty_factory_result pty_factory_result = yetty_yplatform_pty_factory_create(config, NULL);
     if (!YETTY_IS_OK(pty_factory_result)) {
         fprintf(stderr, "Failed to create PTY factory\n");
         platform_input_pipe->ops->destroy(platform_input_pipe);
         if (window)
-            yetty_platform_destroy_window(window);
+            yetty_yplatform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
     }
-    struct yetty_platform_pty_factory *pty_factory = pty_factory_result.value;
+    struct yetty_yplatform_pty_factory *pty_factory = pty_factory_result.value;
 
     /* WebGPU instance */
     WGPUInstance instance = wgpuCreateInstance(NULL);
@@ -222,7 +222,7 @@ int main(int argc, char **argv)
         pty_factory->ops->destroy(pty_factory);
         platform_input_pipe->ops->destroy(platform_input_pipe);
         if (window)
-            yetty_platform_destroy_window(window);
+            yetty_yplatform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
@@ -231,13 +231,13 @@ int main(int argc, char **argv)
     /* Surface (NULL for headless mode) */
     WGPUSurface surface = NULL;
     if (window) {
-        surface = yetty_platform_create_surface(instance, window);
+        surface = yetty_yplatform_create_surface(instance, window);
         if (!surface) {
             fprintf(stderr, "Failed to create WebGPU surface\n");
             wgpuInstanceRelease(instance);
             pty_factory->ops->destroy(pty_factory);
             platform_input_pipe->ops->destroy(platform_input_pipe);
-            yetty_platform_destroy_window(window);
+            yetty_yplatform_destroy_window(window);
             config->ops->destroy(config);
             glfwTerminate();
             return 1;
@@ -247,7 +247,7 @@ int main(int argc, char **argv)
     /* App context */
     int fb_width, fb_height;
     if (window) {
-        yetty_platform_get_framebuffer_size(window, &fb_width, &fb_height);
+        yetty_yplatform_get_framebuffer_size(window, &fb_width, &fb_height);
     } else {
         /* Headless mode: use configured dimensions */
         fb_width = width;
@@ -275,7 +275,7 @@ int main(int argc, char **argv)
         pty_factory->ops->destroy(pty_factory);
         platform_input_pipe->ops->destroy(platform_input_pipe);
         if (window)
-            yetty_platform_destroy_window(window);
+            yetty_yplatform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
@@ -295,8 +295,8 @@ int main(int argc, char **argv)
 
     /* Initial resize event */
     if (window)
-        yetty_platform_get_framebuffer_size(window, &fb_width, &fb_height);
-    struct yetty_core_event event = {
+        yetty_yplatform_get_framebuffer_size(window, &fb_width, &fb_height);
+    struct yetty_ycore_event event = {
         .type = YETTY_EVENT_RESIZE,
         .resize = {
             .width = (float)fb_width,
@@ -307,7 +307,7 @@ int main(int argc, char **argv)
 
     /* OS event loop (headless uses a simple wait loop) */
     if (window) {
-        yetty_platform_run_os_event_loop(window, &running);
+        yetty_yplatform_run_os_event_loop(window, &running);
     } else {
         /* Headless mode: just wait for render thread to finish */
         while (running) {
@@ -332,7 +332,7 @@ int main(int argc, char **argv)
     ydebug("main: config destroyed");
     if (window) {
         ydebug("main: destroying window");
-        yetty_platform_destroy_window(window);
+        yetty_yplatform_destroy_window(window);
         ydebug("main: window destroyed");
     }
     ydebug("main: calling glfwTerminate");

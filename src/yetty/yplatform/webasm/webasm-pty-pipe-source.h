@@ -18,7 +18,7 @@ typedef void (*webasm_pty_notify_callback)(void *user_data);
  * when data arrives in the buffer, which triggers the callback.
  */
 struct webasm_pty_pipe_source {
-	struct yetty_platform_pty_pipe_source base;
+	struct yetty_yplatform_pty_pipe_source base;
 	webasm_pty_notify_callback notify_callback;
 	void *notify_user_data;
 };

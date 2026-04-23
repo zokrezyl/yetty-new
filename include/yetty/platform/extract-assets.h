@@ -1,5 +1,5 @@
-#ifndef YETTY_PLATFORM_EXTRACT_ASSETS_H
-#define YETTY_PLATFORM_EXTRACT_ASSETS_H
+#ifndef YETTY_YPLATFORM_EXTRACT_ASSETS_H
+#define YETTY_YPLATFORM_EXTRACT_ASSETS_H
 
 #include <yetty/ycore/result.h>
 
@@ -7,13 +7,13 @@
 extern "C" {
 #endif
 
-struct yetty_config;
+struct yetty_yconfig;
 
 /* Extract embedded assets to cache directory */
-struct yetty_core_void_result yetty_platform_extract_assets(struct yetty_config *config);
+struct yetty_ycore_void_result yetty_yplatform_extract_assets(struct yetty_yconfig *config);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* YETTY_PLATFORM_EXTRACT_ASSETS_H */
+#endif /* YETTY_YPLATFORM_EXTRACT_ASSETS_H */

@@ -12,7 +12,7 @@ extern "C" {
 struct yetty_yetty_yetty_ypaint_canvas;
 
 /* Result type */
-YETTY_RESULT_DECLARE(yetty_yetty_yetty_ypaint_canvas, struct yetty_yetty_yetty_ypaint_canvas *);
+YETTY_YRESULT_DECLARE(yetty_yetty_yetty_ypaint_canvas, struct yetty_yetty_yetty_ypaint_canvas *);
 
 /* Glyph bit marker for packed grid */
 #define YETTY_YPAINT_CANVAS_GLYPH_BIT 0x80000000u

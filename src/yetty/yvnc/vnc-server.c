@@ -38,8 +38,8 @@ struct yetty_vnc_server {
 	WGPUQueue queue;
 
 	/* Event loop for async I/O */
-	struct yetty_core_event_loop *event_loop;
-	yetty_core_tcp_server_id tcp_server_id;
+	struct yetty_ycore_event_loop *event_loop;
+	yetty_ycore_tcp_server_id tcp_server_id;
 
 	/* Server state */
 	uint16_t port;
@@ -179,10 +179,10 @@ static const char *DIFF_SHADER =
 static void dispatch_input(struct yetty_vnc_server *server,
 			   const struct vnc_input_header *hdr,
 			   const uint8_t *data);
-static struct yetty_core_void_result ensure_resources(struct yetty_vnc_server *server,
+static struct yetty_ycore_void_result ensure_resources(struct yetty_vnc_server *server,
 						      uint32_t width, uint32_t height);
-static struct yetty_core_void_result create_diff_pipeline(struct yetty_vnc_server *server);
-static struct yetty_core_void_result encode_tile(struct yetty_vnc_server *server,
+static struct yetty_ycore_void_result create_diff_pipeline(struct yetty_vnc_server *server);
+static struct yetty_ycore_void_result encode_tile(struct yetty_vnc_server *server,
 						 uint16_t tx, uint16_t ty,
 						 uint8_t **out_data, size_t *out_size,
 						 uint8_t *out_encoding);
@@ -347,7 +347,7 @@ static void vnc_server_on_disconnect(void *conn_ctx)
 struct yetty_vnc_server_ptr_result
 yetty_vnc_server_create(WGPUInstance instance, WGPUDevice device,
 			WGPUQueue queue,
-			struct yetty_core_event_loop *event_loop)
+			struct yetty_ycore_event_loop *event_loop)
 {
 	if (!event_loop)
 		return YETTY_ERR(yetty_vnc_server_ptr, "event_loop is NULL");
@@ -405,14 +405,14 @@ void yetty_vnc_server_destroy(struct yetty_vnc_server *server)
 	free(server);
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_server_start(struct yetty_vnc_server *server, uint16_t port)
 {
 	if (!server)
-		return YETTY_ERR(yetty_core_void, "null server");
+		return YETTY_ERR(yetty_ycore_void, "null server");
 
 	if (server->running)
-		return YETTY_ERR(yetty_core_void, "already running");
+		return YETTY_ERR(yetty_ycore_void, "already running");
 
 	/* Setup TCP server callbacks */
 	struct yetty_tcp_server_callbacks callbacks = {
@@ -424,16 +424,16 @@ yetty_vnc_server_start(struct yetty_vnc_server *server, uint16_t port)
 	};
 
 	/* Create TCP server */
-	struct yetty_core_tcp_server_id_result id_res =
+	struct yetty_ycore_tcp_server_id_result id_res =
 		server->event_loop->ops->create_tcp_server(
 			server->event_loop, "0.0.0.0", port, &callbacks);
 	if (!YETTY_IS_OK(id_res))
-		return YETTY_ERR(yetty_core_void, "failed to create TCP server");
+		return YETTY_ERR(yetty_ycore_void, "failed to create TCP server");
 
 	server->tcp_server_id = id_res.value;
 
 	/* Start listening */
-	struct yetty_core_void_result res =
+	struct yetty_ycore_void_result res =
 		server->event_loop->ops->start_tcp_server(
 			server->event_loop, server->tcp_server_id);
 	if (!YETTY_IS_OK(res)) {
@@ -448,7 +448,7 @@ yetty_vnc_server_start(struct yetty_vnc_server *server, uint16_t port)
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_server_stop(struct yetty_vnc_server *server)
 {
 	if (!server)
@@ -571,7 +571,7 @@ void yetty_vnc_server_force_h264_idr(struct yetty_vnc_server *server)
  * Send to clients
  *===========================================================================*/
 
-static struct yetty_core_void_result send_to_all_clients(
+static struct yetty_ycore_void_result send_to_all_clients(
 	struct yetty_vnc_server *server, const void *data, size_t size)
 {
 	for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -587,7 +587,7 @@ static struct yetty_core_void_result send_to_all_clients(
  * GPU resources and tile encoding
  *===========================================================================*/
 
-static struct yetty_core_void_result create_diff_pipeline(struct yetty_vnc_server *server)
+static struct yetty_ycore_void_result create_diff_pipeline(struct yetty_vnc_server *server)
 {
 	WGPUShaderSourceWGSL wgsl_desc = {0};
 	wgsl_desc.chain.sType = WGPUSType_ShaderSourceWGSL;
@@ -598,7 +598,7 @@ static struct yetty_core_void_result create_diff_pipeline(struct yetty_vnc_serve
 
 	WGPUShaderModule shader = wgpuDeviceCreateShaderModule(server->device, &shader_desc);
 	if (!shader)
-		return YETTY_ERR(yetty_core_void, "failed to create diff shader");
+		return YETTY_ERR(yetty_ycore_void, "failed to create diff shader");
 
 	WGPUBindGroupLayoutEntry entries[3] = {0};
 	entries[0].binding = 0;
@@ -636,12 +636,12 @@ static struct yetty_core_void_result create_diff_pipeline(struct yetty_vnc_serve
 	wgpuPipelineLayoutRelease(layout);
 
 	if (!server->diff_pipeline)
-		return YETTY_ERR(yetty_core_void, "failed to create diff pipeline");
+		return YETTY_ERR(yetty_ycore_void, "failed to create diff pipeline");
 
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result ensure_resources(struct yetty_vnc_server *server,
+static struct yetty_ycore_void_result ensure_resources(struct yetty_vnc_server *server,
 						      uint32_t width, uint32_t height)
 {
 	if (server->last_width == width && server->last_height == height && server->prev_texture)
@@ -684,7 +684,7 @@ static struct yetty_core_void_result ensure_resources(struct yetty_vnc_server *s
 	free(server->dirty_tiles);
 	server->dirty_tiles = calloc(num_tiles, sizeof(int));
 	if (!server->dirty_tiles)
-		return YETTY_ERR(yetty_core_void, "failed to allocate dirty tiles");
+		return YETTY_ERR(yetty_ycore_void, "failed to allocate dirty tiles");
 
 	WGPUTextureDescriptor tex_desc = {0};
 	tex_desc.size = (WGPUExtent3D){width, height, 1};
@@ -695,22 +695,22 @@ static struct yetty_core_void_result ensure_resources(struct yetty_vnc_server *s
 	tex_desc.dimension = WGPUTextureDimension_2D;
 	server->prev_texture = wgpuDeviceCreateTexture(server->device, &tex_desc);
 	if (!server->prev_texture)
-		return YETTY_ERR(yetty_core_void, "failed to create prev texture");
+		return YETTY_ERR(yetty_ycore_void, "failed to create prev texture");
 
 	WGPUBufferDescriptor buf_desc = {0};
 	buf_desc.size = num_tiles * sizeof(uint32_t);
 	buf_desc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
 	server->dirty_flags_buffer = wgpuDeviceCreateBuffer(server->device, &buf_desc);
 	if (!server->dirty_flags_buffer)
-		return YETTY_ERR(yetty_core_void, "failed to create dirty flags buffer");
+		return YETTY_ERR(yetty_ycore_void, "failed to create dirty flags buffer");
 
 	buf_desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
 	server->dirty_flags_readback = wgpuDeviceCreateBuffer(server->device, &buf_desc);
 	if (!server->dirty_flags_readback)
-		return YETTY_ERR(yetty_core_void, "failed to create readback buffer");
+		return YETTY_ERR(yetty_ycore_void, "failed to create readback buffer");
 
 	if (!server->diff_pipeline) {
-		struct yetty_core_void_result res = create_diff_pipeline(server);
+		struct yetty_ycore_void_result res = create_diff_pipeline(server);
 		if (!YETTY_IS_OK(res))
 			return res;
 	}
@@ -719,14 +719,14 @@ static struct yetty_core_void_result ensure_resources(struct yetty_vnc_server *s
 	return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result encode_tile(struct yetty_vnc_server *server,
+static struct yetty_ycore_void_result encode_tile(struct yetty_vnc_server *server,
 						 uint16_t tx, uint16_t ty,
 						 uint8_t **out_data, size_t *out_size,
 						 uint8_t *out_encoding)
 {
 	const uint8_t *pixels = server->cpu_pixels ? server->cpu_pixels : server->gpu_readback_pixels;
 	if (!pixels)
-		return YETTY_ERR(yetty_core_void, "no pixels");
+		return YETTY_ERR(yetty_ycore_void, "no pixels");
 
 	uint32_t start_x = tx * VNC_TILE_SIZE;
 	uint32_t start_y = ty * VNC_TILE_SIZE;
@@ -888,7 +888,7 @@ static void dispatch_input(struct yetty_vnc_server *server,
  * Frame capture and send
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_server_send_frame_cpu(struct yetty_vnc_server *server,
 				const uint8_t *pixels,
 				uint32_t width, uint32_t height)
@@ -899,7 +899,7 @@ yetty_vnc_server_send_frame_cpu(struct yetty_vnc_server *server,
 	server->cpu_pixels = pixels;
 	server->cpu_pixels_size = width * height * 4;
 
-	struct yetty_core_void_result res = ensure_resources(server, width, height);
+	struct yetty_ycore_void_result res = ensure_resources(server, width, height);
 	if (!YETTY_IS_OK(res))
 		return res;
 
@@ -996,7 +996,7 @@ static void pixels_map_callback(WGPUMapAsyncStatus status,
 }
 
 /* Encode and send dirty tiles */
-static struct yetty_core_void_result encode_and_send_dirty_tiles(
+static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
 	struct yetty_vnc_server *server, uint32_t width, uint32_t height)
 {
 	uint32_t num_tiles = server->tiles_x * server->tiles_y;
@@ -1033,7 +1033,7 @@ static struct yetty_core_void_result encode_and_send_dirty_tiles(
 			size_t tile_size;
 			uint8_t encoding;
 
-			struct yetty_core_void_result res =
+			struct yetty_ycore_void_result res =
 				encode_tile(server, tx, ty, &tile_data, &tile_size, &encoding);
 			if (!YETTY_IS_OK(res))
 				continue;
@@ -1065,7 +1065,7 @@ static struct yetty_core_void_result encode_and_send_dirty_tiles(
  * wgpuInstanceProcessEvents until both buffer maps complete. No
  * state machine; no cross-frame pending work; no one-keystroke
  * lag. Blocks the caller for the GPU readback duration (~1-5 ms). */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 				WGPUTexture texture,
 				uint32_t width, uint32_t height)
@@ -1073,7 +1073,7 @@ yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 	if (!server || !server->running || server->client_count == 0)
 		return YETTY_OK_VOID();
 
-	struct yetty_core_void_result res = ensure_resources(server, width, height);
+	struct yetty_ycore_void_result res = ensure_resources(server, width, height);
 	if (!YETTY_IS_OK(res))
 		return res;
 
@@ -1086,7 +1086,7 @@ yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 		free(server->gpu_readback_pixels);
 		server->gpu_readback_pixels = malloc(pixel_size);
 		if (!server->gpu_readback_pixels)
-			return YETTY_ERR(yetty_core_void, "failed to allocate readback buffer");
+			return YETTY_ERR(yetty_ycore_void, "failed to allocate readback buffer");
 		server->gpu_readback_pixels_size = pixel_size;
 	}
 
@@ -1211,7 +1211,7 @@ yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 
 	if (server->map_status != WGPUMapAsyncStatus_Success) {
 		ywarn("VNC map failed status=%u", server->map_status);
-		return YETTY_ERR(yetty_core_void, "buffer map failed");
+		return YETTY_ERR(yetty_ycore_void, "buffer map failed");
 	}
 
 	if (!do_full) {
@@ -1237,7 +1237,7 @@ yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 	return encode_and_send_dirty_tiles(server, width, height);
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_server_send_frame(struct yetty_vnc_server *server, WGPUTexture texture,
 			    const uint8_t *cpu_pixels, uint32_t width,
 			    uint32_t height)

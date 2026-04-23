@@ -1,5 +1,5 @@
-#ifndef YETTY_TERM_YPAINT_LAYER_H
-#define YETTY_TERM_YPAINT_LAYER_H
+#ifndef YETTY_YTERM_YPAINT_LAYER_H
+#define YETTY_YTERM_YPAINT_LAYER_H
 
 #include <stdint.h>
 #include <yetty/yterm/terminal.h>
@@ -31,20 +31,20 @@ extern "C" {
  * @param request_render_fn: callback to request re-render
  * @param request_render_userdata: userdata for callback
  */
-struct yetty_term_terminal_layer_result yetty_term_ypaint_layer_create(
+struct yetty_yterm_terminal_layer_result yetty_yterm_ypaint_layer_create(
     uint32_t cols, uint32_t rows,
     float cell_width, float cell_height,
     int scrolling_mode,
     const struct yetty_context *context,
-    yetty_term_request_render_fn request_render_fn,
+    yetty_yterm_request_render_fn request_render_fn,
     void *request_render_userdata,
-    yetty_term_scroll_fn scroll_fn,
+    yetty_yterm_scroll_fn scroll_fn,
     void *scroll_userdata,
-    yetty_term_cursor_fn cursor_fn,
+    yetty_yterm_cursor_fn cursor_fn,
     void *cursor_userdata);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* YETTY_TERM_YPAINT_LAYER_H */
+#endif /* YETTY_YTERM_YPAINT_LAYER_H */

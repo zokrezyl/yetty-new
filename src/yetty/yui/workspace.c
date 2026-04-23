@@ -50,12 +50,12 @@ void yetty_yui_workspace_destroy(struct yetty_yui_workspace *ws)
  * Core operations
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yui_workspace_render(struct yetty_yui_workspace *ws,
-			   struct yetty_render_target *render_target)
+			   struct yetty_yrender_target *render_target)
 {
 	if (!ws)
-		return YETTY_ERR(yetty_core_void, "workspace is NULL");
+		return YETTY_ERR(yetty_ycore_void, "workspace is NULL");
 
 	if (ws->root)
 		return yetty_yui_tile_render(ws->root, render_target);
@@ -63,14 +63,14 @@ yetty_yui_workspace_render(struct yetty_yui_workspace *ws,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yui_workspace_resize(struct yetty_yui_workspace *ws, float width,
 			   float height)
 {
 	struct yetty_yui_rect bounds;
 
 	if (!ws)
-		return YETTY_ERR(yetty_core_void, "workspace is NULL");
+		return YETTY_ERR(yetty_ycore_void, "workspace is NULL");
 
 	ws->width = width;
 	ws->height = height;
@@ -87,14 +87,14 @@ yetty_yui_workspace_resize(struct yetty_yui_workspace *ws, float width,
  * Root tile management
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yui_workspace_set_root(struct yetty_yui_workspace *ws,
 			     struct yetty_yui_tile *tile)
 {
 	struct yetty_yui_rect bounds;
 
 	if (!ws)
-		return YETTY_ERR(yetty_core_void, "workspace is NULL");
+		return YETTY_ERR(yetty_ycore_void, "workspace is NULL");
 
 	ws->root = tile;
 
@@ -126,9 +126,9 @@ float yetty_yui_workspace_height(const struct yetty_yui_workspace *ws)
  * Tree operations
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yui_workspace_split_pane(struct yetty_yui_workspace *ws,
-			       yetty_core_object_id pane_id,
+			       yetty_ycore_object_id pane_id,
 			       enum yetty_yui_orientation orientation)
 {
 	struct yetty_yui_tile *target;
@@ -137,29 +137,29 @@ yetty_yui_workspace_split_pane(struct yetty_yui_workspace *ws,
 	struct yetty_yui_tile_ptr_result new_pane_res;
 	struct yetty_yui_tile *split;
 	struct yetty_yui_tile *new_pane;
-	struct yetty_core_void_result res;
+	struct yetty_ycore_void_result res;
 
 	if (!ws)
-		return YETTY_ERR(yetty_core_void, "workspace is NULL");
+		return YETTY_ERR(yetty_ycore_void, "workspace is NULL");
 	if (!ws->root)
-		return YETTY_ERR(yetty_core_void, "no root tile");
+		return YETTY_ERR(yetty_ycore_void, "no root tile");
 
 	/* Find target pane */
 	target = yetty_yui_tile_find_by_id(ws->root, pane_id);
 	if (!target)
-		return YETTY_ERR(yetty_core_void, "pane not found");
+		return YETTY_ERR(yetty_ycore_void, "pane not found");
 
 	/* Create new split */
 	split_res = yetty_yui_split_create(orientation);
 	if (YETTY_IS_ERR(split_res))
-		return YETTY_ERR(yetty_core_void, split_res.error.msg);
+		return YETTY_ERR(yetty_ycore_void, split_res.error.msg);
 	split = split_res.value;
 
 	/* Create new pane */
 	new_pane_res = yetty_yui_pane_create();
 	if (YETTY_IS_ERR(new_pane_res)) {
 		yetty_yui_tile_destroy(split);
-		return YETTY_ERR(yetty_core_void, new_pane_res.error.msg);
+		return YETTY_ERR(yetty_ycore_void, new_pane_res.error.msg);
 	}
 	new_pane = new_pane_res.value;
 
@@ -188,7 +188,7 @@ yetty_yui_workspace_split_pane(struct yetty_yui_workspace *ws,
 	parent_split = yetty_yui_tile_find_parent_split(ws->root, pane_id);
 	if (!parent_split) {
 		yetty_yui_tile_destroy(split);
-		return YETTY_ERR(yetty_core_void, "parent split not found");
+		return YETTY_ERR(yetty_ycore_void, "parent split not found");
 	}
 
 	if (yetty_yui_split_first(parent_split) == target) {
@@ -209,19 +209,19 @@ yetty_yui_workspace_split_pane(struct yetty_yui_workspace *ws,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yui_workspace_close_tile(struct yetty_yui_workspace *ws,
-			       yetty_core_object_id tile_id)
+			       yetty_ycore_object_id tile_id)
 {
 	struct yetty_yui_tile *parent_split;
 	struct yetty_yui_tile *sibling;
 	struct yetty_yui_tile *grandparent;
-	struct yetty_core_void_result res;
+	struct yetty_ycore_void_result res;
 
 	if (!ws)
-		return YETTY_ERR(yetty_core_void, "workspace is NULL");
+		return YETTY_ERR(yetty_ycore_void, "workspace is NULL");
 	if (!ws->root)
-		return YETTY_ERR(yetty_core_void, "no root tile");
+		return YETTY_ERR(yetty_ycore_void, "no root tile");
 
 	/* Closing root? */
 	if (yetty_yui_tile_id(ws->root) == tile_id) {
@@ -233,7 +233,7 @@ yetty_yui_workspace_close_tile(struct yetty_yui_workspace *ws,
 	/* Find parent split */
 	parent_split = yetty_yui_tile_find_parent_split(ws->root, tile_id);
 	if (!parent_split)
-		return YETTY_ERR(yetty_core_void, "parent split not found");
+		return YETTY_ERR(yetty_ycore_void, "parent split not found");
 
 	/* Determine sibling */
 	if (yetty_yui_tile_id(yetty_yui_split_first(parent_split)) == tile_id) {
@@ -261,7 +261,7 @@ yetty_yui_workspace_close_tile(struct yetty_yui_workspace *ws,
 	grandparent = yetty_yui_tile_find_parent_split(
 	    ws->root, yetty_yui_tile_id(parent_split));
 	if (!grandparent)
-		return YETTY_ERR(yetty_core_void, "grandparent not found");
+		return YETTY_ERR(yetty_ycore_void, "grandparent not found");
 
 	/* Clear parent's children to prevent double-free */
 	yetty_yui_split_set_first(parent_split, NULL);
@@ -291,18 +291,18 @@ yetty_yui_workspace_close_tile(struct yetty_yui_workspace *ws,
  * Config-based layout loading
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
-				const struct yetty_config *config,
+				const struct yetty_yconfig *config,
 				const struct yetty_context *yetty_ctx)
 {
-	struct yetty_config *layout_config;
+	struct yetty_yconfig *layout_config;
 	struct yetty_yui_tile_ptr_result tile_res;
 
 	if (!ws)
-		return YETTY_ERR(yetty_core_void, "workspace is NULL");
+		return YETTY_ERR(yetty_ycore_void, "workspace is NULL");
 	if (!yetty_ctx)
-		return YETTY_ERR(yetty_core_void, "yetty_ctx is NULL");
+		return YETTY_ERR(yetty_ycore_void, "yetty_ctx is NULL");
 
 	/* Get layout sub-config (optional) */
 	layout_config = NULL;
@@ -317,7 +317,7 @@ yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
 	} else {
 		/* Fallback: create default single pane */
 		if (!config)
-			return YETTY_ERR(yetty_core_void, "config is NULL");
+			return YETTY_ERR(yetty_ycore_void, "config is NULL");
 
 		tile_res = yetty_yui_pane_create();
 		if (YETTY_IS_OK(tile_res)) {
@@ -347,7 +347,7 @@ yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
 					yetty_vnc_viewer_create(host, port, yetty_ctx);
 				if (YETTY_IS_ERR(vnc_res)) {
 					yetty_yui_tile_destroy(tile_res.value);
-					return YETTY_ERR(yetty_core_void,
+					return YETTY_ERR(yetty_ycore_void,
 							 vnc_res.error.msg);
 				}
 
@@ -357,30 +357,30 @@ yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
 				yetty_yui_pane_set_focused(tile_res.value, 1);
 			} else {
 				/* Create terminal */
-				struct yetty_term_terminal_result term_res;
+				struct yetty_yterm_terminal_result term_res;
 				struct grid_size grid_size = {.rows = 24, .cols = 80};
 
-				term_res = yetty_term_terminal_create(grid_size,
+				term_res = yetty_yterm_terminal_create(grid_size,
 								      yetty_ctx);
 				if (YETTY_IS_ERR(term_res)) {
 					yetty_yui_tile_destroy(tile_res.value);
-					return YETTY_ERR(yetty_core_void,
+					return YETTY_ERR(yetty_ycore_void,
 							 term_res.error.msg);
 				}
 
 				yetty_yui_pane_push_view(
 				    tile_res.value,
-				    yetty_term_terminal_as_view(term_res.value));
+				    yetty_yterm_terminal_as_view(term_res.value));
 				yetty_yui_pane_set_focused(tile_res.value, 1);
 			}
 		}
 	}
 
 	if (YETTY_IS_ERR(tile_res))
-		return YETTY_ERR(yetty_core_void, tile_res.error.msg);
+		return YETTY_ERR(yetty_ycore_void, tile_res.error.msg);
 
 	/* Set as root */
-	struct yetty_core_void_result res = yetty_yui_workspace_set_root(ws, tile_res.value);
+	struct yetty_ycore_void_result res = yetty_yui_workspace_set_root(ws, tile_res.value);
 	if (YETTY_IS_ERR(res))
 		return res;
 
@@ -396,17 +396,17 @@ yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
  * Event handling
  *===========================================================================*/
 
-struct yetty_core_int_result
+struct yetty_ycore_int_result
 yetty_yui_workspace_on_event(struct yetty_yui_workspace *ws,
-			     const struct yetty_core_event *event)
+			     const struct yetty_ycore_event *event)
 {
 	struct yetty_yui_tile *focused_pane;
 	struct yetty_yui_tile *clicked_pane;
 
 	if (!ws)
-		return YETTY_ERR(yetty_core_int, "workspace is NULL");
+		return YETTY_ERR(yetty_ycore_int, "workspace is NULL");
 	if (!ws->root)
-		return YETTY_OK(yetty_core_int, 0);
+		return YETTY_OK(yetty_ycore_int, 0);
 
 	/* Handle mouse down - update focus */
 	if (event->type == YETTY_EVENT_MOUSE_DOWN) {
@@ -429,7 +429,7 @@ yetty_yui_workspace_on_event(struct yetty_yui_workspace *ws,
 		/* Pass event to clicked pane */
 		if (clicked_pane)
 			return yetty_yui_tile_on_event(clicked_pane, event);
-		return YETTY_OK(yetty_core_int, 0);
+		return YETTY_OK(yetty_ycore_int, 0);
 	}
 
 	/* Keyboard events go only to focused pane */
@@ -441,7 +441,7 @@ yetty_yui_workspace_on_event(struct yetty_yui_workspace *ws,
 		       event->type, (void*)focused_pane);
 		if (focused_pane)
 			return yetty_yui_tile_on_event(focused_pane, event);
-		return YETTY_OK(yetty_core_int, 0);
+		return YETTY_OK(yetty_ycore_int, 0);
 	}
 
 	/* Other events (resize, etc.) pass through to tile tree */
