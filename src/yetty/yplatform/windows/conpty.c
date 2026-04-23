@@ -14,14 +14,14 @@
 
 /* Windows PTY pipe source */
 struct win_pty_pipe_source {
-    struct yetty_platform_pty_pipe_source base;
+    struct yetty_yplatform_pty_pipe_source base;
     HANDLE handle;
     int crt_fd;  /* CRT fd from _open_osfhandle for libuv */
 };
 
 /* Windows ConPTY implementation - embeds base as first member */
 struct win_conpty {
-    struct yetty_platform_pty base;
+    struct yetty_yplatform_pty base;
     struct win_pty_pipe_source pipe_source;
     HPCON hpc;
     HANDLE pipe_in;
@@ -33,15 +33,15 @@ struct win_conpty {
 };
 
 /* Forward declarations */
-static void win_conpty_destroy(struct yetty_platform_pty *self);
-static struct yetty_ycore_size_result win_conpty_read(struct yetty_platform_pty *self, char *buf, size_t max_len);
-static struct yetty_ycore_size_result win_conpty_write(struct yetty_platform_pty *self, const char *data, size_t len);
-static struct yetty_ycore_void_result win_conpty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
-static struct yetty_ycore_void_result win_conpty_stop(struct yetty_platform_pty *self);
-static struct yetty_platform_pty_pipe_source *win_conpty_pipe_source(struct yetty_platform_pty *self);
+static void win_conpty_destroy(struct yetty_yplatform_pty *self);
+static struct yetty_ycore_size_result win_conpty_read(struct yetty_yplatform_pty *self, char *buf, size_t max_len);
+static struct yetty_ycore_size_result win_conpty_write(struct yetty_yplatform_pty *self, const char *data, size_t len);
+static struct yetty_ycore_void_result win_conpty_resize(struct yetty_yplatform_pty *self, uint32_t cols, uint32_t rows);
+static struct yetty_ycore_void_result win_conpty_stop(struct yetty_yplatform_pty *self);
+static struct yetty_yplatform_pty_pipe_source *win_conpty_pipe_source(struct yetty_yplatform_pty *self);
 
 /* Ops table */
-static const struct yetty_platform_pty_ops win_conpty_ops = {
+static const struct yetty_yplatform_pty_ops win_conpty_ops = {
     .destroy = win_conpty_destroy,
     .read = win_conpty_read,
     .write = win_conpty_write,
@@ -52,24 +52,24 @@ static const struct yetty_platform_pty_ops win_conpty_ops = {
 
 /* Windows PTY factory - embeds base as first member */
 struct win_pty_factory {
-    struct yetty_platform_pty_factory base;
-    struct yetty_config *config;
+    struct yetty_yplatform_pty_factory base;
+    struct yetty_yconfig *config;
 };
 
 /* Forward declarations for factory */
-static void win_pty_factory_destroy(struct yetty_platform_pty_factory *self);
-static struct yetty_platform_pty_result win_pty_factory_create_pty(
-    struct yetty_platform_pty_factory *self);
+static void win_pty_factory_destroy(struct yetty_yplatform_pty_factory *self);
+static struct yetty_yplatform_pty_result win_pty_factory_create_pty(
+    struct yetty_yplatform_pty_factory *self);
 
 /* Factory ops table */
-static const struct yetty_platform_pty_factory_ops win_pty_factory_ops = {
+static const struct yetty_yplatform_pty_factory_ops win_pty_factory_ops = {
     .destroy = win_pty_factory_destroy,
     .create_pty = win_pty_factory_create_pty,
 };
 
 /* PTY implementation */
 
-static void win_conpty_destroy(struct yetty_platform_pty *self)
+static void win_conpty_destroy(struct yetty_yplatform_pty *self)
 {
     struct win_conpty *pty = container_of(self, struct win_conpty, base);
 
@@ -77,7 +77,7 @@ static void win_conpty_destroy(struct yetty_platform_pty *self)
     free(pty);
 }
 
-static struct yetty_ycore_size_result win_conpty_read(struct yetty_platform_pty *self, char *buf, size_t max_len)
+static struct yetty_ycore_size_result win_conpty_read(struct yetty_yplatform_pty *self, char *buf, size_t max_len)
 {
     struct win_conpty *pty = container_of(self, struct win_conpty, base);
     DWORD bytes_read = 0;
@@ -96,7 +96,7 @@ static struct yetty_ycore_size_result win_conpty_read(struct yetty_platform_pty 
     return YETTY_OK(yetty_ycore_size, (size_t)bytes_read);
 }
 
-static struct yetty_ycore_size_result win_conpty_write(struct yetty_platform_pty *self, const char *data, size_t len)
+static struct yetty_ycore_size_result win_conpty_write(struct yetty_yplatform_pty *self, const char *data, size_t len)
 {
     struct win_conpty *pty = container_of(self, struct win_conpty, base);
     DWORD bytes_written = 0;
@@ -113,7 +113,7 @@ static struct yetty_ycore_size_result win_conpty_write(struct yetty_platform_pty
     return YETTY_OK(yetty_ycore_size, (size_t)bytes_written);
 }
 
-static struct yetty_ycore_void_result win_conpty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows)
+static struct yetty_ycore_void_result win_conpty_resize(struct yetty_yplatform_pty *self, uint32_t cols, uint32_t rows)
 {
     struct win_conpty *pty = container_of(self, struct win_conpty, base);
     COORD size;
@@ -135,7 +135,7 @@ static struct yetty_ycore_void_result win_conpty_resize(struct yetty_platform_pt
     return YETTY_OK_VOID();
 }
 
-static struct yetty_ycore_void_result win_conpty_stop(struct yetty_platform_pty *self)
+static struct yetty_ycore_void_result win_conpty_stop(struct yetty_yplatform_pty *self)
 {
     struct win_conpty *pty = container_of(self, struct win_conpty, base);
 
@@ -173,7 +173,7 @@ static struct yetty_ycore_void_result win_conpty_stop(struct yetty_platform_pty 
     return YETTY_OK_VOID();
 }
 
-static struct yetty_platform_pty_pipe_source *win_conpty_pipe_source(struct yetty_platform_pty *self)
+static struct yetty_yplatform_pty_pipe_source *win_conpty_pipe_source(struct yetty_yplatform_pty *self)
 {
     struct win_conpty *pty = container_of(self, struct win_conpty, base);
     return &pty->pipe_source.base;
@@ -181,7 +181,7 @@ static struct yetty_platform_pty_pipe_source *win_conpty_pipe_source(struct yett
 
 /* Create ConPTY with shell */
 
-static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *config)
+static struct yetty_yplatform_pty_result win_conpty_create(struct yetty_yconfig *config)
 {
     struct win_conpty *pty;
     HANDLE pipe_pty_in = INVALID_HANDLE_VALUE;
@@ -198,7 +198,7 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
 
     pty = malloc(sizeof(struct win_conpty));
     if (!pty)
-        return YETTY_ERR(yetty_platform_pty, "failed to allocate conpty");
+        return YETTY_ERR(yetty_yplatform_pty, "failed to allocate conpty");
 
     pty->base.ops = &win_conpty_ops;
     pty->hpc = NULL;
@@ -215,7 +215,7 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
     /* Create input pipe (we write, ConPTY reads) — regular pipe is fine */
     if (!CreatePipe(&pipe_pty_in, &pty->pipe_in, NULL, 0)) {
         free(pty);
-        return YETTY_ERR(yetty_platform_pty, "CreatePipe for input failed");
+        return YETTY_ERR(yetty_yplatform_pty, "CreatePipe for input failed");
     }
 
     /* Create output pipe (ConPTY writes, we read via libuv uv_pipe_t)
@@ -237,7 +237,7 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
             CloseHandle(pipe_pty_in);
             CloseHandle(pty->pipe_in);
             free(pty);
-            return YETTY_ERR(yetty_platform_pty, "CreateNamedPipe for output failed");
+            return YETTY_ERR(yetty_yplatform_pty, "CreateNamedPipe for output failed");
         }
 
         pipe_pty_out = CreateFileA(
@@ -248,7 +248,7 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
             CloseHandle(pipe_pty_in);
             CloseHandle(pty->pipe_in);
             free(pty);
-            return YETTY_ERR(yetty_platform_pty, "CreateFile for output pipe failed");
+            return YETTY_ERR(yetty_yplatform_pty, "CreateFile for output pipe failed");
         }
     }
 
@@ -264,7 +264,7 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
         CloseHandle(pty->pipe_in);
         CloseHandle(pty->pipe_out);
         free(pty);
-        return YETTY_ERR(yetty_platform_pty, "CreatePseudoConsole failed");
+        return YETTY_ERR(yetty_yplatform_pty, "CreatePseudoConsole failed");
     }
 
     /* Create process with pseudo console */
@@ -278,7 +278,7 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
         CloseHandle(pty->pipe_in);
         CloseHandle(pty->pipe_out);
         free(pty);
-        return YETTY_ERR(yetty_platform_pty, "failed to allocate attribute list");
+        return YETTY_ERR(yetty_yplatform_pty, "failed to allocate attribute list");
     }
 
     if (!InitializeProcThreadAttributeList(attr_list, 1, 0, &attr_size)) {
@@ -287,7 +287,7 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
         CloseHandle(pty->pipe_in);
         CloseHandle(pty->pipe_out);
         free(pty);
-        return YETTY_ERR(yetty_platform_pty, "InitializeProcThreadAttributeList failed");
+        return YETTY_ERR(yetty_yplatform_pty, "InitializeProcThreadAttributeList failed");
     }
 
     if (!UpdateProcThreadAttribute(attr_list, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
@@ -298,7 +298,7 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
         CloseHandle(pty->pipe_in);
         CloseHandle(pty->pipe_out);
         free(pty);
-        return YETTY_ERR(yetty_platform_pty, "UpdateProcThreadAttribute failed");
+        return YETTY_ERR(yetty_yplatform_pty, "UpdateProcThreadAttribute failed");
     }
 
     si.lpAttributeList = attr_list;
@@ -314,7 +314,7 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
         CloseHandle(pty->pipe_in);
         CloseHandle(pty->pipe_out);
         free(pty);
-        return YETTY_ERR(yetty_platform_pty, "CreateProcessW failed");
+        return YETTY_ERR(yetty_yplatform_pty, "CreateProcessW failed");
     }
 
     DeleteProcThreadAttributeList(attr_list);
@@ -333,24 +333,24 @@ static struct yetty_platform_pty_result win_conpty_create(struct yetty_config *c
         CloseHandle(pty->pipe_in);
         CloseHandle(pty->pipe_out);
         free(pty);
-        return YETTY_ERR(yetty_platform_pty, "_open_osfhandle failed for pty output");
+        return YETTY_ERR(yetty_yplatform_pty, "_open_osfhandle failed for pty output");
     }
     pty->pipe_source.base.abstract = (uintptr_t)pty->pipe_source.crt_fd;
     pty->running = 1;
 
-    return YETTY_OK(yetty_platform_pty, &pty->base);
+    return YETTY_OK(yetty_yplatform_pty, &pty->base);
 }
 
 /* Factory implementation */
 
-static void win_pty_factory_destroy(struct yetty_platform_pty_factory *self)
+static void win_pty_factory_destroy(struct yetty_yplatform_pty_factory *self)
 {
     struct win_pty_factory *factory = container_of(self, struct win_pty_factory, base);
     free(factory);
 }
 
-static struct yetty_platform_pty_result win_pty_factory_create_pty(
-    struct yetty_platform_pty_factory *self)
+static struct yetty_yplatform_pty_result win_pty_factory_create_pty(
+    struct yetty_yplatform_pty_factory *self)
 {
     struct win_pty_factory *factory = container_of(self, struct win_pty_factory, base);
     return win_conpty_create(factory->config);
@@ -358,8 +358,8 @@ static struct yetty_platform_pty_result win_pty_factory_create_pty(
 
 /* Factory creation - the public API */
 
-struct yetty_platform_pty_factory_result yetty_platform_pty_factory_create(
-    struct yetty_config *config,
+struct yetty_yplatform_pty_factory_result yetty_yplatform_pty_factory_create(
+    struct yetty_yconfig *config,
     void *os_specific)
 {
     struct win_pty_factory *factory;
@@ -368,10 +368,10 @@ struct yetty_platform_pty_factory_result yetty_platform_pty_factory_create(
 
     factory = malloc(sizeof(struct win_pty_factory));
     if (!factory)
-        return YETTY_ERR(yetty_platform_pty_factory, "failed to allocate pty factory");
+        return YETTY_ERR(yetty_yplatform_pty_factory, "failed to allocate pty factory");
 
     factory->base.ops = &win_pty_factory_ops;
     factory->config = config;
 
-    return YETTY_OK(yetty_platform_pty_factory, &factory->base);
+    return YETTY_OK(yetty_yplatform_pty_factory, &factory->base);
 }

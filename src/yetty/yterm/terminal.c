@@ -284,10 +284,10 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
   terminal->listener.handler = terminal_event_handler;
 
   /* Create PTY */
-  struct yetty_platform_pty_factory *pty_factory =
+  struct yetty_yplatform_pty_factory *pty_factory =
       yetty_context->app_context.pty_factory;
   if (pty_factory && pty_factory->ops && pty_factory->ops->create_pty) {
-    struct yetty_platform_pty_result pty_res =
+    struct yetty_yplatform_pty_result pty_res =
         pty_factory->ops->create_pty(pty_factory);
     if (YETTY_IS_OK(pty_res)) {
       terminal->context.pty = pty_res.value;
@@ -303,7 +303,7 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
       }
 
       /* Register PTY pipe — uv_pipe_t reads data, callbacks handle it */
-      struct yetty_platform_pty_pipe_source *pipe_source =
+      struct yetty_yplatform_pty_pipe_source *pipe_source =
           terminal->context.pty->ops->pipe_source(terminal->context.pty);
       if (pipe_source && terminal->pty_reader) {
         struct yetty_ycore_pipe_id_result pipe_res =

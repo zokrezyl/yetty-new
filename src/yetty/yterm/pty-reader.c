@@ -24,7 +24,7 @@ struct osc_sink {
 };
 
 struct yetty_yterm_pty_reader {
-    struct yetty_platform_pty *pty;
+    struct yetty_yplatform_pty *pty;
     struct yetty_yterm_terminal_layer *default_sink;
     struct osc_sink osc_sinks[MAX_OSC_SINKS];
     size_t osc_sink_count;
@@ -189,7 +189,7 @@ static void process_data(struct yetty_yterm_pty_reader *r, const char *data, siz
 }
 
 struct yetty_yterm_pty_reader_result yetty_yterm_pty_reader_create(
-    struct yetty_platform_pty *pty)
+    struct yetty_yplatform_pty *pty)
 {
     struct yetty_yterm_pty_reader *r;
 

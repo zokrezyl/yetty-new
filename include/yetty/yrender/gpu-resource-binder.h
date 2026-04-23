@@ -28,7 +28,7 @@ struct yetty_yrender_gpu_resource_binder {
     const struct yetty_yrender_gpu_resource_binder_ops *ops;
 };
 
-YETTY_RESULT_DECLARE(yetty_yrender_gpu_resource_binder, struct yetty_yrender_gpu_resource_binder *);
+YETTY_YRESULT_DECLARE(yetty_yrender_gpu_resource_binder, struct yetty_yrender_gpu_resource_binder *);
 
 struct yetty_yrender_gpu_resource_binder_result yetty_yrender_gpu_resource_binder_create(
     WGPUDevice device,

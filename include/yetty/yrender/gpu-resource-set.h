@@ -34,7 +34,7 @@ struct yetty_yrender_gpu_resource_set {
     size_t children_count;
 };
 
-YETTY_RESULT_DECLARE(yetty_yrender_gpu_resource_set, const struct yetty_yrender_gpu_resource_set *);
+YETTY_YRESULT_DECLARE(yetty_yrender_gpu_resource_set, const struct yetty_yrender_gpu_resource_set *);
 
 #ifdef __cplusplus
 }

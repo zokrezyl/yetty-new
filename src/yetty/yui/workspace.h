@@ -12,13 +12,13 @@ extern "C" {
 #endif
 
 struct yetty_yui_workspace;
-struct yetty_config;
+struct yetty_yconfig;
 struct yetty_context;
 struct yetty_ycore_event;
 struct yetty_yrender_target;
 
 /* Result types */
-YETTY_RESULT_DECLARE(yetty_yui_workspace_ptr, struct yetty_yui_workspace *);
+YETTY_YRESULT_DECLARE(yetty_yui_workspace_ptr, struct yetty_yui_workspace *);
 
 /* Create/destroy */
 struct yetty_yui_workspace_ptr_result yetty_yui_workspace_create(void);
@@ -59,7 +59,7 @@ yetty_yui_workspace_close_tile(struct yetty_yui_workspace *ws,
 /* Load layout from config - creates tile tree and sets as root */
 struct yetty_ycore_void_result
 yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
-				const struct yetty_config *config,
+				const struct yetty_yconfig *config,
 				const struct yetty_context *yetty_ctx);
 
 /* Event handling - returns 1 if handled, 0 if not */

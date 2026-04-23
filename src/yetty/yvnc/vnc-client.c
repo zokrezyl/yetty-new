@@ -74,7 +74,7 @@ void yetty_vnc_client_destroy(struct yetty_vnc_client *client)
 		return;
 
 	if (client->socket != YETTY_SOCKET_INVALID)
-		yetty_platform_socket_close(client->socket);
+		yetty_yplatform_socket_close(client->socket);
 
 	free(client->reconnect_host);
 	free(client->pixels);
@@ -99,7 +99,7 @@ yetty_vnc_client_disconnect(struct yetty_vnc_client *client)
 		return YETTY_OK_VOID();
 
 	if (client->socket != YETTY_SOCKET_INVALID) {
-		yetty_platform_socket_close(client->socket);
+		yetty_yplatform_socket_close(client->socket);
 		client->socket = YETTY_SOCKET_INVALID;
 	}
 	client->connected = 0;

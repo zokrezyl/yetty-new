@@ -481,7 +481,7 @@ yetty_ypaint_canvas_create(bool scrolling_mode,
   }
 
   /* Create default MSDF font for text spans (font_id = -1) */
-  struct yetty_config *config = context->app_context.config;
+  struct yetty_yconfig *config = context->app_context.config;
   const char *fonts_dir = config->ops->get_string(config, "paths/fonts", "");
   const char *shaders_dir = config->ops->get_string(config, "paths/shaders", "");
   const char *font_family = config->ops->font_family(config);

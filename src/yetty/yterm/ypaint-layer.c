@@ -170,7 +170,7 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_ypaint_layer_create(
   struct yetty_yterm_ypaint_layer *layer;
 
   /* Load ypaint-layer shader from file */
-  struct yetty_config *config = context->app_context.config;
+  struct yetty_yconfig *config = context->app_context.config;
   const char *shaders_dir = config->ops->get_string(config, "paths/shaders", "");
   char shader_path[512];
   snprintf(shader_path, sizeof(shader_path), "%s/ypaint-layer.wgsl", shaders_dir);

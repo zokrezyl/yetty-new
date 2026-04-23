@@ -42,7 +42,7 @@ struct yetty_yfsvm_program {
 	int uses_time;
 };
 
-YETTY_RESULT_DECLARE(yetty_yfsvm_program, struct yetty_yfsvm_program);
+YETTY_YRESULT_DECLARE(yetty_yfsvm_program, struct yetty_yfsvm_program);
 
 /*=============================================================================
  * API

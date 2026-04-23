@@ -81,11 +81,11 @@ void yetty_vnc_server_destroy(struct yetty_vnc_server *server)
 		return;
 
 	if (server->server_fd != YETTY_SOCKET_INVALID)
-		yetty_platform_socket_close(server->server_fd);
+		yetty_yplatform_socket_close(server->server_fd);
 
 	for (size_t i = 0; i < server->client_count; i++) {
 		if (server->clients[i] != YETTY_SOCKET_INVALID)
-			yetty_platform_socket_close(server->clients[i]);
+			yetty_yplatform_socket_close(server->clients[i]);
 	}
 	free(server->clients);
 	free(server);
@@ -107,7 +107,7 @@ yetty_vnc_server_stop(struct yetty_vnc_server *server)
 		return YETTY_OK_VOID();
 
 	if (server->server_fd != YETTY_SOCKET_INVALID) {
-		yetty_platform_socket_close(server->server_fd);
+		yetty_yplatform_socket_close(server->server_fd);
 		server->server_fd = YETTY_SOCKET_INVALID;
 	}
 	server->running = 0;

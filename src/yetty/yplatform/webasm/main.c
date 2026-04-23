@@ -17,11 +17,11 @@
 #include <string.h>
 
 /* Forward declarations for window.c and surface.c */
-int yetty_platform_webasm_create_window(struct yetty_config *config);
-void yetty_platform_webasm_destroy_window(void);
-void yetty_platform_webasm_get_framebuffer_size(int *width, int *height);
-int yetty_platform_webasm_update_canvas_size(void);
-WGPUSurface yetty_platform_webasm_create_surface(WGPUInstance instance);
+int yetty_yplatform_webasm_create_window(struct yetty_yconfig *config);
+void yetty_yplatform_webasm_destroy_window(void);
+void yetty_yplatform_webasm_get_framebuffer_size(int *width, int *height);
+int yetty_yplatform_webasm_update_canvas_size(void);
+WGPUSurface yetty_yplatform_webasm_create_surface(WGPUInstance instance);
 
 /*=============================================================================
  * Key mapping: DOM code -> GLFW key code
@@ -128,7 +128,7 @@ static int wheel_mods_to_glfw(const EmscriptenWheelEvent *e)
 
 static EM_BOOL on_key_down(int event_type, const EmscriptenKeyboardEvent *e, void *user_data)
 {
-	struct yetty_platform_input_pipe *pipe = user_data;
+	struct yetty_yplatform_input_pipe *pipe = user_data;
 	struct yetty_ycore_event event = {0};
 	int key, mods;
 
@@ -175,7 +175,7 @@ static EM_BOOL on_key_down(int event_type, const EmscriptenKeyboardEvent *e, voi
 
 static EM_BOOL on_key_up(int event_type, const EmscriptenKeyboardEvent *e, void *user_data)
 {
-	struct yetty_platform_input_pipe *pipe = user_data;
+	struct yetty_yplatform_input_pipe *pipe = user_data;
 	struct yetty_ycore_event event = {0};
 	int key, mods;
 
@@ -198,7 +198,7 @@ static EM_BOOL on_key_up(int event_type, const EmscriptenKeyboardEvent *e, void 
 
 static EM_BOOL on_mouse_down(int event_type, const EmscriptenMouseEvent *e, void *user_data)
 {
-	struct yetty_platform_input_pipe *pipe = user_data;
+	struct yetty_yplatform_input_pipe *pipe = user_data;
 	struct yetty_ycore_event event = {0};
 
 	(void)event_type;
@@ -218,7 +218,7 @@ static EM_BOOL on_mouse_down(int event_type, const EmscriptenMouseEvent *e, void
 
 static EM_BOOL on_mouse_up(int event_type, const EmscriptenMouseEvent *e, void *user_data)
 {
-	struct yetty_platform_input_pipe *pipe = user_data;
+	struct yetty_yplatform_input_pipe *pipe = user_data;
 	struct yetty_ycore_event event = {0};
 
 	(void)event_type;
@@ -238,7 +238,7 @@ static EM_BOOL on_mouse_up(int event_type, const EmscriptenMouseEvent *e, void *
 
 static EM_BOOL on_mouse_move(int event_type, const EmscriptenMouseEvent *e, void *user_data)
 {
-	struct yetty_platform_input_pipe *pipe = user_data;
+	struct yetty_yplatform_input_pipe *pipe = user_data;
 	struct yetty_ycore_event event = {0};
 
 	(void)event_type;
@@ -257,7 +257,7 @@ static EM_BOOL on_mouse_move(int event_type, const EmscriptenMouseEvent *e, void
 
 static EM_BOOL on_wheel(int event_type, const EmscriptenWheelEvent *e, void *user_data)
 {
-	struct yetty_platform_input_pipe *pipe = user_data;
+	struct yetty_yplatform_input_pipe *pipe = user_data;
 	struct yetty_ycore_event event = {0};
 	float dx, dy;
 
@@ -282,7 +282,7 @@ static EM_BOOL on_wheel(int event_type, const EmscriptenWheelEvent *e, void *use
 
 static EM_BOOL on_resize(int event_type, const EmscriptenUiEvent *e, void *user_data)
 {
-	struct yetty_platform_input_pipe *pipe = user_data;
+	struct yetty_yplatform_input_pipe *pipe = user_data;
 	struct yetty_ycore_event event = {0};
 	int width, height;
 
@@ -293,8 +293,8 @@ static EM_BOOL on_resize(int event_type, const EmscriptenUiEvent *e, void *user_
 		return EM_FALSE;
 
 	/* First update the canvas size to match container, then read new dimensions */
-	yetty_platform_webasm_update_canvas_size();
-	yetty_platform_webasm_get_framebuffer_size(&width, &height);
+	yetty_yplatform_webasm_update_canvas_size();
+	yetty_yplatform_webasm_get_framebuffer_size(&width, &height);
 
 	event.type = YETTY_EVENT_RESIZE;
 	event.resize.width = (float)width;
@@ -305,7 +305,7 @@ static EM_BOOL on_resize(int event_type, const EmscriptenUiEvent *e, void *user_
 	return EM_FALSE;
 }
 
-static void setup_input_callbacks(struct yetty_platform_input_pipe *pipe)
+static void setup_input_callbacks(struct yetty_yplatform_input_pipe *pipe)
 {
 	const char *target = "#canvas";
 
@@ -326,13 +326,13 @@ static void setup_input_callbacks(struct yetty_platform_input_pipe *pipe)
 
 int main(int argc, char **argv)
 {
-	struct yetty_platform_paths paths;
-	struct yetty_config_result config_result;
-	struct yetty_config *config;
-	struct yetty_platform_input_pipe_result pipe_result;
-	struct yetty_platform_input_pipe *pipe;
-	struct yetty_platform_pty_factory_result pty_factory_result;
-	struct yetty_platform_pty_factory *pty_factory;
+	struct yetty_yplatform_paths paths;
+	struct yetty_yconfig_result config_result;
+	struct yetty_yconfig *config;
+	struct yetty_yplatform_input_pipe_result pipe_result;
+	struct yetty_yplatform_input_pipe *pipe;
+	struct yetty_yplatform_pty_factory_result pty_factory_result;
+	struct yetty_yplatform_pty_factory *pty_factory;
 	WGPUInstance instance;
 	WGPUSurface surface;
 	int canvas_width, canvas_height;
@@ -352,7 +352,7 @@ int main(int argc, char **argv)
 	paths.bin_dir = NULL;
 
 	/* Config */
-	config_result = yetty_config_create(argc, argv, &paths);
+	config_result = yetty_yconfig_create(argc, argv, &paths);
 	if (!YETTY_IS_OK(config_result)) {
 		yerror("Failed to create Config");
 		return 1;
@@ -361,7 +361,7 @@ int main(int argc, char **argv)
 	ydebug("main: Config created");
 
 	/* Window (canvas) */
-	if (!yetty_platform_webasm_create_window(config)) {
+	if (!yetty_yplatform_webasm_create_window(config)) {
 		yerror("Failed to create window");
 		config->ops->destroy(config);
 		return 1;
@@ -369,10 +369,10 @@ int main(int argc, char **argv)
 	ydebug("main: Window created");
 
 	/* PlatformInputPipe */
-	pipe_result = yetty_platform_input_pipe_create();
+	pipe_result = yetty_yplatform_input_pipe_create();
 	if (!YETTY_IS_OK(pipe_result)) {
 		yerror("Failed to create PlatformInputPipe");
-		yetty_platform_webasm_destroy_window();
+		yetty_yplatform_webasm_destroy_window();
 		config->ops->destroy(config);
 		return 1;
 	}
@@ -383,11 +383,11 @@ int main(int argc, char **argv)
 	setup_input_callbacks(pipe);
 
 	/* PtyFactory */
-	pty_factory_result = yetty_platform_pty_factory_create(config, NULL);
+	pty_factory_result = yetty_yplatform_pty_factory_create(config, NULL);
 	if (!YETTY_IS_OK(pty_factory_result)) {
 		yerror("Failed to create PtyFactory");
 		pipe->ops->destroy(pipe);
-		yetty_platform_webasm_destroy_window();
+		yetty_yplatform_webasm_destroy_window();
 		config->ops->destroy(config);
 		return 1;
 	}
@@ -400,19 +400,19 @@ int main(int argc, char **argv)
 		yerror("Failed to create WebGPU instance");
 		pty_factory->ops->destroy(pty_factory);
 		pipe->ops->destroy(pipe);
-		yetty_platform_webasm_destroy_window();
+		yetty_yplatform_webasm_destroy_window();
 		config->ops->destroy(config);
 		return 1;
 	}
 	ydebug("main: WebGPU instance created");
 
-	surface = yetty_platform_webasm_create_surface(instance);
+	surface = yetty_yplatform_webasm_create_surface(instance);
 	if (!surface) {
 		yerror("Failed to create WebGPU surface");
 		wgpuInstanceRelease(instance);
 		pty_factory->ops->destroy(pty_factory);
 		pipe->ops->destroy(pipe);
-		yetty_platform_webasm_destroy_window();
+		yetty_yplatform_webasm_destroy_window();
 		config->ops->destroy(config);
 		return 1;
 	}
@@ -446,7 +446,7 @@ int main(int argc, char **argv)
 		wgpuInstanceRelease(instance);
 		pty_factory->ops->destroy(pty_factory);
 		pipe->ops->destroy(pipe);
-		yetty_platform_webasm_destroy_window();
+		yetty_yplatform_webasm_destroy_window();
 		config->ops->destroy(config);
 		return 1;
 	}
@@ -454,7 +454,7 @@ int main(int argc, char **argv)
 	ydebug("main: Yetty created");
 
 	/* Initial resize event */
-	yetty_platform_webasm_get_framebuffer_size(&fb_width, &fb_height);
+	yetty_yplatform_webasm_get_framebuffer_size(&fb_width, &fb_height);
 	event.type = YETTY_EVENT_RESIZE;
 	event.resize.width = (float)fb_width;
 	event.resize.height = (float)fb_height;

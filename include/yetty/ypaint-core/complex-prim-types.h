@@ -87,7 +87,7 @@ struct yetty_ypaint_complex_prim_instance {
 		float x, float y);
 };
 
-YETTY_RESULT_DECLARE(yetty_ypaint_complex_prim_instance_ptr,
+YETTY_YRESULT_DECLARE(yetty_ypaint_complex_prim_instance_ptr,
 	struct yetty_ypaint_complex_prim_instance *);
 
 //=============================================================================
@@ -133,7 +133,7 @@ struct yetty_ypaint_concrete_factory {
 
 struct yetty_ypaint_complex_prim_factory;
 
-YETTY_RESULT_DECLARE(yetty_ypaint_complex_prim_factory_ptr,
+YETTY_YRESULT_DECLARE(yetty_ypaint_complex_prim_factory_ptr,
 	struct yetty_ypaint_complex_prim_factory *);
 
 // Create (after device/queue available) / destroy

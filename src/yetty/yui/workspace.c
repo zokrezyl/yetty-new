@@ -291,10 +291,10 @@ yetty_yui_workspace_close_tile(struct yetty_yui_workspace *ws,
 
 struct yetty_ycore_void_result
 yetty_yui_workspace_load_layout(struct yetty_yui_workspace *ws,
-				const struct yetty_config *config,
+				const struct yetty_yconfig *config,
 				const struct yetty_context *yetty_ctx)
 {
-	struct yetty_config *layout_config;
+	struct yetty_yconfig *layout_config;
 	struct yetty_yui_tile_ptr_result tile_res;
 
 	if (!ws)

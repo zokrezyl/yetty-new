@@ -12,7 +12,7 @@ extern "C" {
 struct yetty_yrender_rendered_layer;
 
 /* Result type */
-YETTY_RESULT_DECLARE(yetty_yrender_rendered_layer, struct yetty_yrender_rendered_layer *);
+YETTY_YRESULT_DECLARE(yetty_yrender_rendered_layer, struct yetty_yrender_rendered_layer *);
 
 /* Rendered layer ops */
 struct yetty_yrender_rendered_layer_ops {

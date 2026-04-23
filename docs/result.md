@@ -2,12 +2,12 @@
 
 Yetty uses typed result unions for error propagation — no exceptions, no errno.
 
-## YETTY_RESULT_DECLARE
+## YETTY_YRESULT_DECLARE
 
 Generates a type-specific result struct containing a tagged union of value or error:
 
 ```c
-#define YETTY_RESULT_DECLARE(name, value_type) \
+#define YETTY_YRESULT_DECLARE(name, value_type) \
     struct name##_result { \
         int ok; \
         union { \
@@ -23,8 +23,8 @@ Each module declares its own result types in its header:
 
 ```c
 /* terminal.h */
-YETTY_RESULT_DECLARE(yetty_yterm_terminal, struct yetty_yterm_terminal *);
-YETTY_RESULT_DECLARE(yetty_yterm_terminal_layer, struct yetty_yterm_terminal_layer *);
+YETTY_YRESULT_DECLARE(yetty_yterm_terminal, struct yetty_yterm_terminal *);
+YETTY_YRESULT_DECLARE(yetty_yterm_terminal_layer, struct yetty_yterm_terminal_layer *);
 
 /* Generates:
  *   struct yetty_yterm_terminal_result
@@ -37,9 +37,9 @@ YETTY_RESULT_DECLARE(yetty_yterm_terminal_layer, struct yetty_yterm_terminal_lay
 Defined in `include/yetty/core/result.h`:
 
 ```c
-YETTY_RESULT_DECLARE(yetty_ycore_void, int);   /* void result — success/failure only */
-YETTY_RESULT_DECLARE(yetty_ycore_int, int);
-YETTY_RESULT_DECLARE(yetty_ycore_size, size_t);
+YETTY_YRESULT_DECLARE(yetty_ycore_void, int);   /* void result — success/failure only */
+YETTY_YRESULT_DECLARE(yetty_ycore_int, int);
+YETTY_YRESULT_DECLARE(yetty_ycore_size, size_t);
 ```
 
 ## Creating Results

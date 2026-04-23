@@ -13,7 +13,7 @@ extern "C" {
 struct yetty_yrender_layer_renderer;
 
 /* Result type */
-YETTY_RESULT_DECLARE(yetty_yrender_layer_renderer,
+YETTY_YRESULT_DECLARE(yetty_yrender_layer_renderer,
 		     struct yetty_yrender_layer_renderer *);
 
 /* Layer renderer vtable */

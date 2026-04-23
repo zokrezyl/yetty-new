@@ -10,7 +10,7 @@ static char data_dir_buf[512];
 static char runtime_dir_buf[512];
 static char config_dir_buf[512];
 
-const char *yetty_platform_get_cache_dir(void)
+const char *yetty_yplatform_get_cache_dir(void)
 {
     const char *xdg = getenv("XDG_CACHE_HOME");
     if (xdg) {
@@ -27,7 +27,7 @@ const char *yetty_platform_get_cache_dir(void)
     return "/tmp/yetty";
 }
 
-const char *yetty_platform_get_data_dir(void)
+const char *yetty_yplatform_get_data_dir(void)
 {
     const char *xdg = getenv("XDG_DATA_HOME");
     if (xdg) {
@@ -44,7 +44,7 @@ const char *yetty_platform_get_data_dir(void)
     return "/tmp/yetty";
 }
 
-const char *yetty_platform_get_runtime_dir(void)
+const char *yetty_yplatform_get_runtime_dir(void)
 {
     const char *xdg = getenv("XDG_RUNTIME_DIR");
     if (xdg) {
@@ -56,7 +56,7 @@ const char *yetty_platform_get_runtime_dir(void)
     return runtime_dir_buf;
 }
 
-const char *yetty_platform_get_config_dir(void)
+const char *yetty_yplatform_get_config_dir(void)
 {
     const char *xdg = getenv("XDG_CONFIG_HOME");
     if (xdg) {

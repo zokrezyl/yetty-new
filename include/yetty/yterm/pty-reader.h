@@ -16,7 +16,7 @@ extern "C" {
 struct yetty_yterm_pty_reader;
 
 struct yetty_yterm_pty_reader_result yetty_yterm_pty_reader_create(
-    struct yetty_platform_pty *pty);
+    struct yetty_yplatform_pty *pty);
 
 void yetty_yterm_pty_reader_destroy(struct yetty_yterm_pty_reader *reader);
 
@@ -35,7 +35,7 @@ int yetty_yterm_pty_reader_read(struct yetty_yterm_pty_reader *reader);
 void yetty_yterm_pty_reader_feed(struct yetty_yterm_pty_reader *reader,
                                 const char *data, size_t len);
 
-YETTY_RESULT_DECLARE(yetty_yterm_pty_reader, struct yetty_yterm_pty_reader *);
+YETTY_YRESULT_DECLARE(yetty_yterm_pty_reader, struct yetty_yterm_pty_reader *);
 
 #ifdef __cplusplus
 }

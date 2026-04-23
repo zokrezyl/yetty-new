@@ -25,7 +25,7 @@ struct yetty_ypaint_id_result {
 
 struct yetty_ypaint_core_buffer;
 
-YETTY_RESULT_DECLARE(yetty_ypaint_core_buffer, struct yetty_ypaint_core_buffer *);
+YETTY_YRESULT_DECLARE(yetty_ypaint_core_buffer, struct yetty_ypaint_core_buffer *);
 
 // Create/destroy
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(void);
@@ -46,7 +46,7 @@ struct yetty_ypaint_core_primitive_iter {
     struct yetty_ypaint_prim_flyweight fw;
 };
 
-YETTY_RESULT_DECLARE(yetty_ypaint_core_primitive_iter, struct yetty_ypaint_core_primitive_iter);
+YETTY_YRESULT_DECLARE(yetty_ypaint_core_primitive_iter, struct yetty_ypaint_core_primitive_iter);
 
 struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_first(
     const struct yetty_ypaint_core_buffer *buf,

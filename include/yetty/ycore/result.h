@@ -13,7 +13,7 @@ struct yetty_ycore_error {
 };
 
 /* Generate type-specific result struct: struct <name>_result */
-#define YETTY_RESULT_DECLARE(name, value_type) \
+#define YETTY_YRESULT_DECLARE(name, value_type) \
     struct name##_result { \
         int ok; \
         union { \
@@ -23,9 +23,9 @@ struct yetty_ycore_error {
     }
 
 /* Common result types in core namespace */
-YETTY_RESULT_DECLARE(yetty_ycore_void, int);
-YETTY_RESULT_DECLARE(yetty_ycore_int, int);
-YETTY_RESULT_DECLARE(yetty_ycore_size, size_t);
+YETTY_YRESULT_DECLARE(yetty_ycore_void, int);
+YETTY_YRESULT_DECLARE(yetty_ycore_int, int);
+YETTY_YRESULT_DECLARE(yetty_ycore_size, size_t);
 
 /* Create success result (void) */
 #define YETTY_OK_VOID() \

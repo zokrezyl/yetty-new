@@ -7,7 +7,7 @@
 #include <yetty/ytrace.h>
 #include <emscripten/html5.h>
 
-WGPUSurface yetty_platform_webasm_create_surface(WGPUInstance instance)
+WGPUSurface yetty_yplatform_webasm_create_surface(WGPUInstance instance)
 {
 	WGPUEmscriptenSurfaceSourceCanvasHTMLSelector canvas_source = {0};
 	WGPUSurfaceDescriptor surface_desc = {0};

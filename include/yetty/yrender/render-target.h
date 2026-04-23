@@ -16,7 +16,7 @@ struct yetty_yrender_gpu_allocator;
 struct yetty_gpu_context;
 
 /* Result type */
-YETTY_RESULT_DECLARE(yetty_yrender_target_ptr, struct yetty_yrender_target *);
+YETTY_YRESULT_DECLARE(yetty_yrender_target_ptr, struct yetty_yrender_target *);
 
 /* Viewport - position and size */
 struct yetty_yrender_viewport {

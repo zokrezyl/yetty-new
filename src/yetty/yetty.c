@@ -450,7 +450,7 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
     ydebug("yetty_create: WebGPU initialized");
 
     /* Create event loop */
-    struct yetty_platform_input_pipe *pipe = app_context->platform_input_pipe;
+    struct yetty_yplatform_input_pipe *pipe = app_context->platform_input_pipe;
     struct yetty_ycore_event_loop_result event_loop_res = yetty_ycore_event_loop_create(pipe);
     if (!YETTY_IS_OK(event_loop_res)) {
         yetty_destroy(yetty);
@@ -489,10 +489,10 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
 
     /* Start RPC server if configured */
     const char *rpc_port_str = app_context->config->ops->get_string(
-        app_context->config, YETTY_CONFIG_KEY_RPC_PORT, NULL);
+        app_context->config, YETTY_YCONFIG_KEY_RPC_PORT, NULL);
     if (rpc_port_str) {
         const char *rpc_host = app_context->config->ops->get_string(
-            app_context->config, YETTY_CONFIG_KEY_RPC_HOST, "127.0.0.1");
+            app_context->config, YETTY_YCONFIG_KEY_RPC_HOST, "127.0.0.1");
         int rpc_port = atoi(rpc_port_str);
         ydebug("yetty_create: Starting RPC server on %s:%d", rpc_host, rpc_port);
         struct yetty_rpc_server_ptr_result rpc_res = yetty_rpc_server_create(yetty->event_loop);

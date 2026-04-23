@@ -18,7 +18,7 @@ struct yetty_yterm_terminal;
 struct yetty_yterm_terminal_layer;
 struct yetty_yterm_terminal_layer_ops;
 struct yetty_ycore_event_loop;
-struct yetty_platform_pty;
+struct yetty_yplatform_pty;
 struct yetty_yui_view;
 struct yetty_yrender_gpu_resource_binder;
 struct yetty_yrender_target;
@@ -32,8 +32,8 @@ typedef struct yetty_ycore_void_result (*yetty_yrender_layer_fn)(
     struct yetty_gpu_context *gpu);
 
 /* Result types */
-YETTY_RESULT_DECLARE(yetty_yterm_terminal, struct yetty_yterm_terminal *);
-YETTY_RESULT_DECLARE(yetty_yterm_terminal_layer,
+YETTY_YRESULT_DECLARE(yetty_yterm_terminal, struct yetty_yterm_terminal *);
+YETTY_YRESULT_DECLARE(yetty_yterm_terminal_layer,
                      struct yetty_yterm_terminal_layer *);
 
 /* PTY write callback - called when layer needs to send data to PTY */
@@ -105,7 +105,7 @@ struct yetty_yterm_terminal_layer {
 /* Terminal context - contains yetty context plus terminal-owned objects */
 struct yetty_yterm_terminal_context {
   struct yetty_context yetty_context;
-  struct yetty_platform_pty *pty;
+  struct yetty_yplatform_pty *pty;
 };
 
 /* Terminal creation/destruction */

@@ -191,12 +191,12 @@ struct yetty_ycore_void_result yetty_thing_init(struct yetty_thing *thing)
 }
 ```
 
-Each module declares its own result types using `YETTY_RESULT_DECLARE`:
+Each module declares its own result types using `YETTY_YRESULT_DECLARE`:
 
 ```c
 /* In terminal.h */
-YETTY_RESULT_DECLARE(yetty_yterm_terminal, struct yetty_yterm_terminal *);
-YETTY_RESULT_DECLARE(yetty_yterm_terminal_layer, struct yetty_yterm_terminal_layer *);
+YETTY_YRESULT_DECLARE(yetty_yterm_terminal, struct yetty_yterm_terminal *);
+YETTY_YRESULT_DECLARE(yetty_yterm_terminal_layer, struct yetty_yterm_terminal_layer *);
 
 /* Generates: struct yetty_yterm_terminal_result, struct yetty_yterm_terminal_layer_result */
 

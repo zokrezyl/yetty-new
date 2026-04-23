@@ -685,7 +685,7 @@ void yetty_yui_tile_clear_focus(struct yetty_yui_tile *root)
  *===========================================================================*/
 
 struct yetty_yui_tile_ptr_result
-yetty_yui_tile_create_from_config(const struct yetty_config *config,
+yetty_yui_tile_create_from_config(const struct yetty_yconfig *config,
 				  const struct yetty_context *yetty_ctx)
 {
 	const char *type;
@@ -702,8 +702,8 @@ yetty_yui_tile_create_from_config(const struct yetty_config *config,
 		const char *orient_str;
 		enum yetty_yui_orientation orientation;
 		float ratio;
-		struct yetty_config *first_config;
-		struct yetty_config *second_config;
+		struct yetty_yconfig *first_config;
+		struct yetty_yconfig *second_config;
 		struct yetty_yui_tile_ptr_result first_res, second_res;
 
 		/* Parse orientation */

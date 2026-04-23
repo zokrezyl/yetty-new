@@ -260,8 +260,8 @@ static int raster_font_rasterize_glyph(struct raster_font *font, uint32_t codepo
 
     /* Fallback to Regular if this face not available */
     if (!face) {
-        if (style != YETTY_FONT_MS_STYLE_REGULAR) {
-            return raster_font_rasterize_glyph(font, codepoint, YETTY_FONT_MS_STYLE_REGULAR);
+        if (style != YETTY_YFONT_MS_STYLE_REGULAR) {
+            return raster_font_rasterize_glyph(font, codepoint, YETTY_YFONT_MS_STYLE_REGULAR);
         }
         return 0;
     }
@@ -269,8 +269,8 @@ static int raster_font_rasterize_glyph(struct raster_font *font, uint32_t codepo
     FT_UInt glyph_index = FT_Get_Char_Index(face, codepoint);
     if (glyph_index == 0) {
         /* Fallback to Regular if glyph not in this face */
-        if (style != YETTY_FONT_MS_STYLE_REGULAR) {
-            return raster_font_rasterize_glyph(font, codepoint, YETTY_FONT_MS_STYLE_REGULAR);
+        if (style != YETTY_YFONT_MS_STYLE_REGULAR) {
+            return raster_font_rasterize_glyph(font, codepoint, YETTY_YFONT_MS_STYLE_REGULAR);
         }
         return 0;
     }
@@ -465,7 +465,7 @@ static void raster_font_cleanup(struct raster_font *font)
  *===========================================================================*/
 
 struct yetty_font_ms_font_result yetty_font_ms_raster_font_create(
-    struct yetty_config *config,
+    struct yetty_yconfig *config,
     float cell_width,
     float cell_height)
 {
@@ -606,7 +606,7 @@ static struct pixel_size_result raster_font_get_cell_size(const struct yetty_fon
 
 static struct uint32_result raster_font_get_glyph_index(struct yetty_font_ms_font *self, uint32_t codepoint)
 {
-    return raster_font_get_glyph_index_styled(self, codepoint, YETTY_FONT_MS_STYLE_REGULAR);
+    return raster_font_get_glyph_index_styled(self, codepoint, YETTY_YFONT_MS_STYLE_REGULAR);
 }
 
 static struct uint32_result raster_font_get_glyph_index_styled(struct yetty_font_ms_font *self, uint32_t codepoint, enum yetty_font_ms_style style)
@@ -627,8 +627,8 @@ static struct uint32_result raster_font_get_glyph_index_styled(struct yetty_font
             return YETTY_OK(uint32, slot);
     }
 
-    if (style != YETTY_FONT_MS_STYLE_REGULAR)
-        return raster_font_get_glyph_index_styled(self, codepoint, YETTY_FONT_MS_STYLE_REGULAR);
+    if (style != YETTY_YFONT_MS_STYLE_REGULAR)
+        return raster_font_get_glyph_index_styled(self, codepoint, YETTY_YFONT_MS_STYLE_REGULAR);
 
     return YETTY_ERR(uint32, "glyph not found");
 }
@@ -662,7 +662,7 @@ static struct yetty_ycore_void_result raster_font_load_glyphs(struct yetty_font_
 
             if (!raster_font_rasterize_glyph(font, codepoint, style)) {
                 /* Not a warning for non-Regular - fallback handles it */
-                if (style == YETTY_FONT_MS_STYLE_REGULAR) {
+                if (style == YETTY_YFONT_MS_STYLE_REGULAR) {
                     ywarn("Failed to rasterize glyph for U+%04X", codepoint);
                 }
                 continue;

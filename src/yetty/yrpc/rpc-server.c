@@ -83,8 +83,8 @@ static void handle_message(struct rpc_conn_ctx *ctx,
 	msg = parse_res.value;
 
 	ytrace("yrpc: received %s: channel=%u method=%.*s msgid=%u",
-	       msg.type == YETTY_RPC_MSG_REQUEST      ? "request" :
-	       msg.type == YETTY_RPC_MSG_NOTIFICATION ? "notification" :
+	       msg.type == YETTY_YRPC_MSG_REQUEST      ? "request" :
+	       msg.type == YETTY_YRPC_MSG_NOTIFICATION ? "notification" :
 						        "response",
 	       msg.channel, (int)msg.method_len, msg.method, msg.msgid);
 
@@ -94,7 +94,7 @@ static void handle_message(struct rpc_conn_ctx *ctx,
 		ytrace("yrpc: no handler for channel=%u method=%.*s",
 		       msg.channel, (int)msg.method_len, msg.method);
 
-		if (msg.type == YETTY_RPC_MSG_REQUEST) {
+		if (msg.type == YETTY_YRPC_MSG_REQUEST) {
 			/* Send error response */
 			yetty_rpc_write_buffer_init(&wbuf, ctx->response_buf,
 						    RESPONSE_BUFFER_SIZE);
@@ -111,7 +111,7 @@ static void handle_message(struct rpc_conn_ctx *ctx,
 	result = handler->handler(&msg, handler->userdata);
 
 	/* Send response for requests */
-	if (msg.type == YETTY_RPC_MSG_REQUEST) {
+	if (msg.type == YETTY_YRPC_MSG_REQUEST) {
 		yetty_rpc_write_buffer_init(&wbuf, ctx->response_buf,
 					    RESPONSE_BUFFER_SIZE);
 
@@ -438,15 +438,15 @@ handle_key_down(const struct yetty_rpc_message *msg, void *userdata)
 	msgpack_object *params;
 
 	if (!server->event_loop)
-		return YETTY_RPC_HANDLER_ERR("no event loop");
+		return YETTY_YRPC_HANDLER_ERR("no event loop");
 	if (!msg->params || msg->params_len == 0)
-		return YETTY_RPC_HANDLER_ERR("missing params");
+		return YETTY_YRPC_HANDLER_ERR("missing params");
 
 	msgpack_unpacked_init(&unpacked);
 	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
 				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
 		msgpack_unpacked_destroy(&unpacked);
-		return YETTY_RPC_HANDLER_ERR("invalid params");
+		return YETTY_YRPC_HANDLER_ERR("invalid params");
 	}
 	params = &unpacked.data;
 
@@ -457,7 +457,7 @@ handle_key_down(const struct yetty_rpc_message *msg, void *userdata)
 
 	msgpack_unpacked_destroy(&unpacked);
 	server->event_loop->ops->dispatch(server->event_loop, &event);
-	return YETTY_RPC_HANDLER_OK_BOOL(1);
+	return YETTY_YRPC_HANDLER_OK_BOOL(1);
 }
 
 static struct yetty_rpc_handler_result
@@ -469,15 +469,15 @@ handle_key_up(const struct yetty_rpc_message *msg, void *userdata)
 	msgpack_object *params;
 
 	if (!server->event_loop)
-		return YETTY_RPC_HANDLER_ERR("no event loop");
+		return YETTY_YRPC_HANDLER_ERR("no event loop");
 	if (!msg->params || msg->params_len == 0)
-		return YETTY_RPC_HANDLER_ERR("missing params");
+		return YETTY_YRPC_HANDLER_ERR("missing params");
 
 	msgpack_unpacked_init(&unpacked);
 	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
 				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
 		msgpack_unpacked_destroy(&unpacked);
-		return YETTY_RPC_HANDLER_ERR("invalid params");
+		return YETTY_YRPC_HANDLER_ERR("invalid params");
 	}
 	params = &unpacked.data;
 
@@ -488,7 +488,7 @@ handle_key_up(const struct yetty_rpc_message *msg, void *userdata)
 
 	msgpack_unpacked_destroy(&unpacked);
 	server->event_loop->ops->dispatch(server->event_loop, &event);
-	return YETTY_RPC_HANDLER_OK_BOOL(1);
+	return YETTY_YRPC_HANDLER_OK_BOOL(1);
 }
 
 static struct yetty_rpc_handler_result
@@ -500,15 +500,15 @@ handle_char(const struct yetty_rpc_message *msg, void *userdata)
 	msgpack_object *params;
 
 	if (!server->event_loop)
-		return YETTY_RPC_HANDLER_ERR("no event loop");
+		return YETTY_YRPC_HANDLER_ERR("no event loop");
 	if (!msg->params || msg->params_len == 0)
-		return YETTY_RPC_HANDLER_ERR("missing params");
+		return YETTY_YRPC_HANDLER_ERR("missing params");
 
 	msgpack_unpacked_init(&unpacked);
 	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
 				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
 		msgpack_unpacked_destroy(&unpacked);
-		return YETTY_RPC_HANDLER_ERR("invalid params");
+		return YETTY_YRPC_HANDLER_ERR("invalid params");
 	}
 	params = &unpacked.data;
 
@@ -524,7 +524,7 @@ handle_char(const struct yetty_rpc_message *msg, void *userdata)
 
 	msgpack_unpacked_destroy(&unpacked);
 	server->event_loop->ops->dispatch(server->event_loop, &event);
-	return YETTY_RPC_HANDLER_OK_BOOL(1);
+	return YETTY_YRPC_HANDLER_OK_BOOL(1);
 }
 
 static struct yetty_rpc_handler_result
@@ -536,15 +536,15 @@ handle_mouse_down(const struct yetty_rpc_message *msg, void *userdata)
 	msgpack_object *params;
 
 	if (!server->event_loop)
-		return YETTY_RPC_HANDLER_ERR("no event loop");
+		return YETTY_YRPC_HANDLER_ERR("no event loop");
 	if (!msg->params || msg->params_len == 0)
-		return YETTY_RPC_HANDLER_ERR("missing params");
+		return YETTY_YRPC_HANDLER_ERR("missing params");
 
 	msgpack_unpacked_init(&unpacked);
 	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
 				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
 		msgpack_unpacked_destroy(&unpacked);
-		return YETTY_RPC_HANDLER_ERR("invalid params");
+		return YETTY_YRPC_HANDLER_ERR("invalid params");
 	}
 	params = &unpacked.data;
 
@@ -555,7 +555,7 @@ handle_mouse_down(const struct yetty_rpc_message *msg, void *userdata)
 
 	msgpack_unpacked_destroy(&unpacked);
 	server->event_loop->ops->dispatch(server->event_loop, &event);
-	return YETTY_RPC_HANDLER_OK_BOOL(1);
+	return YETTY_YRPC_HANDLER_OK_BOOL(1);
 }
 
 static struct yetty_rpc_handler_result
@@ -567,15 +567,15 @@ handle_mouse_up(const struct yetty_rpc_message *msg, void *userdata)
 	msgpack_object *params;
 
 	if (!server->event_loop)
-		return YETTY_RPC_HANDLER_ERR("no event loop");
+		return YETTY_YRPC_HANDLER_ERR("no event loop");
 	if (!msg->params || msg->params_len == 0)
-		return YETTY_RPC_HANDLER_ERR("missing params");
+		return YETTY_YRPC_HANDLER_ERR("missing params");
 
 	msgpack_unpacked_init(&unpacked);
 	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
 				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
 		msgpack_unpacked_destroy(&unpacked);
-		return YETTY_RPC_HANDLER_ERR("invalid params");
+		return YETTY_YRPC_HANDLER_ERR("invalid params");
 	}
 	params = &unpacked.data;
 
@@ -586,7 +586,7 @@ handle_mouse_up(const struct yetty_rpc_message *msg, void *userdata)
 
 	msgpack_unpacked_destroy(&unpacked);
 	server->event_loop->ops->dispatch(server->event_loop, &event);
-	return YETTY_RPC_HANDLER_OK_BOOL(1);
+	return YETTY_YRPC_HANDLER_OK_BOOL(1);
 }
 
 static struct yetty_rpc_handler_result
@@ -598,15 +598,15 @@ handle_mouse_move(const struct yetty_rpc_message *msg, void *userdata)
 	msgpack_object *params;
 
 	if (!server->event_loop)
-		return YETTY_RPC_HANDLER_ERR("no event loop");
+		return YETTY_YRPC_HANDLER_ERR("no event loop");
 	if (!msg->params || msg->params_len == 0)
-		return YETTY_RPC_HANDLER_ERR("missing params");
+		return YETTY_YRPC_HANDLER_ERR("missing params");
 
 	msgpack_unpacked_init(&unpacked);
 	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
 				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
 		msgpack_unpacked_destroy(&unpacked);
-		return YETTY_RPC_HANDLER_ERR("invalid params");
+		return YETTY_YRPC_HANDLER_ERR("invalid params");
 	}
 	params = &unpacked.data;
 
@@ -616,7 +616,7 @@ handle_mouse_move(const struct yetty_rpc_message *msg, void *userdata)
 
 	msgpack_unpacked_destroy(&unpacked);
 	server->event_loop->ops->dispatch(server->event_loop, &event);
-	return YETTY_RPC_HANDLER_OK_BOOL(1);
+	return YETTY_YRPC_HANDLER_OK_BOOL(1);
 }
 
 static struct yetty_rpc_handler_result
@@ -628,15 +628,15 @@ handle_scroll(const struct yetty_rpc_message *msg, void *userdata)
 	msgpack_object *params;
 
 	if (!server->event_loop)
-		return YETTY_RPC_HANDLER_ERR("no event loop");
+		return YETTY_YRPC_HANDLER_ERR("no event loop");
 	if (!msg->params || msg->params_len == 0)
-		return YETTY_RPC_HANDLER_ERR("missing params");
+		return YETTY_YRPC_HANDLER_ERR("missing params");
 
 	msgpack_unpacked_init(&unpacked);
 	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
 				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
 		msgpack_unpacked_destroy(&unpacked);
-		return YETTY_RPC_HANDLER_ERR("invalid params");
+		return YETTY_YRPC_HANDLER_ERR("invalid params");
 	}
 	params = &unpacked.data;
 
@@ -649,7 +649,7 @@ handle_scroll(const struct yetty_rpc_message *msg, void *userdata)
 
 	msgpack_unpacked_destroy(&unpacked);
 	server->event_loop->ops->dispatch(server->event_loop, &event);
-	return YETTY_RPC_HANDLER_OK_BOOL(1);
+	return YETTY_YRPC_HANDLER_OK_BOOL(1);
 }
 
 static struct yetty_rpc_handler_result
@@ -661,15 +661,15 @@ handle_resize(const struct yetty_rpc_message *msg, void *userdata)
 	msgpack_object *params;
 
 	if (!server->event_loop)
-		return YETTY_RPC_HANDLER_ERR("no event loop");
+		return YETTY_YRPC_HANDLER_ERR("no event loop");
 	if (!msg->params || msg->params_len == 0)
-		return YETTY_RPC_HANDLER_ERR("missing params");
+		return YETTY_YRPC_HANDLER_ERR("missing params");
 
 	msgpack_unpacked_init(&unpacked);
 	if (msgpack_unpack_next(&unpacked, (const char *)msg->params,
 				msg->params_len, NULL) != MSGPACK_UNPACK_SUCCESS) {
 		msgpack_unpacked_destroy(&unpacked);
-		return YETTY_RPC_HANDLER_ERR("invalid params");
+		return YETTY_YRPC_HANDLER_ERR("invalid params");
 	}
 	params = &unpacked.data;
 
@@ -679,7 +679,7 @@ handle_resize(const struct yetty_rpc_message *msg, void *userdata)
 
 	msgpack_unpacked_destroy(&unpacked);
 	server->event_loop->ops->dispatch(server->event_loop, &event);
-	return YETTY_RPC_HANDLER_OK_BOOL(1);
+	return YETTY_YRPC_HANDLER_OK_BOOL(1);
 }
 
 static struct yetty_ycore_void_result
@@ -692,7 +692,7 @@ register_builtin_handlers(struct yetty_rpc_server *server)
 
 #define REG(method, handler)                                                   \
 	res = yetty_rpc_server_register_handler(                               \
-		server, YETTY_RPC_CHANNEL_EVENT_LOOP, method, handler, server);\
+		server, YETTY_YRPC_CHANNEL_EVENT_LOOP, method, handler, server);\
 	if (YETTY_IS_ERR(res))                                                 \
 		return res;
 

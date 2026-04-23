@@ -14,7 +14,7 @@ extern "C" {
 struct yetty_vnc_client;
 
 /* Result type */
-YETTY_RESULT_DECLARE(yetty_vnc_client_ptr, struct yetty_vnc_client *);
+YETTY_YRESULT_DECLARE(yetty_vnc_client_ptr, struct yetty_vnc_client *);
 
 /* Connection stats */
 struct yetty_vnc_client_stats {

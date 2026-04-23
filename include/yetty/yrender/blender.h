@@ -14,7 +14,7 @@ extern "C" {
 struct yetty_yrender_blender;
 
 /* Result type */
-YETTY_RESULT_DECLARE(yetty_yrender_blender, struct yetty_yrender_blender *);
+YETTY_YRESULT_DECLARE(yetty_yrender_blender, struct yetty_yrender_blender *);
 
 /* Blender ops */
 struct yetty_yrender_blender_ops {

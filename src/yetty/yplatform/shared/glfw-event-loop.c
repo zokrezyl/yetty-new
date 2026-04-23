@@ -6,7 +6,7 @@
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
-    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_yplatform_input_pipe *pipe = glfwGetWindowUserPointer(window);
     struct yetty_ycore_event event = {0};
 
     if (!pipe)
@@ -48,7 +48,7 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 
 static void char_callback(GLFWwindow *window, unsigned int codepoint)
 {
-    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_yplatform_input_pipe *pipe = glfwGetWindowUserPointer(window);
     struct yetty_ycore_event event = {0};
 
     if (!pipe)
@@ -62,7 +62,7 @@ static void char_callback(GLFWwindow *window, unsigned int codepoint)
 
 static void mouse_button_callback(GLFWwindow *window, int button, int action, int mods)
 {
-    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_yplatform_input_pipe *pipe = glfwGetWindowUserPointer(window);
     struct yetty_ycore_event event = {0};
     double x, y;
 
@@ -86,7 +86,7 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action, in
 
 static void cursor_pos_callback(GLFWwindow *window, double x, double y)
 {
-    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_yplatform_input_pipe *pipe = glfwGetWindowUserPointer(window);
     struct yetty_ycore_event event = {0};
 
     if (!pipe)
@@ -101,7 +101,7 @@ static void cursor_pos_callback(GLFWwindow *window, double x, double y)
 
 static void scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
 {
-    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_yplatform_input_pipe *pipe = glfwGetWindowUserPointer(window);
     struct yetty_ycore_event event = {0};
     double x, y;
     int mods = 0;
@@ -133,7 +133,7 @@ static void scroll_callback(GLFWwindow *window, double xoffset, double yoffset)
 
 static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 {
-    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_yplatform_input_pipe *pipe = glfwGetWindowUserPointer(window);
     struct yetty_ycore_event event = {0};
 
     if (!pipe)
@@ -148,7 +148,7 @@ static void framebuffer_size_callback(GLFWwindow *window, int width, int height)
 
 static void window_close_callback(GLFWwindow *window)
 {
-    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_yplatform_input_pipe *pipe = glfwGetWindowUserPointer(window);
     struct yetty_ycore_event event = {0};
 
     if (!pipe)
@@ -160,7 +160,7 @@ static void window_close_callback(GLFWwindow *window)
 
 static void window_refresh_callback(GLFWwindow *window)
 {
-    struct yetty_platform_input_pipe *pipe = glfwGetWindowUserPointer(window);
+    struct yetty_yplatform_input_pipe *pipe = glfwGetWindowUserPointer(window);
     struct yetty_ycore_event event = {0};
 
     if (!pipe)
@@ -170,7 +170,7 @@ static void window_refresh_callback(GLFWwindow *window)
     pipe->ops->write(pipe, &event, sizeof(event));
 }
 
-void yetty_platform_setup_window_callbacks(GLFWwindow *window)
+void yetty_yplatform_setup_window_callbacks(GLFWwindow *window)
 {
     glfwSetKeyCallback(window, key_callback);
     glfwSetCharCallback(window, char_callback);
@@ -182,7 +182,7 @@ void yetty_platform_setup_window_callbacks(GLFWwindow *window)
     glfwSetWindowRefreshCallback(window, window_refresh_callback);
 }
 
-void yetty_platform_run_os_event_loop(GLFWwindow *window, int *running)
+void yetty_yplatform_run_os_event_loop(GLFWwindow *window, int *running)
 {
     while (*running && !glfwWindowShouldClose(window))
         glfwWaitEvents();

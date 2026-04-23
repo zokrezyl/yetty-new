@@ -59,8 +59,8 @@ struct yetty_ypaint_prim_flyweight {
     const struct yetty_ypaint_prim_base_ops *ops;  // base ops (size, aabb)
 };
 
-YETTY_RESULT_DECLARE(yetty_ypaint_prim_base_ops_ptr, const struct yetty_ypaint_prim_base_ops *);
-YETTY_RESULT_DECLARE(yetty_ypaint_prim_flyweight_ptr, struct yetty_ypaint_prim_flyweight *);
+YETTY_YRESULT_DECLARE(yetty_ypaint_prim_base_ops_ptr, const struct yetty_ypaint_prim_base_ops *);
+YETTY_YRESULT_DECLARE(yetty_ypaint_prim_flyweight_ptr, struct yetty_ypaint_prim_flyweight *);
 
 // Handler function - takes prim_type, returns base ops pointer or error
 typedef struct yetty_ypaint_prim_base_ops_ptr_result (*yetty_ypaint_prim_handler_fn)(
@@ -69,7 +69,7 @@ typedef struct yetty_ypaint_prim_base_ops_ptr_result (*yetty_ypaint_prim_handler
 // Flyweight registry instance (opaque)
 struct yetty_ypaint_flyweight_registry;
 
-YETTY_RESULT_DECLARE(yetty_ypaint_flyweight_registry_ptr,
+YETTY_YRESULT_DECLARE(yetty_ypaint_flyweight_registry_ptr,
     struct yetty_ypaint_flyweight_registry *);
 
 // Create/destroy registry instance

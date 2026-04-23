@@ -39,7 +39,7 @@ struct yetty_yimage;
  * Result types
  *===========================================================================*/
 
-YETTY_RESULT_DECLARE(yetty_yimage, struct yetty_yimage *);
+YETTY_YRESULT_DECLARE(yetty_yimage, struct yetty_yimage *);
 
 /*=============================================================================
  * Lifecycle

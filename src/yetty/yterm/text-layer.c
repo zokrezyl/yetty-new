@@ -117,10 +117,10 @@ static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
     if (!text_layer->font || !text_layer->font->ops || count == 0)
         return result;
 
-    enum yetty_font_ms_style style = YETTY_FONT_MS_STYLE_REGULAR;
-    if (bold && italic)      style = YETTY_FONT_MS_STYLE_BOLD_ITALIC;
-    else if (bold)           style = YETTY_FONT_MS_STYLE_BOLD;
-    else if (italic)         style = YETTY_FONT_MS_STYLE_ITALIC;
+    enum yetty_font_ms_style style = YETTY_YFONT_MS_STYLE_REGULAR;
+    if (bold && italic)      style = YETTY_YFONT_MS_STYLE_BOLD_ITALIC;
+    else if (bold)           style = YETTY_YFONT_MS_STYLE_BOLD;
+    else if (italic)         style = YETTY_YFONT_MS_STYLE_ITALIC;
 
     struct uint32_result glyph_res = text_layer->font->ops->get_glyph_index_styled(
         text_layer->font, chars[0], style);
@@ -230,7 +230,7 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
     struct yetty_yterm_terminal_text_layer *text_layer;
 
     /* Load text-layer shader from file */
-    struct yetty_config *config = context->app_context.config;
+    struct yetty_yconfig *config = context->app_context.config;
     const char *shaders_dir = config->ops->get_string(config, "paths/shaders", "");
     char shader_path[512];
     snprintf(shader_path, sizeof(shader_path), "%s/text-layer.wgsl", shaders_dir);
@@ -262,7 +262,7 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
 
     /* Create font from config */
     const char *render_method = config->ops->get_string(
-        config, YETTY_CONFIG_KEY_TERMINAL_FONT_RENDER_METHOD, "raster");
+        config, YETTY_YCONFIG_KEY_TERMINAL_FONT_RENDER_METHOD, "raster");
     ydebug("text_layer: render_method='%s'", render_method);
     struct yetty_font_ms_font_result font_res;
     if (strcmp(render_method, "msdf") == 0) {

@@ -1,5 +1,5 @@
-#ifndef YETTY_PLATFORM_IPC_SOCKET_H
-#define YETTY_PLATFORM_IPC_SOCKET_H
+#ifndef YETTY_YPLATFORM_IPC_SOCKET_H
+#define YETTY_YPLATFORM_IPC_SOCKET_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -21,7 +21,7 @@ typedef struct yetty_ipc_socket *yetty_ipc_socket_t;
 #define YETTY_IPC_SOCKET_INVALID NULL
 
 /* Result types */
-YETTY_RESULT_DECLARE(yetty_ipc_socket, yetty_ipc_socket_t);
+YETTY_YRESULT_DECLARE(yetty_ipc_socket, yetty_ipc_socket_t);
 
 /* Maximum path length for socket/pipe */
 #define YETTY_IPC_SOCKET_PATH_MAX 256
@@ -98,4 +98,4 @@ void yetty_ipc_socket_unlink(const char *path);
 }
 #endif
 
-#endif /* YETTY_PLATFORM_IPC_SOCKET_H */
+#endif /* YETTY_YPLATFORM_IPC_SOCKET_H */

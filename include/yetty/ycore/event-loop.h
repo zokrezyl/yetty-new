@@ -15,10 +15,10 @@ typedef int yetty_ycore_tcp_server_id;
 typedef int yetty_ycore_tcp_client_id;
 
 /* Result types for this module */
-YETTY_RESULT_DECLARE(yetty_ycore_pipe_id, yetty_ycore_pipe_id);
-YETTY_RESULT_DECLARE(yetty_ycore_timer_id, yetty_ycore_timer_id);
-YETTY_RESULT_DECLARE(yetty_ycore_tcp_server_id, yetty_ycore_tcp_server_id);
-YETTY_RESULT_DECLARE(yetty_ycore_tcp_client_id, yetty_ycore_tcp_client_id);
+YETTY_YRESULT_DECLARE(yetty_ycore_pipe_id, yetty_ycore_pipe_id);
+YETTY_YRESULT_DECLARE(yetty_ycore_timer_id, yetty_ycore_timer_id);
+YETTY_YRESULT_DECLARE(yetty_ycore_tcp_server_id, yetty_ycore_tcp_server_id);
+YETTY_YRESULT_DECLARE(yetty_ycore_tcp_client_id, yetty_ycore_tcp_client_id);
 
 /* TCP connection handle (opaque, passed to callbacks) */
 struct yetty_tcp_conn;
@@ -55,7 +55,7 @@ struct yetty_tcp_client_callbacks {
 
 struct yetty_ycore_event_loop;
 struct yetty_ycore_event_listener;
-struct yetty_platform_pty_pipe_source;
+struct yetty_yplatform_pty_pipe_source;
 
 /* Pipe alloc callback — called by event loop to get a buffer for reading */
 typedef void (*yetty_pipe_alloc_cb)(void *ctx, size_t suggested_size, char **buf, size_t *buflen);
@@ -103,7 +103,7 @@ struct yetty_ycore_event_loop_ops {
     /* PTY pipe — uv_pipe_t with uv_read_start, caller provides callbacks */
     struct yetty_ycore_pipe_id_result (*register_pty_pipe)(
         struct yetty_ycore_event_loop *self,
-        struct yetty_platform_pty_pipe_source *source,
+        struct yetty_yplatform_pty_pipe_source *source,
         yetty_pipe_alloc_cb alloc_cb,
         yetty_pipe_read_cb read_cb,
         void *cb_ctx);
@@ -172,10 +172,10 @@ struct yetty_ycore_event_loop {
 };
 
 /* Event loop creation - platform_input_pipe can be NULL */
-struct yetty_platform_input_pipe;
-YETTY_RESULT_DECLARE(yetty_ycore_event_loop, struct yetty_ycore_event_loop *);
+struct yetty_yplatform_input_pipe;
+YETTY_YRESULT_DECLARE(yetty_ycore_event_loop, struct yetty_ycore_event_loop *);
 struct yetty_ycore_event_loop_result yetty_ycore_event_loop_create(
-    struct yetty_platform_input_pipe *pipe);
+    struct yetty_yplatform_input_pipe *pipe);
 
 #ifdef __cplusplus
 }

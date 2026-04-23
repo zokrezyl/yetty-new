@@ -21,7 +21,7 @@ extern "C" {
 
 struct yetty_ycdb_reader;
 
-YETTY_RESULT_DECLARE(yetty_ycdb_reader, struct yetty_ycdb_reader *);
+YETTY_YRESULT_DECLARE(yetty_ycdb_reader, struct yetty_ycdb_reader *);
 
 struct yetty_ycdb_reader_result
 yetty_ycdb_reader_open(const char *path);
@@ -43,7 +43,7 @@ yetty_ycdb_reader_get(struct yetty_ycdb_reader *r,
 
 struct yetty_ycdb_writer;
 
-YETTY_RESULT_DECLARE(yetty_ycdb_writer, struct yetty_ycdb_writer *);
+YETTY_YRESULT_DECLARE(yetty_ycdb_writer, struct yetty_ycdb_writer *);
 
 struct yetty_ycdb_writer_result
 yetty_ycdb_writer_create(const char *path);

@@ -103,7 +103,7 @@ struct libuv_event_loop {
     struct tcp_client_handle tcp_clients[MAX_TCP_CLIENTS];
     int next_tcp_client_id;
 
-    struct yetty_platform_input_pipe *platform_input_pipe;
+    struct yetty_yplatform_input_pipe *platform_input_pipe;
     uv_pipe_t input_pipe;
     int input_pipe_active;
 
@@ -132,7 +132,7 @@ static struct yetty_ycore_void_result libuv_broadcast(
     struct yetty_ycore_event_loop *self, const struct yetty_ycore_event *event);
 static struct yetty_ycore_pipe_id_result libuv_register_pty_pipe(
     struct yetty_ycore_event_loop *self,
-    struct yetty_platform_pty_pipe_source *source,
+    struct yetty_yplatform_pty_pipe_source *source,
     yetty_pipe_alloc_cb alloc_cb,
     yetty_pipe_read_cb read_cb,
     void *cb_ctx);
@@ -412,7 +412,7 @@ static struct yetty_ycore_void_result libuv_broadcast(
 
 static struct yetty_ycore_pipe_id_result libuv_register_pty_pipe(
     struct yetty_ycore_event_loop *self,
-    struct yetty_platform_pty_pipe_source *source,
+    struct yetty_yplatform_pty_pipe_source *source,
     yetty_pipe_alloc_cb alloc_cb,
     yetty_pipe_read_cb read_cb,
     void *cb_ctx)
@@ -984,7 +984,7 @@ static struct yetty_ycore_void_result libuv_tcp_close(struct yetty_tcp_conn *con
 }
 
 struct yetty_ycore_event_loop_result yetty_ycore_event_loop_create(
-    struct yetty_platform_input_pipe *pipe)
+    struct yetty_yplatform_input_pipe *pipe)
 {
     struct libuv_event_loop *impl;
 

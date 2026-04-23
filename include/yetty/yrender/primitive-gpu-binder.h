@@ -28,7 +28,7 @@ struct yetty_yrender_gpu_allocator;
 
 struct yetty_primitive_gpu_binder;
 
-YETTY_RESULT_DECLARE(yetty_primitive_gpu_binder_ptr,
+YETTY_YRESULT_DECLARE(yetty_primitive_gpu_binder_ptr,
 	struct yetty_primitive_gpu_binder *);
 
 // Create binder

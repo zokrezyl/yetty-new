@@ -9,7 +9,7 @@ static char data_dir_buf[512];
 static char runtime_dir_buf[512];
 static char config_dir_buf[512];
 
-const char *yetty_platform_get_cache_dir(void)
+const char *yetty_yplatform_get_cache_dir(void)
 {
     const char *localAppData = getenv("LOCALAPPDATA");
     if (localAppData) {
@@ -19,7 +19,7 @@ const char *yetty_platform_get_cache_dir(void)
     return "C:\\temp\\yetty";
 }
 
-const char *yetty_platform_get_data_dir(void)
+const char *yetty_yplatform_get_data_dir(void)
 {
     const char *localAppData = getenv("LOCALAPPDATA");
     if (localAppData) {
@@ -29,7 +29,7 @@ const char *yetty_platform_get_data_dir(void)
     return "C:\\temp\\yetty";
 }
 
-const char *yetty_platform_get_runtime_dir(void)
+const char *yetty_yplatform_get_runtime_dir(void)
 {
     const char *temp = getenv("TEMP");
     if (temp) {
@@ -39,7 +39,7 @@ const char *yetty_platform_get_runtime_dir(void)
     return "C:\\temp\\yetty";
 }
 
-const char *yetty_platform_get_config_dir(void)
+const char *yetty_yplatform_get_config_dir(void)
 {
     const char *appData = getenv("APPDATA");
     if (appData) {

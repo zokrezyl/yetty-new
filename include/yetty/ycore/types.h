@@ -37,7 +37,7 @@ struct yetty_ycore_buffer {
   size_t size;
 };
 
-YETTY_RESULT_DECLARE(yetty_ycore_buffer, struct yetty_ycore_buffer);
+YETTY_YRESULT_DECLARE(yetty_ycore_buffer, struct yetty_ycore_buffer);
 
 /* Buffer operations - doubling growth like kernel/C++ vector */
 struct yetty_ycore_buffer_result yetty_ycore_buffer_create(size_t initial_capacity);
@@ -112,9 +112,9 @@ struct rectangle {
   struct pixel_coord max;
 };
 
-YETTY_RESULT_DECLARE(uint32, uint32_t);
-YETTY_RESULT_DECLARE(pixel_size, struct pixel_size);
-YETTY_RESULT_DECLARE(rectangle, struct rectangle);
+YETTY_YRESULT_DECLARE(uint32, uint32_t);
+YETTY_YRESULT_DECLARE(pixel_size, struct pixel_size);
+YETTY_YRESULT_DECLARE(rectangle, struct rectangle);
 
 #ifdef __cplusplus
 }

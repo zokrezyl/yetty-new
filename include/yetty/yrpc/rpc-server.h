@@ -14,7 +14,7 @@ struct yetty_rpc_server;
 struct yetty_ycore_event_loop;
 
 /* Result types */
-YETTY_RESULT_DECLARE(yetty_rpc_server_ptr, struct yetty_rpc_server *);
+YETTY_YRESULT_DECLARE(yetty_rpc_server_ptr, struct yetty_rpc_server *);
 
 /*
  * Handler result: success with optional response data, or error message.
@@ -34,17 +34,17 @@ struct yetty_rpc_handler_result {
 };
 
 /* Create success result with msgpack data */
-#define YETTY_RPC_HANDLER_OK_DATA(d, l)                                        \
+#define YETTY_YRPC_HANDLER_OK_DATA(d, l)                                        \
 	((struct yetty_rpc_handler_result){                                    \
 		.ok = 1, .value = {.data = (d), .len = (l)}})
 
 /* Create success result with bool */
-#define YETTY_RPC_HANDLER_OK_BOOL(v)                                           \
+#define YETTY_YRPC_HANDLER_OK_BOOL(v)                                           \
 	((struct yetty_rpc_handler_result){                                    \
 		.ok = 1, .value = {.data = NULL, .len = 0, .bool_value = (v)}})
 
 /* Create error result */
-#define YETTY_RPC_HANDLER_ERR(msg)                                             \
+#define YETTY_YRPC_HANDLER_ERR(msg)                                             \
 	((struct yetty_rpc_handler_result){.ok = 0, .error = (msg)})
 
 /*

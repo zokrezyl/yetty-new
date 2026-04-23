@@ -9,16 +9,16 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-int yetty_platform_socket_init(void)
+int yetty_yplatform_socket_init(void)
 {
 	return 1;
 }
 
-void yetty_platform_socket_cleanup(void)
+void yetty_yplatform_socket_cleanup(void)
 {
 }
 
-struct yetty_socket_fd_result yetty_platform_socket_create_tcp(void)
+struct yetty_socket_fd_result yetty_yplatform_socket_create_tcp(void)
 {
 	int fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (fd < 0)
@@ -26,14 +26,14 @@ struct yetty_socket_fd_result yetty_platform_socket_create_tcp(void)
 	return YETTY_OK(yetty_socket_fd, fd);
 }
 
-void yetty_platform_socket_close(yetty_socket_fd fd)
+void yetty_yplatform_socket_close(yetty_socket_fd fd)
 {
 	if (fd >= 0)
 		close(fd);
 }
 
 struct yetty_ycore_void_result
-yetty_platform_socket_set_nonblocking(yetty_socket_fd fd)
+yetty_yplatform_socket_set_nonblocking(yetty_socket_fd fd)
 {
 	int flags = fcntl(fd, F_GETFL, 0);
 	if (flags < 0)
@@ -44,7 +44,7 @@ yetty_platform_socket_set_nonblocking(yetty_socket_fd fd)
 }
 
 struct yetty_ycore_void_result
-yetty_platform_socket_set_nodelay(yetty_socket_fd fd, int enable)
+yetty_yplatform_socket_set_nodelay(yetty_socket_fd fd, int enable)
 {
 	int val = enable ? 1 : 0;
 	if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &val, sizeof(val)) < 0)
@@ -53,7 +53,7 @@ yetty_platform_socket_set_nodelay(yetty_socket_fd fd, int enable)
 }
 
 struct yetty_ycore_void_result
-yetty_platform_socket_set_reuseaddr(yetty_socket_fd fd, int enable)
+yetty_yplatform_socket_set_reuseaddr(yetty_socket_fd fd, int enable)
 {
 	int val = enable ? 1 : 0;
 	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) < 0)
@@ -62,7 +62,7 @@ yetty_platform_socket_set_reuseaddr(yetty_socket_fd fd, int enable)
 	return YETTY_OK_VOID();
 }
 
-struct yetty_ycore_void_result yetty_platform_socket_bind(yetty_socket_fd fd,
+struct yetty_ycore_void_result yetty_yplatform_socket_bind(yetty_socket_fd fd,
 							 uint16_t port)
 {
 	struct sockaddr_in addr;
@@ -75,7 +75,7 @@ struct yetty_ycore_void_result yetty_platform_socket_bind(yetty_socket_fd fd,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_ycore_void_result yetty_platform_socket_listen(yetty_socket_fd fd,
+struct yetty_ycore_void_result yetty_yplatform_socket_listen(yetty_socket_fd fd,
 							   int backlog)
 {
 	if (listen(fd, backlog) < 0)
@@ -83,7 +83,7 @@ struct yetty_ycore_void_result yetty_platform_socket_listen(yetty_socket_fd fd,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_socket_fd_result yetty_platform_socket_accept(yetty_socket_fd fd)
+struct yetty_socket_fd_result yetty_yplatform_socket_accept(yetty_socket_fd fd)
 {
 	struct sockaddr_in addr;
 	socklen_t addrlen = sizeof(addr);
@@ -96,7 +96,7 @@ struct yetty_socket_fd_result yetty_platform_socket_accept(yetty_socket_fd fd)
 	return YETTY_OK(yetty_socket_fd, client_fd);
 }
 
-struct yetty_ycore_void_result yetty_platform_socket_connect(yetty_socket_fd fd,
+struct yetty_ycore_void_result yetty_yplatform_socket_connect(yetty_socket_fd fd,
 							    const char *host,
 							    uint16_t port)
 {
@@ -122,7 +122,7 @@ struct yetty_ycore_void_result yetty_platform_socket_connect(yetty_socket_fd fd,
 }
 
 struct yetty_ycore_void_result
-yetty_platform_socket_connect_check(yetty_socket_fd fd)
+yetty_yplatform_socket_connect_check(yetty_socket_fd fd)
 {
 	int err = 0;
 	socklen_t len = sizeof(err);
@@ -133,7 +133,7 @@ yetty_platform_socket_connect_check(yetty_socket_fd fd)
 	return YETTY_OK_VOID();
 }
 
-struct yetty_ycore_size_result yetty_platform_socket_send(yetty_socket_fd fd,
+struct yetty_ycore_size_result yetty_yplatform_socket_send(yetty_socket_fd fd,
 							 const void *data,
 							 size_t len)
 {
@@ -146,7 +146,7 @@ struct yetty_ycore_size_result yetty_platform_socket_send(yetty_socket_fd fd,
 	return YETTY_OK(yetty_ycore_size, (size_t)sent);
 }
 
-struct yetty_ycore_size_result yetty_platform_socket_recv(yetty_socket_fd fd,
+struct yetty_ycore_size_result yetty_yplatform_socket_recv(yetty_socket_fd fd,
 							 void *buf,
 							 size_t max_len)
 {
@@ -159,12 +159,12 @@ struct yetty_ycore_size_result yetty_platform_socket_recv(yetty_socket_fd fd,
 	return YETTY_OK(yetty_ycore_size, (size_t)received);
 }
 
-int yetty_platform_socket_would_block(void)
+int yetty_yplatform_socket_would_block(void)
 {
 	return errno == EAGAIN || errno == EWOULDBLOCK;
 }
 
-int yetty_platform_socket_connect_in_progress(void)
+int yetty_yplatform_socket_connect_in_progress(void)
 {
 	return errno == EINPROGRESS;
 }

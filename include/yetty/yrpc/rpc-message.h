@@ -18,15 +18,15 @@ extern "C" {
 
 /* Message types */
 enum yetty_rpc_message_type {
-	YETTY_RPC_MSG_REQUEST = 0,
-	YETTY_RPC_MSG_RESPONSE = 1,
-	YETTY_RPC_MSG_NOTIFICATION = 2,
+	YETTY_YRPC_MSG_REQUEST = 0,
+	YETTY_YRPC_MSG_RESPONSE = 1,
+	YETTY_YRPC_MSG_NOTIFICATION = 2,
 };
 
 /* Channel IDs (extensible) */
 enum yetty_rpc_channel {
-	YETTY_RPC_CHANNEL_EVENT_LOOP = 0,
-	YETTY_RPC_CHANNEL_STREAM = 1,
+	YETTY_YRPC_CHANNEL_EVENT_LOOP = 0,
+	YETTY_YRPC_CHANNEL_STREAM = 1,
 };
 
 /* Parsed RPC message */
@@ -41,7 +41,7 @@ struct yetty_rpc_message {
 };
 
 /* Result types */
-YETTY_RESULT_DECLARE(yetty_rpc_message, struct yetty_rpc_message);
+YETTY_YRESULT_DECLARE(yetty_rpc_message, struct yetty_rpc_message);
 
 /*
  * Parse a msgpack-RPC message from raw bytes.

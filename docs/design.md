@@ -53,7 +53,7 @@ See [C Coding Style](c-coding-style.md) for the full vtable and embedding patter
 Yetty uses typed result unions — similar to Rust's `Result<T, E>` — encoded as C structs with a tagged union.
 
 ```c
-YETTY_RESULT_DECLARE(yetty_font_font, struct yetty_font_font *);
+YETTY_YRESULT_DECLARE(yetty_font_font, struct yetty_font_font *);
 
 /* Returns struct yetty_font_font_result { int ok; union { value; error; }; } */
 struct yetty_font_font_result res = yetty_font_raster_font_create(config, 10, 20);

@@ -16,7 +16,7 @@ struct yetty_ycore_event;
 struct yetty_yrender_target;
 
 /* Result types */
-YETTY_RESULT_DECLARE(yetty_yui_view_ptr, struct yetty_yui_view *);
+YETTY_YRESULT_DECLARE(yetty_yui_view_ptr, struct yetty_yui_view *);
 
 /* View ops vtable */
 struct yetty_yui_view_ops {

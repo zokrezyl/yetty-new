@@ -26,7 +26,7 @@ struct yetty_yrender_gpu_allocator {
     const struct yetty_yrender_gpu_allocator_ops *ops;
 };
 
-YETTY_RESULT_DECLARE(yetty_yrender_gpu_allocator, struct yetty_yrender_gpu_allocator *);
+YETTY_YRESULT_DECLARE(yetty_yrender_gpu_allocator, struct yetty_yrender_gpu_allocator *);
 
 struct yetty_yrender_gpu_allocator_result yetty_yrender_gpu_allocator_create(WGPUDevice device);
 

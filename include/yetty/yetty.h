@@ -11,10 +11,10 @@ extern "C" {
 
 /* Forward declarations */
 struct yetty_yetty;
-struct yetty_config;
-struct yetty_platform_input_pipe;
+struct yetty_yconfig;
+struct yetty_yplatform_input_pipe;
 struct yetty_clipboard_manager;
-struct yetty_platform_pty_factory;
+struct yetty_yplatform_pty_factory;
 struct yetty_ycore_event_loop;
 struct yetty_yrender_gpu_allocator;
 
@@ -29,10 +29,10 @@ struct yetty_app_gpu_context {
 /* App context - passed from platform main to yetty_create */
 struct yetty_app_context {
     struct yetty_app_gpu_context app_gpu_context;
-    struct yetty_config *config;
-    struct yetty_platform_input_pipe *platform_input_pipe;
+    struct yetty_yconfig *config;
+    struct yetty_yplatform_input_pipe *platform_input_pipe;
     struct yetty_clipboard_manager *clipboard_manager;
-    struct yetty_platform_pty_factory *pty_factory;
+    struct yetty_yplatform_pty_factory *pty_factory;
 };
 
 /* Yetty GPU context - yetty-owned GPU objects */
@@ -53,7 +53,7 @@ struct yetty_context {
 };
 
 /* Result type */
-YETTY_RESULT_DECLARE(yetty_yetty, struct yetty_yetty *);
+YETTY_YRESULT_DECLARE(yetty_yetty, struct yetty_yetty *);
 
 /* Create yetty instance */
 struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_context);
