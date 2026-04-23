@@ -125,9 +125,10 @@ option(YETTY_ENABLE_TOOL_YSLIDES         "yslides tool"                      OFF
 option(YETTY_ENABLE_TOOL_QA              "qa static analysis tools"          ON)
 
 # Auto-disable QA tools for cross-compilation (requires host LLVM/Clang libs)
+# Also disabled on macOS for now — tools/qa/CMakeLists.txt hardcodes Linux LLVM paths.
 if(YETTY_ENABLE_TOOL_QA)
-    if(YETTY_ANDROID OR YETTY_IOS OR EMSCRIPTEN OR CMAKE_CROSSCOMPILING)
-        message(STATUS "Disabling QA tools for cross-compilation")
+    if(YETTY_ANDROID OR YETTY_IOS OR EMSCRIPTEN OR CMAKE_CROSSCOMPILING OR APPLE)
+        message(STATUS "Disabling QA tools (cross-compilation or macOS)")
         set(YETTY_ENABLE_TOOL_QA OFF CACHE BOOL "" FORCE)
     endif()
 endif()
