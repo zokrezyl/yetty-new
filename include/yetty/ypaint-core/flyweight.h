@@ -11,13 +11,13 @@ extern "C" {
 #endif
 
 // Forward declare gpu_resource_set result (defined in yrender/gpu-resource-set.h)
-struct yetty_render_gpu_resource_set;
-struct yetty_render_gpu_resource_set_result;
+struct yetty_yrender_gpu_resource_set;
+struct yetty_yrender_gpu_resource_set_result;
 
 // Primitive ops vtable - all functions return result types
 struct yetty_ypaint_prim_ops {
     // Size in bytes (for buffer iteration)
-    struct yetty_core_size_result (*size)(const uint32_t *prim);
+    struct yetty_ycore_size_result (*size)(const uint32_t *prim);
 
     // Bounding box (for spatial grid)
     struct rectangle_result (*aabb)(const uint32_t *prim);
@@ -27,7 +27,7 @@ struct yetty_ypaint_prim_ops {
 
     // Get GPU resources for rendering (optional, NULL for simple SDF prims)
     // cache_ptr: pointer to cache storage (caller provides, callee allocates)
-    struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(
+    struct yetty_yrender_gpu_resource_set_result (*get_gpu_resource_set)(
         const uint32_t *prim, void **cache_ptr);
 };
 
@@ -44,7 +44,7 @@ typedef struct yetty_ypaint_prim_flyweight (*yetty_ypaint_prim_handler_fn)(
 // Flyweight registry instance (opaque)
 struct yetty_ypaint_flyweight_registry;
 
-YETTY_RESULT_DECLARE(yetty_ypaint_flyweight_registry_ptr,
+YETTY_YRESULT_DECLARE(yetty_ypaint_flyweight_registry_ptr,
     struct yetty_ypaint_flyweight_registry *);
 
 // Create/destroy registry instance
@@ -60,7 +60,7 @@ void yetty_ypaint_flyweight_registry_set_default(
     yetty_ypaint_prim_handler_fn handler);
 
 // Register additional handler for type range [type_min, type_max]
-struct yetty_core_void_result yetty_ypaint_flyweight_registry_add(
+struct yetty_ycore_void_result yetty_ypaint_flyweight_registry_add(
     struct yetty_ypaint_flyweight_registry *reg,
     uint32_t type_min,
     uint32_t type_max,

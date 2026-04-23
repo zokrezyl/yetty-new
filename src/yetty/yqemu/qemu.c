@@ -18,8 +18,8 @@
 #include <unistd.h>
 
 /* Platform paths */
-extern const char *yetty_platform_get_data_dir(void);
-extern const char *yetty_platform_get_config_dir(void);
+extern const char *yetty_yplatform_get_data_dir(void);
+extern const char *yetty_yplatform_get_config_dir(void);
 
 /* mkdir -p helper (local; we don't want to pull a bigger dep here) */
 static int qemu_mkdir_p(const char *path)
@@ -122,8 +122,8 @@ static void qemu_settings_ensure_default(const char *path)
 
 pid_t qemu_start(uint16_t port)
 {
-    const char *data_dir = yetty_platform_get_data_dir();
-    const char *config_dir = yetty_platform_get_config_dir();
+    const char *data_dir = yetty_yplatform_get_data_dir();
+    const char *config_dir = yetty_yplatform_get_config_dir();
     char qemu_bin[512];
     char bios_path[512];
     char kernel_path[512];

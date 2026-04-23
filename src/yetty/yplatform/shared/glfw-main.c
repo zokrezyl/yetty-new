@@ -18,17 +18,17 @@
 #include <yetty/ytrace.h>
 
 /* Forward declarations - implemented in other platform files */
-const char *yetty_platform_get_cache_dir(void);
-const char *yetty_platform_get_data_dir(void);
-const char *yetty_platform_get_config_dir(void);
-const char *yetty_platform_get_runtime_dir(void);
+const char *yetty_yplatform_get_cache_dir(void);
+const char *yetty_yplatform_get_data_dir(void);
+const char *yetty_yplatform_get_config_dir(void);
+const char *yetty_yplatform_get_runtime_dir(void);
 
-GLFWwindow *yetty_platform_create_window(int width, int height, const char *title);
-void yetty_platform_destroy_window(GLFWwindow *window);
-void yetty_platform_get_framebuffer_size(GLFWwindow *window, int *width, int *height);
-WGPUSurface yetty_platform_create_surface(WGPUInstance instance, GLFWwindow *window);
-void yetty_platform_setup_window_callbacks(GLFWwindow *window);
-void yetty_platform_run_os_event_loop(GLFWwindow *window, int *running);
+GLFWwindow *yetty_yplatform_create_window(int width, int height, const char *title);
+void yetty_yplatform_destroy_window(GLFWwindow *window);
+void yetty_yplatform_get_framebuffer_size(GLFWwindow *window, int *width, int *height);
+WGPUSurface yetty_yplatform_create_surface(WGPUInstance instance, GLFWwindow *window);
+void yetty_yplatform_setup_window_callbacks(GLFWwindow *window);
+void yetty_yplatform_run_os_event_loop(GLFWwindow *window, int *running);
 
 /* Render thread args */
 struct render_thread_args {
@@ -41,7 +41,7 @@ struct render_thread_args {
 static int render_thread_func(void *arg)
 {
     struct render_thread_args *args = arg;
-    struct yetty_core_void_result res = yetty_run(args->yetty);
+    struct yetty_ycore_void_result res = yetty_run(args->yetty);
 
     args->result = YETTY_IS_OK(res) ? 0 : 1;
     *(args->running) = 0;
@@ -60,9 +60,9 @@ int main(int argc, char **argv)
     }
 
     /* Platform paths */
-    const char *cache_dir = yetty_platform_get_cache_dir();
-    const char *data_dir = yetty_platform_get_data_dir();
-    const char *runtime_dir = yetty_platform_get_runtime_dir();
+    const char *cache_dir = yetty_yplatform_get_cache_dir();
+    const char *data_dir = yetty_yplatform_get_data_dir();
+    const char *runtime_dir = yetty_yplatform_get_runtime_dir();
 
     char shaders_dir[512];
     char fonts_dir[512];
@@ -74,7 +74,7 @@ int main(int argc, char **argv)
     yplatform_mkdir_p(runtime_dir);
     yplatform_mkdir_p(fonts_dir);
 
-    struct yetty_platform_paths paths = {
+    struct yetty_yplatform_paths paths = {
         .shaders_dir = shaders_dir,
         .fonts_dir = fonts_dir,
         .runtime_dir = runtime_dir,
@@ -82,23 +82,23 @@ int main(int argc, char **argv)
     };
 
     /* Config */
-    struct yetty_config_result config_result = yetty_config_create(argc, argv, &paths);
+    struct yetty_yconfig_result config_result = yetty_yconfig_create(argc, argv, &paths);
     if (!YETTY_IS_OK(config_result)) {
         fprintf(stderr, "Failed to create config\n");
         glfwTerminate();
         return 1;
     }
-    struct yetty_config *config = config_result.value;
+    struct yetty_yconfig *config = config_result.value;
 
     /* Extract assets */
-    yetty_platform_extract_assets(config);
+    yetty_yplatform_extract_assets(config);
     ydebug("main: assets extracted");
 
     /* Window */
     int width = config->ops->get_int(config, "window/width", 1280);
     int height = config->ops->get_int(config, "window/height", 720);
     ydebug("main: creating window %dx%d", width, height);
-    GLFWwindow *window = yetty_platform_create_window(width, height, "yetty");
+    GLFWwindow *window = yetty_yplatform_create_window(width, height, "yetty");
     if (!window) {
         fprintf(stderr, "Failed to create window\n");
         config->ops->destroy(config);
@@ -107,36 +107,36 @@ int main(int argc, char **argv)
     }
     ydebug("main: window created");
 
-    yetty_platform_setup_window_callbacks(window);
+    yetty_yplatform_setup_window_callbacks(window);
     ydebug("main: window callbacks set up");
 
     /* Platform input pipe */
     ydebug("main: creating platform input pipe");
     fflush(stderr);
-    struct yetty_platform_input_pipe_result pipe_result = yetty_platform_input_pipe_create();
+    struct yetty_yplatform_input_pipe_result pipe_result = yetty_yplatform_input_pipe_create();
     ydebug("main: platform input pipe created, ok=%d", pipe_result.ok);
     if (!YETTY_IS_OK(pipe_result)) {
         fprintf(stderr, "Failed to create platform input pipe\n");
-        yetty_platform_destroy_window(window);
+        yetty_yplatform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
     }
-    struct yetty_platform_input_pipe *platform_input_pipe = pipe_result.value;
+    struct yetty_yplatform_input_pipe *platform_input_pipe = pipe_result.value;
     glfwSetWindowUserPointer(window, platform_input_pipe);
 
     /* PTY factory */
     ydebug("main: creating PTY factory");
-    struct yetty_platform_pty_factory_result pty_factory_result = yetty_platform_pty_factory_create(config, NULL);
+    struct yetty_yplatform_pty_factory_result pty_factory_result = yetty_yplatform_pty_factory_create(config, NULL);
     if (!YETTY_IS_OK(pty_factory_result)) {
         fprintf(stderr, "Failed to create PTY factory\n");
         platform_input_pipe->ops->destroy(platform_input_pipe);
-        yetty_platform_destroy_window(window);
+        yetty_yplatform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
     }
-    struct yetty_platform_pty_factory *pty_factory = pty_factory_result.value;
+    struct yetty_yplatform_pty_factory *pty_factory = pty_factory_result.value;
 
     /* WebGPU instance and surface */
     WGPUInstance instance = wgpuCreateInstance(NULL);
@@ -144,19 +144,19 @@ int main(int argc, char **argv)
         fprintf(stderr, "Failed to create WebGPU instance\n");
         pty_factory->ops->destroy(pty_factory);
         platform_input_pipe->ops->destroy(platform_input_pipe);
-        yetty_platform_destroy_window(window);
+        yetty_yplatform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
     }
 
-    WGPUSurface surface = yetty_platform_create_surface(instance, window);
+    WGPUSurface surface = yetty_yplatform_create_surface(instance, window);
     if (!surface) {
         fprintf(stderr, "Failed to create WebGPU surface\n");
         wgpuInstanceRelease(instance);
         pty_factory->ops->destroy(pty_factory);
         platform_input_pipe->ops->destroy(platform_input_pipe);
-        yetty_platform_destroy_window(window);
+        yetty_yplatform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
@@ -164,7 +164,7 @@ int main(int argc, char **argv)
 
     /* App context */
     int fb_width, fb_height;
-    yetty_platform_get_framebuffer_size(window, &fb_width, &fb_height);
+    yetty_yplatform_get_framebuffer_size(window, &fb_width, &fb_height);
 
     struct yetty_app_context app_context = {
         .app_gpu_context = {
@@ -186,7 +186,7 @@ int main(int argc, char **argv)
         wgpuInstanceRelease(instance);
         pty_factory->ops->destroy(pty_factory);
         platform_input_pipe->ops->destroy(platform_input_pipe);
-        yetty_platform_destroy_window(window);
+        yetty_yplatform_destroy_window(window);
         config->ops->destroy(config);
         glfwTerminate();
         return 1;
@@ -205,8 +205,8 @@ int main(int argc, char **argv)
     ythread_t *render_thread = ythread_create(render_thread_func, &thread_args);
 
     /* Initial resize event */
-    yetty_platform_get_framebuffer_size(window, &fb_width, &fb_height);
-    struct yetty_core_event event = {
+    yetty_yplatform_get_framebuffer_size(window, &fb_width, &fb_height);
+    struct yetty_ycore_event event = {
         .type = YETTY_EVENT_RESIZE,
         .resize = {
             .width = (float)fb_width,
@@ -216,7 +216,7 @@ int main(int argc, char **argv)
     platform_input_pipe->ops->write(platform_input_pipe, &event, sizeof(event));
 
     /* OS event loop */
-    yetty_platform_run_os_event_loop(window, &running);
+    yetty_yplatform_run_os_event_loop(window, &running);
     ythread_join(render_thread);
 
     /* Cleanup - surface is released by yetty_destroy (yetty owns it after configure) */
@@ -232,7 +232,7 @@ int main(int argc, char **argv)
     ydebug("main: platform_input_pipe destroyed");
     config->ops->destroy(config);
     ydebug("main: config destroyed, destroying window");
-    yetty_platform_destroy_window(window);
+    yetty_yplatform_destroy_window(window);
     ydebug("main: window destroyed, calling glfwTerminate");
     glfwTerminate();
     ydebug("main: cleanup complete");

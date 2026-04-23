@@ -87,7 +87,7 @@ struct yetty_ypaint_complex_prim_parse_ops {
 //=============================================================================
 
 struct yetty_ypaint_complex_prim_runtime_ops {
-	struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(
+	struct yetty_yrender_gpu_resource_set_result (*get_gpu_resource_set)(
 		const uint8_t *data, uint32_t payload_size, void **cache);
 
 	void (*destroy_cache)(void *cache);

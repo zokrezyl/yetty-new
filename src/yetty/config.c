@@ -27,9 +27,9 @@ struct config_node {
 
 /* Config implementation */
 struct config_impl {
-    struct yetty_config base;
+    struct yetty_yconfig base;
     struct config_node *root;
-    struct yetty_platform_paths paths;
+    struct yetty_yplatform_paths paths;
     char shaders_dir[512];
     char fonts_dir[512];
     char runtime_dir[512];
@@ -39,7 +39,7 @@ struct config_impl {
 /* Sub-config view - lightweight wrapper pointing to a sub-node */
 #define MAX_SUBCONFIGS 64
 struct config_subnode {
-    struct yetty_config base;
+    struct yetty_yconfig base;
     struct config_node *node;
 };
 
@@ -47,22 +47,22 @@ static struct config_subnode g_subconfigs[MAX_SUBCONFIGS];
 static int g_subconfig_count = 0;
 
 /* Forward declarations */
-static void config_destroy(struct yetty_config *self);
-static const char *config_get_string(const struct yetty_config *self, const char *path, const char *default_value);
-static int config_get_int(const struct yetty_config *self, const char *path, int default_value);
-static int config_get_bool(const struct yetty_config *self, const char *path, int default_value);
-static int config_has(const struct yetty_config *self, const char *path);
-static struct yetty_core_void_result config_set_string(struct yetty_config *self, const char *path, const char *value);
-static int config_use_damage_tracking(const struct yetty_config *self);
-static int config_show_fps(const struct yetty_config *self);
-static int config_debug_damage_rects(const struct yetty_config *self);
-static uint32_t config_scrollback_lines(const struct yetty_config *self);
-static const char *config_font_family(const struct yetty_config *self);
+static void config_destroy(struct yetty_yconfig *self);
+static const char *config_get_string(const struct yetty_yconfig *self, const char *path, const char *default_value);
+static int config_get_int(const struct yetty_yconfig *self, const char *path, int default_value);
+static int config_get_bool(const struct yetty_yconfig *self, const char *path, int default_value);
+static int config_has(const struct yetty_yconfig *self, const char *path);
+static struct yetty_ycore_void_result config_set_string(struct yetty_yconfig *self, const char *path, const char *value);
+static int config_use_damage_tracking(const struct yetty_yconfig *self);
+static int config_show_fps(const struct yetty_yconfig *self);
+static int config_debug_damage_rects(const struct yetty_yconfig *self);
+static uint32_t config_scrollback_lines(const struct yetty_yconfig *self);
+static const char *config_font_family(const struct yetty_yconfig *self);
 
-static struct yetty_config *config_get_node(const struct yetty_config *self,
+static struct yetty_yconfig *config_get_node(const struct yetty_yconfig *self,
                                             const char *path);
 
-static const struct yetty_config_ops config_ops = {
+static const struct yetty_yconfig_ops config_ops = {
     .destroy = config_destroy,
     .get_string = config_get_string,
     .get_int = config_get_int,
@@ -318,14 +318,14 @@ static int load_yaml_file(struct config_node *root, const char *path)
 
 /* Config ops implementation */
 
-static void config_destroy(struct yetty_config *self)
+static void config_destroy(struct yetty_yconfig *self)
 {
     struct config_impl *impl = container_of(self, struct config_impl, base);
     node_destroy(impl->root);
     free(impl);
 }
 
-static const char *config_get_string(const struct yetty_config *self, const char *path, const char *default_value)
+static const char *config_get_string(const struct yetty_yconfig *self, const char *path, const char *default_value)
 {
     struct config_impl *impl = container_of(self, struct config_impl, base);
     char key[MAX_KEY_LEN] = {0};
@@ -341,7 +341,7 @@ static const char *config_get_string(const struct yetty_config *self, const char
     return node->value;
 }
 
-static int config_get_int(const struct yetty_config *self, const char *path, int default_value)
+static int config_get_int(const struct yetty_yconfig *self, const char *path, int default_value)
 {
     struct config_impl *impl = container_of(self, struct config_impl, base);
     char key[MAX_KEY_LEN] = {0};
@@ -357,7 +357,7 @@ static int config_get_int(const struct yetty_config *self, const char *path, int
     return node->int_value;
 }
 
-static int config_get_bool(const struct yetty_config *self, const char *path, int default_value)
+static int config_get_bool(const struct yetty_yconfig *self, const char *path, int default_value)
 {
     struct config_impl *impl = container_of(self, struct config_impl, base);
     char key[MAX_KEY_LEN] = {0};
@@ -373,7 +373,7 @@ static int config_get_bool(const struct yetty_config *self, const char *path, in
     return node->bool_value;
 }
 
-static int config_has(const struct yetty_config *self, const char *path)
+static int config_has(const struct yetty_yconfig *self, const char *path)
 {
     struct config_impl *impl = container_of(self, struct config_impl, base);
     char key[MAX_KEY_LEN] = {0};
@@ -385,55 +385,55 @@ static int config_has(const struct yetty_config *self, const char *path)
     return node_find_child(parent, key) != NULL;
 }
 
-static struct yetty_core_void_result config_set_string(struct yetty_config *self, const char *path, const char *value)
+static struct yetty_ycore_void_result config_set_string(struct yetty_yconfig *self, const char *path, const char *value)
 {
     struct config_impl *impl = container_of(self, struct config_impl, base);
     char key[MAX_KEY_LEN] = {0};
 
     struct config_node *parent = navigate_or_create(impl->root, path, key);
     if (!parent)
-        return YETTY_ERR(yetty_core_void, "failed to create config path");
+        return YETTY_ERR(yetty_ycore_void, "failed to create config path");
 
     node_set_value(parent, key, value);
     return YETTY_OK_VOID();
 }
 
-static int config_use_damage_tracking(const struct yetty_config *self)
+static int config_use_damage_tracking(const struct yetty_yconfig *self)
 {
-    return config_get_bool(self, YETTY_CONFIG_KEY_RENDERING_DAMAGE_TRACKING, 1);
+    return config_get_bool(self, YETTY_YCONFIG_KEY_RENDERING_DAMAGE_TRACKING, 1);
 }
 
-static int config_show_fps(const struct yetty_config *self)
+static int config_show_fps(const struct yetty_yconfig *self)
 {
-    return config_get_bool(self, YETTY_CONFIG_KEY_RENDERING_SHOW_FPS, 1);
+    return config_get_bool(self, YETTY_YCONFIG_KEY_RENDERING_SHOW_FPS, 1);
 }
 
-static int config_debug_damage_rects(const struct yetty_config *self)
+static int config_debug_damage_rects(const struct yetty_yconfig *self)
 {
-    return config_get_bool(self, YETTY_CONFIG_KEY_DEBUG_DAMAGE_RECTS, 0);
+    return config_get_bool(self, YETTY_YCONFIG_KEY_DEBUG_DAMAGE_RECTS, 0);
 }
 
-static uint32_t config_scrollback_lines(const struct yetty_config *self)
+static uint32_t config_scrollback_lines(const struct yetty_yconfig *self)
 {
-    return (uint32_t)config_get_int(self, YETTY_CONFIG_KEY_SCROLLBACK_LINES, 10000);
+    return (uint32_t)config_get_int(self, YETTY_YCONFIG_KEY_SCROLLBACK_LINES, 10000);
 }
 
-static const char *config_font_family(const struct yetty_config *self)
+static const char *config_font_family(const struct yetty_yconfig *self)
 {
-    return config_get_string(self, YETTY_CONFIG_KEY_FONT_FAMILY, "default");
+    return config_get_string(self, YETTY_YCONFIG_KEY_FONT_FAMILY, "default");
 }
 
 /* Forward declaration */
-static const struct yetty_config_ops subnode_ops;
+static const struct yetty_yconfig_ops subnode_ops;
 
 /* Subnode ops - same as config ops but uses subnode's node as root */
-static void subnode_destroy(struct yetty_config *self)
+static void subnode_destroy(struct yetty_yconfig *self)
 {
     /* No-op: subnodes don't own their data */
     (void)self;
 }
 
-static const char *subnode_get_string(const struct yetty_config *self,
+static const char *subnode_get_string(const struct yetty_yconfig *self,
                                       const char *path,
                                       const char *default_value)
 {
@@ -451,7 +451,7 @@ static const char *subnode_get_string(const struct yetty_config *self,
     return node->value;
 }
 
-static int subnode_get_int(const struct yetty_config *self, const char *path,
+static int subnode_get_int(const struct yetty_yconfig *self, const char *path,
                            int default_value)
 {
     struct config_subnode *sub = (struct config_subnode *)self;
@@ -468,7 +468,7 @@ static int subnode_get_int(const struct yetty_config *self, const char *path,
     return node->int_value;
 }
 
-static int subnode_get_bool(const struct yetty_config *self, const char *path,
+static int subnode_get_bool(const struct yetty_yconfig *self, const char *path,
                             int default_value)
 {
     struct config_subnode *sub = (struct config_subnode *)self;
@@ -485,7 +485,7 @@ static int subnode_get_bool(const struct yetty_config *self, const char *path,
     return node->bool_value;
 }
 
-static int subnode_has(const struct yetty_config *self, const char *path)
+static int subnode_has(const struct yetty_yconfig *self, const char *path)
 {
     struct config_subnode *sub = (struct config_subnode *)self;
     char key[MAX_KEY_LEN] = {0};
@@ -497,20 +497,20 @@ static int subnode_has(const struct yetty_config *self, const char *path)
     return node_find_child(parent, key) != NULL;
 }
 
-static struct yetty_core_void_result subnode_set_string(struct yetty_config *self,
+static struct yetty_ycore_void_result subnode_set_string(struct yetty_yconfig *self,
                                                         const char *path,
                                                         const char *value)
 {
     (void)self;
     (void)path;
     (void)value;
-    return YETTY_ERR(yetty_core_void, "cannot set on subnode");
+    return YETTY_ERR(yetty_ycore_void, "cannot set on subnode");
 }
 
-static struct yetty_config *subnode_get_node(const struct yetty_config *self,
+static struct yetty_yconfig *subnode_get_node(const struct yetty_yconfig *self,
                                              const char *path);
 
-static const struct yetty_config_ops subnode_ops = {
+static const struct yetty_yconfig_ops subnode_ops = {
     .destroy = subnode_destroy,
     .get_string = subnode_get_string,
     .get_int = subnode_get_int,
@@ -525,7 +525,7 @@ static const struct yetty_config_ops subnode_ops = {
     .font_family = NULL,
 };
 
-static struct yetty_config *create_subconfig(struct config_node *node)
+static struct yetty_yconfig *create_subconfig(struct config_node *node)
 {
     if (!node || g_subconfig_count >= MAX_SUBCONFIGS)
         return NULL;
@@ -536,7 +536,7 @@ static struct yetty_config *create_subconfig(struct config_node *node)
     return &sub->base;
 }
 
-static struct yetty_config *config_get_node(const struct yetty_config *self,
+static struct yetty_yconfig *config_get_node(const struct yetty_yconfig *self,
                                             const char *path)
 {
     struct config_impl *impl = container_of(self, struct config_impl, base);
@@ -550,7 +550,7 @@ static struct yetty_config *config_get_node(const struct yetty_config *self,
     return create_subconfig(node);
 }
 
-static struct yetty_config *subnode_get_node(const struct yetty_config *self,
+static struct yetty_yconfig *subnode_get_node(const struct yetty_yconfig *self,
                                              const char *path)
 {
     struct config_subnode *sub = (struct config_subnode *)self;
@@ -567,7 +567,7 @@ static struct yetty_config *subnode_get_node(const struct yetty_config *self,
 
 /* Store platform paths */
 
-static void store_platform_paths(struct config_impl *impl, const struct yetty_platform_paths *paths)
+static void store_platform_paths(struct config_impl *impl, const struct yetty_yplatform_paths *paths)
 {
     if (!paths)
         return;
@@ -679,11 +679,11 @@ static void parse_vm_args(struct config_impl *impl, int argc, char *argv[])
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--temu") == 0) {
-            parent = navigate_or_create(impl->root, YETTY_CONFIG_KEY_TEMU, key);
+            parent = navigate_or_create(impl->root, YETTY_YCONFIG_KEY_TEMU, key);
             if (parent)
                 node_set_value(parent, key, "true");
         } else if (strcmp(argv[i], "--qemu") == 0) {
-            parent = navigate_or_create(impl->root, YETTY_CONFIG_KEY_QEMU, key);
+            parent = navigate_or_create(impl->root, YETTY_YCONFIG_KEY_QEMU, key);
             if (parent)
                 node_set_value(parent, key, "true");
         }
@@ -692,26 +692,26 @@ static void parse_vm_args(struct config_impl *impl, int argc, char *argv[])
 
 /* Public create function */
 
-struct yetty_config_result yetty_config_create(int argc, char *argv[],
-                                                const struct yetty_platform_paths *paths)
+struct yetty_yconfig_result yetty_yconfig_create(int argc, char *argv[],
+                                                const struct yetty_yplatform_paths *paths)
 {
     struct config_impl *impl = calloc(1, sizeof(struct config_impl));
     if (!impl)
-        return YETTY_ERR(yetty_config, "failed to allocate config");
+        return YETTY_ERR(yetty_yconfig, "failed to allocate config");
 
     impl->base.ops = &config_ops;
     impl->root = node_create(NULL);
     if (!impl->root) {
         free(impl);
-        return YETTY_ERR(yetty_config, "failed to allocate config root");
+        return YETTY_ERR(yetty_yconfig, "failed to allocate config root");
     }
 
     try_load_config_file(impl, argc, argv);
     store_platform_paths(impl, paths);
     parse_arg_to_config(impl, argc, argv, "-e", NULL, "shell/command");
-    parse_arg_to_config(impl, argc, argv, NULL, "--rpc-host", YETTY_CONFIG_KEY_RPC_HOST);
-    parse_arg_to_config(impl, argc, argv, "-r", "--rpc-port", YETTY_CONFIG_KEY_RPC_PORT);
+    parse_arg_to_config(impl, argc, argv, NULL, "--rpc-host", YETTY_YCONFIG_KEY_RPC_HOST);
+    parse_arg_to_config(impl, argc, argv, "-r", "--rpc-port", YETTY_YCONFIG_KEY_RPC_PORT);
     parse_vm_args(impl, argc, argv);
 
-    return YETTY_OK(yetty_config, &impl->base);
+    return YETTY_OK(yetty_yconfig, &impl->base);
 }

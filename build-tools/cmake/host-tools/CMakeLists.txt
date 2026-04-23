@@ -141,13 +141,13 @@ else()
 endif()
 
 # msdf-gen tool
-add_executable(yetty-msdf-gen
+add_executable(yetty-ymsdf-gen
     ${YETTY_ROOT}/tools/gen-msdf/main.c
     ${YETTY_ROOT}/src/yetty/ytrace.c
     ${YETTY_HOST_PLATFORM_SOURCES}
 )
-target_include_directories(yetty-msdf-gen PRIVATE ${YETTY_ROOT}/include)
-target_link_libraries(yetty-msdf-gen PRIVATE yetty_ymsdf_gen)
+target_include_directories(yetty-ymsdf-gen PRIVATE ${YETTY_ROOT}/include)
+target_link_libraries(yetty-ymsdf-gen PRIVATE yetty_ymsdf_gen)
 
 # =============================================================================
 # VM tools - statically linked for x86_64 Linux (JSLinux VM)

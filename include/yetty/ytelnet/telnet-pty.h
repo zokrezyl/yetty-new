@@ -17,7 +17,7 @@ extern "C" {
  * @param port TCP port number
  * @return PTY result
  */
-struct yetty_platform_pty_result telnet_pty_create(const char *host, uint16_t port);
+struct yetty_yplatform_pty_result telnet_pty_create(const char *host, uint16_t port);
 
 #ifdef __cplusplus
 }

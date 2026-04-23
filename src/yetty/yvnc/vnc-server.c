@@ -81,33 +81,33 @@ void yetty_vnc_server_destroy(struct yetty_vnc_server *server)
 		return;
 
 	if (server->server_fd != YETTY_SOCKET_INVALID)
-		yetty_platform_socket_close(server->server_fd);
+		yetty_yplatform_socket_close(server->server_fd);
 
 	for (size_t i = 0; i < server->client_count; i++) {
 		if (server->clients[i] != YETTY_SOCKET_INVALID)
-			yetty_platform_socket_close(server->clients[i]);
+			yetty_yplatform_socket_close(server->clients[i]);
 	}
 	free(server->clients);
 	free(server);
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_server_start(struct yetty_vnc_server *server, uint16_t port)
 {
 	/* TODO: implement */
 	(void)server;
 	(void)port;
-	return YETTY_ERR(yetty_core_void, "not implemented");
+	return YETTY_ERR(yetty_ycore_void, "not implemented");
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_server_stop(struct yetty_vnc_server *server)
 {
 	if (!server)
 		return YETTY_OK_VOID();
 
 	if (server->server_fd != YETTY_SOCKET_INVALID) {
-		yetty_platform_socket_close(server->server_fd);
+		yetty_yplatform_socket_close(server->server_fd);
 		server->server_fd = YETTY_SOCKET_INVALID;
 	}
 	server->running = 0;
@@ -206,7 +206,7 @@ void yetty_vnc_server_force_h264_idr(struct yetty_vnc_server *server)
 	(void)server;
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_server_send_frame(struct yetty_vnc_server *server, WGPUTexture texture,
 			    const uint8_t *cpu_pixels, uint32_t width,
 			    uint32_t height)
@@ -220,7 +220,7 @@ yetty_vnc_server_send_frame(struct yetty_vnc_server *server, WGPUTexture texture
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 				WGPUTexture texture, uint32_t width,
 				uint32_t height)
@@ -235,7 +235,7 @@ int yetty_vnc_server_has_pending_input(const struct yetty_vnc_server *server)
 	return 0;
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_vnc_server_process_input(struct yetty_vnc_server *server)
 {
 	/* TODO: implement */

@@ -18,7 +18,7 @@
 static int g_canvas_width = 0;
 static int g_canvas_height = 0;
 
-int yetty_platform_webasm_create_window(struct yetty_config *config)
+int yetty_yplatform_webasm_create_window(struct yetty_yconfig *config)
 {
 	int default_width;
 	int default_height;
@@ -54,38 +54,38 @@ int yetty_platform_webasm_create_window(struct yetty_config *config)
 	return 1;
 }
 
-void yetty_platform_webasm_destroy_window(void)
+void yetty_yplatform_webasm_destroy_window(void)
 {
 	/* Nothing to destroy on web */
 	ydebug("window: Destroyed (no-op on web)");
 }
 
-void yetty_platform_webasm_get_window_size(int *width, int *height)
+void yetty_yplatform_webasm_get_window_size(int *width, int *height)
 {
 	*width = g_canvas_width;
 	*height = g_canvas_height;
 }
 
-void yetty_platform_webasm_get_framebuffer_size(int *width, int *height)
+void yetty_yplatform_webasm_get_framebuffer_size(int *width, int *height)
 {
 	/* On web, framebuffer size equals canvas size (device pixel ratio is separate) */
 	*width = g_canvas_width;
 	*height = g_canvas_height;
 }
 
-void yetty_platform_webasm_get_content_scale(float *xscale, float *yscale)
+void yetty_yplatform_webasm_get_content_scale(float *xscale, float *yscale)
 {
 	double ratio = emscripten_get_device_pixel_ratio();
 	*xscale = (float)ratio;
 	*yscale = (float)ratio;
 }
 
-int yetty_platform_webasm_should_close(void)
+int yetty_yplatform_webasm_should_close(void)
 {
 	return 0;  /* Web apps don't "close" */
 }
 
-void yetty_platform_webasm_set_title(const char *title)
+void yetty_yplatform_webasm_set_title(const char *title)
 {
 	EM_ASM({ document.title = UTF8ToString($0); }, title);
 }
@@ -94,7 +94,7 @@ void yetty_platform_webasm_set_title(const char *title)
  * Updates internal dimensions and canvas element size.
  * Returns 1 if size actually changed, 0 otherwise.
  */
-int yetty_platform_webasm_update_canvas_size(void)
+int yetty_yplatform_webasm_update_canvas_size(void)
 {
 	int width;
 	int height;

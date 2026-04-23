@@ -453,10 +453,10 @@ ypaint/flyweight.c         # Creates configured registry with all handlers
 ```c
 // Primitive ops vtable
 struct yetty_ypaint_prim_ops {
-    struct yetty_core_size_result (*size)(const uint32_t *prim);
+    struct yetty_ycore_size_result (*size)(const uint32_t *prim);
     struct rectangle_result (*aabb)(const uint32_t *prim);
     void (*destroy)(void *cache);  // optional, NULL for simple prims
-    struct yetty_render_gpu_resource_set_result (*get_gpu_resource_set)(
+    struct yetty_yrender_gpu_resource_set_result (*get_gpu_resource_set)(
         const uint32_t *prim, void **cache_ptr);  // optional, NULL for SDF prims
 };
 
@@ -487,7 +487,7 @@ void yetty_ypaint_flyweight_registry_set_default(
     yetty_ypaint_prim_handler_fn handler);
 
 // Register handler for type range [type_min, type_max]
-struct yetty_core_void_result yetty_ypaint_flyweight_registry_add(
+struct yetty_ycore_void_result yetty_ypaint_flyweight_registry_add(
     struct yetty_ypaint_flyweight_registry *reg,
     uint32_t type_min, uint32_t type_max,
     yetty_ypaint_prim_handler_fn handler);
@@ -659,7 +659,7 @@ for (each visible complex prim) {
     struct yetty_ypaint_prim_flyweight fw =
         yetty_ypaint_flyweight_registry_get(reg, ref.data);
     if (fw.ops && fw.ops->get_gpu_resource_set) {
-        struct yetty_render_gpu_resource_set_result rs =
+        struct yetty_yrender_gpu_resource_set_result rs =
             fw.ops->get_gpu_resource_set(ref.data, ref.cache_ptr);
         layer->rs.children[child_idx++] = rs.value;
     }

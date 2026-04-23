@@ -44,8 +44,8 @@ enum telnet_state {
 
 /* Telnet PTY implementation */
 struct telnet_pty {
-    struct yetty_platform_pty base;
-    struct yetty_platform_pty_pipe_source pipe_source;
+    struct yetty_yplatform_pty base;
+    struct yetty_yplatform_pty_pipe_source pipe_source;
 
     /* Network */
     int socket;
@@ -75,15 +75,15 @@ struct telnet_pty {
 };
 
 /* Forward declarations */
-static void telnet_pty_destroy(struct yetty_platform_pty *self);
-static struct yetty_core_size_result telnet_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len);
-static struct yetty_core_size_result telnet_pty_write(struct yetty_platform_pty *self, const char *data, size_t len);
-static struct yetty_core_void_result telnet_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows);
-static struct yetty_core_void_result telnet_pty_stop(struct yetty_platform_pty *self);
-static struct yetty_platform_pty_pipe_source *telnet_pty_pipe_source(struct yetty_platform_pty *self);
+static void telnet_pty_destroy(struct yetty_yplatform_pty *self);
+static struct yetty_ycore_size_result telnet_pty_read(struct yetty_yplatform_pty *self, char *buf, size_t max_len);
+static struct yetty_ycore_size_result telnet_pty_write(struct yetty_yplatform_pty *self, const char *data, size_t len);
+static struct yetty_ycore_void_result telnet_pty_resize(struct yetty_yplatform_pty *self, uint32_t cols, uint32_t rows);
+static struct yetty_ycore_void_result telnet_pty_stop(struct yetty_yplatform_pty *self);
+static struct yetty_yplatform_pty_pipe_source *telnet_pty_pipe_source(struct yetty_yplatform_pty *self);
 
 /* Ops table */
-static const struct yetty_platform_pty_ops telnet_pty_ops = {
+static const struct yetty_yplatform_pty_ops telnet_pty_ops = {
     .destroy = telnet_pty_destroy,
     .read = telnet_pty_read,
     .write = telnet_pty_write,
@@ -375,7 +375,7 @@ static int telnet_connect(struct telnet_pty *pty)
 
 /* PTY implementation */
 
-static void telnet_pty_destroy(struct yetty_platform_pty *self)
+static void telnet_pty_destroy(struct yetty_yplatform_pty *self)
 {
     struct telnet_pty *pty = (struct telnet_pty *)self;
 
@@ -388,26 +388,26 @@ static void telnet_pty_destroy(struct yetty_platform_pty *self)
     free(pty);
 }
 
-static struct yetty_core_size_result telnet_pty_read(struct yetty_platform_pty *self, char *buf, size_t max_len)
+static struct yetty_ycore_size_result telnet_pty_read(struct yetty_yplatform_pty *self, char *buf, size_t max_len)
 {
     struct telnet_pty *pty = (struct telnet_pty *)self;
 
     if (!pty->running || max_len == 0)
-        return YETTY_OK(yetty_core_size, 0);
+        return YETTY_OK(yetty_ycore_size, 0);
 
     ssize_t n = read(pty->output_pipe[0], buf, max_len);
     if (n < 0)
         n = 0;
 
-    return YETTY_OK(yetty_core_size, (size_t)n);
+    return YETTY_OK(yetty_ycore_size, (size_t)n);
 }
 
-static struct yetty_core_size_result telnet_pty_write(struct yetty_platform_pty *self, const char *data, size_t len)
+static struct yetty_ycore_size_result telnet_pty_write(struct yetty_yplatform_pty *self, const char *data, size_t len)
 {
     struct telnet_pty *pty = (struct telnet_pty *)self;
 
     if (!pty->running || len == 0)
-        return YETTY_OK(yetty_core_size, 0);
+        return YETTY_OK(yetty_ycore_size, 0);
 
     /* Escape IAC bytes in data */
     uint8_t buf[4096];
@@ -424,12 +424,12 @@ static struct yetty_core_size_result telnet_pty_write(struct yetty_platform_pty 
     }
 
     if (telnet_send_raw(pty, buf, j) < 0)
-        return YETTY_OK(yetty_core_size, 0);
+        return YETTY_OK(yetty_ycore_size, 0);
 
-    return YETTY_OK(yetty_core_size, len);
+    return YETTY_OK(yetty_ycore_size, len);
 }
 
-static struct yetty_core_void_result telnet_pty_resize(struct yetty_platform_pty *self, uint32_t cols, uint32_t rows)
+static struct yetty_ycore_void_result telnet_pty_resize(struct yetty_yplatform_pty *self, uint32_t cols, uint32_t rows)
 {
     struct telnet_pty *pty = (struct telnet_pty *)self;
 
@@ -442,7 +442,7 @@ static struct yetty_core_void_result telnet_pty_resize(struct yetty_platform_pty
     return YETTY_OK_VOID();
 }
 
-static struct yetty_core_void_result telnet_pty_stop(struct yetty_platform_pty *self)
+static struct yetty_ycore_void_result telnet_pty_stop(struct yetty_yplatform_pty *self)
 {
     struct telnet_pty *pty = (struct telnet_pty *)self;
 
@@ -465,20 +465,20 @@ static struct yetty_core_void_result telnet_pty_stop(struct yetty_platform_pty *
     return YETTY_OK_VOID();
 }
 
-static struct yetty_platform_pty_pipe_source *telnet_pty_pipe_source(struct yetty_platform_pty *self)
+static struct yetty_yplatform_pty_pipe_source *telnet_pty_pipe_source(struct yetty_yplatform_pty *self)
 {
     struct telnet_pty *pty = (struct telnet_pty *)self;
     return &pty->pipe_source;
 }
 
 /* Create telnet PTY */
-struct yetty_platform_pty_result telnet_pty_create(const char *host, uint16_t port)
+struct yetty_yplatform_pty_result telnet_pty_create(const char *host, uint16_t port)
 {
     struct telnet_pty *pty;
 
     pty = calloc(1, sizeof(struct telnet_pty));
     if (!pty)
-        return YETTY_ERR(yetty_platform_pty, "failed to allocate telnet pty");
+        return YETTY_ERR(yetty_yplatform_pty, "failed to allocate telnet pty");
 
     pty->base.ops = &telnet_pty_ops;
     pty->socket = -1;
@@ -493,14 +493,14 @@ struct yetty_platform_pty_result telnet_pty_create(const char *host, uint16_t po
 
     if (!pty->host) {
         free(pty);
-        return YETTY_ERR(yetty_platform_pty, "failed to allocate host string");
+        return YETTY_ERR(yetty_yplatform_pty, "failed to allocate host string");
     }
 
     /* Create output pipe */
     if (pipe(pty->output_pipe) < 0) {
         free(pty->host);
         free(pty);
-        return YETTY_ERR(yetty_platform_pty, "failed to create output pipe");
+        return YETTY_ERR(yetty_yplatform_pty, "failed to create output pipe");
     }
 
     fcntl(pty->output_pipe[0], F_SETFL, O_NONBLOCK);
@@ -515,7 +515,7 @@ struct yetty_platform_pty_result telnet_pty_create(const char *host, uint16_t po
         close(pty->output_pipe[1]);
         free(pty->host);
         free(pty);
-        return YETTY_ERR(yetty_platform_pty, "failed to connect");
+        return YETTY_ERR(yetty_yplatform_pty, "failed to connect");
     }
 
     /* Start reader thread */
@@ -526,47 +526,47 @@ struct yetty_platform_pty_result telnet_pty_create(const char *host, uint16_t po
         close(pty->output_pipe[1]);
         free(pty->host);
         free(pty);
-        return YETTY_ERR(yetty_platform_pty, "failed to create reader thread");
+        return YETTY_ERR(yetty_yplatform_pty, "failed to create reader thread");
     }
 
-    return YETTY_OK(yetty_platform_pty, &pty->base);
+    return YETTY_OK(yetty_yplatform_pty, &pty->base);
 }
 
 /* Factory implementation */
 
 struct telnet_pty_factory {
-    struct yetty_platform_pty_factory base;
+    struct yetty_yplatform_pty_factory base;
     char *host;
     uint16_t port;
 };
 
-static void telnet_pty_factory_destroy(struct yetty_platform_pty_factory *self)
+static void telnet_pty_factory_destroy(struct yetty_yplatform_pty_factory *self)
 {
     struct telnet_pty_factory *factory = (struct telnet_pty_factory *)self;
     free(factory->host);
     free(factory);
 }
 
-static struct yetty_platform_pty_result telnet_pty_factory_create_pty(
-    struct yetty_platform_pty_factory *self)
+static struct yetty_yplatform_pty_result telnet_pty_factory_create_pty(
+    struct yetty_yplatform_pty_factory *self)
 {
     struct telnet_pty_factory *factory = (struct telnet_pty_factory *)self;
     return telnet_pty_create(factory->host, factory->port);
 }
 
-static const struct yetty_platform_pty_factory_ops telnet_pty_factory_ops = {
+static const struct yetty_yplatform_pty_factory_ops telnet_pty_factory_ops = {
     .destroy = telnet_pty_factory_destroy,
     .create_pty = telnet_pty_factory_create_pty,
 };
 
-struct yetty_platform_pty_factory_result telnet_pty_factory_create(
+struct yetty_yplatform_pty_factory_result telnet_pty_factory_create(
     const char *host, uint16_t port)
 {
     struct telnet_pty_factory *factory;
 
     factory = calloc(1, sizeof(struct telnet_pty_factory));
     if (!factory)
-        return YETTY_ERR(yetty_platform_pty_factory, "failed to allocate telnet pty factory");
+        return YETTY_ERR(yetty_yplatform_pty_factory, "failed to allocate telnet pty factory");
 
     factory->base.ops = &telnet_pty_factory_ops;
     factory->host = strdup(host);
@@ -574,8 +574,8 @@ struct yetty_platform_pty_factory_result telnet_pty_factory_create(
 
     if (!factory->host) {
         free(factory);
-        return YETTY_ERR(yetty_platform_pty_factory, "failed to allocate host string");
+        return YETTY_ERR(yetty_yplatform_pty_factory, "failed to allocate host string");
     }
 
-    return YETTY_OK(yetty_platform_pty_factory, &factory->base);
+    return YETTY_OK(yetty_yplatform_pty_factory, &factory->base);
 }

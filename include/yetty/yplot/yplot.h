@@ -83,7 +83,7 @@ struct yetty_yplot_yplot;
 // Result types
 //=============================================================================
 
-YETTY_RESULT_DECLARE(yetty_yplot_yplot, struct yetty_yplot_yplot *);
+YETTY_YRESULT_DECLARE(yetty_yplot_yplot, struct yetty_yplot_yplot *);
 
 //=============================================================================
 // Lifecycle
@@ -96,7 +96,7 @@ void yetty_yplot_yplot_destroy(struct yetty_yplot_yplot *plot);
 // Bytecode management
 //=============================================================================
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yplot_yplot_set_bytecode(struct yetty_yplot_yplot *plot,
                                const uint32_t *bytecode,
                                uint32_t word_count);
@@ -110,11 +110,11 @@ uint32_t yetty_yplot_yplot_function_count(struct yetty_yplot_yplot *plot);
 // Function styling
 //=============================================================================
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yplot_yplot_set_function_color(struct yetty_yplot_yplot *plot,
                                       uint32_t index, uint32_t color);
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yplot_yplot_set_function_visible(struct yetty_yplot_yplot *plot,
                                         uint32_t index, bool visible);
 
@@ -156,12 +156,12 @@ void yetty_yplot_yplot_get_aabb(struct yetty_yplot_yplot *plot,
 // GPU Resource Set
 //=============================================================================
 
-struct yetty_render_gpu_resource_set_result
+struct yetty_yrender_gpu_resource_set_result
 yetty_yplot_yplot_get_gpu_resource_set(struct yetty_yplot_yplot *plot);
 
 // Get static shader-only resource set (for ypaint layer to include yplot_render)
 // This resource set contains only shader code, no buffers.
-const struct yetty_render_gpu_resource_set *yetty_yplot_get_shader_resource_set(void);
+const struct yetty_yrender_gpu_resource_set *yetty_yplot_get_shader_resource_set(void);
 
 bool yetty_yplot_yplot_is_dirty(struct yetty_yplot_yplot *plot);
 void yetty_yplot_yplot_clear_dirty(struct yetty_yplot_yplot *plot);
@@ -201,7 +201,7 @@ uint32_t yetty_yplot_yplot_serialize_wire(struct yetty_yplot_yplot *plot,
 // Utilities
 //=============================================================================
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yplot_parse_color(const char *color_str, uint32_t *out_color);
 
 uint32_t yetty_yplot_default_color(uint32_t index);

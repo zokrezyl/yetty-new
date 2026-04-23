@@ -1,5 +1,5 @@
-#ifndef YETTY_PLATFORM_IPC_SOCKET_H
-#define YETTY_PLATFORM_IPC_SOCKET_H
+#ifndef YETTY_YPLATFORM_IPC_SOCKET_H
+#define YETTY_YPLATFORM_IPC_SOCKET_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -21,7 +21,7 @@ typedef struct yetty_ipc_socket *yetty_ipc_socket_t;
 #define YETTY_IPC_SOCKET_INVALID NULL
 
 /* Result types */
-YETTY_RESULT_DECLARE(yetty_ipc_socket, yetty_ipc_socket_t);
+YETTY_YRESULT_DECLARE(yetty_ipc_socket, yetty_ipc_socket_t);
 
 /* Maximum path length for socket/pipe */
 #define YETTY_IPC_SOCKET_PATH_MAX 256
@@ -61,7 +61,7 @@ struct yetty_ipc_socket_result yetty_ipc_socket_accept(yetty_ipc_socket_t sock);
  * Send data on a connected socket.
  * Returns number of bytes sent, or 0 if would block.
  */
-struct yetty_core_size_result yetty_ipc_socket_send(yetty_ipc_socket_t sock,
+struct yetty_ycore_size_result yetty_ipc_socket_send(yetty_ipc_socket_t sock,
 						    const void *data,
 						    size_t len);
 
@@ -69,7 +69,7 @@ struct yetty_core_size_result yetty_ipc_socket_send(yetty_ipc_socket_t sock,
  * Receive data from a connected socket.
  * Returns number of bytes received, or 0 if would block or EOF.
  */
-struct yetty_core_size_result yetty_ipc_socket_recv(yetty_ipc_socket_t sock,
+struct yetty_ycore_size_result yetty_ipc_socket_recv(yetty_ipc_socket_t sock,
 						    void *buf, size_t max_len);
 
 /*
@@ -98,4 +98,4 @@ void yetty_ipc_socket_unlink(const char *path);
 }
 #endif
 
-#endif /* YETTY_PLATFORM_IPC_SOCKET_H */
+#endif /* YETTY_YPLATFORM_IPC_SOCKET_H */

@@ -68,13 +68,13 @@ void yetty_ycdb_reader_close(struct yetty_ycdb_reader *r)
 	free(r);
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ycdb_reader_get(struct yetty_ycdb_reader *r,
 		      const void *key, size_t key_len,
 		      void **out_data, size_t *out_len)
 {
 	if (!r || !key || !out_data || !out_len)
-		return YETTY_ERR(yetty_core_void, "invalid arguments");
+		return YETTY_ERR(yetty_ycore_void, "invalid arguments");
 
 	*out_data = NULL;
 	*out_len = 0;
@@ -88,15 +88,15 @@ yetty_ycdb_reader_get(struct yetty_ycdb_reader *r,
 		return YETTY_OK_VOID(); /* not found */
 
 	if (cdb_seek(r->cdb, pos.position) < 0)
-		return YETTY_ERR(yetty_core_void, "cdb_seek failed");
+		return YETTY_ERR(yetty_ycore_void, "cdb_seek failed");
 
 	void *data = malloc(pos.length);
 	if (!data)
-		return YETTY_ERR(yetty_core_void, "allocation failed");
+		return YETTY_ERR(yetty_ycore_void, "allocation failed");
 
 	if (cdb_read(r->cdb, data, pos.length) < 0) {
 		free(data);
-		return YETTY_ERR(yetty_core_void, "cdb_read failed");
+		return YETTY_ERR(yetty_ycore_void, "cdb_read failed");
 	}
 
 	*out_data = data;
@@ -123,13 +123,13 @@ struct yetty_ycdb_writer_result yetty_ycdb_writer_create(const char *path)
 	return YETTY_OK(yetty_ycdb_writer, w);
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ycdb_writer_add(struct yetty_ycdb_writer *w,
 		      const void *key, size_t key_len,
 		      const void *value, size_t value_len)
 {
 	if (!w || !w->cdb)
-		return YETTY_ERR(yetty_core_void, "writer is NULL");
+		return YETTY_ERR(yetty_ycore_void, "writer is NULL");
 
 	cdb_buffer_t kb = {0};
 	kb.length = key_len;
@@ -139,22 +139,22 @@ yetty_ycdb_writer_add(struct yetty_ycdb_writer *w,
 	vb.buffer = (char *)value;
 
 	if (cdb_add(w->cdb, &kb, &vb) < 0)
-		return YETTY_ERR(yetty_core_void, "cdb_add failed");
+		return YETTY_ERR(yetty_ycore_void, "cdb_add failed");
 
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result yetty_ycdb_writer_finish(struct yetty_ycdb_writer *w)
+struct yetty_ycore_void_result yetty_ycdb_writer_finish(struct yetty_ycdb_writer *w)
 {
 	if (!w || !w->cdb)
-		return YETTY_ERR(yetty_core_void, "writer is NULL");
+		return YETTY_ERR(yetty_ycore_void, "writer is NULL");
 
 	int ret = cdb_close(w->cdb);
 	w->cdb = NULL;
 	free(w);
 
 	if (ret < 0)
-		return YETTY_ERR(yetty_core_void, "cdb_close failed");
+		return YETTY_ERR(yetty_ycore_void, "cdb_close failed");
 	return YETTY_OK_VOID();
 }
 
@@ -230,13 +230,13 @@ void yetty_ycdb_reader_close(struct yetty_ycdb_reader *r)
 	free(r);
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ycdb_reader_get(struct yetty_ycdb_reader *r,
 		      const void *key, size_t key_len,
 		      void **out_data, size_t *out_len)
 {
 	if (!r || !key || !out_data || !out_len)
-		return YETTY_ERR(yetty_core_void, "invalid arguments");
+		return YETTY_ERR(yetty_ycore_void, "invalid arguments");
 
 	*out_data = NULL;
 	*out_len = 0;
@@ -249,11 +249,11 @@ yetty_ycdb_reader_get(struct yetty_ycdb_reader *r,
 
 	void *data = malloc(dlen);
 	if (!data)
-		return YETTY_ERR(yetty_core_void, "allocation failed");
+		return YETTY_ERR(yetty_ycore_void, "allocation failed");
 
 	if (cdb_read(&r->cdb, (char *)data, dlen, dpos) < 0) {
 		free(data);
-		return YETTY_ERR(yetty_core_void, "cdb_read failed");
+		return YETTY_ERR(yetty_ycore_void, "cdb_read failed");
 	}
 
 	*out_data = data;
@@ -283,25 +283,25 @@ struct yetty_ycdb_writer_result yetty_ycdb_writer_create(const char *path)
 	return YETTY_OK(yetty_ycdb_writer, w);
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ycdb_writer_add(struct yetty_ycdb_writer *w,
 		      const void *key, size_t key_len,
 		      const void *value, size_t value_len)
 {
 	if (!w || !w->started)
-		return YETTY_ERR(yetty_core_void, "writer is NULL");
+		return YETTY_ERR(yetty_ycore_void, "writer is NULL");
 
 	if (cdb_make_add(&w->cdbm, (const char *)key, key_len,
 			 (const char *)value, value_len) < 0)
-		return YETTY_ERR(yetty_core_void, "cdb_make_add failed");
+		return YETTY_ERR(yetty_ycore_void, "cdb_make_add failed");
 
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result yetty_ycdb_writer_finish(struct yetty_ycdb_writer *w)
+struct yetty_ycore_void_result yetty_ycdb_writer_finish(struct yetty_ycdb_writer *w)
 {
 	if (!w || !w->started)
-		return YETTY_ERR(yetty_core_void, "writer is NULL");
+		return YETTY_ERR(yetty_ycore_void, "writer is NULL");
 
 	int ret = cdb_make_finish(&w->cdbm);
 	w->started = 0;
@@ -321,7 +321,7 @@ struct yetty_core_void_result yetty_ycdb_writer_finish(struct yetty_ycdb_writer 
 	free(w);
 
 	if (ret < 0)
-		return YETTY_ERR(yetty_core_void, "cdb_make_finish failed");
+		return YETTY_ERR(yetty_ycore_void, "cdb_make_finish failed");
 	return YETTY_OK_VOID();
 }
 
