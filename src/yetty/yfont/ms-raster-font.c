@@ -497,7 +497,7 @@ struct yetty_font_ms_font_result yetty_font_ms_raster_font_create(
     font->cell_height = cell_height;
 
     /* Resource set: namespace + atlas texture + UV buffer */
-    strncpy(font->rs.namespace, "raster_font", YETTY_YRENDER__NAME_MAX - 1);
+    strncpy(font->rs.namespace, "raster_font", YETTY_YRENDER_NAME_MAX - 1);
     font->rs.texture_count = 1;
     font->rs.buffer_count = 1;
 
@@ -506,9 +506,9 @@ struct yetty_font_ms_font_result yetty_font_ms_raster_font_create(
     FONT_ATLAS(font).height = GLYPH_SLOT_H(font);
     FONT_ATLAS(font).format = WGPUTextureFormat_R8Unorm;
     FONT_ATLAS(font).sampler_filter = WGPUFilterMode_Linear;
-    strncpy(FONT_ATLAS(font).name, "texture", YETTY_YRENDER__NAME_MAX - 1);
-    strncpy(FONT_ATLAS(font).wgsl_type, "texture_2d<f32>", YETTY_YRENDER__WGSL_TYPE_MAX - 1);
-    strncpy(FONT_ATLAS(font).sampler_name, "sampler", YETTY_YRENDER__NAME_MAX - 1);
+    strncpy(FONT_ATLAS(font).name, "texture", YETTY_YRENDER_NAME_MAX - 1);
+    strncpy(FONT_ATLAS(font).wgsl_type, "texture_2d<f32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
+    strncpy(FONT_ATLAS(font).sampler_name, "sampler", YETTY_YRENDER_NAME_MAX - 1);
 
     size_t atlas_bytes = (size_t)FONT_ATLAS(font).width * FONT_ATLAS(font).height;
     FONT_ATLAS(font).data = calloc(atlas_bytes, 1);
@@ -517,8 +517,8 @@ struct yetty_font_ms_font_result yetty_font_ms_raster_font_create(
         return YETTY_ERR(yetty_font_ms_font, "Failed to allocate atlas");
     }
 
-    strncpy(FONT_UV_BUF(font).name, "buffer", YETTY_YRENDER__NAME_MAX - 1);
-    strncpy(FONT_UV_BUF(font).wgsl_type, "array<f32>", YETTY_YRENDER__WGSL_TYPE_MAX - 1);
+    strncpy(FONT_UV_BUF(font).name, "buffer", YETTY_YRENDER_NAME_MAX - 1);
+    strncpy(FONT_UV_BUF(font).wgsl_type, "array<f32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
     FONT_UV_BUF(font).readonly = 1;
     FONT_UV_BUF(font).capacity = 256 * sizeof(struct raster_glyph_uv);
     FONT_UV_BUF(font).data = malloc(FONT_UV_BUF(font).capacity);

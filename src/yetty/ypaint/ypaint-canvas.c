@@ -16,6 +16,7 @@
 #include <yetty/ysdf/types.gen.h>
 #include <yetty/yconfig.h>
 #include <yetty/yetty.h>
+#include <yetty/yplot/yplot-gen.h>
 #include <yetty/ytrace.h>
 
 /* Glyph primitive type (not in ysdf types.gen.h since not SDF) */
@@ -29,79 +30,75 @@
 //=============================================================================
 
 // Reference to a primitive in another line
-struct yetty_yetty_ypaint_canvas_prim_ref {
+struct yetty_ypaint_canvas_prim_ref {
   uint16_t lines_ahead; // relative offset to base line (0 = same line)
   uint16_t prim_index;  // index within base line's prims array
 };
 
 // Dynamic array of prim_ref
-struct yetty_yetty_ypaint_canvas_prim_ref_array {
-  struct yetty_yetty_ypaint_canvas_prim_ref *data;
+struct yetty_ypaint_canvas_prim_ref_array {
+  struct yetty_ypaint_canvas_prim_ref *data;
   uint32_t count;
   uint32_t capacity;
 };
 
 // A single grid cell
-struct yetty_yetty_ypaint_canvas_grid_cell {
-  struct yetty_yetty_ypaint_canvas_prim_ref_array refs;
+struct yetty_ypaint_canvas_grid_cell {
+  struct yetty_ypaint_canvas_prim_ref_array refs;
 };
 
 // A single primitive's data
-struct yetty_yetty_ypaint_canvas_prim_data {
+struct yetty_ypaint_canvas_prim_data {
   uint32_t rolling_row; // rolling_row at insertion (cursor row or explicit)
   float *data;
   uint32_t word_count;
 };
 
 // Dynamic array of prim_data
-struct yetty_yetty_ypaint_canvas_prim_data_array {
-  struct yetty_yetty_ypaint_canvas_prim_data *data;
+struct yetty_ypaint_canvas_prim_data_array {
+  struct yetty_ypaint_canvas_prim_data *data;
   uint32_t count;
   uint32_t capacity;
 };
 
 // Font resource attached to a grid line — pointer to the font object
-struct yetty_yetty_ypaint_canvas_font_entry {
+struct yetty_ypaint_canvas_font_entry {
   struct yetty_font_font *font; // the font object (owns atlas + metadata)
   int32_t font_id;              // buffer-level font id
 };
 
-// Complex primitive reference (stored on last overlapping line)
-struct yetty_yetty_ypaint_canvas_complex_prim {
-  uint32_t *data;           // copied primitive data (owned)
-  uint32_t word_count;      // size in words
-  uint32_t rolling_row;     // rolling row at insertion
-  void *cache;              // runtime cache (for gpu_resource_set)
-};
+// Complex primitive stored on last overlapping line - uses factory instance
+// (replaces old canvas-specific struct with factory instance pointer)
 
 // A single row/line in the grid
-struct yetty_yetty_ypaint_canvas_grid_line {
-  struct yetty_yetty_ypaint_canvas_prim_data_array
+struct yetty_ypaint_canvas_grid_line {
+  struct yetty_ypaint_canvas_prim_data_array
       prims; // All primitives (SDF + glyph) whose BASE is this line
-  struct yetty_yetty_ypaint_canvas_grid_cell *cells;
+  struct yetty_ypaint_canvas_grid_cell *cells;
   uint32_t cell_count;
   uint32_t cell_capacity;
 
   // Font resources owned by this line (moved down as needed)
-  struct yetty_yetty_ypaint_canvas_font_entry *fonts;
+  struct yetty_ypaint_canvas_font_entry *fonts;
   uint32_t font_count;
   uint32_t font_capacity;
 
   // Complex primitives whose BASE (last overlapping line) is this line
-  struct yetty_yetty_ypaint_canvas_complex_prim *complex_prims;
+  // Uses factory instances instead of canvas-specific struct
+  struct yetty_ypaint_complex_prim_instance **complex_prims;
   uint32_t complex_prim_count;
   uint32_t complex_prim_capacity;
 };
 
 // Simple line array
-struct yetty_yetty_ypaint_canvas_line_buffer {
-  struct yetty_yetty_ypaint_canvas_grid_line *lines;
+struct yetty_ypaint_canvas_line_buffer {
+  struct yetty_ypaint_canvas_grid_line *lines;
   uint32_t capacity;
   uint32_t count;
 };
 
 // Canvas structure
-struct yetty_yetty_ypaint_canvas {
+struct yetty_ypaint_canvas {
   bool scrolling_mode;
 
   struct pixel_size cell_size;
@@ -115,7 +112,7 @@ struct yetty_yetty_ypaint_canvas {
   uint32_t rolling_row_0;
 
   // Lines
-  struct yetty_yetty_ypaint_canvas_line_buffer lines;
+  struct yetty_ypaint_canvas_line_buffer lines;
 
   // Packed grid staging
   uint32_t *grid_staging;
@@ -129,11 +126,11 @@ struct yetty_yetty_ypaint_canvas {
   uint32_t prim_staging_capacity;
 
   // Scroll callback
-  yetty_yetty_ypaint_canvas_scroll_callback scroll_callback;
+  yetty_ypaint_canvas_scroll_callback scroll_callback;
   struct yetty_ycore_void_result *scroll_callback_user_data;
 
   // Cursor set callback (when cursor moves without scroll)
-  yetty_yetty_ypaint_canvas_cursor_set_callback cursor_set_callback;
+  yetty_ypaint_canvas_cursor_set_callback cursor_set_callback;
   struct yetty_ycore_void_result *cursor_set_callback_user_data;
 
   // Default font for text spans with font_id = -1
@@ -142,8 +139,11 @@ struct yetty_yetty_ypaint_canvas {
   // Shaders directory for creating fonts from buffers
   char shaders_dir[512];
 
-  // Flyweight registry for primitive handlers
+  // Flyweight registry for primitive handlers (SDF prims)
   struct yetty_ypaint_flyweight_registry *flyweight_registry;
+
+  // Factory for complex primitive ops (yplot, yimage, etc.)
+  struct yetty_ypaint_complex_prim_factory *complex_prim_factory;
 };
 
 #define DEFAULT_MAX_PRIMS_PER_CELL 16
@@ -158,14 +158,14 @@ struct yetty_yetty_ypaint_canvas {
 //=============================================================================
 
 static void
-prim_ref_array_init(struct yetty_yetty_ypaint_canvas_prim_ref_array *arr) {
+prim_ref_array_init(struct yetty_ypaint_canvas_prim_ref_array *arr) {
   arr->data = NULL;
   arr->count = 0;
   arr->capacity = 0;
 }
 
 static void
-prim_ref_array_free(struct yetty_yetty_ypaint_canvas_prim_ref_array *arr) {
+prim_ref_array_free(struct yetty_ypaint_canvas_prim_ref_array *arr) {
   free(arr->data);
   arr->data = NULL;
   arr->count = 0;
@@ -173,27 +173,27 @@ prim_ref_array_free(struct yetty_yetty_ypaint_canvas_prim_ref_array *arr) {
 }
 
 static void
-prim_ref_array_push(struct yetty_yetty_ypaint_canvas_prim_ref_array *arr,
-                    struct yetty_yetty_ypaint_canvas_prim_ref ref) {
+prim_ref_array_push(struct yetty_ypaint_canvas_prim_ref_array *arr,
+                    struct yetty_ypaint_canvas_prim_ref ref) {
   if (arr->count >= arr->capacity) {
     uint32_t new_cap =
         arr->capacity == 0 ? INITIAL_REF_CAPACITY : arr->capacity * 2;
     arr->data = realloc(
-        arr->data, new_cap * sizeof(struct yetty_yetty_ypaint_canvas_prim_ref));
+        arr->data, new_cap * sizeof(struct yetty_ypaint_canvas_prim_ref));
     arr->capacity = new_cap;
   }
   arr->data[arr->count++] = ref;
 }
 
 static void
-prim_data_array_init(struct yetty_yetty_ypaint_canvas_prim_data_array *arr) {
+prim_data_array_init(struct yetty_ypaint_canvas_prim_data_array *arr) {
   arr->data = NULL;
   arr->count = 0;
   arr->capacity = 0;
 }
 
 static void
-prim_data_array_free(struct yetty_yetty_ypaint_canvas_prim_data_array *arr) {
+prim_data_array_free(struct yetty_ypaint_canvas_prim_data_array *arr) {
   for (uint32_t i = 0; i < arr->count; i++)
     free(arr->data[i].data);
   free(arr->data);
@@ -203,7 +203,7 @@ prim_data_array_free(struct yetty_yetty_ypaint_canvas_prim_data_array *arr) {
 }
 
 static uint32_t
-prim_data_array_push(struct yetty_yetty_ypaint_canvas_prim_data_array *arr,
+prim_data_array_push(struct yetty_ypaint_canvas_prim_data_array *arr,
                      uint32_t rolling_row, const float *data,
                      uint32_t word_count) {
   if (arr->count >= arr->capacity) {
@@ -211,7 +211,7 @@ prim_data_array_push(struct yetty_yetty_ypaint_canvas_prim_data_array *arr,
         arr->capacity == 0 ? INITIAL_PRIM_CAPACITY : arr->capacity * 2;
     arr->data =
         realloc(arr->data,
-                new_cap * sizeof(struct yetty_yetty_ypaint_canvas_prim_data));
+                new_cap * sizeof(struct yetty_ypaint_canvas_prim_data));
     arr->capacity = new_cap;
   }
   uint32_t idx = arr->count++;
@@ -227,7 +227,7 @@ prim_data_array_push(struct yetty_yetty_ypaint_canvas_prim_data_array *arr,
 //=============================================================================
 
 static struct yetty_ycore_void_result
-grid_line_init(struct yetty_yetty_ypaint_canvas_grid_line *line,
+grid_line_init(struct yetty_ypaint_canvas_grid_line *line,
                uint32_t initial_cells) {
   prim_data_array_init(&line->prims);
   line->fonts = NULL;
@@ -241,7 +241,7 @@ grid_line_init(struct yetty_yetty_ypaint_canvas_grid_line *line,
   line->complex_prim_capacity = 0;
   if (initial_cells > 0) {
     line->cells = calloc(initial_cells,
-                         sizeof(struct yetty_yetty_ypaint_canvas_grid_cell));
+                         sizeof(struct yetty_ypaint_canvas_grid_cell));
     if (!line->cells)
       return YETTY_ERR(yetty_ycore_void, "calloc failed for grid cells");
     line->cell_capacity = initial_cells;
@@ -250,7 +250,7 @@ grid_line_init(struct yetty_yetty_ypaint_canvas_grid_line *line,
 }
 
 static struct yetty_ycore_void_result
-grid_line_free(struct yetty_yetty_ypaint_canvas_grid_line *line,
+grid_line_free(struct yetty_ypaint_canvas_grid_line *line,
                const struct yetty_ypaint_flyweight_registry *reg) {
   if (!reg)
     return YETTY_ERR(yetty_ycore_void, "reg is NULL");
@@ -265,18 +265,9 @@ grid_line_free(struct yetty_yetty_ypaint_canvas_grid_line *line,
   line->fonts = NULL;
   line->font_count = 0;
   line->font_capacity = 0;
-  /* Destroy complex prims owned by this line */
+  /* Destroy complex prim instances owned by this line */
   for (uint32_t i = 0; i < line->complex_prim_count; i++) {
-    struct yetty_yetty_ypaint_canvas_complex_prim *cp = &line->complex_prims[i];
-    if (cp->cache) {
-      struct yetty_ypaint_prim_flyweight fw =
-          yetty_ypaint_flyweight_registry_get(reg, cp->data);
-      if (!fw.ops)
-        return YETTY_ERR(yetty_ycore_void, "no handler for complex prim type");
-      if (fw.ops->destroy)
-        fw.ops->destroy(cp->cache);
-    }
-    free(cp->data);
+    yetty_ypaint_complex_prim_instance_destroy(line->complex_prims[i]);
   }
   free(line->complex_prims);
   line->complex_prims = NULL;
@@ -292,7 +283,7 @@ grid_line_free(struct yetty_yetty_ypaint_canvas_grid_line *line,
 }
 
 static struct yetty_ycore_void_result
-grid_line_ensure_cells(struct yetty_yetty_ypaint_canvas_grid_line *line,
+grid_line_ensure_cells(struct yetty_ypaint_canvas_grid_line *line,
                        uint32_t min_cells) {
   if (min_cells <= line->cell_capacity) {
     if (min_cells > line->cell_count) {
@@ -308,9 +299,9 @@ grid_line_ensure_cells(struct yetty_yetty_ypaint_canvas_grid_line *line,
   while (new_cap < min_cells)
     new_cap *= 2;
 
-  struct yetty_yetty_ypaint_canvas_grid_cell *new_cells =
+  struct yetty_ypaint_canvas_grid_cell *new_cells =
       realloc(line->cells,
-              new_cap * sizeof(struct yetty_yetty_ypaint_canvas_grid_cell));
+              new_cap * sizeof(struct yetty_ypaint_canvas_grid_cell));
   if (!new_cells)
     return YETTY_ERR(yetty_ycore_void, "realloc failed for grid cells");
   line->cells = new_cells;
@@ -326,14 +317,14 @@ grid_line_ensure_cells(struct yetty_yetty_ypaint_canvas_grid_line *line,
 //=============================================================================
 
 static void
-line_buffer_init(struct yetty_yetty_ypaint_canvas_line_buffer *buf) {
+line_buffer_init(struct yetty_ypaint_canvas_line_buffer *buf) {
   buf->lines = NULL;
   buf->capacity = 0;
   buf->count = 0;
 }
 
 static struct yetty_ycore_void_result
-line_buffer_free(struct yetty_yetty_ypaint_canvas_line_buffer *buf,
+line_buffer_free(struct yetty_ypaint_canvas_line_buffer *buf,
                  const struct yetty_ypaint_flyweight_registry *reg) {
   for (uint32_t i = 0; i < buf->count; i++) {
     struct yetty_ycore_void_result res = grid_line_free(&buf->lines[i], reg);
@@ -347,8 +338,8 @@ line_buffer_free(struct yetty_yetty_ypaint_canvas_line_buffer *buf,
   return YETTY_OK_VOID();
 }
 
-static struct yetty_yetty_ypaint_canvas_grid_line *
-line_buffer_get(struct yetty_yetty_ypaint_canvas_line_buffer *buf,
+static struct yetty_ypaint_canvas_grid_line *
+line_buffer_get(struct yetty_ypaint_canvas_line_buffer *buf,
                 uint32_t index) {
   if (index >= buf->count)
     return NULL;
@@ -356,9 +347,9 @@ line_buffer_get(struct yetty_yetty_ypaint_canvas_line_buffer *buf,
 }
 
 static struct yetty_ycore_void_result
-canvas_ensure_lines(struct yetty_yetty_ypaint_canvas *canvas,
+canvas_ensure_lines(struct yetty_ypaint_canvas *canvas,
                     uint32_t min_count) {
-  struct yetty_yetty_ypaint_canvas_line_buffer *buf = &canvas->lines;
+  struct yetty_ypaint_canvas_line_buffer *buf = &canvas->lines;
 
   // Grow capacity if needed
   if (min_count > buf->capacity) {
@@ -367,9 +358,9 @@ canvas_ensure_lines(struct yetty_yetty_ypaint_canvas *canvas,
     while (new_cap < min_count)
       new_cap *= 2;
 
-    struct yetty_yetty_ypaint_canvas_grid_line *new_lines =
+    struct yetty_ypaint_canvas_grid_line *new_lines =
         realloc(buf->lines,
-                new_cap * sizeof(struct yetty_yetty_ypaint_canvas_grid_line));
+                new_cap * sizeof(struct yetty_ypaint_canvas_grid_line));
     if (!new_lines)
       return YETTY_ERR(yetty_ycore_void, "realloc failed for line buffer");
     buf->lines = new_lines;
@@ -388,7 +379,7 @@ canvas_ensure_lines(struct yetty_yetty_ypaint_canvas *canvas,
 }
 
 static struct yetty_ycore_void_result
-line_buffer_pop_front(struct yetty_yetty_ypaint_canvas_line_buffer *buf,
+line_buffer_pop_front(struct yetty_ypaint_canvas_line_buffer *buf,
                       const struct yetty_ypaint_flyweight_registry *reg,
                       uint32_t count) {
   if (count == 0 || buf->count == 0)
@@ -407,12 +398,12 @@ line_buffer_pop_front(struct yetty_yetty_ypaint_canvas_line_buffer *buf,
   uint32_t remaining = buf->count - count;
   if (remaining > 0) {
     memmove(buf->lines, buf->lines + count,
-            remaining * sizeof(struct yetty_yetty_ypaint_canvas_grid_line));
+            remaining * sizeof(struct yetty_ypaint_canvas_grid_line));
   }
 
   // Zero the freed slots at the end
   memset(buf->lines + remaining, 0,
-         count * sizeof(struct yetty_yetty_ypaint_canvas_grid_line));
+         count * sizeof(struct yetty_ypaint_canvas_grid_line));
 
   buf->count = remaining;
   return YETTY_OK_VOID();
@@ -422,15 +413,15 @@ line_buffer_pop_front(struct yetty_yetty_ypaint_canvas_line_buffer *buf,
 // Canvas implementation
 //=============================================================================
 
-struct yetty_yetty_ypaint_canvas *
-yetty_yetty_ypaint_canvas_create(bool scrolling_mode,
+struct yetty_ypaint_canvas *
+yetty_ypaint_canvas_create(bool scrolling_mode,
                                   const struct yetty_context *context) {
-  struct yetty_yetty_ypaint_canvas *canvas;
+  struct yetty_ypaint_canvas *canvas;
 
   if (!context)
     return NULL;
 
-  canvas = calloc(1, sizeof(struct yetty_yetty_ypaint_canvas));
+  canvas = calloc(1, sizeof(struct yetty_ypaint_canvas));
   if (!canvas)
     return NULL;
 
@@ -440,17 +431,54 @@ yetty_yetty_ypaint_canvas_create(bool scrolling_mode,
 
   line_buffer_init(&canvas->lines);
 
-  /* Create flyweight registry with all handlers */
+  /* Create flyweight registry with all handlers (for SDF prims) */
   struct yetty_ypaint_flyweight_registry_ptr_result fw_res =
       yetty_ypaint_flyweight_create();
   if (YETTY_IS_ERR(fw_res)) {
     yerror("ypaint_canvas: flyweight creation failed: %s", fw_res.error.msg);
-    /* lines buffer is empty here, no registry needed for cleanup */
     free(canvas->lines.lines);
     free(canvas);
     return NULL;
   }
   canvas->flyweight_registry = fw_res.value;
+
+  /* Create complex prim factory and register types */
+  struct yetty_ypaint_complex_prim_factory_ptr_result factory_res =
+      yetty_ypaint_complex_prim_factory_create(
+          context->gpu_context.device,
+          context->gpu_context.queue,
+          context->gpu_context.surface_format,
+          context->gpu_context.allocator);
+  if (YETTY_IS_ERR(factory_res)) {
+    yerror("ypaint_canvas: factory creation failed: %s", factory_res.error.msg);
+    yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
+    free(canvas->lines.lines);
+    free(canvas);
+    return NULL;
+  }
+  canvas->complex_prim_factory = factory_res.value;
+
+  /* Create and register yplot factory */
+  struct yetty_ypaint_concrete_factory *yplot_factory = yetty_yplot_factory_create();
+  if (!yplot_factory) {
+    yerror("ypaint_canvas: yplot factory creation failed");
+    yetty_ypaint_complex_prim_factory_destroy(canvas->complex_prim_factory);
+    yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
+    free(canvas->lines.lines);
+    free(canvas);
+    return NULL;
+  }
+  struct yetty_ycore_void_result yplot_reg_res =
+      yetty_ypaint_complex_prim_factory_register(canvas->complex_prim_factory, yplot_factory);
+  if (YETTY_IS_ERR(yplot_reg_res)) {
+    yerror("ypaint_canvas: yplot registration failed: %s", yplot_reg_res.error.msg);
+    yetty_yplot_factory_destroy(yplot_factory);
+    yetty_ypaint_complex_prim_factory_destroy(canvas->complex_prim_factory);
+    yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
+    free(canvas->lines.lines);
+    free(canvas);
+    return NULL;
+  }
 
   /* Create default MSDF font for text spans (font_id = -1) */
   struct yetty_yconfig *config = context->app_context.config;
@@ -483,7 +511,7 @@ yetty_yetty_ypaint_canvas_create(bool scrolling_mode,
 }
 
 struct yetty_ycore_void_result
-yetty_yetty_ypaint_canvas_destroy(struct yetty_yetty_ypaint_canvas *canvas) {
+yetty_ypaint_canvas_destroy(struct yetty_ypaint_canvas *canvas) {
   if (!canvas)
     return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
 
@@ -493,6 +521,7 @@ yetty_yetty_ypaint_canvas_destroy(struct yetty_yetty_ypaint_canvas *canvas) {
       line_buffer_free(&canvas->lines, canvas->flyweight_registry);
   if (YETTY_IS_ERR(res))
     return res;
+  yetty_ypaint_complex_prim_factory_destroy(canvas->complex_prim_factory);
   yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
   free(canvas->grid_staging);
   free(canvas->prim_staging);
@@ -504,8 +533,8 @@ yetty_yetty_ypaint_canvas_destroy(struct yetty_yetty_ypaint_canvas *canvas) {
 // Configuration
 //=============================================================================
 
-struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_set_cell_size(
-    struct yetty_yetty_ypaint_canvas *canvas, struct pixel_size size) {
+struct yetty_ycore_void_result yetty_ypaint_canvas_set_cell_size(
+    struct yetty_ypaint_canvas *canvas, struct pixel_size size) {
   if (!canvas)
     return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
   if (size.width <= 0.0f || size.height <= 0.0f)
@@ -515,8 +544,8 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_set_cell_size(
   return YETTY_OK_VOID();
 }
 
-struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_set_grid_size(
-    struct yetty_yetty_ypaint_canvas *canvas, struct grid_size size) {
+struct yetty_ycore_void_result yetty_ypaint_canvas_set_grid_size(
+    struct yetty_ypaint_canvas *canvas, struct grid_size size) {
   if (!canvas)
     return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
   canvas->grid_size = size;
@@ -528,15 +557,15 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_set_grid_size(
 // Accessors
 //=============================================================================
 
-struct pixel_size yetty_yetty_ypaint_canvas_cell_get_pixel_size(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+struct pixel_size yetty_ypaint_canvas_cell_get_pixel_size(
+    struct yetty_ypaint_canvas *canvas) {
   if (!canvas)
     return (struct pixel_size){0, 0};
   return canvas->cell_size;
 }
 
-struct grid_size yetty_yetty_ypaint_canvas_get_grid_size(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+struct grid_size yetty_ypaint_canvas_get_grid_size(
+    struct yetty_ypaint_canvas *canvas) {
   if (!canvas)
     return (struct grid_size){0, 0};
   return canvas->grid_size;
@@ -546,8 +575,8 @@ struct grid_size yetty_yetty_ypaint_canvas_get_grid_size(
 // Cursor
 //=============================================================================
 
-struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_set_cursor_pos(
-    struct yetty_yetty_ypaint_canvas *canvas, struct grid_cursor_pos pos) {
+struct yetty_ycore_void_result yetty_ypaint_canvas_set_cursor_pos(
+    struct yetty_ypaint_canvas *canvas, struct grid_cursor_pos pos) {
   if (!canvas)
     return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
   canvas->cursor_col = pos.cols;
@@ -556,12 +585,12 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_set_cursor_pos(
 }
 
 uint16_t
-yetty_yetty_ypaint_canvas_cursor_col(struct yetty_yetty_ypaint_canvas *canvas) {
+yetty_ypaint_canvas_cursor_col(struct yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->cursor_col : 0;
 }
 
 uint16_t
-yetty_yetty_ypaint_canvas_cursor_row(struct yetty_yetty_ypaint_canvas *canvas) {
+yetty_ypaint_canvas_cursor_row(struct yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->cursor_row : 0;
 }
 
@@ -569,8 +598,8 @@ yetty_yetty_ypaint_canvas_cursor_row(struct yetty_yetty_ypaint_canvas *canvas) {
 // Rolling offset
 //=============================================================================
 
-uint32_t yetty_yetty_ypaint_canvas_rolling_row_0(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+uint32_t yetty_ypaint_canvas_rolling_row_0(
+    struct yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->rolling_row_0 : 0;
 }
 
@@ -581,7 +610,7 @@ uint32_t yetty_yetty_ypaint_canvas_rolling_row_0(
 // Add a single primitive (internal)
 // Returns the grid_line (bottom row of AABB) for this primitive
 static struct uint32_result
-add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
+add_primitive_internal(struct yetty_ypaint_canvas *canvas,
                        const struct yetty_ypaint_core_primitive_iter *iter) {
   if (!canvas)
     return YETTY_ERR(uint32, "canvas is NULL");
@@ -631,7 +660,7 @@ add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
 
   canvas_ensure_lines(canvas, primitive_grid_line + 1);
 
-  struct yetty_yetty_ypaint_canvas_grid_line *base_line =
+  struct yetty_ypaint_canvas_grid_line *base_line =
       line_buffer_get(&canvas->lines, primitive_grid_line);
   if (!base_line)
     return YETTY_ERR(uint32, "line_buffer_get returned NULL");
@@ -666,14 +695,14 @@ add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
     prim_col_max = canvas->grid_size.cols - 1;
 
   for (uint32_t row = prim_row_min; row <= prim_row_max; row++) {
-    struct yetty_yetty_ypaint_canvas_grid_line *line =
+    struct yetty_ypaint_canvas_grid_line *line =
         line_buffer_get(&canvas->lines, row);
     grid_line_ensure_cells(line, prim_col_max + 1);
 
     uint16_t lines_ahead = (uint16_t)(primitive_grid_line - row);
 
     for (uint32_t col = prim_col_min; col <= prim_col_max; col++) {
-      struct yetty_yetty_ypaint_canvas_prim_ref ref = {lines_ahead,
+      struct yetty_ypaint_canvas_prim_ref ref = {lines_ahead,
                                                        (uint16_t)prim_index};
       prim_ref_array_push(&line->cells[col].refs, ref);
     }
@@ -688,31 +717,32 @@ add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
 
   // Track complex prims for resource set collection
   if (yetty_ypaint_is_complex_type(prim_type)) {
-    // Ensure capacity
+    /* Create factory instance for complex prim */
+    struct yetty_ypaint_complex_prim_instance_ptr_result inst_res =
+        yetty_ypaint_complex_prim_factory_create_instance(
+            canvas->complex_prim_factory,
+            iter->fw.data,
+            word_count * sizeof(uint32_t),
+            primitive_rolling_row);
+    if (YETTY_IS_ERR(inst_res))
+      return YETTY_ERR(uint32, inst_res.error.msg);
+
+    /* Ensure capacity for instance pointer array */
     if (base_line->complex_prim_count >= base_line->complex_prim_capacity) {
       uint32_t new_cap = base_line->complex_prim_capacity == 0
                              ? 4
                              : base_line->complex_prim_capacity * 2;
       base_line->complex_prims = realloc(
           base_line->complex_prims,
-          new_cap * sizeof(struct yetty_yetty_ypaint_canvas_complex_prim));
-      if (!base_line->complex_prims)
+          new_cap * sizeof(struct yetty_ypaint_complex_prim_instance *));
+      if (!base_line->complex_prims) {
+        yetty_ypaint_complex_prim_instance_destroy(inst_res.value);
         return YETTY_ERR(uint32, "realloc complex_prims failed");
+      }
       base_line->complex_prim_capacity = new_cap;
     }
 
-    // Copy primitive data (we need to own it for cache management)
-    uint32_t *data_copy = malloc(word_count * sizeof(uint32_t));
-    if (!data_copy)
-      return YETTY_ERR(uint32, "malloc complex prim data failed");
-    memcpy(data_copy, iter->fw.data, word_count * sizeof(uint32_t));
-
-    struct yetty_yetty_ypaint_canvas_complex_prim *cp =
-        &base_line->complex_prims[base_line->complex_prim_count++];
-    cp->data = data_copy;
-    cp->word_count = word_count;
-    cp->rolling_row = primitive_rolling_row;
-    cp->cache = NULL;
+    base_line->complex_prims[base_line->complex_prim_count++] = inst_res.value;
 
     ydebug("add_primitive_internal: added complex prim type=0x%08x to line %u",
            prim_type, primitive_grid_line);
@@ -724,20 +754,20 @@ add_primitive_internal(struct yetty_yetty_ypaint_canvas *canvas,
 
 // Commit buffer after adding all primitives (internal)
 // Handles auto-scroll if primitives extend beyond visible area
-struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_commit_buffer_internal(
-    struct yetty_yetty_ypaint_canvas *canvas, uint32_t max_row) {
+struct yetty_ycore_void_result yetty_ypaint_canvas_commit_buffer_internal(
+    struct yetty_ypaint_canvas *canvas, uint32_t max_row) {
   if (!canvas) {
-    yerror("yetty_yetty_ypaint_canvas_commit_buffer_internal: canvas is NULL");
+    yerror("yetty_ypaint_canvas_commit_buffer_internal: canvas is NULL");
     return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
   }
   if (canvas->grid_size.rows == 0) {
-    yerror("yetty_yetty_ypaint_canvas_commit_buffer_internal: grid_rows is 0, "
+    yerror("yetty_ypaint_canvas_commit_buffer_internal: grid_rows is 0, "
            "scene "
            "bounds not set?");
     return YETTY_ERR(yetty_ycore_void, "grid_rows is 0");
   }
 
-  ydebug("yetty_yetty_ypaint_canvas_commit_buffer_internal: max_row=%u "
+  ydebug("yetty_ypaint_canvas_commit_buffer_internal: max_row=%u "
          "cursor_row=%u "
          "grid_rows=%u",
          max_row, canvas->cursor_row, canvas->grid_size.rows);
@@ -750,13 +780,13 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_commit_buffer_internal(
         (uint16_t)(target_cursor_row - canvas->grid_size.rows + 1);
 
     ydebug(
-        "yetty_yetty_ypaint_canvas_commit_buffer_internal: SCROLL target=%u >= "
+        "yetty_ypaint_canvas_commit_buffer_internal: SCROLL target=%u >= "
         "grid_rows=%u, scroll %u lines",
         target_cursor_row, canvas->grid_size.rows, lines_to_scroll);
 
     // Notify other layers via callback BEFORE scrolling
     if (!canvas->scroll_callback) {
-      yerror("yetty_yetty_ypaint_canvas_commit_buffer_internal: "
+      yerror("yetty_ypaint_canvas_commit_buffer_internal: "
              "scroll_callback is "
              "NULL");
       return YETTY_ERR(yetty_ycore_void, "scroll_callback is NULL");
@@ -764,17 +794,17 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_commit_buffer_internal(
     struct yetty_ycore_void_result scroll_res = canvas->scroll_callback(
         canvas->scroll_callback_user_data, lines_to_scroll);
     if (YETTY_IS_ERR(scroll_res)) {
-      yerror("yetty_yetty_ypaint_canvas_commit_buffer_internal: "
+      yerror("yetty_ypaint_canvas_commit_buffer_internal: "
              "scroll_callback failed");
       return scroll_res;
     }
 
     // Scroll ypaint grid
-    yetty_yetty_ypaint_canvas_scroll_lines(canvas, lines_to_scroll);
+    yetty_ypaint_canvas_scroll_lines(canvas, lines_to_scroll);
 
     // Cursor at last visible row
     canvas->cursor_row = (uint16_t)(canvas->grid_size.rows - 1);
-    ydebug("yetty_yetty_ypaint_canvas_commit_buffer_internal: cursor_row set "
+    ydebug("yetty_ypaint_canvas_commit_buffer_internal: cursor_row set "
            "to %u "
            "(last "
            "visible)",
@@ -783,7 +813,7 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_commit_buffer_internal(
     // No scroll needed, just move cursor
     uint16_t new_row = (uint16_t)target_cursor_row;
 
-    ydebug("yetty_yetty_ypaint_canvas_commit_buffer_internal: CURSOR MOVE "
+    ydebug("yetty_ypaint_canvas_commit_buffer_internal: CURSOR MOVE "
            "target=%u < "
            "grid_rows=%u, new_row=%u",
            target_cursor_row, canvas->grid_size.rows, new_row);
@@ -792,7 +822,7 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_commit_buffer_internal(
 
     // Notify other layers of cursor position change
     if (!canvas->cursor_set_callback) {
-      yerror("yetty_yetty_ypaint_canvas_commit_buffer_internal: "
+      yerror("yetty_ypaint_canvas_commit_buffer_internal: "
              "cursor_set_callback "
              "is NULL");
       return YETTY_ERR(yetty_ycore_void, "cursor_set_callback is NULL");
@@ -800,13 +830,13 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_commit_buffer_internal(
     struct yetty_ycore_void_result cursor_res = canvas->cursor_set_callback(
         canvas->cursor_set_callback_user_data, new_row);
     if (YETTY_IS_ERR(cursor_res)) {
-      yerror("yetty_yetty_ypaint_canvas_commit_buffer_internal: "
+      yerror("yetty_ypaint_canvas_commit_buffer_internal: "
              "cursor_set_callback "
              "failed");
       return cursor_res;
     }
     ydebug(
-        "yetty_yetty_ypaint_canvas_commit_buffer_internal: cursor_set_callback "
+        "yetty_ypaint_canvas_commit_buffer_internal: cursor_set_callback "
         "succeeded");
   }
 
@@ -818,7 +848,7 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_commit_buffer_internal(
 //=============================================================================
 
 struct yetty_ycore_void_result
-yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
+yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
                                struct yetty_ypaint_core_buffer *buffer) {
   if (!canvas) {
     yerror("yetty_ypaint_canvas_add_buffer: canvas is NULL");
@@ -921,7 +951,7 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
       return scroll_res;
     }
 
-    yetty_yetty_ypaint_canvas_scroll_lines(canvas, lines_scrolled);
+    yetty_ypaint_canvas_scroll_lines(canvas, lines_scrolled);
 
     ydebug("add_buffer: after scroll cursor_row=%u rolling_row_0=%u",
            canvas->cursor_row, canvas->rolling_row_0);
@@ -1120,7 +1150,7 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
       uint32_t rolling_row = canvas->rolling_row_0 + canvas->cursor_row;
 
       /* Store glyph as primitive at its max row */
-      struct yetty_yetty_ypaint_canvas_grid_line *base_line =
+      struct yetty_ypaint_canvas_grid_line *base_line =
           line_buffer_get(&canvas->lines, glyph_row_max);
       if (!base_line) goto next_glyph;
 
@@ -1139,12 +1169,12 @@ yetty_ypaint_canvas_add_buffer(struct yetty_yetty_ypaint_canvas *canvas,
         col_max = canvas->grid_size.cols - 1;
 
       for (uint32_t row = row_min; row <= glyph_row_max; row++) {
-        struct yetty_yetty_ypaint_canvas_grid_line *line =
+        struct yetty_ypaint_canvas_grid_line *line =
             line_buffer_get(&canvas->lines, row);
         grid_line_ensure_cells(line, col_max + 1);
         uint16_t lines_ahead = (uint16_t)(glyph_row_max - row);
         for (uint32_t col = col_min; col <= col_max; col++) {
-          struct yetty_yetty_ypaint_canvas_prim_ref ref = {
+          struct yetty_ypaint_canvas_prim_ref ref = {
               lines_ahead, (uint16_t)prim_idx};
           prim_ref_array_push(&line->cells[col].refs, ref);
         }
@@ -1162,13 +1192,13 @@ next_glyph:
     /* Attach font to the lowest row this span's glyphs reach.
      * Skip default font - it's owned by canvas, not by lines. */
     if (font && font != canvas->default_font && glyph_max_row > 0) {
-      struct yetty_yetty_ypaint_canvas_grid_line *target_line =
+      struct yetty_ypaint_canvas_grid_line *target_line =
           line_buffer_get(&canvas->lines, glyph_max_row);
       if (target_line) {
         /* Check if font already attached to a higher line — move it down */
         bool found = false;
         for (uint32_t li = 0; li < canvas->lines.count && !found; li++) {
-          struct yetty_yetty_ypaint_canvas_grid_line *l =
+          struct yetty_ypaint_canvas_grid_line *l =
               &canvas->lines.lines[li];
           for (uint32_t fi = 0; fi < l->font_count; fi++) {
             if (l->fonts[fi].font == font) {
@@ -1179,7 +1209,7 @@ next_glyph:
                   uint32_t new_cap = target_line->font_capacity == 0
                       ? 4 : target_line->font_capacity * 2;
                   target_line->fonts = realloc(target_line->fonts,
-                      new_cap * sizeof(struct yetty_yetty_ypaint_canvas_font_entry));
+                      new_cap * sizeof(struct yetty_ypaint_canvas_font_entry));
                   target_line->font_capacity = new_cap;
                 }
                 target_line->fonts[target_line->font_count++] = l->fonts[fi];
@@ -1197,10 +1227,10 @@ next_glyph:
             uint32_t new_cap = target_line->font_capacity == 0
                 ? 4 : target_line->font_capacity * 2;
             target_line->fonts = realloc(target_line->fonts,
-                new_cap * sizeof(struct yetty_yetty_ypaint_canvas_font_entry));
+                new_cap * sizeof(struct yetty_ypaint_canvas_font_entry));
             target_line->font_capacity = new_cap;
           }
-          struct yetty_yetty_ypaint_canvas_font_entry entry = {0};
+          struct yetty_ypaint_canvas_font_entry entry = {0};
           entry.font = font;
           entry.font_id = ts->font_id;
           target_line->fonts[target_line->font_count++] = entry;
@@ -1247,14 +1277,14 @@ next_glyph:
 //=============================================================================
 
 static struct yetty_ycore_void_result
-dump_grid(struct yetty_yetty_ypaint_canvas *canvas, const char *label) {
+dump_grid(struct yetty_ypaint_canvas *canvas, const char *label) {
   ydebug("=== GRID DUMP [%s] lines.count=%u rolling_row_0=%u grid=%ux%u "
          "staging=%u ===",
          label, canvas->lines.count, canvas->rolling_row_0,
          canvas->grid_size.cols, canvas->grid_size.rows,
          canvas->grid_staging_count);
   for (uint32_t i = 0; i < canvas->lines.count; i++) {
-    struct yetty_yetty_ypaint_canvas_grid_line *line =
+    struct yetty_ypaint_canvas_grid_line *line =
         line_buffer_get(&canvas->lines, i);
     uint32_t total_refs = 0;
     uint32_t first_ref_col = 0xFFFFFFFF;
@@ -1264,7 +1294,7 @@ dump_grid(struct yetty_yetty_ypaint_canvas *canvas, const char *label) {
         first_ref_col = c;
     }
     if (total_refs > 0 && first_ref_col != 0xFFFFFFFF) {
-      struct yetty_yetty_ypaint_canvas_prim_ref *ref =
+      struct yetty_ypaint_canvas_prim_ref *ref =
           &line->cells[first_ref_col].refs.data[0];
       ydebug("  line[%u] prims=%u refs=%u cells=%u first_ref@col%u: ahead=%u "
              "idx=%u",
@@ -1280,14 +1310,14 @@ dump_grid(struct yetty_yetty_ypaint_canvas *canvas, const char *label) {
 }
 
 struct yetty_ycore_void_result
-yetty_yetty_ypaint_canvas_scroll_lines(struct yetty_yetty_ypaint_canvas *canvas,
+yetty_ypaint_canvas_scroll_lines(struct yetty_ypaint_canvas *canvas,
                                        uint16_t num_lines) {
   if (!canvas)
     return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
   if (num_lines == 0)
     return YETTY_OK_VOID();
 
-  ydebug("yetty_yetty_ypaint_canvas_scroll_lines: num_lines=%u lines.count=%u "
+  ydebug("yetty_ypaint_canvas_scroll_lines: num_lines=%u lines.count=%u "
          "rolling_row_0=%u",
          num_lines, canvas->lines.count, canvas->rolling_row_0);
 
@@ -1308,7 +1338,7 @@ yetty_yetty_ypaint_canvas_scroll_lines(struct yetty_yetty_ypaint_canvas *canvas,
   else
     canvas->cursor_row = 0;
 
-  ydebug("yetty_yetty_ypaint_canvas_scroll_lines: after scroll lines.count=%u "
+  ydebug("yetty_ypaint_canvas_scroll_lines: after scroll lines.count=%u "
          "rolling_row_0=%u cursor_row=%u",
          canvas->lines.count, canvas->rolling_row_0, canvas->cursor_row);
 
@@ -1318,9 +1348,9 @@ yetty_yetty_ypaint_canvas_scroll_lines(struct yetty_yetty_ypaint_canvas *canvas,
   return YETTY_OK_VOID();
 }
 
-struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_set_scroll_callback(
-    struct yetty_yetty_ypaint_canvas *canvas,
-    yetty_yetty_ypaint_canvas_scroll_callback callback,
+struct yetty_ycore_void_result yetty_ypaint_canvas_set_scroll_callback(
+    struct yetty_ypaint_canvas *canvas,
+    yetty_ypaint_canvas_scroll_callback callback,
     struct yetty_ycore_void_result *user_data) {
   if (!canvas)
     return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
@@ -1329,9 +1359,9 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_set_scroll_callback(
   return YETTY_OK_VOID();
 }
 
-struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_set_cursor_callback(
-    struct yetty_yetty_ypaint_canvas *canvas,
-    yetty_yetty_ypaint_canvas_cursor_set_callback callback,
+struct yetty_ycore_void_result yetty_ypaint_canvas_set_cursor_callback(
+    struct yetty_ypaint_canvas *canvas,
+    yetty_ypaint_canvas_cursor_set_callback callback,
     struct yetty_ycore_void_result *user_data) {
   if (!canvas)
     return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
@@ -1345,19 +1375,19 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_set_cursor_callback(
 //=============================================================================
 
 struct yetty_ycore_void_result
-yetty_yetty_ypaint_canvas_mark_dirty(struct yetty_yetty_ypaint_canvas *canvas) {
+yetty_ypaint_canvas_mark_dirty(struct yetty_ypaint_canvas *canvas) {
   if (canvas)
     canvas->dirty = true;
   return YETTY_OK_VOID();
 }
 
-bool yetty_yetty_ypaint_canvas_is_dirty(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+bool yetty_ypaint_canvas_is_dirty(
+    struct yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->dirty : false;
 }
 
 static struct yetty_ycore_void_result
-ensure_grid_staging(struct yetty_yetty_ypaint_canvas *canvas,
+ensure_grid_staging(struct yetty_ypaint_canvas *canvas,
                     uint32_t min_size) {
   if (min_size <= canvas->grid_staging_capacity)
     return YETTY_OK_VOID();
@@ -1377,8 +1407,8 @@ ensure_grid_staging(struct yetty_yetty_ypaint_canvas *canvas,
   return YETTY_OK_VOID();
 }
 
-struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_rebuild_grid(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+struct yetty_ycore_void_result yetty_ypaint_canvas_rebuild_grid(
+    struct yetty_ypaint_canvas *canvas) {
   if (!canvas)
     return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
   if (!canvas->dirty && canvas->grid_staging_count > 0)
@@ -1391,7 +1421,7 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_rebuild_grid(
     line_base_prim_idx = malloc(canvas->lines.count * sizeof(uint32_t));
     for (uint32_t i = 0; i < canvas->lines.count; i++) {
       line_base_prim_idx[i] = total_prims;
-      struct yetty_yetty_ypaint_canvas_grid_line *line =
+      struct yetty_ypaint_canvas_grid_line *line =
           line_buffer_get(&canvas->lines, i);
       total_prims += line->prims.count;
     }
@@ -1405,7 +1435,7 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_rebuild_grid(
   if (canvas->lines.count > grid_h)
     grid_h = canvas->lines.count;
   for (uint32_t i = 0; i < canvas->lines.count; i++) {
-    struct yetty_yetty_ypaint_canvas_grid_line *line =
+    struct yetty_ypaint_canvas_grid_line *line =
         line_buffer_get(&canvas->lines, i);
     if (line->cell_count > grid_w)
       grid_w = line->cell_count;
@@ -1426,7 +1456,7 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_rebuild_grid(
 
   for (uint32_t y = 0; y < grid_h; y++) {
     bool has_line = y < canvas->lines.count;
-    struct yetty_yetty_ypaint_canvas_grid_line *line =
+    struct yetty_ypaint_canvas_grid_line *line =
         has_line ? line_buffer_get(&canvas->lines, y) : NULL;
     uint32_t line_cell_count = line ? line->cell_count : 0;
 
@@ -1443,9 +1473,9 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_rebuild_grid(
 
       // Add prim entries (includes both SDF and glyph primitives)
       if (has_line && x < line_cell_count) {
-        struct yetty_yetty_ypaint_canvas_grid_cell *cell = &line->cells[x];
+        struct yetty_ypaint_canvas_grid_cell *cell = &line->cells[x];
         for (uint32_t ri = 0; ri < cell->refs.count; ri++) {
-          struct yetty_yetty_ypaint_canvas_prim_ref *ref = &cell->refs.data[ri];
+          struct yetty_ypaint_canvas_prim_ref *ref = &cell->refs.data[ri];
           uint32_t bl = y + ref->lines_ahead;
           if (bl < canvas->lines.count && line_base_prim_idx) {
             ensure_grid_staging(canvas, canvas->grid_staging_count + 1);
@@ -1466,17 +1496,17 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_rebuild_grid(
 }
 
 const uint32_t *
-yetty_yetty_ypaint_canvas_grid_data(struct yetty_yetty_ypaint_canvas *canvas) {
+yetty_ypaint_canvas_grid_data(struct yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->grid_staging : NULL;
 }
 
-uint32_t yetty_yetty_ypaint_canvas_grid_word_count(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+uint32_t yetty_ypaint_canvas_grid_word_count(
+    struct yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->grid_staging_count : 0;
 }
 
-struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_clear_staging(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+struct yetty_ycore_void_result yetty_ypaint_canvas_clear_staging(
+    struct yetty_ypaint_canvas *canvas) {
   if (canvas) {
     canvas->grid_staging_count = 0;
     canvas->prim_staging_count = 0;
@@ -1489,7 +1519,7 @@ struct yetty_ycore_void_result yetty_yetty_ypaint_canvas_clear_staging(
 //=============================================================================
 
 static struct yetty_ycore_void_result
-ensure_prim_staging(struct yetty_yetty_ypaint_canvas *canvas,
+ensure_prim_staging(struct yetty_ypaint_canvas *canvas,
                     uint32_t min_size) {
   if (min_size <= canvas->prim_staging_capacity)
     return YETTY_OK_VOID();
@@ -1506,8 +1536,8 @@ ensure_prim_staging(struct yetty_yetty_ypaint_canvas *canvas,
   return YETTY_OK_VOID();
 }
 
-const uint32_t *yetty_yetty_ypaint_canvas_build_prim_staging(
-    struct yetty_yetty_ypaint_canvas *canvas, uint32_t *word_count) {
+const uint32_t *yetty_ypaint_canvas_build_prim_staging(
+    struct yetty_ypaint_canvas *canvas, uint32_t *word_count) {
   if (!canvas) {
     if (word_count)
       *word_count = 0;
@@ -1518,7 +1548,7 @@ const uint32_t *yetty_yetty_ypaint_canvas_build_prim_staging(
   uint32_t prim_count = 0;
   uint32_t total_words = 0;
   for (uint32_t i = 0; i < canvas->lines.count; i++) {
-    struct yetty_yetty_ypaint_canvas_grid_line *line =
+    struct yetty_ypaint_canvas_grid_line *line =
         line_buffer_get(&canvas->lines, i);
     for (uint32_t p = 0; p < line->prims.count; p++) {
       prim_count++;
@@ -1541,11 +1571,11 @@ const uint32_t *yetty_yetty_ypaint_canvas_build_prim_staging(
   uint32_t data_offset = 0;
   uint32_t prim_idx = 0;
   for (uint32_t i = 0; i < canvas->lines.count; i++) {
-    struct yetty_yetty_ypaint_canvas_grid_line *line =
+    struct yetty_ypaint_canvas_grid_line *line =
         line_buffer_get(&canvas->lines, i);
 
     for (uint32_t p = 0; p < line->prims.count; p++) {
-      struct yetty_yetty_ypaint_canvas_prim_data *prim = &line->prims.data[p];
+      struct yetty_ypaint_canvas_prim_data *prim = &line->prims.data[p];
       canvas->prim_staging[prim_idx] = data_offset;
 
       // Prepend rolling_row at insertion (for shader y_offset calculation)
@@ -1569,14 +1599,14 @@ const uint32_t *yetty_yetty_ypaint_canvas_build_prim_staging(
   return canvas->prim_staging;
 }
 
-uint32_t yetty_yetty_ypaint_canvas_prim_gpu_size(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+uint32_t yetty_ypaint_canvas_prim_gpu_size(
+    struct yetty_ypaint_canvas *canvas) {
   if (!canvas)
     return 0;
 
   uint32_t total_words = 0;
   for (uint32_t i = 0; i < canvas->lines.count; i++) {
-    struct yetty_yetty_ypaint_canvas_grid_line *line =
+    struct yetty_ypaint_canvas_grid_line *line =
         line_buffer_get(&canvas->lines, i);
     for (uint32_t p = 0; p < line->prims.count; p++)
       total_words += line->prims.data[p].word_count + 1; // +1 for rolling_row
@@ -1589,7 +1619,7 @@ uint32_t yetty_yetty_ypaint_canvas_prim_gpu_size(
 //=============================================================================
 
 struct yetty_ycore_void_result
-yetty_yetty_ypaint_canvas_clear(struct yetty_yetty_ypaint_canvas *canvas) {
+yetty_ypaint_canvas_clear(struct yetty_ypaint_canvas *canvas) {
   if (!canvas)
     return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
 
@@ -1608,12 +1638,12 @@ yetty_yetty_ypaint_canvas_clear(struct yetty_yetty_ypaint_canvas *canvas) {
   return YETTY_OK_VOID();
 }
 
-bool yetty_yetty_ypaint_canvas_empty(struct yetty_yetty_ypaint_canvas *canvas) {
+bool yetty_ypaint_canvas_empty(struct yetty_ypaint_canvas *canvas) {
   if (!canvas)
     return true;
 
   for (uint32_t i = 0; i < canvas->lines.count; i++) {
-    struct yetty_yetty_ypaint_canvas_grid_line *line =
+    struct yetty_ypaint_canvas_grid_line *line =
         line_buffer_get(&canvas->lines, i);
     if (line->prims.count > 0)
       return false;
@@ -1621,22 +1651,22 @@ bool yetty_yetty_ypaint_canvas_empty(struct yetty_yetty_ypaint_canvas *canvas) {
   return true;
 }
 
-uint32_t yetty_yetty_ypaint_canvas_primitive_count(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+uint32_t yetty_ypaint_canvas_primitive_count(
+    struct yetty_ypaint_canvas *canvas) {
   if (!canvas)
     return 0;
 
   uint32_t count = 0;
   for (uint32_t i = 0; i < canvas->lines.count; i++) {
-    struct yetty_yetty_ypaint_canvas_grid_line *line =
+    struct yetty_ypaint_canvas_grid_line *line =
         line_buffer_get(&canvas->lines, i);
     count += line->prims.count;
   }
   return count;
 }
 
-struct yetty_font_font *yetty_yetty_ypaint_canvas_get_default_font(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+struct yetty_font_font *yetty_ypaint_canvas_get_default_font(
+    struct yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->default_font : NULL;
 }
 
@@ -1644,8 +1674,8 @@ struct yetty_font_font *yetty_yetty_ypaint_canvas_get_default_font(
 // Complex primitive access (for atlas rendering)
 //=============================================================================
 
-uint32_t yetty_yetty_ypaint_canvas_complex_prim_count(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+uint32_t yetty_ypaint_canvas_complex_prim_count(
+    struct yetty_ypaint_canvas *canvas) {
   if (!canvas)
     return 0;
 
@@ -1655,19 +1685,18 @@ uint32_t yetty_yetty_ypaint_canvas_complex_prim_count(
     visible_lines = canvas->lines.count;
 
   for (uint32_t i = 0; i < visible_lines; i++) {
-    struct yetty_yetty_ypaint_canvas_grid_line *line =
+    struct yetty_ypaint_canvas_grid_line *line =
         line_buffer_get(&canvas->lines, i);
     count += line->complex_prim_count;
   }
   return count;
 }
 
-struct yetty_ypaint_canvas_complex_prim_ref
-yetty_yetty_ypaint_canvas_get_complex_prim(
-    struct yetty_yetty_ypaint_canvas *canvas, uint32_t index) {
-  struct yetty_ypaint_canvas_complex_prim_ref ref = {NULL, NULL};
+struct yetty_ypaint_complex_prim_instance *
+yetty_ypaint_canvas_get_complex_prim(
+    struct yetty_ypaint_canvas *canvas, uint32_t index) {
   if (!canvas)
-    return ref;
+    return NULL;
 
   uint32_t visible_lines = canvas->grid_size.rows;
   if (visible_lines > canvas->lines.count)
@@ -1675,23 +1704,25 @@ yetty_yetty_ypaint_canvas_get_complex_prim(
 
   uint32_t current = 0;
   for (uint32_t i = 0; i < visible_lines; i++) {
-    struct yetty_yetty_ypaint_canvas_grid_line *line =
+    struct yetty_ypaint_canvas_grid_line *line =
         line_buffer_get(&canvas->lines, i);
     if (index < current + line->complex_prim_count) {
       uint32_t local_idx = index - current;
-      struct yetty_yetty_ypaint_canvas_complex_prim *cp =
-          &line->complex_prims[local_idx];
-      ref.data = cp->data;
-      ref.cache_ptr = &cp->cache;
-      return ref;
+      return line->complex_prims[local_idx];
     }
     current += line->complex_prim_count;
   }
-  return ref;
+  return NULL;
 }
 
 const struct yetty_ypaint_flyweight_registry *
-yetty_yetty_ypaint_canvas_get_flyweight_registry(
-    struct yetty_yetty_ypaint_canvas *canvas) {
+yetty_ypaint_canvas_get_flyweight_registry(
+    struct yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->flyweight_registry : NULL;
+}
+
+struct yetty_ypaint_complex_prim_factory *
+yetty_ypaint_canvas_get_complex_prim_factory(
+    struct yetty_ypaint_canvas *canvas) {
+  return canvas ? canvas->complex_prim_factory : NULL;
 }

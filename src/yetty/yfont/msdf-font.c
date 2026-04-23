@@ -463,37 +463,37 @@ yetty_font_msdf_font_create(const char *cdb_path, const char *shader_path)
 	}
 
 	/* GPU resource set */
-	strncpy(font->rs.namespace, "msdf_font", YETTY_YRENDER__NAME_MAX - 1);
+	strncpy(font->rs.namespace, "msdf_font", YETTY_YRENDER_NAME_MAX - 1);
 
 	font->rs.texture_count = 1;
 	struct yetty_yrender_texture *tex = &font->rs.textures[0];
-	strncpy(tex->name, "texture", YETTY_YRENDER__NAME_MAX - 1);
-	strncpy(tex->wgsl_type, "texture_2d<f32>", YETTY_YRENDER__WGSL_TYPE_MAX - 1);
-	strncpy(tex->sampler_name, "sampler", YETTY_YRENDER__NAME_MAX - 1);
+	strncpy(tex->name, "texture", YETTY_YRENDER_NAME_MAX - 1);
+	strncpy(tex->wgsl_type, "texture_2d<f32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
+	strncpy(tex->sampler_name, "sampler", YETTY_YRENDER_NAME_MAX - 1);
 	tex->format = WGPUTextureFormat_RGBA8Unorm;
 	tex->sampler_filter = WGPUFilterMode_Linear;
 
 	font->rs.buffer_count = 1;
 	struct yetty_yrender_buffer *buf = &font->rs.buffers[0];
-	strncpy(buf->name, "buffer", YETTY_YRENDER__NAME_MAX - 1);
-	strncpy(buf->wgsl_type, "array<f32>", YETTY_YRENDER__WGSL_TYPE_MAX - 1);
+	strncpy(buf->name, "buffer", YETTY_YRENDER_NAME_MAX - 1);
+	strncpy(buf->wgsl_type, "array<f32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
 	buf->readonly = 1;
 
 	font->rs.uniform_count = 4;
-	strncpy(font->rs.uniforms[0].name, "pixel_range", YETTY_YRENDER__NAME_MAX - 1);
-	font->rs.uniforms[0].type = YETTY_YRENDER__UNIFORM_F32;
+	strncpy(font->rs.uniforms[0].name, "pixel_range", YETTY_YRENDER_NAME_MAX - 1);
+	font->rs.uniforms[0].type = YETTY_YRENDER_UNIFORM_F32;
 	font->rs.uniforms[0].f32 = font->pixel_range;
 
-	strncpy(font->rs.uniforms[1].name, "base_size", YETTY_YRENDER__NAME_MAX - 1);
-	font->rs.uniforms[1].type = YETTY_YRENDER__UNIFORM_F32;
+	strncpy(font->rs.uniforms[1].name, "base_size", YETTY_YRENDER_NAME_MAX - 1);
+	font->rs.uniforms[1].type = YETTY_YRENDER_UNIFORM_F32;
 	font->rs.uniforms[1].f32 = font->base_size;
 
-	strncpy(font->rs.uniforms[2].name, "cell_size", YETTY_YRENDER__NAME_MAX - 1);
-	font->rs.uniforms[2].type = YETTY_YRENDER__UNIFORM_U32;
+	strncpy(font->rs.uniforms[2].name, "cell_size", YETTY_YRENDER_NAME_MAX - 1);
+	font->rs.uniforms[2].type = YETTY_YRENDER_UNIFORM_U32;
 	font->rs.uniforms[2].u32 = font->cell_size;
 
-	strncpy(font->rs.uniforms[3].name, "atlas_cols", YETTY_YRENDER__NAME_MAX - 1);
-	font->rs.uniforms[3].type = YETTY_YRENDER__UNIFORM_U32;
+	strncpy(font->rs.uniforms[3].name, "atlas_cols", YETTY_YRENDER_NAME_MAX - 1);
+	font->rs.uniforms[3].type = YETTY_YRENDER_UNIFORM_U32;
 	font->rs.uniforms[3].u32 = font->atlas_cols;
 
 	yetty_yrender_shader_code_set(&font->rs.shader,

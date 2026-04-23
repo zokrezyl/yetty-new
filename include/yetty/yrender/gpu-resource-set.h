@@ -1,5 +1,5 @@
-#ifndef YETTY_YRENDER__GPU_RESOURCE_SET_H
-#define YETTY_YRENDER__GPU_RESOURCE_SET_H
+#ifndef YETTY_YRENDER_GPU_RESOURCE_SET_H
+#define YETTY_YRENDER_GPU_RESOURCE_SET_H
 
 #include <yetty/yrender/types.h>
 #include <yetty/ycore/result.h>
@@ -9,28 +9,28 @@
 extern "C" {
 #endif
 
-#define YETTY_YRENDER__RS_MAX_TEXTURES  4
-#define YETTY_YRENDER__RS_MAX_BUFFERS   4
-#define YETTY_YRENDER__RS_MAX_UNIFORMS 16
-#define YETTY_YRENDER__RS_MAX_CHILDREN  4
+#define YETTY_YRENDER_RS_MAX_TEXTURES  4
+#define YETTY_YRENDER_RS_MAX_BUFFERS   4
+#define YETTY_YRENDER_RS_MAX_UNIFORMS 32
+#define YETTY_YRENDER_RS_MAX_CHILDREN  4
 
 /* GPU resource set - collection of resources a provider needs */
 struct yetty_yrender_gpu_resource_set {
-    char namespace[YETTY_YRENDER__NAME_MAX];
+    char namespace[YETTY_YRENDER_NAME_MAX];
     struct pixel_size pixel_size;
 
-    struct yetty_yrender_texture textures[YETTY_YRENDER__RS_MAX_TEXTURES];
+    struct yetty_yrender_texture textures[YETTY_YRENDER_RS_MAX_TEXTURES];
     size_t texture_count;
 
-    struct yetty_yrender_buffer buffers[YETTY_YRENDER__RS_MAX_BUFFERS];
+    struct yetty_yrender_buffer buffers[YETTY_YRENDER_RS_MAX_BUFFERS];
     size_t buffer_count;
 
-    struct yetty_yrender_uniform uniforms[YETTY_YRENDER__RS_MAX_UNIFORMS];
+    struct yetty_yrender_uniform uniforms[YETTY_YRENDER_RS_MAX_UNIFORMS];
     size_t uniform_count;
 
     struct yetty_yrender_shader_code shader;
 
-    struct yetty_yrender_gpu_resource_set *children[YETTY_YRENDER__RS_MAX_CHILDREN];
+    struct yetty_yrender_gpu_resource_set *children[YETTY_YRENDER_RS_MAX_CHILDREN];
     size_t children_count;
 };
 
@@ -40,4 +40,4 @@ YETTY_YRESULT_DECLARE(yetty_yrender_gpu_resource_set, const struct yetty_yrender
 }
 #endif
 
-#endif /* YETTY_YRENDER__GPU_RESOURCE_SET_H */
+#endif /* YETTY_YRENDER_GPU_RESOURCE_SET_H */

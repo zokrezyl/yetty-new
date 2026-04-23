@@ -43,13 +43,13 @@ struct yetty_yimage_result yetty_yimage_create(void)
 	img->dirty = true;
 
 	/* Initialize gpu_resource_set */
-	strncpy(img->rs.namespace, "yimage", YETTY_YRENDER__NAME_MAX - 1);
+	strncpy(img->rs.namespace, "yimage", YETTY_YRENDER_NAME_MAX - 1);
 
 	/* Texture slot 0: image pixels */
 	struct yetty_yrender_texture *tex = &img->rs.textures[0];
-	strncpy(tex->name, "image_tex", YETTY_YRENDER__NAME_MAX - 1);
-	strncpy(tex->wgsl_type, "texture_2d<f32>", YETTY_YRENDER__WGSL_TYPE_MAX - 1);
-	strncpy(tex->sampler_name, "image_sampler", YETTY_YRENDER__NAME_MAX - 1);
+	strncpy(tex->name, "image_tex", YETTY_YRENDER_NAME_MAX - 1);
+	strncpy(tex->wgsl_type, "texture_2d<f32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
+	strncpy(tex->sampler_name, "image_sampler", YETTY_YRENDER_NAME_MAX - 1);
 	tex->format = 0x12; /* WGPUTextureFormat_RGBA8Unorm */
 	tex->sampler_filter = 1; /* WGPUFilterMode_Linear */
 	img->rs.texture_count = 1;
@@ -58,21 +58,21 @@ struct yetty_yimage_result yetty_yimage_create(void)
 	struct yetty_yrender_uniform *u;
 
 	u = &img->rs.uniforms[0];
-	strncpy(u->name, "image_bounds", YETTY_YRENDER__NAME_MAX - 1);
-	u->type = YETTY_YRENDER__UNIFORM_VEC4;
+	strncpy(u->name, "image_bounds", YETTY_YRENDER_NAME_MAX - 1);
+	u->type = YETTY_YRENDER_UNIFORM_VEC4;
 
 	u = &img->rs.uniforms[1];
-	strncpy(u->name, "image_size", YETTY_YRENDER__NAME_MAX - 1);
-	u->type = YETTY_YRENDER__UNIFORM_VEC2;
+	strncpy(u->name, "image_size", YETTY_YRENDER_NAME_MAX - 1);
+	u->type = YETTY_YRENDER_UNIFORM_VEC2;
 
 	u = &img->rs.uniforms[2];
-	strncpy(u->name, "image_zoom", YETTY_YRENDER__NAME_MAX - 1);
-	u->type = YETTY_YRENDER__UNIFORM_F32;
+	strncpy(u->name, "image_zoom", YETTY_YRENDER_NAME_MAX - 1);
+	u->type = YETTY_YRENDER_UNIFORM_F32;
 	u->f32 = 1.0f;
 
 	u = &img->rs.uniforms[3];
-	strncpy(u->name, "image_center", YETTY_YRENDER__NAME_MAX - 1);
-	u->type = YETTY_YRENDER__UNIFORM_VEC2;
+	strncpy(u->name, "image_center", YETTY_YRENDER_NAME_MAX - 1);
+	u->type = YETTY_YRENDER_UNIFORM_VEC2;
 	u->vec2[0] = 0.5f;
 	u->vec2[1] = 0.5f;
 

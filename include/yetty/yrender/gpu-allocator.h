@@ -1,5 +1,5 @@
-#ifndef YETTY_YRENDER__GPU_ALLOCATOR_H
-#define YETTY_YRENDER__GPU_ALLOCATOR_H
+#ifndef YETTY_YRENDER_GPU_ALLOCATOR_H
+#define YETTY_YRENDER_GPU_ALLOCATOR_H
 
 #include <yetty/ycore/result.h>
 #include <webgpu/webgpu.h>
@@ -34,4 +34,4 @@ struct yetty_yrender_gpu_allocator_result yetty_yrender_gpu_allocator_create(WGP
 }
 #endif
 
-#endif /* YETTY_YRENDER__GPU_ALLOCATOR_H */
+#endif /* YETTY_YRENDER_GPU_ALLOCATOR_H */

@@ -1,5 +1,5 @@
-#ifndef YETTY_YRENDER__TARGET_H
-#define YETTY_YRENDER__TARGET_H
+#ifndef YETTY_YRENDER_TARGET_H
+#define YETTY_YRENDER_TARGET_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -119,4 +119,4 @@ struct yetty_yrender_target_ptr_result yetty_yrender_target_vnc_create(
 }
 #endif
 
-#endif /* YETTY_YRENDER__TARGET_H */
+#endif /* YETTY_YRENDER_TARGET_H */

@@ -3,6 +3,7 @@
 #include <yetty/yfont/ms-raster-font.h>
 #include <yetty/yfont/ms-msdf-font.h>
 #include <yetty/yrender/gpu-resource-set.h>
+#include <yetty/yrender/render-target.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/types.h>
 #include <yetty/ycore/util.h>
@@ -58,15 +59,15 @@ static void init_uniforms(struct yetty_yrender_gpu_resource_set *rs)
 {
     rs->uniform_count = U_COUNT;
 
-    rs->uniforms[U_GRID_SIZE]      = (struct yetty_yrender_uniform){"grid_size",      YETTY_YRENDER__UNIFORM_VEC2};
-    rs->uniforms[U_CELL_SIZE]      = (struct yetty_yrender_uniform){"cell_size",      YETTY_YRENDER__UNIFORM_VEC2};
-    rs->uniforms[U_CURSOR_POS]     = (struct yetty_yrender_uniform){"cursor_pos",     YETTY_YRENDER__UNIFORM_VEC2};
-    rs->uniforms[U_CURSOR_VISIBLE] = (struct yetty_yrender_uniform){"cursor_visible", YETTY_YRENDER__UNIFORM_F32};
-    rs->uniforms[U_CURSOR_SHAPE]   = (struct yetty_yrender_uniform){"cursor_shape",   YETTY_YRENDER__UNIFORM_F32};
-    rs->uniforms[U_SCALE]          = (struct yetty_yrender_uniform){"scale",          YETTY_YRENDER__UNIFORM_F32};
-    rs->uniforms[U_DEFAULT_FG]     = (struct yetty_yrender_uniform){"default_fg",     YETTY_YRENDER__UNIFORM_U32};
-    rs->uniforms[U_DEFAULT_BG]     = (struct yetty_yrender_uniform){"default_bg",     YETTY_YRENDER__UNIFORM_U32};
-    rs->uniforms[U_FONT_TYPE]     = (struct yetty_yrender_uniform){"font_type",     YETTY_YRENDER__UNIFORM_U32};
+    rs->uniforms[U_GRID_SIZE]      = (struct yetty_yrender_uniform){"grid_size",      YETTY_YRENDER_UNIFORM_VEC2};
+    rs->uniforms[U_CELL_SIZE]      = (struct yetty_yrender_uniform){"cell_size",      YETTY_YRENDER_UNIFORM_VEC2};
+    rs->uniforms[U_CURSOR_POS]     = (struct yetty_yrender_uniform){"cursor_pos",     YETTY_YRENDER_UNIFORM_VEC2};
+    rs->uniforms[U_CURSOR_VISIBLE] = (struct yetty_yrender_uniform){"cursor_visible", YETTY_YRENDER_UNIFORM_F32};
+    rs->uniforms[U_CURSOR_SHAPE]   = (struct yetty_yrender_uniform){"cursor_shape",   YETTY_YRENDER_UNIFORM_F32};
+    rs->uniforms[U_SCALE]          = (struct yetty_yrender_uniform){"scale",          YETTY_YRENDER_UNIFORM_F32};
+    rs->uniforms[U_DEFAULT_FG]     = (struct yetty_yrender_uniform){"default_fg",     YETTY_YRENDER_UNIFORM_U32};
+    rs->uniforms[U_DEFAULT_BG]     = (struct yetty_yrender_uniform){"default_bg",     YETTY_YRENDER_UNIFORM_U32};
+    rs->uniforms[U_FONT_TYPE]     = (struct yetty_yrender_uniform){"font_type",     YETTY_YRENDER_UNIFORM_U32};
 
     set_scale(rs, 1.0f);
     set_cursor_shape(rs, 1.0f);
@@ -98,6 +99,8 @@ static struct yetty_yrender_gpu_resource_set_result text_layer_get_gpu_resource_
     const struct yetty_yterm_terminal_layer *self);
 static int text_layer_on_key(struct yetty_yterm_terminal_layer *self, int key, int mods);
 static int text_layer_on_char(struct yetty_yterm_terminal_layer *self, uint32_t codepoint, int mods);
+static struct yetty_ycore_void_result text_layer_render(
+    struct yetty_yterm_terminal_layer *self, struct yetty_yrender_target *target);
 
 /* VTerm callbacks */
 static int on_damage(VTermRect rect, void *user);
@@ -180,6 +183,7 @@ static const struct yetty_yterm_terminal_layer_ops text_layer_ops = {
     .write = text_layer_write,
     .resize_grid = text_layer_resize_grid,
     .get_gpu_resource_set = text_layer_get_gpu_resource_set,
+    .render = text_layer_render,
     .is_empty = text_layer_is_empty,
     .on_key = text_layer_on_key,
     .on_char = text_layer_on_char,
@@ -319,11 +323,11 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
     vterm_output_set_callback(text_layer->vterm, vterm_output_callback, text_layer);
 
     /* Resource set */
-    strncpy(text_layer->rs.namespace, "text_grid", YETTY_YRENDER__NAME_MAX - 1);
+    strncpy(text_layer->rs.namespace, "text_grid", YETTY_YRENDER_NAME_MAX - 1);
 
     text_layer->rs.buffer_count = 1;
-    strncpy(text_layer->rs.buffers[0].name, "buffer", YETTY_YRENDER__NAME_MAX - 1);
-    strncpy(text_layer->rs.buffers[0].wgsl_type, "array<u32>", YETTY_YRENDER__WGSL_TYPE_MAX - 1);
+    strncpy(text_layer->rs.buffers[0].name, "buffer", YETTY_YRENDER_NAME_MAX - 1);
+    strncpy(text_layer->rs.buffers[0].wgsl_type, "array<u32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
     text_layer->rs.buffers[0].readonly = 1;
 
     init_uniforms(&text_layer->rs);
@@ -508,6 +512,13 @@ static struct yetty_yrender_gpu_resource_set_result text_layer_get_gpu_resource_
     }
 
     return YETTY_OK(yetty_yrender_gpu_resource_set, &text_layer->rs);
+}
+
+/* Render layer to target - delegate to render_target */
+static struct yetty_ycore_void_result text_layer_render(
+    struct yetty_yterm_terminal_layer *self, struct yetty_yrender_target *target)
+{
+    return target->ops->render_layer(target, self);
 }
 
 /* VTerm callbacks */
