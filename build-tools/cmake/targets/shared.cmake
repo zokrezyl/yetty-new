@@ -350,7 +350,7 @@ function(yetty_embed_assets TARGET)
     file(RENAME "${INCBIN_CONFIG_DIR}/${CONFIG_FILENAME}" "${INCBIN_CONFIG_DIR}/config.yaml")
 
     # Embed config (not compressed)
-    incbin_add_directory(${TARGET} "config" "${INCBIN_CONFIG_DIR}" "*" FALSE)
+    incbin_add_directory(${TARGET} "yconfig" "${INCBIN_CONFIG_DIR}" "*" FALSE)
 
     # Embed shared RISC-V runtime (kernel, opensbi, rootfs) under yemu/ prefix
     # Used by both --temu (TinyEMU, in-process) and --qemu (external QEMU via telnet).

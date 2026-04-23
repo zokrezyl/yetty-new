@@ -36,7 +36,7 @@ struct yetty_incbin_assets {
 #include "yetty_data_manifest.h"
 #endif
 
-#ifdef HAS_CONFIG_MANIFEST
+#ifdef HAS_YCONFIG_MANIFEST
 #include "yetty_yconfig_manifest.h"
 #endif
 
@@ -86,8 +86,8 @@ struct yetty_incbin_assets *yetty_incbin_assets_create(void) {
   ydebug("Registered data assets from manifest");
 #endif
 
-#ifdef HAS_CONFIG_MANIFEST
-  register_config_assets_c(register_asset_callback);
+#ifdef HAS_YCONFIG_MANIFEST
+  register_yconfig_assets_c(register_asset_callback);
   ydebug("Registered config assets from manifest");
 #endif
 

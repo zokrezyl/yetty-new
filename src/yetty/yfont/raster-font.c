@@ -437,33 +437,33 @@ raster_font_finalise(struct raster_font *f, const char *shader_path)
 	}
 
 	/* GPU resource set */
-	strncpy(f->rs.namespace, "raster_font", YETTY_YRENDER__NAME_MAX - 1);
+	strncpy(f->rs.namespace, "raster_font", YETTY_YRENDER_NAME_MAX - 1);
 
 	f->rs.texture_count = 1;
 	struct yetty_yrender_texture *tex = &f->rs.textures[0];
-	strncpy(tex->name, "texture", YETTY_YRENDER__NAME_MAX - 1);
-	strncpy(tex->wgsl_type, "texture_2d<f32>", YETTY_YRENDER__WGSL_TYPE_MAX - 1);
-	strncpy(tex->sampler_name, "sampler", YETTY_YRENDER__NAME_MAX - 1);
+	strncpy(tex->name, "texture", YETTY_YRENDER_NAME_MAX - 1);
+	strncpy(tex->wgsl_type, "texture_2d<f32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
+	strncpy(tex->sampler_name, "sampler", YETTY_YRENDER_NAME_MAX - 1);
 	tex->format = WGPUTextureFormat_R8Unorm;
 	tex->sampler_filter = WGPUFilterMode_Linear;
 
 	f->rs.buffer_count = 1;
 	struct yetty_yrender_buffer *buf = &f->rs.buffers[0];
-	strncpy(buf->name, "buffer", YETTY_YRENDER__NAME_MAX - 1);
-	strncpy(buf->wgsl_type, "array<f32>", YETTY_YRENDER__WGSL_TYPE_MAX - 1);
+	strncpy(buf->name, "buffer", YETTY_YRENDER_NAME_MAX - 1);
+	strncpy(buf->wgsl_type, "array<f32>", YETTY_YRENDER_WGSL_TYPE_MAX - 1);
 	buf->readonly = 1;
 
 	f->rs.uniform_count = 3;
-	strncpy(f->rs.uniforms[0].name, "base_size", YETTY_YRENDER__NAME_MAX - 1);
-	f->rs.uniforms[0].type = YETTY_YRENDER__UNIFORM_F32;
+	strncpy(f->rs.uniforms[0].name, "base_size", YETTY_YRENDER_NAME_MAX - 1);
+	f->rs.uniforms[0].type = YETTY_YRENDER_UNIFORM_F32;
 	f->rs.uniforms[0].f32 = f->base_size;
 
-	strncpy(f->rs.uniforms[1].name, "cell_size", YETTY_YRENDER__NAME_MAX - 1);
-	f->rs.uniforms[1].type = YETTY_YRENDER__UNIFORM_U32;
+	strncpy(f->rs.uniforms[1].name, "cell_size", YETTY_YRENDER_NAME_MAX - 1);
+	f->rs.uniforms[1].type = YETTY_YRENDER_UNIFORM_U32;
 	f->rs.uniforms[1].u32 = f->cell_size;
 
-	strncpy(f->rs.uniforms[2].name, "atlas_cols", YETTY_YRENDER__NAME_MAX - 1);
-	f->rs.uniforms[2].type = YETTY_YRENDER__UNIFORM_U32;
+	strncpy(f->rs.uniforms[2].name, "atlas_cols", YETTY_YRENDER_NAME_MAX - 1);
+	f->rs.uniforms[2].type = YETTY_YRENDER_UNIFORM_U32;
 	f->rs.uniforms[2].u32 = f->atlas_cols;
 
 	yetty_yrender_shader_code_set(&f->rs.shader,
