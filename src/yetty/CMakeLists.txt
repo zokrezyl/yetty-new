@@ -176,5 +176,5 @@ if(YETTY_ENABLE_LIB_QEMU)
 endif()
 
 if(YETTY_ENABLE_FEATURE_SSH)
-    add_subdirectory(ssh)
+    add_subdirectory(yssh)
 endif()
