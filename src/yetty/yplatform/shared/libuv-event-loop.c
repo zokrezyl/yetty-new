@@ -84,6 +84,13 @@ struct prioritized_listener {
     int priority;
 };
 
+/* Single-linked queue of (fn, arg) callbacks scheduled via post_to_loop. */
+struct post_node {
+    void (*fn)(void *);
+    void *arg;
+    struct post_node *next;
+};
+
 struct libuv_event_loop {
     struct yetty_ycore_event_loop base;
     uv_loop_t *loop;
@@ -109,6 +116,12 @@ struct libuv_event_loop {
 
     uv_async_t render_async;
     int render_pending;
+
+    /* Cross-thread post-to-loop queue (drained by on_post_async). */
+    uv_async_t post_async;
+    uv_mutex_t post_mutex;
+    struct post_node *post_head;
+    struct post_node *post_tail;
 
 #ifndef _WIN32
     uv_signal_t sigint_handle;
@@ -167,6 +180,8 @@ static struct yetty_ycore_size_result libuv_tcp_send(
 static struct yetty_ycore_void_result libuv_tcp_close(
     struct yetty_tcp_conn *conn);
 static void libuv_request_render(struct yetty_ycore_event_loop *self);
+static void libuv_post_to_loop(struct yetty_ycore_event_loop *self,
+                               void (*fn)(void *), void *arg);
 
 static const struct yetty_ycore_event_loop_ops libuv_ops = {
     .destroy = libuv_destroy,
@@ -192,6 +207,7 @@ static const struct yetty_ycore_event_loop_ops libuv_ops = {
     .tcp_send = libuv_tcp_send,
     .tcp_close = libuv_tcp_close,
     .request_render = libuv_request_render,
+    .post_to_loop = libuv_post_to_loop,
 };
 
 /* Callbacks */
@@ -215,6 +231,31 @@ static void on_render_async(uv_async_t *handle)
         impl->render_pending = 0;
         event.type = YETTY_EVENT_RENDER;
         libuv_dispatch(&impl->base, &event);
+    }
+}
+
+/* Drain the post-to-loop queue. Runs on the loop thread; called whenever
+ * post_async is signalled by libuv_post_to_loop (from any thread). */
+static void on_post_async(uv_async_t *handle)
+{
+    struct libuv_event_loop *impl = handle->data;
+    struct post_node *batch;
+
+    /* Detach the whole list under the lock; invoke callbacks unlocked so
+     * they can themselves call post_to_loop without deadlocking. */
+    uv_mutex_lock(&impl->post_mutex);
+    batch = impl->post_head;
+    impl->post_head = NULL;
+    impl->post_tail = NULL;
+    uv_mutex_unlock(&impl->post_mutex);
+
+    while (batch) {
+        struct post_node *node = batch;
+        batch = node->next;
+        ydebug("on_post_async: invoking fn=%p arg=%p", (void *)node->fn, node->arg);
+        if (node->fn)
+            node->fn(node->arg);
+        free(node);
     }
 }
 
@@ -290,9 +331,18 @@ static void libuv_destroy(struct yetty_ycore_event_loop *self)
     uv_close((uv_handle_t *)&impl->sigterm_handle, NULL);
 #endif
     uv_close((uv_handle_t *)&impl->render_async, NULL);
+    uv_close((uv_handle_t *)&impl->post_async, NULL);
 
     if (impl->input_pipe_active)
         uv_close((uv_handle_t *)&impl->input_pipe, NULL);
+
+    /* Drain any leftover post-queue nodes. */
+    while (impl->post_head) {
+        struct post_node *node = impl->post_head;
+        impl->post_head = node->next;
+        free(node);
+    }
+    uv_mutex_destroy(&impl->post_mutex);
 
     free(impl);
 }
@@ -573,6 +623,36 @@ static void libuv_request_render(struct yetty_ycore_event_loop *self)
     ydebug("libuv_request_render: setting render_pending=1");
     impl->render_pending = 1;
     uv_async_send(&impl->render_async);
+}
+
+/* Thread-safe: append (fn, arg) to the post queue and wake the loop. */
+static void libuv_post_to_loop(struct yetty_ycore_event_loop *self,
+                               void (*fn)(void *), void *arg)
+{
+    struct libuv_event_loop *impl = container_of(self, struct libuv_event_loop, base);
+    struct post_node *node;
+
+    if (!fn)
+        return;
+
+    node = malloc(sizeof(struct post_node));
+    if (!node) {
+        ywarn("libuv_post_to_loop: malloc failed, dropping callback");
+        return;
+    }
+    node->fn = fn;
+    node->arg = arg;
+    node->next = NULL;
+
+    uv_mutex_lock(&impl->post_mutex);
+    if (impl->post_tail)
+        impl->post_tail->next = node;
+    else
+        impl->post_head = node;
+    impl->post_tail = node;
+    uv_mutex_unlock(&impl->post_mutex);
+
+    uv_async_send(&impl->post_async);
 }
 
 /* TCP Server & Client */
@@ -1002,6 +1082,11 @@ struct yetty_ycore_event_loop_result yetty_ycore_event_loop_create(
     /* Render async */
     impl->render_async.data = impl;
     uv_async_init(impl->loop, &impl->render_async, on_render_async);
+
+    /* Post-to-loop machinery (used by the GPU poll thread to resume coros). */
+    impl->post_async.data = impl;
+    uv_async_init(impl->loop, &impl->post_async, on_post_async);
+    uv_mutex_init(&impl->post_mutex);
 
 #ifndef _WIN32
     /* Signal handlers (Unix only) */

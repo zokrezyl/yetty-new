@@ -17,6 +17,7 @@ option(YETTY_ENABLE_LIB_INCBIN      "incbin — binary embedding"             ON
 option(YETTY_ENABLE_LIB_ARGS        "args — command line parser"             ON)
 option(YETTY_ENABLE_LIB_LZ4         "lz4 — compression"                     OFF)
 option(YETTY_ENABLE_LIB_LIBUV       "libuv — event loop"                    ON)
+option(YETTY_ENABLE_LIB_LIBCO       "libco — stackful coroutines"           ON)
 option(YETTY_ENABLE_LIB_GLM         "glm — math"                            OFF)
 option(YETTY_ENABLE_LIB_STB         "stb — image loading"                   OFF)
 option(YETTY_ENABLE_LIB_YAML_CPP    "yaml-cpp — config parsing (C++)"       OFF)

@@ -48,6 +48,8 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-window.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-clipboard-manager.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/ycoroutine.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/ywebgpu.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/fork-pty.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pty-factory.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pipe.c
@@ -143,6 +145,7 @@ target_link_libraries(yetty PRIVATE
     $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:tinyemu>
     $<$<BOOL:${YETTY_ENABLE_LIB_QEMU}>:yetty_qemu>
     yetty_telnet
+    yetty_yco
     rt
     util
 )

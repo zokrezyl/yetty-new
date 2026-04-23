@@ -164,6 +164,13 @@ struct yetty_ycore_event_loop_ops {
         struct yetty_tcp_conn *conn);
 
     void (*request_render)(struct yetty_ycore_event_loop *self);
+
+    /* Schedule fn(arg) to run on the loop thread. Thread-safe — may be
+     * called from any thread, including the loop thread itself. The order
+     * of dispatch matches submission order. Used by the GPU poll thread to
+     * resume coroutines on the loop after wgpu callbacks fire. */
+    void (*post_to_loop)(struct yetty_ycore_event_loop *self,
+                         void (*fn)(void *), void *arg);
 };
 
 /* Event loop base */
