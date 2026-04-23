@@ -4,6 +4,7 @@
 #include <yetty/platform/pty-factory.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/types.h>
+#include <yetty/ytrace.h>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -255,6 +256,16 @@ static struct yetty_yplatform_pty_result win_conpty_create(struct yetty_yconfig 
     /* Create pseudo console */
     size.X = (SHORT)pty->cols;
     size.Y = (SHORT)pty->rows;
+
+    /* Detach from any inherited parent console BEFORE creating the ConPTY.
+     * Without this, cmd.exe's std handles fall back to the parent console
+     * (e.g. a shell that launched yetty), bypassing PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE. */
+    {
+        HWND parent_console = GetConsoleWindow();
+        BOOL freed = FreeConsole();
+        ydebug("win_conpty_create: parent_console=%p FreeConsole=%d",
+               (void *)parent_console, (int)freed);
+    }
 
     hr = CreatePseudoConsole(size, pipe_pty_in, pipe_pty_out, 0, &pty->hpc);
     CloseHandle(pipe_pty_in);

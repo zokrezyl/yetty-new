@@ -73,14 +73,33 @@ static void terminal_pty_pipe_read(void *ctx, const char *buf, long nread) {
   struct yetty_yterm_terminal *terminal = ctx;
 
   if (nread > 0 && terminal->pty_reader) {
+    /* Dump first/last bytes as hex+ascii to see what ConPTY sent */
+    char hex[512] = {0};
+    char asc[256] = {0};
+    size_t dump_n = nread > 80 ? 80 : (size_t)nread;
+    size_t hoff = 0, aoff = 0;
+    for (size_t i = 0; i < dump_n; i++) {
+      unsigned char c = (unsigned char)buf[i];
+      if (hoff + 4 < sizeof(hex))
+        hoff += (size_t)snprintf(hex + hoff, sizeof(hex) - hoff, "%02x ", c);
+      if (aoff + 2 < sizeof(asc))
+        asc[aoff++] = (c >= 0x20 && c < 0x7f) ? (char)c : '.';
+    }
+    ydebug("terminal_pty_pipe_read: nread=%ld dump=[%s] ascii=[%s]",
+           nread, hex, asc);
     yetty_yterm_pty_reader_feed(terminal->pty_reader, buf, (size_t)nread);
     if (terminal->layer_count > 0) {
       struct yetty_yterm_terminal_layer *layer = terminal->layers[0];
+      ydebug("terminal_pty_pipe_read: after feed layer=%p dirty=%d",
+             (void *)layer, layer ? layer->dirty : -1);
       if (layer && layer->dirty) {
         terminal->context.yetty_context.event_loop->ops->request_render(
             terminal->context.yetty_context.event_loop);
       }
     }
+  } else {
+    ydebug("terminal_pty_pipe_read: skipped (nread=%ld pty_reader=%p)",
+           nread, (void *)(terminal ? terminal->pty_reader : NULL));
   }
 }
 

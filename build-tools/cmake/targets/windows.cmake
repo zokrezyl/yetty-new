@@ -1,5 +1,9 @@
 # Windows desktop build target
 
+# Disable RISC-V emulator integrations on Windows — no toolchain wired up.
+set(YETTY_ENABLE_LIB_TINYEMU OFF CACHE BOOL "" FORCE)
+set(YETTY_ENABLE_LIB_QEMU OFF CACHE BOOL "" FORCE)
+
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
 # Windows-specific libraries (guarded by variables.cmake)

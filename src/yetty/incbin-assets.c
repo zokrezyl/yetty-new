@@ -390,8 +390,7 @@ int yetty_incbin_assets_extract_yemu_to(struct yetty_incbin_assets *assets,
   snprintf(rootfs_tar, sizeof(rootfs_tar), "%s/alpine-rootfs.tar", yemu_dir);
   snprintf(rootfs_dir, sizeof(rootfs_dir), "%s/alpine-rootfs", yemu_dir);
 
-  struct stat st;
-  if (stat(rootfs_tar, &st) == 0) {
+  if (yplatform_file_exists(rootfs_tar)) {
     ydebug("extract_yemu_to: extracting rootfs tarball");
     if (!extract_tarball(rootfs_tar, rootfs_dir)) {
       ydebug("Failed to extract rootfs tarball");

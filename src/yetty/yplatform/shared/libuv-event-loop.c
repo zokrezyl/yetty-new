@@ -301,7 +301,8 @@ static void on_pty_pipe_alloc(uv_handle_t *handle, size_t suggested_size, uv_buf
 static void on_pty_pipe_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
 {
     struct pty_pipe_handle *ph = stream->data;
-    ydebug("on_pty_pipe_read: nread=%zd", nread);
+    ydebug("on_pty_pipe_read: nread=%zd buf_base=%p buf_len=%zu",
+           nread, (void *)(buf ? buf->base : NULL), (size_t)(buf ? buf->len : 0));
     ph->read_cb(ph->cb_ctx, buf->base, (long)nread);
 }
 

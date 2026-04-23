@@ -160,6 +160,9 @@ endif()
 # Add src/yetty (populates YETTY_SOURCES, YETTY_CORE_SOURCES, builds feature libraries)
 add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
 
+# Vendored portable getopt/getopt_long (shared by all platforms)
+list(APPEND YETTY_SOURCES ${YETTY_ROOT}/src/yetty/yplatform/getopt.c)
+
 # Unit tests (opt-in)
 if(YETTY_ENABLE_FEATURE_TESTS)
     enable_testing()
