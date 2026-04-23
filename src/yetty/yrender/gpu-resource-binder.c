@@ -325,13 +325,13 @@ static struct yetty_ycore_void_result create_atlas(struct gpu_resource_binder_im
 /* Create GPU resources */
 static struct yetty_ycore_void_result create_gpu_resources(struct gpu_resource_binder_impl *impl)
 {
-    /* Storage buffer */
-    if (impl->storage_buffer_size > 0) {
+    /* Storage buffer - create even if size is 0 when buffers are declared (placeholder for bind group) */
+    if (impl->flat_buffer_count > 0) {
         char label[] = "storage_buffer";
         WGPUBufferDescriptor desc = {0};
         desc.label.data = label;
         desc.label.length = sizeof(label) - 1;
-        desc.size = impl->storage_buffer_size;
+        desc.size = impl->storage_buffer_size > 0 ? impl->storage_buffer_size : 4;  /* min 4 bytes */
         desc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopyDst;
         impl->storage_buffer = impl->allocator->ops->create_buffer(impl->allocator, &desc);
         if (!impl->storage_buffer)
@@ -446,13 +446,13 @@ static struct yetty_ycore_void_result upload_all(struct gpu_resource_binder_impl
             size_t sz = yetty_yrender_uniform_type_size(u->type);
             if (offset + sz > sizeof(packed)) break;
             memcpy(packed + offset, &u->f32, sz);  /* union starts at f32 */
-            if (u->type == YETTY_YRENDER__UNIFORM_VEC2)
+            if (u->type == YETTY_YRENDER_UNIFORM_VEC2)
                 ydebug("GpuResourceBinder: uniform[%zu] '%s_%s' vec2(%.1f, %.1f) at offset %zu",
                        i, impl->flat_uniforms[i].ns, u->name, u->vec2[0], u->vec2[1], offset);
-            else if (u->type == YETTY_YRENDER__UNIFORM_F32)
+            else if (u->type == YETTY_YRENDER_UNIFORM_F32)
                 ydebug("GpuResourceBinder: uniform[%zu] '%s_%s' f32=%.3f at offset %zu",
                        i, impl->flat_uniforms[i].ns, u->name, u->f32, offset);
-            else if (u->type == YETTY_YRENDER__UNIFORM_U32)
+            else if (u->type == YETTY_YRENDER_UNIFORM_U32)
                 ydebug("GpuResourceBinder: uniform[%zu] '%s_%s' u32=0x%08x at offset %zu",
                        i, impl->flat_uniforms[i].ns, u->name, u->u32, offset);
             offset += sz;
@@ -499,8 +499,8 @@ static void generate_wgsl_bindings(struct gpu_resource_binder_impl *impl, char *
         if (n > 0 && (size_t)n < rem) { p += n; rem -= n; }
     }
 
-    /* Storage buffer */
-    if (impl->storage_buffer_size > 0) {
+    /* Storage buffer - declare if any buffers exist (even if size is 0 during pipeline compilation) */
+    if (impl->flat_buffer_count > 0) {
         n = snprintf(p, rem, "@group(0) @binding(%u) var<storage, read> storage_buffer: array<u32>;\n", binding++);
         if (n > 0 && (size_t)n < rem) { p += n; rem -= n; }
 
@@ -595,7 +595,7 @@ static struct yetty_ycore_void_result create_bind_group(struct gpu_resource_bind
         memset(ge, 0, sizeof(*ge));
         ge->binding = binding;
         ge->buffer = impl->storage_buffer;
-        ge->size = impl->storage_buffer_size;
+        ge->size = impl->storage_buffer_size > 0 ? impl->storage_buffer_size : 4;
         count++; binding++;
     }
 
@@ -788,23 +788,17 @@ static struct yetty_ycore_void_result binder_submit(struct yetty_yrender_gpu_res
 {
     struct gpu_resource_binder_impl *impl = (struct gpu_resource_binder_impl *)self;
 
-    /* Don't re-add if already in list (idempotent) */
-    for (size_t i = 0; i < impl->resource_set_count; i++) {
-        if (impl->resource_sets[i] == rs)
-            return YETTY_OK_VOID();
+    /* Don't re-add if already submitted (idempotent) */
+    if (impl->submitted) {
+        for (size_t i = 0; i < impl->resource_set_count; i++) {
+            if (impl->resource_sets[i] == rs)
+                return YETTY_OK_VOID();
+        }
     }
 
-    if (impl->resource_set_count >= MAX_RESOURCE_SETS) {
-        ydebug("binder_submit OVERFLOW binder=%p rs=%p submitted=%d existing:",
-               (void *)impl, (void *)rs, impl->submitted);
-        for (size_t i = 0; i < impl->resource_set_count; i++)
-            ydebug("  [%zu] = %p", i, (void *)impl->resource_sets[i]);
+    if (impl->resource_set_count >= MAX_RESOURCE_SETS)
         return YETTY_ERR(yetty_ycore_void, "max resource sets reached");
-    }
 
-    ydebug("binder_submit APPEND binder=%p rs=%p submitted=%d count=%zu->%zu",
-           (void *)impl, (void *)rs, impl->submitted,
-           impl->resource_set_count, impl->resource_set_count + 1);
     impl->resource_sets[impl->resource_set_count++] = (struct yetty_yrender_gpu_resource_set *)rs;
     return YETTY_OK_VOID();
 }
@@ -813,8 +807,11 @@ static struct yetty_ycore_void_result binder_finalize(struct yetty_yrender_gpu_r
 {
     struct gpu_resource_binder_impl *impl = (struct gpu_resource_binder_impl *)self;
 
-    if (impl->finalized)
+    if (impl->finalized) {
+        ydebug("GpuResourceBinder: finalize CACHE HIT (already finalized)");
         return YETTY_OK_VOID();
+    }
+    ydebug("GpuResourceBinder: finalize CACHE MISS - rebuilding pipeline");
 
     /* Release old GPU resources if re-finalizing */
     if (impl->pipeline) { wgpuRenderPipelineRelease(impl->pipeline); impl->pipeline = NULL; }
@@ -906,7 +903,8 @@ static struct yetty_ycore_void_result binder_update(struct yetty_yrender_gpu_res
     for (size_t i = 0; i < impl->resource_set_count; i++)
         current_hash ^= compute_tree_shader_hash(impl->resource_sets[i]);
     if (current_hash != impl->last_shader_hash) {
-        ydebug("GpuResourceBinder: shader hash changed");
+        ydebug("GpuResourceBinder: shader hash changed 0x%llx -> 0x%llx",
+               (unsigned long long)impl->last_shader_hash, (unsigned long long)current_hash);
         need_refinalize = 1;
     }
 
@@ -939,11 +937,12 @@ static struct yetty_ycore_void_result binder_update(struct yetty_yrender_gpu_res
     }
 
     if (need_refinalize) {
-        ydebug("GpuResourceBinder: structural change, re-finalizing");
+        ydebug("GpuResourceBinder: update CACHE MISS - structural change, re-finalizing");
         impl->finalized = 0;
         return binder_finalize(self);
     }
 
+    ydebug("GpuResourceBinder: update CACHE HIT - no structural change");
     /* No structural change — upload only dirty resources */
     int any_dirty = 0;
 

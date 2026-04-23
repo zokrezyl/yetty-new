@@ -1,5 +1,5 @@
-#ifndef YETTY_YRENDER__LAYER_RENDERER_H
-#define YETTY_YRENDER__LAYER_RENDERER_H
+#ifndef YETTY_YRENDER_LAYER_RENDERER_H
+#define YETTY_YRENDER_LAYER_RENDERER_H
 
 #include <yetty/ycore/result.h>
 #include <yetty/yrender/gpu-resource-set.h>
@@ -38,4 +38,4 @@ struct yetty_yrender_layer_renderer_result yetty_yrender_layer_renderer_surface_
 }
 #endif
 
-#endif /* YETTY_YRENDER__LAYER_RENDERER_H */
+#endif /* YETTY_YRENDER_LAYER_RENDERER_H */

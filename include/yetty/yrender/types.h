@@ -1,5 +1,5 @@
-#ifndef YETTY_YRENDER__TYPES_H
-#define YETTY_YRENDER__TYPES_H
+#ifndef YETTY_YRENDER_TYPES_H
+#define YETTY_YRENDER_TYPES_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -8,16 +8,16 @@
 extern "C" {
 #endif
 
-#define YETTY_YRENDER__NAME_MAX 64
-#define YETTY_YRENDER__WGSL_TYPE_MAX 64
+#define YETTY_YRENDER_NAME_MAX 64
+#define YETTY_YRENDER_WGSL_TYPE_MAX 64
 
 /* Storage buffer */
 struct yetty_yrender_buffer {
     uint8_t *data;
     size_t size;
     size_t capacity;
-    char name[YETTY_YRENDER__NAME_MAX];
-    char wgsl_type[YETTY_YRENDER__WGSL_TYPE_MAX];
+    char name[YETTY_YRENDER_NAME_MAX];
+    char wgsl_type[YETTY_YRENDER_WGSL_TYPE_MAX];
     int readonly;
     int dirty;
 };
@@ -28,27 +28,27 @@ struct yetty_yrender_texture {
     uint32_t width;
     uint32_t height;
     uint32_t format;          /* WGPUTextureFormat */
-    char name[YETTY_YRENDER__NAME_MAX];
-    char wgsl_type[YETTY_YRENDER__WGSL_TYPE_MAX];
-    char sampler_name[YETTY_YRENDER__NAME_MAX];
+    char name[YETTY_YRENDER_NAME_MAX];
+    char wgsl_type[YETTY_YRENDER_WGSL_TYPE_MAX];
+    char sampler_name[YETTY_YRENDER_NAME_MAX];
     uint32_t sampler_filter;  /* WGPUFilterMode */
     int dirty;
 };
 
 /* Uniform value types */
 enum yetty_yrender_uniform_type {
-    YETTY_YRENDER__UNIFORM_F32,
-    YETTY_YRENDER__UNIFORM_VEC2,
-    YETTY_YRENDER__UNIFORM_VEC3,
-    YETTY_YRENDER__UNIFORM_VEC4,
-    YETTY_YRENDER__UNIFORM_MAT4,
-    YETTY_YRENDER__UNIFORM_U32,
-    YETTY_YRENDER__UNIFORM_I32,
+    YETTY_YRENDER_UNIFORM_F32,
+    YETTY_YRENDER_UNIFORM_VEC2,
+    YETTY_YRENDER_UNIFORM_VEC3,
+    YETTY_YRENDER_UNIFORM_VEC4,
+    YETTY_YRENDER_UNIFORM_MAT4,
+    YETTY_YRENDER_UNIFORM_U32,
+    YETTY_YRENDER_UNIFORM_I32,
 };
 
 /* Uniform: named typed scalar/vector/matrix value */
 struct yetty_yrender_uniform {
-    char name[YETTY_YRENDER__NAME_MAX];
+    char name[YETTY_YRENDER_NAME_MAX];
     enum yetty_yrender_uniform_type type;
     union {
         float f32;
@@ -95,4 +95,4 @@ size_t yetty_yrender_texture_get_size(const struct yetty_yrender_texture *textur
 }
 #endif
 
-#endif /* YETTY_YRENDER__TYPES_H */
+#endif /* YETTY_YRENDER_TYPES_H */

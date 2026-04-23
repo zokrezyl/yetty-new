@@ -1,7 +1,7 @@
 // YSDF primitive handler for buffer iteration
 #pragma once
 
-#include <yetty/ypaint-core/buffer.h>
+#include <yetty/ypaint-core/flyweight.h>
 #include <yetty/ysdf/types.gen.h>
 
 #ifdef __cplusplus
@@ -24,20 +24,28 @@ yetty_ysdf_prim_aabb(const uint32_t *prim) {
   return yetty_ysdf_compute_aabb((const float *)prim, word_count);
 }
 
-static const struct yetty_ypaint_prim_ops yetty_ysdf_prim_ops = {
+// Base ops for SDF primitives (size, aabb only)
+static const struct yetty_ypaint_prim_base_ops yetty_ysdf_prim_base_ops = {
     .size = yetty_ysdf_prim_size,
     .aabb = yetty_ysdf_prim_aabb,
+};
+
+// Extended ops for SDF primitives (includes base + destroy + get_gpu_resource_set)
+static const struct yetty_ypaint_prim_ops yetty_ysdf_prim_ops = {
+    .base = {
+        .size = yetty_ysdf_prim_size,
+        .aabb = yetty_ysdf_prim_aabb,
+    },
     .destroy = NULL,              // SDF prims have no cached data
     .get_gpu_resource_set = NULL, // SDF prims rendered by main shader
 };
 
-static inline struct yetty_ypaint_prim_flyweight
-yetty_ysdf_handler(const uint32_t *prim) {
-  uint32_t type = prim[0];
-  if (type < 256 && yetty_ysdf_primitive_size(type) > 0)
-    return (struct yetty_ypaint_prim_flyweight){.data = prim,
-                                                .ops = &yetty_ysdf_prim_ops};
-  return (struct yetty_ypaint_prim_flyweight){.data = NULL, .ops = NULL};
+// Handler returns base ops (for flyweight registry)
+static inline struct yetty_ypaint_prim_base_ops_ptr_result
+yetty_ysdf_handler(uint32_t prim_type) {
+  if (prim_type < 256 && yetty_ysdf_primitive_size(prim_type) > 0)
+    return YETTY_OK(yetty_ypaint_prim_base_ops_ptr, &yetty_ysdf_prim_base_ops);
+  return YETTY_ERR(yetty_ypaint_prim_base_ops_ptr, "not an SDF type");
 }
 
 #ifdef __cplusplus

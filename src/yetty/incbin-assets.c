@@ -37,7 +37,7 @@ struct yetty_incbin_assets {
 #endif
 
 #ifdef HAS_CONFIG_MANIFEST
-#include "yetty_config_manifest.h"
+#include "yetty_yconfig_manifest.h"
 #endif
 
 #ifdef HAS_YEMU_MANIFEST

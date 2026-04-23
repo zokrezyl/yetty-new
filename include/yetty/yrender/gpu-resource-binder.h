@@ -1,5 +1,5 @@
-#ifndef YETTY_YRENDER__GPU_RESOURCE_BINDER_H
-#define YETTY_YRENDER__GPU_RESOURCE_BINDER_H
+#ifndef YETTY_YRENDER_GPU_RESOURCE_BINDER_H
+#define YETTY_YRENDER_GPU_RESOURCE_BINDER_H
 
 #include <yetty/ycore/result.h>
 #include <yetty/yrender/gpu-resource-set.h>
@@ -40,4 +40,4 @@ struct yetty_yrender_gpu_resource_binder_result yetty_yrender_gpu_resource_binde
 }
 #endif
 
-#endif /* YETTY_YRENDER__GPU_RESOURCE_BINDER_H */
+#endif /* YETTY_YRENDER_GPU_RESOURCE_BINDER_H */

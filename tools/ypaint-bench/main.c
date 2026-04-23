@@ -7,6 +7,26 @@
 #include <string.h>
 #include <time.h>
 
+// Complex primitive type for yplot
+#define YETTY_YPAINT_TYPE_YPLOT 0x80000003u
+
+// yfsvm constants
+#define YFSVM_MAGIC       0x5946534Du
+#define YFSVM_VERSION     1u
+#define YFSVM_MAX_FUNCTIONS 16u
+
+// yfsvm opcodes
+#define YFSVM_OP_RET      0x01
+#define YFSVM_OP_LOAD_X   0x03
+#define YFSVM_OP_MUL      0x12
+#define YFSVM_OP_SIN      0x20
+#define YFSVM_OP_COS      0x21
+
+// Encode yfsvm instruction
+static inline uint32_t yfsvm_encode(uint8_t op, uint8_t dst, uint8_t src1, uint8_t src2, uint16_t imm12) {
+    return ((uint32_t)op << 24) | ((dst & 0xF) << 20) | ((src1 & 0xF) << 16) | ((src2 & 0xF) << 12) | (imm12 & 0xFFF);
+}
+
 // SDF primitive types (from ypaint-sdf-types.gen.h)
 enum ypaint_sdf_type {
     YPAINT_SDF_CIRCLE = 0,
@@ -188,6 +208,102 @@ static uint32_t gen_primitive(float *buf, float scene_w, float scene_h) {
     return word_count;
 }
 
+// Default colors for plot functions
+static const uint32_t PLOT_COLORS[] = {
+    0xFF0000FF, // Red
+    0xFF00FF00, // Green
+    0xFFFF0000, // Blue
+    0xFF00FFFF, // Cyan
+    0xFFFF00FF, // Magenta
+    0xFFFFFF00, // Yellow
+    0xFFFF8000, // Orange
+    0xFF8000FF, // Purple
+};
+
+// Generate yplot primitive into buffer, returns bytes written
+static uint32_t gen_yplot(uint8_t *buf, float scene_w, float scene_h, int func_count) {
+    (void)scene_w;
+    (void)scene_h;
+    uint32_t *u32buf = (uint32_t *)buf;
+    float *fbuf = (float *)buf;
+    uint32_t pos = 0;
+
+    // FAM header: type, payload_size (filled in later)
+    u32buf[pos++] = YETTY_YPAINT_TYPE_YPLOT;
+    uint32_t payload_size_pos = pos++;
+
+    // Wire format starts here
+    uint32_t wire_start = pos;
+
+    // Bounds (float)
+    fbuf[pos++] = 50.0f;   // bounds_x
+    fbuf[pos++] = 50.0f;   // bounds_y
+    fbuf[pos++] = 400.0f;  // bounds_w
+    fbuf[pos++] = 200.0f;  // bounds_h
+
+    // Flags
+    u32buf[pos++] = 0x07;  // grid | axes | functions
+
+    // Function count
+    if (func_count < 1) func_count = 1;
+    if (func_count > 8) func_count = 8;
+    u32buf[pos++] = (uint32_t)func_count;
+
+    // Colors[8]
+    for (int i = 0; i < 8; i++) {
+        u32buf[pos++] = (i < func_count) ? PLOT_COLORS[i] : 0;
+    }
+
+    // Bytecode
+    // Header: magic, version, func_count, const_count
+    uint32_t bc_pos = 0;
+    uint32_t bytecode[256];
+
+    bytecode[bc_pos++] = YFSVM_MAGIC;
+    bytecode[bc_pos++] = YFSVM_VERSION;
+    bytecode[bc_pos++] = (uint32_t)func_count;
+    bytecode[bc_pos++] = 0;  // const_count = 0
+
+    // Function table: packed (length:16 | offset:16) for each function
+    for (int i = 0; i < (int)YFSVM_MAX_FUNCTIONS; i++) {
+        if (i < func_count) {
+            // Each function has 3 instructions: LOAD_X, op, RET
+            uint32_t offset = i * 3;
+            uint32_t length = 3;
+            bytecode[bc_pos++] = (length << 16) | offset;
+        } else {
+            bytecode[bc_pos++] = 0;
+        }
+    }
+
+    // Code starts after header (4) + function table (YFSVM_MAX_FUNCTIONS)
+    // bc_pos is already at the right position after function table
+    for (int i = 0; i < func_count; i++) {
+        // r1 = x
+        bytecode[bc_pos++] = yfsvm_encode(YFSVM_OP_LOAD_X, 1, 0, 0, 0);
+        // r0 = sin(r1) or cos(r1) depending on function index
+        if (i % 2 == 0) {
+            bytecode[bc_pos++] = yfsvm_encode(YFSVM_OP_SIN, 0, 1, 0, 0);
+        } else {
+            bytecode[bc_pos++] = yfsvm_encode(YFSVM_OP_COS, 0, 1, 0, 0);
+        }
+        // ret
+        bytecode[bc_pos++] = yfsvm_encode(YFSVM_OP_RET, 0, 0, 0, 0);
+    }
+
+    // Write bytecode_word_count and bytecode
+    u32buf[pos++] = bc_pos;  // bytecode_word_count
+    for (uint32_t i = 0; i < bc_pos; i++) {
+        u32buf[pos++] = bytecode[i];
+    }
+
+    // Fill in payload_size (in bytes, not words)
+    uint32_t payload_words = pos - wire_start;
+    u32buf[payload_size_pos] = payload_words * 4;
+
+    return pos * 4;  // return bytes
+}
+
 // Buffer for primitives
 #define MAX_BUFFER_SIZE (1024 * 1024) // 1MB
 static float g_buffer[MAX_BUFFER_SIZE / sizeof(float)];
@@ -198,7 +314,9 @@ int main(int argc, char **argv) {
     float scene_w = 800.0f;
     float scene_h = 600.0f;
     int loop_count = 1;  // 1 = single run, -1 = infinite, >1 = N iterations
-    int delay_ms = 16; // ~60fps
+    int delay_ms = 16;   // ~60fps
+    int plot_count = 0;  // Number of plots to generate (0 = SDF mode)
+    int plot_funcs = 2;  // Number of functions per plot
 
     // Parse args
     for (int i = 1; i < argc; i++) {
@@ -210,6 +328,15 @@ int main(int argc, char **argv) {
             scene_w = atof(argv[++i]);
         else if (strcmp(argv[i], "-h") == 0 && i + 1 < argc)
             scene_h = atof(argv[++i]);
+        else if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--plot") == 0) {
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                plot_count = atoi(argv[++i]);
+            } else {
+                plot_count = 1;
+            }
+        }
+        else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc)
+            plot_funcs = atoi(argv[++i]);
         else if (strcmp(argv[i], "-l") == 0 || strcmp(argv[i], "--loop") == 0) {
             if (i + 1 < argc && argv[i + 1][0] != '-') {
                 loop_count = atoi(argv[++i]);
@@ -223,7 +350,9 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--help") == 0) {
             fprintf(stderr,
                     "Usage: %s [options]\n"
-                    "  -n <count>  Number of primitives (default: 100)\n"
+                    "  -n <count>  Number of SDF primitives (default: 100)\n"
+                    "  -p [count]  Generate plots instead of SDF (default: 1 if no count)\n"
+                    "  -f <funcs>  Functions per plot (default: 2, max: 8)\n"
                     "  -s <seed>   Random seed (default: time-based)\n"
                     "  -w <width>  Scene width (default: 800)\n"
                     "  -h <height> Scene height (default: 600)\n"
@@ -237,16 +366,30 @@ int main(int argc, char **argv) {
     g_rng_state = seed ? seed : (uint64_t)time(NULL);
 
     do {
-        // Generate primitives
-        uint32_t total_words = 0;
-        for (uint32_t i = 0; i < count; i++) {
-            if (total_words >= MAX_BUFFER_SIZE / sizeof(float) - 20)
-                break;
-            total_words += gen_primitive(&g_buffer[total_words], scene_w, scene_h);
+        size_t raw_bytes;
+
+        if (plot_count > 0) {
+            // Generate plots
+            uint8_t *bytebuf = (uint8_t *)g_buffer;
+            uint32_t total_bytes = 0;
+            for (int i = 0; i < plot_count; i++) {
+                if (total_bytes >= MAX_BUFFER_SIZE - 1024)
+                    break;
+                total_bytes += gen_yplot(&bytebuf[total_bytes], scene_w, scene_h, plot_funcs);
+            }
+            raw_bytes = total_bytes;
+        } else {
+            // Generate SDF primitives
+            uint32_t total_words = 0;
+            for (uint32_t i = 0; i < count; i++) {
+                if (total_words >= MAX_BUFFER_SIZE / sizeof(float) - 20)
+                    break;
+                total_words += gen_primitive(&g_buffer[total_words], scene_w, scene_h);
+            }
+            raw_bytes = total_words * sizeof(float);
         }
 
         // Base64 encode
-        size_t raw_bytes = total_words * sizeof(float);
         size_t b64_cap = (raw_bytes + 2) / 3 * 4 + 1;
         char *b64 = malloc(b64_cap);
         if (!b64) {

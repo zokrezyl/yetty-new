@@ -1,5 +1,5 @@
-#ifndef YETTY_YRENDER__RENDERED_LAYER_H
-#define YETTY_YRENDER__RENDERED_LAYER_H
+#ifndef YETTY_YRENDER_RENDERED_LAYER_H
+#define YETTY_YRENDER_RENDERED_LAYER_H
 
 #include <stdint.h>
 #include <yetty/ycore/result.h>
@@ -43,4 +43,4 @@ struct yetty_yrender_rendered_layer_result yetty_yrender_rendered_layer_wrap(
 }
 #endif
 
-#endif /* YETTY_YRENDER__RENDERED_LAYER_H */
+#endif /* YETTY_YRENDER_RENDERED_LAYER_H */

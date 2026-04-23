@@ -89,13 +89,13 @@ size_t yetty_yrender_texture_get_size(const struct yetty_yrender_texture *textur
 const char *yetty_yrender_uniform_type_wgsl(enum yetty_yrender_uniform_type type)
 {
     switch (type) {
-    case YETTY_YRENDER__UNIFORM_F32:  return "f32";
-    case YETTY_YRENDER__UNIFORM_VEC2: return "vec2<f32>";
-    case YETTY_YRENDER__UNIFORM_VEC3: return "vec3<f32>";
-    case YETTY_YRENDER__UNIFORM_VEC4: return "vec4<f32>";
-    case YETTY_YRENDER__UNIFORM_MAT4: return "mat4x4<f32>";
-    case YETTY_YRENDER__UNIFORM_U32:  return "u32";
-    case YETTY_YRENDER__UNIFORM_I32:  return "i32";
+    case YETTY_YRENDER_UNIFORM_F32:  return "f32";
+    case YETTY_YRENDER_UNIFORM_VEC2: return "vec2<f32>";
+    case YETTY_YRENDER_UNIFORM_VEC3: return "vec3<f32>";
+    case YETTY_YRENDER_UNIFORM_VEC4: return "vec4<f32>";
+    case YETTY_YRENDER_UNIFORM_MAT4: return "mat4x4<f32>";
+    case YETTY_YRENDER_UNIFORM_U32:  return "u32";
+    case YETTY_YRENDER_UNIFORM_I32:  return "i32";
     default:                        return "f32";
     }
 }
@@ -103,13 +103,13 @@ const char *yetty_yrender_uniform_type_wgsl(enum yetty_yrender_uniform_type type
 size_t yetty_yrender_uniform_type_size(enum yetty_yrender_uniform_type type)
 {
     switch (type) {
-    case YETTY_YRENDER__UNIFORM_F32:  return 4;
-    case YETTY_YRENDER__UNIFORM_VEC2: return 8;
-    case YETTY_YRENDER__UNIFORM_VEC3: return 12;
-    case YETTY_YRENDER__UNIFORM_VEC4: return 16;
-    case YETTY_YRENDER__UNIFORM_MAT4: return 64;
-    case YETTY_YRENDER__UNIFORM_U32:  return 4;
-    case YETTY_YRENDER__UNIFORM_I32:  return 4;
+    case YETTY_YRENDER_UNIFORM_F32:  return 4;
+    case YETTY_YRENDER_UNIFORM_VEC2: return 8;
+    case YETTY_YRENDER_UNIFORM_VEC3: return 12;
+    case YETTY_YRENDER_UNIFORM_VEC4: return 16;
+    case YETTY_YRENDER_UNIFORM_MAT4: return 64;
+    case YETTY_YRENDER_UNIFORM_U32:  return 4;
+    case YETTY_YRENDER_UNIFORM_I32:  return 4;
     default:                        return 4;
     }
 }
@@ -119,13 +119,13 @@ size_t yetty_yrender_uniform_type_size(enum yetty_yrender_uniform_type type)
 size_t yetty_yrender_uniform_type_align(enum yetty_yrender_uniform_type type)
 {
     switch (type) {
-    case YETTY_YRENDER__UNIFORM_F32:  return 4;
-    case YETTY_YRENDER__UNIFORM_VEC2: return 8;
-    case YETTY_YRENDER__UNIFORM_VEC3: return 16;
-    case YETTY_YRENDER__UNIFORM_VEC4: return 16;
-    case YETTY_YRENDER__UNIFORM_MAT4: return 16;
-    case YETTY_YRENDER__UNIFORM_U32:  return 4;
-    case YETTY_YRENDER__UNIFORM_I32:  return 4;
+    case YETTY_YRENDER_UNIFORM_F32:  return 4;
+    case YETTY_YRENDER_UNIFORM_VEC2: return 8;
+    case YETTY_YRENDER_UNIFORM_VEC3: return 16;
+    case YETTY_YRENDER_UNIFORM_VEC4: return 16;
+    case YETTY_YRENDER_UNIFORM_MAT4: return 16;
+    case YETTY_YRENDER_UNIFORM_U32:  return 4;
+    case YETTY_YRENDER_UNIFORM_I32:  return 4;
     default:                        return 4;
     }
 }

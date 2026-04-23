@@ -1,5 +1,5 @@
-#ifndef YETTY_YRENDER__BLENDER_H
-#define YETTY_YRENDER__BLENDER_H
+#ifndef YETTY_YRENDER_BLENDER_H
+#define YETTY_YRENDER_BLENDER_H
 
 #include <stddef.h>
 #include <yetty/ycore/result.h>
@@ -52,4 +52,4 @@ struct yetty_yrender_blender_result yetty_yrender_blender_create(
 }
 #endif
 
-#endif /* YETTY_YRENDER__BLENDER_H */
+#endif /* YETTY_YRENDER_BLENDER_H */

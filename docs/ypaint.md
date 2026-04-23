@@ -195,7 +195,7 @@ The canvas manages a spatial grid for GPU culling:
 Each grid cell stores an array of `prim_ref`:
 
 ```c
-struct yetty_yetty_ypaint_canvas_prim_ref {
+struct yetty_ypaint_canvas_prim_ref {
     uint16_t lines_ahead;  // relative offset to base line (0 = same line)
     uint16_t prim_index;   // index within base line's prims array
 };
@@ -311,102 +311,82 @@ line[7].complex_prims.add(ptr)  // Only last overlapping line
 ```
 
 Why simplified:
-- Complex prims render to atlas, not via grid dispatch
+- Complex prims render via own pipelines, not via grid dispatch
 - Last line reference sufficient for lifetime management
 - When last line scrolls out → prim out of scope → release
 
-### Atlas-Based Rendering
+### Direct Layer Rendering
 
-Complex primitives use a render-to-texture approach with atlas composition:
+Complex primitives render directly to the ypaint layer texture at their viewport positions:
 
 ```
+ypaint_layer_texture (render target)
 ┌─────────────────────────────────────────────────────┐
-│                  Render Target                       │
-│  ┌───────────────────────────────────────────────┐  │
-│  │ Simple prims layer (SDF + glyphs via grid)    │  │
-│  └───────────────────────────────────────────────┘  │
-│                        ↓ blend                       │
-│  ┌───────────────────────────────────────────────┐  │
-│  │ Complex prims atlas (pre-rendered textures)   │  │
-│  │  ┌────────┬────────┬────────┐                 │  │
-│  │  │ yplot1 │ yplot2 │ image1 │                 │  │
-│  │  ├────────┴────────┴────────┤                 │  │
-│  │  │    nested_ypaint         │                 │  │
-│  │  └──────────────────────────┘                 │  │
-│  └───────────────────────────────────────────────┘  │
+│                                                     │
+│    ┌──────────┐                                     │
+│    │  yplot0  │  ← viewport set to prim bounds     │
+│    │          │    own pipeline, LoadOp=Load       │
+│    └──────────┘                                     │
+│                    ┌──────────┐                     │
+│                    │  yplot1  │                     │
+│                    └──────────┘                     │
+│         ┌─────────────────┐                         │
+│         │     image0      │                         │
+│         └─────────────────┘                         │
 └─────────────────────────────────────────────────────┘
+         ↓
+    Blend with text_layer (existing blender)
+         ↓
+    Screen
 ```
 
 **Flow:**
-1. Simple prims → rendered via grid dispatch (existing flow)
-2. Complex prims → each rendered to atlas region
-3. Atlas texture blended with simple prims layer
-4. Result → render target (surface or ymux)
+1. `layer->render(render_target)` called by terminal
+2. Render simple prims to render_target (LoadOp=Clear, full-screen quad, SDF shader)
+3. For each complex primitive: `instance->render(render_target, x, y)`
+   - LoadOp=Load (preserves simple prims and previous complex prims)
+   - Viewport set to instance's screen bounds (x, y, width, height)
+   - Instance uses its factory's pre-compiled pipeline
+   - Fragment shader fills the viewport region
+4. Layer texture blended with other layers (text_layer, etc.)
+5. Result → screen
 
-### Atlas Lifecycle
+**No atlas needed** - each primitive renders directly to its viewport region on the layer texture.
+
+### Complex Prim Lifecycle
 
 **Creation:**
-- Atlas created on first render of complex prims
-- Regions packed (simple bin packing)
-- Each complex prim renders to its region
+- Instance created when primitive added to canvas
+- Factory's pipeline already compiled (at registration time)
 
-**Caching:**
-- Atlas texture cached between frames
-- Prim dirty flag → re-render only that region (or full atlas if simpler)
-- No re-render if nothing changed
+**Rendering:**
+- Instance dirty flag checked
+- If dirty: render to layer texture at viewport, clear dirty
+- If clean: skip (previous frame's pixels preserved if layer not dirty)
 
 **Release:**
-- Complex prim attached to last overlapping line
-- Line scrolls out → prim released
-- Atlas region freed (or full atlas recreated)
+- Instance attached to last overlapping line
+- Line scrolls out → instance destroyed
 
-### Recursive Composition
+### Recursive Composition (Future)
 
-Complex primitives can contain nested ypaint (recursive):
-
-```
-Terminal
-  └── ypaint layer
-        ├── simple prims → grid dispatch
-        └── complex prims → atlas
-              └── nested ypaint → nested atlas (cached)
-                    ├── simple prims → nested grid dispatch
-                    └── complex prims → nested-nested atlas
-                          └── ...recursive
-```
-
-Each nesting level:
-- Has its own atlas
-- Renders independently
-- Cached separately
-- Blended into parent's atlas
-
-### Atlas Sizing
-
-| Scenario | Atlas Size | Memory |
-|----------|-----------|--------|
-| Typical (5-20 prims) | 2048×2048 | 16MB |
-| Busy (50+ prims) | 4096×4096 | 64MB |
-| Extreme (100+ prims) | 8192×8192 | 256MB |
-
-Query `device.limits.maxTextureDimension2D` for GPU limit. Safe baseline: 4096×4096.
+Complex primitives may contain nested ypaint (recursive). Each nesting level would render to its parent's render target at its viewport bounds.
 
 ### Render Target Integration
 
 The render target abstraction handles both local GPU and remote ymux:
 
-**Surface target (local GPU):**
+**Local GPU:**
 ```
-layer_renderer[0] → simple prims texture
-complex_prim_atlas → pre-rendered complex prims
-         ↓
-    blend_pass → surface
+layer->render(render_target)
+  ├── simple prims → full-screen pass
+  └── complex prims → viewport passes (same target)
 ```
 
-**ymux target (remote):**
+**ymux (remote):**
 ```
-Serialize complex prim data → send to remote
-Remote renders using same atlas approach
+Serialize primitive data → send to remote
+Remote renders using same approach
 ```
 
 ### Wire Format (FAM - Flexible Array Member)
@@ -429,293 +409,227 @@ Complex primitive rendering follows flyweight pattern:
 
 **Extrinsic (per instance):**
 - Bounds, colors, content data
-- Atlas region (render artifact)
+- Viewport position (computed at render time from bounds + scroll offset)
 
-Type registration provides intrinsic parts. Instance data stored in buffer. Atlas is render-time artifact, cached but separate from data model.
-
----
-
-## Flyweight Registry Architecture
-
-The flyweight registry is the central mechanism for handling different primitive types. It decouples primitive data storage (buffer) from primitive operations (size, aabb, destroy).
-
-### Module Structure
-
-```
-ypaint-core/flyweight.h    # Types and instance-based API
-ypaint-core/flyweight.c    # Registry implementation
-ypaint/flyweight.h         # Factory function
-ypaint/flyweight.c         # Creates configured registry with all handlers
-```
-
-### Core Types
-
-```c
-// Primitive ops vtable
-struct yetty_ypaint_prim_ops {
-    struct yetty_ycore_size_result (*size)(const uint32_t *prim);
-    struct rectangle_result (*aabb)(const uint32_t *prim);
-    void (*destroy)(void *cache);  // optional, NULL for simple prims
-    struct yetty_yrender_gpu_resource_set_result (*get_gpu_resource_set)(
-        const uint32_t *prim, void **cache_ptr);  // optional, NULL for SDF prims
-};
-
-// Flyweight - wraps pointer to primitive data + ops
-struct yetty_ypaint_prim_flyweight {
-    const uint32_t *data;  // type at data[0]
-    const struct yetty_ypaint_prim_ops *ops;
-};
-
-// Handler function - returns flyweight (ops=NULL if not handled)
-typedef struct yetty_ypaint_prim_flyweight (*yetty_ypaint_prim_handler_fn)(
-    const uint32_t *prim);
-```
-
-### Registry API
-
-```c
-// Create/destroy registry instance
-struct yetty_ypaint_flyweight_registry_ptr_result
-yetty_ypaint_flyweight_registry_create(void);
-
-void yetty_ypaint_flyweight_registry_destroy(
-    struct yetty_ypaint_flyweight_registry *reg);
-
-// Set default handler (SDF) - tried first, fast path
-void yetty_ypaint_flyweight_registry_set_default(
-    struct yetty_ypaint_flyweight_registry *reg,
-    yetty_ypaint_prim_handler_fn handler);
-
-// Register handler for type range [type_min, type_max]
-struct yetty_ycore_void_result yetty_ypaint_flyweight_registry_add(
-    struct yetty_ypaint_flyweight_registry *reg,
-    uint32_t type_min, uint32_t type_max,
-    yetty_ypaint_prim_handler_fn handler);
-
-// Get flyweight for primitive
-struct yetty_ypaint_prim_flyweight yetty_ypaint_flyweight_registry_get(
-    const struct yetty_ypaint_flyweight_registry *reg,
-    const uint32_t *prim);
-```
-
-### Handler Lookup Order
-
-1. **Default handler** (SDF) - tried first for fast path
-2. **Type range handlers** - searched if default returns ops=NULL
-
-```c
-// Lookup logic in yetty_ypaint_flyweight_registry_get:
-if (default_handler) {
-    fw = default_handler(prim);
-    if (fw.ops) return fw;
-}
-uint32_t type = prim[0];
-for (each registered handler) {
-    if (type >= handler.type_min && type <= handler.type_max) {
-        fw = handler.handler(prim);
-        if (fw.ops) return fw;
-    }
-}
-return {NULL, NULL};  // unhandled
-```
-
-### Canvas Ownership
-
-Canvas owns the flyweight registry instance:
-
-```c
-struct yetty_yetty_ypaint_canvas {
-    // ...
-    struct yetty_ypaint_flyweight_registry *flyweight_registry;
-};
-
-// In canvas_create:
-struct yetty_ypaint_flyweight_registry_ptr_result fw_res =
-    yetty_ypaint_flyweight_create();  // from ypaint/flyweight.c
-canvas->flyweight_registry = fw_res.value;
-
-// In canvas_destroy:
-line_buffer_free(&canvas->lines, canvas->flyweight_registry);
-yetty_ypaint_flyweight_registry_destroy(canvas->flyweight_registry);
-```
-
-### Buffer Read/Write Modes
-
-**Write mode** (adding primitives):
-- No registry needed
-- Buffer is pure data container
-- `yetty_ypaint_core_buffer_add_prim()` just appends bytes
-
-**Read mode** (iterating primitives):
-- Registry required for size lookup
-- Passed as parameter to iteration functions
-
-```c
-// Iteration with registry
-struct yetty_ypaint_core_primitive_iter_result
-yetty_ypaint_core_buffer_prim_first(
-    const struct yetty_ypaint_core_buffer *buf,
-    const struct yetty_ypaint_flyweight_registry *reg);
-
-struct yetty_ypaint_core_primitive_iter_result
-yetty_ypaint_core_buffer_prim_next(
-    const struct yetty_ypaint_core_buffer *buf,
-    const struct yetty_ypaint_flyweight_registry *reg,
-    const struct yetty_ypaint_core_primitive_iter *iter);
-```
-
-### Handler Implementation Example
-
-Each module implements its own handler:
-
-**SDF handler (ysdf/handler.h):**
-```c
-static inline struct yetty_ypaint_prim_flyweight
-yetty_ysdf_handler(const uint32_t *prim) {
-    uint32_t type = prim[0];
-    if (type > YETTY_YSDF_TYPE_MAX)
-        return (struct yetty_ypaint_prim_flyweight){NULL, NULL};
-    return (struct yetty_ypaint_prim_flyweight){prim, &yetty_ysdf_prim_ops};
-}
-```
-
-**yplot handler (yplot/yplot.c):**
-```c
-struct yetty_ypaint_prim_flyweight
-yetty_yplot_handler(const uint32_t *prim) {
-    uint32_t type = prim[0];
-    if (type != YETTY_YPLOT_PRIM_TYPE_ID)
-        return (struct yetty_ypaint_prim_flyweight){NULL, NULL};
-    return (struct yetty_ypaint_prim_flyweight){prim, &yplot_prim_ops};
-}
-```
-
-### Wiring Layer (ypaint/flyweight.c)
-
-Creates configured registry with all handlers:
-
-```c
-struct yetty_ypaint_flyweight_registry_ptr_result
-yetty_ypaint_flyweight_create(void) {
-    struct yetty_ypaint_flyweight_registry_ptr_result res =
-        yetty_ypaint_flyweight_registry_create();
-    if (YETTY_IS_ERR(res)) return res;
-
-    // Default handler for SDF (fast path)
-    yetty_ypaint_flyweight_registry_set_default(res.value, yetty_ysdf_handler);
-
-    // Complex primitive handlers by type range
-    yetty_ypaint_flyweight_registry_add(res.value,
-        YETTY_YPAINT_TYPE_YPLOT, YETTY_YPAINT_TYPE_YPLOT,
-        yetty_yplot_handler);
-
-    // Future: yimage, yvideo handlers
-
-    return res;
-}
-```
-
-### Complex Prim Cleanup
-
-When grid lines are freed, complex prim caches need cleanup via flyweight ops:
-
-```c
-// In grid_line_free:
-for (each complex_prim) {
-    if (cp->cache) {
-        struct yetty_ypaint_prim_flyweight fw =
-            yetty_ypaint_flyweight_registry_get(reg, cp->data);
-        if (fw.ops && fw.ops->destroy)
-            fw.ops->destroy(cp->cache);
-    }
-    free(cp->data);
-}
-```
-
-### Canvas Complex Prim Access
-
-Canvas exposes visible complex prims for rendering:
-
-```c
-// Get count of visible complex prims
-uint32_t yetty_yetty_ypaint_canvas_complex_prim_count(canvas);
-
-// Get complex prim reference by index
-struct yetty_ypaint_canvas_complex_prim_ref {
-    const uint32_t *data;  // FAM: [type][payload_size][payload...]
-    void **cache_ptr;      // Pointer to cache storage
-};
-struct yetty_ypaint_canvas_complex_prim_ref
-yetty_yetty_ypaint_canvas_get_complex_prim(canvas, index);
-```
-
-### Layer Integration
-
-ypaint-layer collects complex prim resource sets:
-
-```c
-// In ypaint_layer_get_gpu_resource_set:
-for (each visible complex prim) {
-    struct yetty_ypaint_prim_flyweight fw =
-        yetty_ypaint_flyweight_registry_get(reg, ref.data);
-    if (fw.ops && fw.ops->get_gpu_resource_set) {
-        struct yetty_yrender_gpu_resource_set_result rs =
-            fw.ops->get_gpu_resource_set(ref.data, ref.cache_ptr);
-        layer->rs.children[child_idx++] = rs.value;
-    }
-}
-```
+Type registration provides intrinsic parts. Instance data stored in buffer.
 
 ---
 
-## Complex Prim Shader Dispatch
+## Primitive Ops
 
-Complex primitives are rendered via shader dispatch in the main ypaint fragment shader. The shader checks for complex prim types (>= 0x80000000) and calls the appropriate render function.
+Two-level ops structure for primitives:
 
-```wgsl
-// In ypaint-layer.wgsl fragment shader:
-const YPAINT_COMPLEX_TYPE_BASE: u32 = 0x80000000u;
-const YPAINT_TYPE_YPLOT: u32 = 0x80000003u;
+**Base ops (all primitives - SDF and complex):**
+- `size` - bytes in buffer, for iteration
+- `aabb` - bounding box
 
-// In the primitive loop:
-if (prim_type >= YPAINT_COMPLEX_TYPE_BASE) {
-    var complex_color = vec4<f32>(0.0);
+**Complex prim ops (extends base):**
+- `size` - same as base
+- `aabb` - same as base
+- `render` - render to render_target at viewport
 
-    if (prim_type == YPAINT_TYPE_YPLOT) {
-        complex_color = yplot_render(prim_offset, local_pos);
-    }
-    // Add other complex types here as needed
-
-    if (complex_color.a > 0.0) {
-        result_color = mix(result_color, complex_color.rgb, complex_color.a);
-        result_alpha = max(result_alpha, complex_color.a);
-    }
-    continue;
-}
-```
-
-The `yplot_render()` function is defined in `yplot.wgsl` and merged by the binder. Each complex prim type provides its own render function that:
-- Takes `prim_offset` and `local_pos` (pixel position in primitive-local coords)
-- Returns `vec4<f32>` color (premultiplied alpha)
-- Does its own bounds checking internally
+SDF primitives use base ops only. Complex primitives use extended ops with render.
 
 ---
 
-## Implementation Status
+## Complex Primitive Factory Pattern
 
-### Completed
+```
+ABSTRACT FACTORY
+│
+└── create(buffer_data) → instance
+        └── reads type from buffer_data
+        └── dispatches to concrete factory
+        └── returns instance
 
-1. **Flyweight registry** - instance-based with handlers for size, aabb, destroy, get_gpu_resource_set
-2. **yplot handler** - implements all flyweight ops
-3. **Canvas complex prim access** - exposes visible complex prims for rendering
-4. **Layer integration** - collects complex prim resource sets as children
-5. **Shader dispatch** - ypaint shader dispatches to complex prim render functions (e.g., `yplot_render()`)
+CONCRETE FACTORY (per type, e.g. yplot)
+│
+├── binder (owns resource set + pre-compiled pipeline)
+│     ├── resource_set (structure for buffers, textures, uniforms)
+│     └── pipeline (compiled ONCE at factory creation, never recompiled)
+│
+└── create_instance(buffer_data) → instance
 
-### Remaining (Atlas Rendering - Future)
+INSTANCE (stored in grid)
+│
+├── buffer_data (knows its size)
+├── factory (back-pointer)
+│
+└── render(render_target, x, y)
+```
 
-Atlas-based rendering is an alternative approach for complex prims that:
-- Have expensive per-pixel evaluation (images, video)
-- Benefit from texture caching
-- Need to composite with effects
+### Abstract Factory
 
-For now, yplot uses inline shader dispatch (fast enough). Atlas rendering will be added for yimage/yvideo.
+The abstract factory is a registry that maps primitive type IDs to concrete factories. It provides a single entry point for creating instances from buffer data.
+
+When you call `create(buffer_data)`, the abstract factory reads the type from the beginning of the buffer, looks up the corresponding concrete factory, and delegates instance creation to it. The caller does not need to know which concrete factory handles which type.
+
+### Concrete Factory
+
+Each primitive type (yplot, image, video, etc.) has its own concrete factory. The concrete factory:
+
+- Owns a **binder** that contains:
+  - The resource set (defines structure for buffers, textures, uniforms)
+  - The pre-compiled pipeline (compiled ONCE at factory creation using existing gpu-resource-binder, then stored permanently)
+- Knows how to create instances from buffer data specific to its type.
+
+The binder is created when the factory is registered (device/queue available). The pipeline is compiled once and held warm for the entire terminal lifetime. No recompilation ever happens.
+
+### Instance
+
+An instance represents a single occurrence of a complex primitive. Instances are stored in the canvas grid. Each instance:
+
+- Holds a copy of its buffer data, which contains all primitive-specific values including its size.
+- Has a back-pointer to its concrete factory, giving access to the factory's binder.
+- Provides a render method that takes a render target and x,y coordinates.
+
+### Data Flow
+
+**Adding primitives:**
+
+1. Call `abstract_factory->create(buffer_data)`
+2. Store the returned instance in the grid
+
+The abstract factory handles all type dispatch internally.
+
+**Rendering:**
+
+1. Canvas calls `instance->render(render_target, x, y)`
+2. The x,y coordinates are provided by the canvas to handle scrolling
+3. The instance knows its own size from its buffer data
+4. The instance uses its factory back-pointer to access the factory's binder
+5. The instance binds its data to the binder's resource set:
+   - **Buffers** (e.g., bytecode, vertex data)
+   - **Textures** (if any, e.g., images)
+   - **Uniforms** (e.g., bounds, colors, flags)
+6. The binder uploads the data to GPU (no shader recompilation)
+7. The binder renders with pre-compiled pipeline to the render target
+
+### Key Point: No Recompilation
+
+The factory's binder owns the pre-compiled pipeline. This pipeline is compiled ONCE when the factory is registered (at startup when device/queue become available). During rendering, only instance data (buffers, textures, uniforms) is bound and uploaded. The shader is never reparsed or recompiled.
+
+---
+
+## Direct Layer Rendering
+
+Complex primitives render directly to the layer texture at their viewport positions.
+
+**Render flow:**
+```
+for each complex prim instance:
+    if dirty:
+        instance->render(render_target, x, y)
+        # sets viewport to instance bounds
+        # uses factory's pre-compiled pipeline
+        # LoadOp=Load preserves existing pixels
+        clear dirty
+```
+
+**Why direct rendering:**
+- No separate texture per instance
+- No compositing pass
+- Each instance just renders to its viewport region
+- Simple multi-pass to same render target
+
+---
+
+## Shader Libraries
+
+Reusable shader code (like yfsvm) is structured as libraries.
+
+**Directory structure:**
+```
+shaders/
+  lib/
+    yfsvm.wgsl      # library - pure functions
+  yplot.wgsl        # main shader, uses yfsvm
+```
+
+**Library characteristics:**
+- Pure functions, no `@group/@binding` declarations
+- Take buffer pointers as parameters (not globals)
+- Reusable across different primitives
+
+**Example library function:**
+```
+fn yfsvm_execute(
+    buf: ptr<storage, array<u32>, read>,
+    offset: u32, ...
+) -> f32 {
+    let val = (*buf)[offset];
+    ...
+}
+```
+
+**Main shader calls library:**
+```
+let y = yfsvm_execute(&storage_buffer, bc_offset, ...);
+```
+
+**GPU resource set specifies libraries:**
+- `libraries[]` field lists library names
+- Binder concatenates: bindings → libraries → main shader
+
+---
+
+## Code Generation
+
+Complex primitives require **only two files** - everything else is generated.
+
+**User provides:**
+1. `<name>.yaml` - schema (uniforms, buffers, type_id, shader libraries)
+2. `<name>.wgsl` - shader (rendering logic)
+
+**Generator produces EVERYTHING else:**
+- C header: type ID, offset constants, uniforms struct, serialization API
+- C source: serialization implementation
+- C factory: create/destroy, compile_pipeline, get_pipeline, get_shared_rs
+- C instance: create/destroy, render (binds data to binder, calls render)
+- Resource set initialization (from YAML uniforms/buffers definition)
+- WGSL: accessor functions with calculated offsets
+
+**Zero type-specific C code needed.** The factory pattern is 100% generic - every complex primitive does the same thing:
+1. Factory creates binder with resource set + compiled pipeline
+2. Instance binds its data (uniforms, buffer, texture) to binder's RS
+3. Binder renders
+
+**Schema location:** `src/yetty/<module>/<module>.yaml`
+
+**Schema defines:**
+- `name` - primitive name
+- `type_id` - unique ID (0x80000000+)
+- `libraries` - shader dependencies (concatenated before main shader)
+- `uniforms` - fixed-size data (name, type, count)
+- `buffer` - variable-size buffer data
+- `texture` - texture input (if needed)
+
+**Standard binding layout (always the same):**
+- 1 uniform block
+- 1 buffer (single `array<u32>`)
+- 1 texture (single texture)
+
+If a primitive needs multiple logical buffers or textures, they are **packed into the single buffer/texture**. The YAML uniforms section describes offsets/names to access sub-parts within the single buffer or texture regions within the single texture.
+
+**Serialization format:**
+```
+[type][payload_size][uniforms...][buffer_lengths...][buffer_data...]
+```
+
+Runtime binds bytes to pipeline - no interpretation. Only constructor (sender) and shader know semantics.
+
+---
+
+## Status
+
+**Done:**
+- Type registry with result-based error handling
+- Abstract factory pattern (maps type_id → concrete factory)
+- Code generator: serialization (C header/source from YAML)
+
+**TODO:**
+- Code generator: factory boilerplate (create/destroy, binder management)
+- Code generator: instance boilerplate (create/destroy, render)
+- Code generator: resource set initialization from YAML
+- Code generator: WGSL accessor functions
+- Remove hand-written boilerplate from yplot.c (should be generated)
