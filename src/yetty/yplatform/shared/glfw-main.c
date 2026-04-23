@@ -66,6 +66,7 @@ static struct option long_options[] = {
     {"rpc-port",     required_argument, 0, 'r'},
     {"temu",         no_argument,       0,  0 },
     {"qemu",         no_argument,       0,  0 },
+    {"ssh",          optional_argument, 0,  0 },
     {"help",         no_argument,       0, 'h'},
     {0, 0, 0, 0}
 };
@@ -84,6 +85,7 @@ static void print_usage(const char *prog)
     fprintf(stderr, "  -r, --rpc-port=PORT    RPC server port\n");
     fprintf(stderr, "      --temu             Run in-process TinyEMU RISC-V VM\n");
     fprintf(stderr, "      --qemu             Run external QEMU RISC-V VM (via telnet)\n");
+    fprintf(stderr, "      --ssh [USER@HOST[:PORT]]  Connect to SSH remote shell\n");
     fprintf(stderr, "  -h, --help             Show this help\n");
 }
 
@@ -94,8 +96,8 @@ static void parse_cmdline(int argc, char **argv, struct yetty_yconfig *config)
     while ((c = getopt_long(argc, argv, "c:e:sHp:C:r:h", long_options, NULL)) != -1) {
         switch (c) {
         case 0:
-            /* long-only option (--rpc-host, --temu, --qemu) already handled
-             * by yetty_yconfig_create; getopt just needs to accept it */
+            /* long-only option (--rpc-host, --temu, --qemu, --ssh) already
+             * handled by yetty_yconfig_create; getopt just needs to accept it */
             break;
         case 'c':
             /* config file already handled by yetty_yconfig_create */
