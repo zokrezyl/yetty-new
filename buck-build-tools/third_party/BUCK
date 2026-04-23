@@ -372,8 +372,8 @@ genrule(
     bash = """
         set -e
         mkdir -p "$OUT/lib" "$OUT/include"
-        curl -fsSL "https://github.com/howerj/cdb/archive/refs/heads/master.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
-        CDB="$BUCK_SCRATCH_PATH/cdb-master"
+        curl -fsSL "https://github.com/howerj/cdb/archive/refs/tags/v4.3.2.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        CDB="$BUCK_SCRATCH_PATH/cdb-4.3.2"
         cc -c -fPIC -O2 -w "$CDB/cdb.c" -o "$BUCK_SCRATCH_PATH/cdb.o"
         ar rcs "$OUT/lib/libcdb.a" "$BUCK_SCRATCH_PATH/cdb.o"
         cp "$CDB/cdb.h" "$OUT/include/"
@@ -390,11 +390,138 @@ cxx_library(
 )
 
 #=============================================================================
-# brotli (system library - provided by nix)
+# brotli
 #=============================================================================
+
+genrule(
+    name = "brotli_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/google/brotli/archive/refs/tags/v1.1.0.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cmake -S "$BUCK_SCRATCH_PATH/brotli-1.1.0" -B "$BUCK_SCRATCH_PATH/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OUT" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DBUILD_SHARED_LIBS=OFF
+        cmake --build "$BUCK_SCRATCH_PATH/build" --parallel
+        cmake --install "$BUCK_SCRATCH_PATH/build"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
 
 cxx_library(
     name = "brotli",
-    exported_linker_flags = ["-lbrotlidec", "-lbrotlicommon"],
+    exported_linker_flags = [
+        "$(location :brotli_build)/lib64/libbrotlidec.a",
+        "$(location :brotli_build)/lib64/libbrotlicommon.a",
+    ],
+    exported_preprocessor_flags = ["-isystem", "$(location :brotli_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# expat (MIT license)
+#=============================================================================
+
+genrule(
+    name = "expat_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        curl -fsSL "https://github.com/libexpat/libexpat/releases/download/R_2_6_2/expat-2.6.2.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cmake -S "$BUCK_SCRATCH_PATH/expat-2.6.2" -B "$BUCK_SCRATCH_PATH/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$OUT" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DEXPAT_SHARED_LIBS=OFF \
+            -DEXPAT_BUILD_EXAMPLES=OFF \
+            -DEXPAT_BUILD_TESTS=OFF \
+            -DEXPAT_BUILD_TOOLS=OFF
+        cmake --build "$BUCK_SCRATCH_PATH/build" --parallel
+        cmake --install "$BUCK_SCRATCH_PATH/build"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "expat",
+    exported_linker_flags = ["$(location :expat_build)/lib64/libexpat.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :expat_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# libuuid from util-linux (BSD-3-clause license)
+#=============================================================================
+
+genrule(
+    name = "libuuid_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT/lib" "$OUT/include"
+        OUT_ABS=`cd "$OUT" && pwd`
+        curl -fsSL "https://mirrors.edge.kernel.org/pub/linux/utils/util-linux/v2.40/util-linux-2.40.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cd "$BUCK_SCRATCH_PATH/util-linux-2.40"
+        ./configure --prefix="$OUT_ABS" --disable-shared --enable-static \
+            --disable-all-programs --enable-libuuid
+        make
+        cp .libs/libuuid.a "$OUT_ABS/lib/" 2>/dev/null || true
+        find . -name "libuuid.a" -exec cp {} "$OUT_ABS/lib/" \\;
+        cp libuuid/src/uuid.h "$OUT_ABS/include/"
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "libuuid",
+    exported_linker_flags = ["$(location :libuuid_build)/lib/libuuid.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :libuuid_build)/include"],
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# fontconfig (Linux desktop only)
+#=============================================================================
+
+genrule(
+    name = "fontconfig_build",
+    out = "install",
+    bash = """
+        set -e
+        mkdir -p "$OUT"
+        OUT_ABS=`cd "$OUT" && pwd`
+        EXPAT_DIR=`cd "$(location :expat_build)" && pwd`
+        FREETYPE_DIR=`cd "$(location :freetype_build)" && pwd`
+        UUID_DIR=`cd "$(location :libuuid_build)" && pwd`
+        curl -fsSL "https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.15.0.tar.gz" | tar -xz -C "$BUCK_SCRATCH_PATH"
+        cd "$BUCK_SCRATCH_PATH/fontconfig-2.15.0"
+        ./configure --prefix="$OUT_ABS" --disable-shared --enable-static \
+            --disable-docs \
+            FREETYPE_CFLAGS="-I$FREETYPE_DIR/include/freetype2" \
+            FREETYPE_LIBS="-L$FREETYPE_DIR/lib64 -lfreetype" \
+            EXPAT_CFLAGS="-I$EXPAT_DIR/include" \
+            EXPAT_LIBS="-L$EXPAT_DIR/lib64 -lexpat" \
+            UUID_CFLAGS="-I$UUID_DIR/include" \
+            UUID_LIBS="-L$UUID_DIR/lib -luuid" \
+            LDFLAGS="-L$FREETYPE_DIR/lib64 -L$EXPAT_DIR/lib64 -L$UUID_DIR/lib"
+        make -j
+        make install
+    """,
+    cacheable = True,
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "fontconfig",
+    exported_linker_flags = ["$(location :fontconfig_build)/lib/libfontconfig.a"],
+    exported_preprocessor_flags = ["-isystem", "$(location :fontconfig_build)/include"],
+    deps = [":freetype", ":expat", ":libuuid"],
     visibility = ["PUBLIC"],
 )

@@ -84,6 +84,7 @@
           curl
           gnutar
           gzip
+          gperf  # For fontconfig
           # Compilers
           llvmPackages_21.clang
           llvmPackages_21.lld

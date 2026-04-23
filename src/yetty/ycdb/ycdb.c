@@ -21,7 +21,7 @@ struct yetty_ycdb_writer {
 
 static cdb_word_t hcdb_read(void *f, void *buf, size_t len) { return (cdb_word_t)fread(buf, 1, len, (FILE *)f); }
 static cdb_word_t hcdb_write(void *f, void *buf, size_t len) { return (cdb_word_t)fwrite(buf, 1, len, (FILE *)f); }
-static int hcdb_seek(void *f, uint64_t off) { return fseek((FILE *)f, (long)off, SEEK_SET); }
+static int hcdb_seek(void *f, long off) { return fseek((FILE *)f, off, SEEK_SET); }
 static void *hcdb_open(const char *name, int mode) { return fopen(name, mode == CDB_RW_MODE ? "wb+" : "rb"); }
 static int hcdb_close(void *f) { return fclose((FILE *)f); }
 static int hcdb_flush(void *f) { return fflush((FILE *)f); }

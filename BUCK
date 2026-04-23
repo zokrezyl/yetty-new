@@ -120,6 +120,7 @@ cxx_library(
     exported_headers = glob(["include/yetty/ycore/**/*.h"]),
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ytrace",
         "//buck-build-tools/third_party:dawn",
@@ -137,6 +138,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         ":ypaint_yaml",
@@ -156,6 +158,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         ":ycdb",
@@ -175,6 +178,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         "//buck-build-tools/third_party:dawn",
@@ -192,6 +196,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         "//buck-build-tools/third_party:dawn",
@@ -209,6 +214,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         ":yrender",
@@ -227,6 +233,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         ":ypaint",
@@ -245,6 +252,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         "//buck-build-tools/third_party:dawn",
@@ -262,6 +270,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         ":ypaint",
@@ -280,6 +289,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         "//buck-build-tools/third_party:libjpeg_turbo",
@@ -299,6 +309,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         "//buck-build-tools/third_party:msgpack",
@@ -316,6 +327,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         "//buck-build-tools/third_party:libjpeg_turbo",
@@ -334,6 +346,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS + ["-DYETTY_USE_HOWERJ_CDB"],
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         "//buck-build-tools/third_party:howerj_cdb",
@@ -351,6 +364,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
     ],
@@ -367,6 +381,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
     ],
@@ -383,6 +398,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         ":yfont",
@@ -400,6 +416,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         ":ypaint_yaml",
@@ -419,6 +436,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         ":yterm",
@@ -438,6 +456,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ycore",
         ":incbin_assets",
@@ -456,6 +475,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":yplatform_shared",
     ],
@@ -478,6 +498,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ytrace",
         ":ycore",
@@ -512,6 +533,7 @@ cxx_library(
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
+    preferred_linkage = "static",
     deps = [
         ":ytrace",
         "//buck-build-tools/third_party:brotli",
@@ -536,6 +558,7 @@ cxx_binary(
         "-DYETTY_HAS_VNC=1",
     ],
     include_directories = YETTY_INCLUDES,
+    link_style = "static",
     deps = [
         ":yetty_main",
         ":ytrace",
@@ -569,14 +592,17 @@ cxx_binary(
         "//buck-build-tools/third_party:libjpeg_turbo",
         "//buck-build-tools/third_party:libpng",
         "//buck-build-tools/third_party:zlib",
+        "//buck-build-tools/third_party:fontconfig",
+        "//buck-build-tools/third_party:expat",
+        "//buck-build-tools/third_party:libuuid",
+        "//buck-build-tools/third_party:brotli",
     ],
     linker_flags = [
         "-lrt",
         "-lutil",
-        "-lfontconfig",
-        "-lexpat",
-        "-luuid",
         "-lm",
+        "-lpthread",
+        "-ldl",
     ],
     visibility = ["PUBLIC"],
 )
