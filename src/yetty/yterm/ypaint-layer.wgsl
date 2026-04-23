@@ -144,7 +144,11 @@ fn glyph_read_color(prim_offset: u32) -> u32 {
     return storage_buffer[prim_offset + 7u];
 }
 
-// median3 is defined in msdf-font.wgsl (merged by binder)
+// The active font's shader (msdf-font.wgsl or raster-font.wgsl) is merged by
+// the binder and provides three helpers:
+//   font_base_size()   -> f32
+//   font_glyph_size(i) -> vec2<f32>  (in base-size pixels)
+//   font_glyph_sample(i, glyph_uv, pixel_scale) -> f32  (alpha 0..1)
 
 // Evaluate SDF for a primitive at given scene position
 fn ypaint_evaluate_sdf(prim_offset: u32, scene_pos: vec2<f32>) -> f32 {
@@ -272,9 +276,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         let local_pos = vec2<f32>(pixel_pos.x, pixel_pos.y - y_offset);
 
 
-        // Handle glyph primitives (MSDF rendering)
+        // Glyph primitives — delegate atlas sampling to the active font
+        // backend via font_glyph_sample() / font_glyph_size(). Bearing has
+        // already been applied on the CPU, so (glyph_x, glyph_y) is the
+        // top-left corner of the rendered glyph rectangle.
         if (prim_type == YPAINT_SDF_GLYPH) {
-            // Glyph position in local coords (with bearing already applied)
             let glyph_x = glyph_read_x(prim_offset);
             let glyph_y = glyph_read_y(prim_offset);
             let font_size = glyph_read_font_size(prim_offset);
@@ -282,55 +288,23 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             let glyph_index = packed & 0xFFFFu;
             let color_packed = glyph_read_color(prim_offset);
 
-            // Compute scale from font_size and base_size
-            let base_size = uniforms.msdf_font_base_size;
-            let scale = select(1.0, font_size / base_size, base_size > 0.0);
+            let base_size = font_base_size();
+            let pixel_scale = select(1.0, font_size / base_size, base_size > 0.0);
 
-            // Read glyph metrics from font metadata buffer
-            let meta_base = msdf_font_buffer_offset + glyph_index * 6u;
-            let glyph_size = vec2<f32>(
-                bitcast<f32>(storage_buffer[meta_base + 0u]),
-                bitcast<f32>(storage_buffer[meta_base + 1u])
-            );
-
-            // Empty glyph - skip
+            let glyph_size = font_glyph_size(glyph_index);
             if (glyph_size.x <= 0.0 || glyph_size.y <= 0.0) {
                 continue;
             }
 
-            // Glyph bounds in local space (apply scale)
             let glyph_min = vec2<f32>(glyph_x, glyph_y);
-            let glyph_max = glyph_min + glyph_size * scale;
-
-            // Bounds check in local coords
+            let glyph_max = glyph_min + glyph_size * pixel_scale;
             if (local_pos.x < glyph_min.x || local_pos.x >= glyph_max.x ||
                 local_pos.y < glyph_min.y || local_pos.y >= glyph_max.y) {
                 continue;
             }
 
-            // Read cell_idx from metadata (slot != cell_idx due to empty glyphs)
-            let cell_idx = u32(bitcast<f32>(storage_buffer[meta_base + 5u]));
-            let font_cell_size = f32(uniforms.msdf_font_cell_size);
-            let atlas_cols = uniforms.msdf_font_atlas_cols;
-            let col = cell_idx % atlas_cols;
-            let row = cell_idx / atlas_cols;
-
-            let atlas_size = vec2<f32>(textureDimensions(atlas_rgba8_texture, 0));
-            let cell_uv_size = font_cell_size / atlas_size;
-            let uv_min = vec2<f32>(f32(col), f32(row)) * cell_uv_size;
-            let uv_max = uv_min + cell_uv_size;
-
-            // Map local pixel to UV within glyph cell
-            let glyph_local = (local_pos - glyph_min) / (glyph_size * scale);
-            let sample_uv = mix(uv_min, uv_max, glyph_local);
-
-            // Sample MSDF
-            let msdf = textureSampleLevel(atlas_rgba8_texture, atlas_rgba8_sampler, sample_uv, 0.0);
-            let sd = median3(msdf.r, msdf.g, msdf.b);
-
-            // Anti-aliased edge
-            let screen_px_range = uniforms.msdf_font_pixel_range * scale;
-            let glyph_alpha = clamp((sd - 0.5) * screen_px_range + 0.5, 0.0, 1.0);
+            let glyph_uv = (local_pos - glyph_min) / (glyph_size * pixel_scale);
+            let glyph_alpha = font_glyph_sample(glyph_index, glyph_uv, pixel_scale);
 
             if (glyph_alpha > 0.0) {
                 let glyph_rgba = ypaint_unpack_color(color_packed);

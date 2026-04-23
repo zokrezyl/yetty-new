@@ -1,69 +1,75 @@
-// MSDF font shader — provides font_sample()
-// Uses RGBA8 atlas texture with uniform cell grid + per-glyph metadata buffer
-// Metadata per glyph: [sizeX, sizeY, bearingX, bearingY, advance, _pad]
-// = 6 floats = 6 u32 words in storage_buffer
-// UV is computed from glyph_index using cell_size and atlas_cols uniforms
+// MSDF font shader — ypaint-layer glue.
+//
+// Exposes three backend-agnostic helpers. ypaint-layer.wgsl calls them by
+// name; the binder merges whichever font shader is active (this one for MSDF
+// or raster-font.wgsl for FreeType) so the same caller works with both.
+//
+// Glyph metadata layout in storage_buffer (6 u32 words per glyph, matches
+// struct glyph_meta_gpu in msdf-font.c):
+//   [0] size_x       bitmap width  in pixels at base_size
+//   [1] size_y       bitmap height in pixels at base_size
+//   [2] bearing_x    horizontal bearing (pre-applied by ypaint on the CPU)
+//   [3] bearing_y    vertical   bearing (pre-applied by ypaint on the CPU)
+//   [4] advance      horizontal advance in pixels at base_size
+//   [5] cell_idx     atlas cell index (-1 for empty glyphs like space)
+//
+// The atlas is a uniform grid of cell_size×cell_size cells; each glyph's
+// bitmap is placed *centered* in its cell with per-axis padding. The shader
+// samples only that inner bitmap region, so a glyph with small bitmap sits
+// naturally inside its caller-provided render rectangle.
 
 fn median3(r: f32, g: f32, b: f32) -> f32 {
     return max(min(r, g), min(max(r, g), b));
 }
 
-fn font_sample(glyph_index: u32, local_px: vec2<f32>, render_size: vec2<f32>) -> f32 {
+fn font_base_size() -> f32 {
+    return uniforms.msdf_font_base_size;
+}
+
+fn font_glyph_size(glyph_index: u32) -> vec2<f32> {
     let base = msdf_font_buffer_offset + glyph_index * 6u;
-    let glyph_size = vec2<f32>(
+    return vec2<f32>(
         bitcast<f32>(storage_buffer[base + 0u]),
         bitcast<f32>(storage_buffer[base + 1u])
     );
-    let bearing = vec2<f32>(
-        bitcast<f32>(storage_buffer[base + 2u]),
-        bitcast<f32>(storage_buffer[base + 3u])
-    );
+}
 
-    // Empty glyph
+// Alpha coverage for a glyph at normalized glyph-local coords (0..1).
+// pixel_scale = rendered_pixels / base_size — drives MSDF antialiasing.
+fn font_glyph_sample(glyph_index: u32,
+                     glyph_uv: vec2<f32>,
+                     pixel_scale: f32) -> f32 {
+    let meta_base = msdf_font_buffer_offset + glyph_index * 6u;
+    let glyph_size = vec2<f32>(
+        bitcast<f32>(storage_buffer[meta_base + 0u]),
+        bitcast<f32>(storage_buffer[meta_base + 1u])
+    );
     if (glyph_size.x <= 0.0 || glyph_size.y <= 0.0) {
         return 0.0;
     }
-
-    // Compute UV from glyph_index using uniform cell grid
-    let cell_size = f32(uniforms.msdf_font_cell_size);
-    let atlas_cols = uniforms.msdf_font_atlas_cols;
-    let col = glyph_index % atlas_cols;
-    let row = glyph_index / atlas_cols;
-
-    // Cell position in atlas (normalized 0-1)
-    let atlas_size = vec2<f32>(textureDimensions(atlas_rgba8_texture, 0));
-    let cell_uv_size = cell_size / atlas_size;
-    let uv_min = vec2<f32>(f32(col), f32(row)) * cell_uv_size;
-    let uv_max = uv_min + cell_uv_size;
-
-    // Scale from base_size to render_size
-    let scale = render_size.y / uniforms.msdf_font_base_size;
-    let scaled_size = glyph_size * scale;
-    let scaled_bearing = bearing * scale;
-
-    // Baseline at 80% of render height
-    let baseline = render_size.y * 0.8;
-    let glyph_top = baseline - scaled_bearing.y;
-    let glyph_left = scaled_bearing.x;
-
-    let glyph_min = vec2<f32>(glyph_left, glyph_top);
-    let glyph_max = vec2<f32>(glyph_left + scaled_size.x, glyph_top + scaled_size.y);
-
-    // Bounds check
-    if (local_px.x < glyph_min.x || local_px.x >= glyph_max.x ||
-        local_px.y < glyph_min.y || local_px.y >= glyph_max.y) {
+    let cell_idx_f = bitcast<f32>(storage_buffer[meta_base + 5u]);
+    if (cell_idx_f < 0.0) {
         return 0.0;
     }
 
-    // Map pixel to UV within glyph cell
-    let glyph_local = (local_px - glyph_min) / scaled_size;
-    let sample_uv = mix(uv_min, uv_max, glyph_local);
+    let cell_idx = u32(cell_idx_f);
+    let cell_size_px = f32(uniforms.msdf_font_cell_size);
+    let atlas_cols = uniforms.msdf_font_atlas_cols;
+    let col = cell_idx % atlas_cols;
+    let row = cell_idx / atlas_cols;
 
-    // Sample MSDF
-    let msdf = textureSampleLevel(atlas_rgba8_texture, atlas_rgba8_sampler, sample_uv, 0.0);
+    let atlas_size = vec2<f32>(textureDimensions(atlas_rgba8_texture, 0));
+    let cell_origin_px = vec2<f32>(f32(col), f32(row)) * cell_size_px;
+    // Bitmap is centered in the cell — map glyph_uv to the inner region only.
+    let padding = (vec2<f32>(cell_size_px) - glyph_size) * 0.5;
+    let uv_min = (cell_origin_px + padding) / atlas_size;
+    let uv_max = (cell_origin_px + padding + glyph_size) / atlas_size;
+    let uv = clamp(glyph_uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    let sample_uv = mix(uv_min, uv_max, uv);
+
+    let msdf = textureSampleLevel(atlas_rgba8_texture, atlas_rgba8_sampler,
+                                  sample_uv, 0.0);
     let sd = median3(msdf.r, msdf.g, msdf.b);
-
-    // Anti-aliased edge
-    let screen_px_range = uniforms.msdf_font_pixel_range * scale;
+    let screen_px_range = uniforms.msdf_font_pixel_range * pixel_scale;
     return clamp((sd - 0.5) * screen_px_range + 0.5, 0.0, 1.0);
 }
