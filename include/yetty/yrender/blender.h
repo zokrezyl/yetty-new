@@ -1,5 +1,5 @@
-#ifndef YETTY_RENDER_BLENDER_H
-#define YETTY_RENDER_BLENDER_H
+#ifndef YETTY_YRENDER__BLENDER_H
+#define YETTY_YRENDER__BLENDER_H
 
 #include <stddef.h>
 #include <yetty/ycore/result.h>
@@ -11,45 +11,45 @@
 extern "C" {
 #endif
 
-struct yetty_render_blender;
+struct yetty_yrender_blender;
 
 /* Result type */
-YETTY_RESULT_DECLARE(yetty_render_blender, struct yetty_render_blender *);
+YETTY_YRESULT_DECLARE(yetty_yrender_blender, struct yetty_yrender_blender *);
 
 /* Blender ops */
-struct yetty_render_blender_ops {
-    void (*destroy)(struct yetty_render_blender *self);
+struct yetty_yrender_blender_ops {
+    void (*destroy)(struct yetty_yrender_blender *self);
 
     /* Blend rendered layers to target */
-    struct yetty_core_void_result (*blend)(
-        struct yetty_render_blender *self,
-        struct yetty_render_rendered_layer **layers,
+    struct yetty_ycore_void_result (*blend)(
+        struct yetty_yrender_blender *self,
+        struct yetty_yrender_rendered_layer **layers,
         size_t layer_count);
 
     /* Set/replace render target (takes ownership, destroys old target) */
     void (*set_target)(
-        struct yetty_render_blender *self,
-        struct yetty_render_target *target);
+        struct yetty_yrender_blender *self,
+        struct yetty_yrender_target *target);
 
     /* Get current target (not owned by caller) */
-    struct yetty_render_target *(*get_target)(
-        const struct yetty_render_blender *self);
+    struct yetty_yrender_target *(*get_target)(
+        const struct yetty_yrender_blender *self);
 };
 
 /* Blender base */
-struct yetty_render_blender {
-    const struct yetty_render_blender_ops *ops;
+struct yetty_yrender_blender {
+    const struct yetty_yrender_blender_ops *ops;
 };
 
 /* Create blender with initial target (takes ownership of target) */
-struct yetty_render_blender_result yetty_render_blender_create(
+struct yetty_yrender_blender_result yetty_yrender_blender_create(
     WGPUDevice device,
     WGPUQueue queue,
-    struct yetty_render_target *target,
+    struct yetty_yrender_target *target,
     const char *shader_path);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* YETTY_RENDER_BLENDER_H */
+#endif /* YETTY_YRENDER__BLENDER_H */

@@ -17,7 +17,7 @@ extern "C" {
  * @param path File path
  * @return Result containing buffer or error
  */
-struct yetty_core_buffer_result yetty_core_read_file(const char *path);
+struct yetty_ycore_buffer_result yetty_ycore_read_file(const char *path);
 
 /**
  * Decode base64 data.
@@ -28,7 +28,7 @@ struct yetty_core_buffer_result yetty_core_read_file(const char *path);
  * @param out_cap Output buffer capacity
  * @return Number of bytes written to out
  */
-size_t yetty_core_base64_decode(const char *in, size_t in_len, char *out,
+size_t yetty_ycore_base64_decode(const char *in, size_t in_len, char *out,
                                 size_t out_cap);
 
 #ifdef __cplusplus

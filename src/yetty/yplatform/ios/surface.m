@@ -3,7 +3,7 @@
 #include <webgpu/webgpu.h>
 #import <QuartzCore/CAMetalLayer.h>
 
-WGPUSurface yetty_platform_create_surface_from_layer(WGPUInstance instance, CAMetalLayer *layer)
+WGPUSurface yetty_yplatform_create_surface_from_layer(WGPUInstance instance, CAMetalLayer *layer)
 {
     WGPUSurfaceSourceMetalLayer metal_source = {0};
     WGPUSurfaceDescriptor surface_desc = {0};

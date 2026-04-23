@@ -17,5 +17,5 @@ target_include_directories(yetty_yui
 target_link_libraries(yetty_yui
     PRIVATE
         webgpu
-        yetty_term
+        yetty_yterm
 )

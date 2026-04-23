@@ -22,7 +22,7 @@ struct yetty_yimage {
 	uint32_t filter;
 
 	/* GPU resource set */
-	struct yetty_render_gpu_resource_set rs;
+	struct yetty_yrender_gpu_resource_set rs;
 	bool dirty;
 };
 
@@ -43,36 +43,36 @@ struct yetty_yimage_result yetty_yimage_create(void)
 	img->dirty = true;
 
 	/* Initialize gpu_resource_set */
-	strncpy(img->rs.namespace, "yimage", YETTY_RENDER_NAME_MAX - 1);
+	strncpy(img->rs.namespace, "yimage", YETTY_YRENDER__NAME_MAX - 1);
 
 	/* Texture slot 0: image pixels */
-	struct yetty_render_texture *tex = &img->rs.textures[0];
-	strncpy(tex->name, "image_tex", YETTY_RENDER_NAME_MAX - 1);
-	strncpy(tex->wgsl_type, "texture_2d<f32>", YETTY_RENDER_WGSL_TYPE_MAX - 1);
-	strncpy(tex->sampler_name, "image_sampler", YETTY_RENDER_NAME_MAX - 1);
+	struct yetty_yrender_texture *tex = &img->rs.textures[0];
+	strncpy(tex->name, "image_tex", YETTY_YRENDER__NAME_MAX - 1);
+	strncpy(tex->wgsl_type, "texture_2d<f32>", YETTY_YRENDER__WGSL_TYPE_MAX - 1);
+	strncpy(tex->sampler_name, "image_sampler", YETTY_YRENDER__NAME_MAX - 1);
 	tex->format = 0x12; /* WGPUTextureFormat_RGBA8Unorm */
 	tex->sampler_filter = 1; /* WGPUFilterMode_Linear */
 	img->rs.texture_count = 1;
 
 	/* Uniforms */
-	struct yetty_render_uniform *u;
+	struct yetty_yrender_uniform *u;
 
 	u = &img->rs.uniforms[0];
-	strncpy(u->name, "image_bounds", YETTY_RENDER_NAME_MAX - 1);
-	u->type = YETTY_RENDER_UNIFORM_VEC4;
+	strncpy(u->name, "image_bounds", YETTY_YRENDER__NAME_MAX - 1);
+	u->type = YETTY_YRENDER__UNIFORM_VEC4;
 
 	u = &img->rs.uniforms[1];
-	strncpy(u->name, "image_size", YETTY_RENDER_NAME_MAX - 1);
-	u->type = YETTY_RENDER_UNIFORM_VEC2;
+	strncpy(u->name, "image_size", YETTY_YRENDER__NAME_MAX - 1);
+	u->type = YETTY_YRENDER__UNIFORM_VEC2;
 
 	u = &img->rs.uniforms[2];
-	strncpy(u->name, "image_zoom", YETTY_RENDER_NAME_MAX - 1);
-	u->type = YETTY_RENDER_UNIFORM_F32;
+	strncpy(u->name, "image_zoom", YETTY_YRENDER__NAME_MAX - 1);
+	u->type = YETTY_YRENDER__UNIFORM_F32;
 	u->f32 = 1.0f;
 
 	u = &img->rs.uniforms[3];
-	strncpy(u->name, "image_center", YETTY_RENDER_NAME_MAX - 1);
-	u->type = YETTY_RENDER_UNIFORM_VEC2;
+	strncpy(u->name, "image_center", YETTY_YRENDER__NAME_MAX - 1);
+	u->type = YETTY_YRENDER__UNIFORM_VEC2;
 	u->vec2[0] = 0.5f;
 	u->vec2[1] = 0.5f;
 
@@ -93,20 +93,20 @@ void yetty_yimage_destroy(struct yetty_yimage *img)
  * Pixel data
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yimage_set_pixels(struct yetty_yimage *img,
 			const uint8_t *pixels,
 			uint32_t width, uint32_t height)
 {
 	if (!img)
-		return YETTY_ERR(yetty_core_void, "img is NULL");
+		return YETTY_ERR(yetty_ycore_void, "img is NULL");
 	if (!pixels || width == 0 || height == 0)
-		return YETTY_ERR(yetty_core_void, "invalid pixel data");
+		return YETTY_ERR(yetty_ycore_void, "invalid pixel data");
 
 	size_t size = (size_t)width * height * 4;
 	uint8_t *copy = realloc(img->pixels, size);
 	if (!copy)
-		return YETTY_ERR(yetty_core_void, "allocation failed");
+		return YETTY_ERR(yetty_ycore_void, "allocation failed");
 
 	memcpy(copy, pixels, size);
 	img->pixels = copy;
@@ -199,15 +199,15 @@ void yetty_yimage_set_filter(struct yetty_yimage *img, uint32_t filter)
  * GPU Resource Set
  *===========================================================================*/
 
-struct yetty_render_gpu_resource_set_result
+struct yetty_yrender_gpu_resource_set_result
 yetty_yimage_get_gpu_resource_set(struct yetty_yimage *img)
 {
 	if (!img)
-		return YETTY_ERR(yetty_render_gpu_resource_set, "img is NULL");
+		return YETTY_ERR(yetty_yrender_gpu_resource_set, "img is NULL");
 
 	if (img->dirty) {
 		/* Update texture */
-		struct yetty_render_texture *tex = &img->rs.textures[0];
+		struct yetty_yrender_texture *tex = &img->rs.textures[0];
 		tex->data = img->pixels;
 		tex->width = img->pixel_width;
 		tex->height = img->pixel_height;
@@ -228,7 +228,7 @@ yetty_yimage_get_gpu_resource_set(struct yetty_yimage *img)
 		img->rs.uniforms[3].vec2[1] = img->center_y;
 	}
 
-	return YETTY_OK(yetty_render_gpu_resource_set, &img->rs);
+	return YETTY_OK(yetty_yrender_gpu_resource_set, &img->rs);
 }
 
 bool yetty_yimage_is_dirty(const struct yetty_yimage *img)

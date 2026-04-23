@@ -20,13 +20,13 @@ endif()
 
 # Platform abstraction sources (thread, term, fs)
 if(WIN32)
-    set(YETTY_PLATFORM_THREAD_SOURCES
+    set(YETTY_YPLATFORM_THREAD_SOURCES
         ${YETTY_ROOT}/src/yetty/yplatform/windows/thread.c
         ${YETTY_ROOT}/src/yetty/yplatform/windows/term.c
         ${YETTY_ROOT}/src/yetty/yplatform/windows/fs.c
     )
 else()
-    set(YETTY_PLATFORM_THREAD_SOURCES
+    set(YETTY_YPLATFORM_THREAD_SOURCES
         ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c
         ${YETTY_ROOT}/src/yetty/yplatform/shared/term.c
         ${YETTY_ROOT}/src/yetty/yplatform/shared/fs.c
@@ -219,7 +219,7 @@ endif()
 
 # Core libraries (always linked)
 # Note: yetty_yui comes first because it depends on yetty_term
-list(APPEND YETTY_LIBS yetty_yui yetty_term yetty_yrender yetty_webgpu)
+list(APPEND YETTY_LIBS yetty_yui yetty_yterm yetty_yrender yetty_webgpu)
 
 # Feature library link targets
 if(YETTY_ENABLE_FEATURE_BASE)

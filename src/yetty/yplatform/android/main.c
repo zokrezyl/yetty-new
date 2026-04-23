@@ -26,18 +26,18 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 /* Forward declarations */
-const char *yetty_platform_get_cache_dir(void);
-const char *yetty_platform_get_runtime_dir(void);
-WGPUSurface yetty_platform_create_surface_from_window(WGPUInstance instance, ANativeWindow *window);
+const char *yetty_yplatform_get_cache_dir(void);
+const char *yetty_yplatform_get_runtime_dir(void);
+WGPUSurface yetty_yplatform_create_surface_from_window(WGPUInstance instance, ANativeWindow *window);
 
 /* App state */
 struct app_state {
     struct android_app *app;
     ANativeWindow *window;
     struct yetty_yetty *yetty;
-    struct yetty_platform_input_pipe *pipe;
-    struct yetty_config *config;
-    struct yetty_platform_pty_factory *pty_factory;
+    struct yetty_yplatform_input_pipe *pipe;
+    struct yetty_yconfig *config;
+    struct yetty_yplatform_pty_factory *pty_factory;
     WGPUInstance instance;
     WGPUSurface surface;
     pthread_t render_thread;
@@ -85,10 +85,10 @@ static void init_yetty(struct app_state *state)
 {
     const char *cache_dir;
     const char *runtime_dir;
-    struct yetty_platform_paths paths;
-    struct yetty_config_result config_result;
-    struct yetty_platform_input_pipe_result pipe_result;
-    struct yetty_platform_pty_factory_result pty_result;
+    struct yetty_yplatform_paths paths;
+    struct yetty_yconfig_result config_result;
+    struct yetty_yplatform_input_pipe_result pipe_result;
+    struct yetty_yplatform_pty_factory_result pty_result;
     struct yetty_app_context ctx;
     struct yetty_yetty_result yetty_result;
     struct render_thread_args *args;
@@ -99,8 +99,8 @@ static void init_yetty(struct app_state *state)
 
     LOGI("Initializing yetty...");
 
-    cache_dir = yetty_platform_get_cache_dir();
-    runtime_dir = yetty_platform_get_runtime_dir();
+    cache_dir = yetty_yplatform_get_cache_dir();
+    runtime_dir = yetty_yplatform_get_runtime_dir();
 
     mkdir_p(cache_dir);
     mkdir_p(runtime_dir);
@@ -111,7 +111,7 @@ static void init_yetty(struct app_state *state)
     paths.bin_dir = NULL;
 
     /* Config */
-    config_result = yetty_config_create(0, NULL, &paths);
+    config_result = yetty_yconfig_create(0, NULL, &paths);
     if (!YETTY_IS_OK(config_result)) {
         LOGE("Failed to create config");
         return;
@@ -119,7 +119,7 @@ static void init_yetty(struct app_state *state)
     state->config = config_result.value;
 
     /* Platform input pipe */
-    pipe_result = yetty_platform_input_pipe_create();
+    pipe_result = yetty_yplatform_input_pipe_create();
     if (!YETTY_IS_OK(pipe_result)) {
         LOGE("Failed to create input pipe");
         return;
@@ -127,7 +127,7 @@ static void init_yetty(struct app_state *state)
     state->pipe = pipe_result.value;
 
     /* PTY factory */
-    pty_result = yetty_platform_pty_factory_create(state->config, NULL);
+    pty_result = yetty_yplatform_pty_factory_create(state->config, NULL);
     if (!YETTY_IS_OK(pty_result)) {
         LOGE("Failed to create PTY factory");
         return;
@@ -142,7 +142,7 @@ static void init_yetty(struct app_state *state)
     }
 
     /* Surface */
-    state->surface = yetty_platform_create_surface_from_window(state->instance, state->window);
+    state->surface = yetty_yplatform_create_surface_from_window(state->instance, state->window);
     if (!state->surface) {
         LOGE("Failed to create surface");
         return;
@@ -228,7 +228,7 @@ static int32_t handle_input(struct android_app *app, AInputEvent *event)
     int32_t type;
     int32_t action;
     float x, y;
-    struct yetty_core_event ev = {0};
+    struct yetty_ycore_event ev = {0};
 
     if (!state->pipe)
         return 0;
@@ -290,7 +290,7 @@ static void handle_cmd(struct android_app *app, int32_t cmd)
         if (state->pipe && state->window) {
             int32_t w = ANativeWindow_getWidth(state->window);
             int32_t h = ANativeWindow_getHeight(state->window);
-            struct yetty_core_event ev = {0};
+            struct yetty_ycore_event ev = {0};
             ev.type = YETTY_EVENT_RESIZE;
             ev.resize.width = (float)w;
             ev.resize.height = (float)h;

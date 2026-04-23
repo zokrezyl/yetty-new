@@ -132,14 +132,14 @@ struct yetty_yexpr_parse_output {
 	struct yetty_yexpr_node *root;
 };
 
-YETTY_RESULT_DECLARE(yetty_yexpr_parse, struct yetty_yexpr_parse_output);
+YETTY_YRESULT_DECLARE(yetty_yexpr_parse, struct yetty_yexpr_parse_output);
 
 struct yetty_yexpr_plot_parse_output {
 	struct yetty_yexpr_arena arena;
 	struct yetty_yexpr_plot_expr plot;
 };
 
-YETTY_RESULT_DECLARE(yetty_yexpr_plot_parse, struct yetty_yexpr_plot_parse_output);
+YETTY_YRESULT_DECLARE(yetty_yexpr_plot_parse, struct yetty_yexpr_plot_parse_output);
 
 /*=============================================================================
  * API

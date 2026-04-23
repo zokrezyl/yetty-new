@@ -1,5 +1,5 @@
-#ifndef YETTY_PLATFORM_PTY_PIPE_SOURCE_H
-#define YETTY_PLATFORM_PTY_PIPE_SOURCE_H
+#ifndef YETTY_YPLATFORM_PTY_PIPE_SOURCE_H
+#define YETTY_YPLATFORM_PTY_PIPE_SOURCE_H
 
 #include <stdint.h>
 
@@ -12,7 +12,7 @@ extern "C" {
  * abstract: fd on Unix (pty master), CRT fd on Windows (via _open_osfhandle)
  * Event loop does: uv_pipe_open(abstract) + uv_read_start(alloc_cb, read_cb)
  */
-struct yetty_platform_pty_pipe_source {
+struct yetty_yplatform_pty_pipe_source {
     uintptr_t abstract;
 };
 
@@ -20,4 +20,4 @@ struct yetty_platform_pty_pipe_source {
 }
 #endif
 
-#endif /* YETTY_PLATFORM_PTY_PIPE_SOURCE_H */
+#endif /* YETTY_YPLATFORM_PTY_PIPE_SOURCE_H */

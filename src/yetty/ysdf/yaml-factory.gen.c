@@ -409,7 +409,7 @@ static void build_prim(struct yetty_ypaint_core_buffer *buffer,
  * Factory
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ysdf_yaml_factory(struct yetty_ypaint_core_buffer *buffer,
                         yaml_parser_t *yaml_parser,
                         const char *primitive_type_name) {
@@ -421,7 +421,7 @@ yetty_ysdf_yaml_factory(struct yetty_ypaint_core_buffer *buffer,
 
     while (!done) {
         if (!yaml_parser_parse(yaml_parser, &event))
-            return YETTY_ERR(yetty_core_void, "yaml parse error");
+            return YETTY_ERR(yetty_ycore_void, "yaml parse error");
 
         switch (event.type) {
         case YAML_MAPPING_START_EVENT:
@@ -493,9 +493,9 @@ yetty_ysdf_yaml_factory(struct yetty_ypaint_core_buffer *buffer,
  * Registration
  *===========================================================================*/
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_ysdf_register_yaml_factories(struct yetty_ypaint_yaml_parser *parser) {
-    struct yetty_core_void_result res;
+    struct yetty_ycore_void_result res;
 
     res = yetty_ypaint_yaml_parser_register(parser, "circle", yetty_ysdf_yaml_factory);
     if (!res.ok) return res;

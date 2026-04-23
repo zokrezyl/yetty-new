@@ -1,5 +1,5 @@
-#ifndef YETTY_FONT_MS_RASTER_FONT_H
-#define YETTY_FONT_MS_RASTER_FONT_H
+#ifndef YETTY_YFONT_MS_RASTER_FONT_H
+#define YETTY_YFONT_MS_RASTER_FONT_H
 
 #include <yetty/yfont/ms-font.h>
 
@@ -7,11 +7,11 @@
 extern "C" {
 #endif
 
-struct yetty_config;
+struct yetty_yconfig;
 
 /* Create monospace raster font from config */
 struct yetty_font_ms_font_result yetty_font_ms_raster_font_create(
-    struct yetty_config *config,
+    struct yetty_yconfig *config,
     float cell_width,
     float cell_height);
 
@@ -19,4 +19,4 @@ struct yetty_font_ms_font_result yetty_font_ms_raster_font_create(
 }
 #endif
 
-#endif /* YETTY_FONT_MS_RASTER_FONT_H */
+#endif /* YETTY_YFONT_MS_RASTER_FONT_H */

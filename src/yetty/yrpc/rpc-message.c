@@ -52,7 +52,7 @@ struct yetty_rpc_message_result yetty_rpc_message_parse(const uint8_t *data,
 
 	type = (int)array->via.array.ptr[0].via.u64;
 
-	if (type == YETTY_RPC_MSG_REQUEST) {
+	if (type == YETTY_YRPC_MSG_REQUEST) {
 		/* Request: [0, msgid, channel, method, params] */
 		if (array_size < 5) {
 			msgpack_unpacked_destroy(&unpacked);
@@ -60,7 +60,7 @@ struct yetty_rpc_message_result yetty_rpc_message_parse(const uint8_t *data,
 					"request needs 5 elements");
 		}
 
-		msg.type = YETTY_RPC_MSG_REQUEST;
+		msg.type = YETTY_YRPC_MSG_REQUEST;
 		msg.msgid = (uint32_t)array->via.array.ptr[1].via.u64;
 		msg.channel = (uint32_t)array->via.array.ptr[2].via.u64;
 
@@ -84,7 +84,7 @@ struct yetty_rpc_message_result yetty_rpc_message_parse(const uint8_t *data,
 			msg.params_len = sbuf.size;
 		}
 
-	} else if (type == YETTY_RPC_MSG_RESPONSE) {
+	} else if (type == YETTY_YRPC_MSG_RESPONSE) {
 		/* Response: [1, msgid, error, result] */
 		if (array_size < 4) {
 			msgpack_unpacked_destroy(&unpacked);
@@ -92,11 +92,11 @@ struct yetty_rpc_message_result yetty_rpc_message_parse(const uint8_t *data,
 					"response needs 4 elements");
 		}
 
-		msg.type = YETTY_RPC_MSG_RESPONSE;
+		msg.type = YETTY_YRPC_MSG_RESPONSE;
 		msg.msgid = (uint32_t)array->via.array.ptr[1].via.u64;
 		/* error and result parsing handled by caller */
 
-	} else if (type == YETTY_RPC_MSG_NOTIFICATION) {
+	} else if (type == YETTY_YRPC_MSG_NOTIFICATION) {
 		/* Notification: [2, channel, method, params] */
 		if (array_size < 4) {
 			msgpack_unpacked_destroy(&unpacked);
@@ -104,7 +104,7 @@ struct yetty_rpc_message_result yetty_rpc_message_parse(const uint8_t *data,
 					"notification needs 4 elements");
 		}
 
-		msg.type = YETTY_RPC_MSG_NOTIFICATION;
+		msg.type = YETTY_YRPC_MSG_NOTIFICATION;
 		msg.msgid = 0;
 		msg.channel = (uint32_t)array->via.array.ptr[1].via.u64;
 
@@ -161,7 +161,7 @@ static int buffer_write(void *data, const char *buf, size_t len)
 	return 0;
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_write_response_ok(struct yetty_rpc_write_buffer *buf, uint32_t msgid,
 			    const uint8_t *result, size_t result_len)
 {
@@ -172,14 +172,14 @@ yetty_rpc_write_response_ok(struct yetty_rpc_write_buffer *buf, uint32_t msgid,
 
 	/* [1, msgid, nil, result] */
 	msgpack_pack_array(&pk, 4);
-	msgpack_pack_int(&pk, YETTY_RPC_MSG_RESPONSE);
+	msgpack_pack_int(&pk, YETTY_YRPC_MSG_RESPONSE);
 	msgpack_pack_uint32(&pk, msgid);
 	msgpack_pack_nil(&pk); /* no error */
 
 	if (result && result_len > 0) {
 		/* Write raw msgpack result */
 		if (buf->len + result_len > buf->capacity)
-			return YETTY_ERR(yetty_core_void, "buffer overflow");
+			return YETTY_ERR(yetty_ycore_void, "buffer overflow");
 		memcpy(buf->data + buf->len, result, result_len);
 		buf->len += result_len;
 	} else {
@@ -189,7 +189,7 @@ yetty_rpc_write_response_ok(struct yetty_rpc_write_buffer *buf, uint32_t msgid,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_write_response_error(struct yetty_rpc_write_buffer *buf,
 			       uint32_t msgid, const char *error_msg)
 {
@@ -203,7 +203,7 @@ yetty_rpc_write_response_error(struct yetty_rpc_write_buffer *buf,
 
 	/* [1, msgid, error, nil] */
 	msgpack_pack_array(&pk, 4);
-	msgpack_pack_int(&pk, YETTY_RPC_MSG_RESPONSE);
+	msgpack_pack_int(&pk, YETTY_YRPC_MSG_RESPONSE);
 	msgpack_pack_uint32(&pk, msgid);
 	msgpack_pack_str(&pk, error_len);
 	if (error_len > 0)
@@ -213,7 +213,7 @@ yetty_rpc_write_response_error(struct yetty_rpc_write_buffer *buf,
 	return YETTY_OK_VOID();
 }
 
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_rpc_write_response_bool(struct yetty_rpc_write_buffer *buf,
 			      uint32_t msgid, int value)
 {
@@ -224,7 +224,7 @@ yetty_rpc_write_response_bool(struct yetty_rpc_write_buffer *buf,
 
 	/* [1, msgid, nil, bool] */
 	msgpack_pack_array(&pk, 4);
-	msgpack_pack_int(&pk, YETTY_RPC_MSG_RESPONSE);
+	msgpack_pack_int(&pk, YETTY_YRPC_MSG_RESPONSE);
 	msgpack_pack_uint32(&pk, msgid);
 	msgpack_pack_nil(&pk); /* no error */
 

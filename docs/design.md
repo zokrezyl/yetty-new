@@ -53,13 +53,13 @@ See [C Coding Style](c-coding-style.md) for the full vtable and embedding patter
 Yetty uses typed result unions — similar to Rust's `Result<T, E>` — encoded as C structs with a tagged union.
 
 ```c
-YETTY_RESULT_DECLARE(yetty_font_font, struct yetty_font_font *);
+YETTY_YRESULT_DECLARE(yetty_font_font, struct yetty_font_font *);
 
 /* Returns struct yetty_font_font_result { int ok; union { value; error; }; } */
 struct yetty_font_font_result res = yetty_font_raster_font_create(config, 10, 20);
 if (YETTY_IS_ERR(res)) {
     yerror("font: %s", res.error.msg);
-    return YETTY_ERR(yetty_core_void, res.error.msg);
+    return YETTY_ERR(yetty_ycore_void, res.error.msg);
 }
 struct yetty_font_font *font = res.value;
 ```
@@ -72,7 +72,7 @@ See [Result Types](result.md) for the macro definitions and usage patterns.
 
 The terminal screen is a stack of render layers: text grid, selection, cursor, ypaint overlays, cards. Each layer:
 
-- Owns a `struct yetty_render_gpu_resource_set` describing its GPU needs
+- Owns a `struct yetty_yrender_gpu_resource_set` describing its GPU needs
 - Has a `dirty` flag — no re-render unless content changed
 - Implements the layer ops interface (`get_gpu_resource_set`, `write`, `resize`, `destroy`)
 

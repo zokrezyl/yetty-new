@@ -39,7 +39,7 @@ struct yetty_yimage;
  * Result types
  *===========================================================================*/
 
-YETTY_RESULT_DECLARE(yetty_yimage, struct yetty_yimage *);
+YETTY_YRESULT_DECLARE(yetty_yimage, struct yetty_yimage *);
 
 /*=============================================================================
  * Lifecycle
@@ -56,7 +56,7 @@ void yetty_yimage_destroy(struct yetty_yimage *img);
  * pixels: raw RGBA8 bytes, 4 bytes per pixel
  * width/height: pixel dimensions
  */
-struct yetty_core_void_result
+struct yetty_ycore_void_result
 yetty_yimage_set_pixels(struct yetty_yimage *img,
 			const uint8_t *pixels,
 			uint32_t width, uint32_t height);
@@ -95,7 +95,7 @@ void yetty_yimage_set_filter(struct yetty_yimage *img, uint32_t filter);
  * GPU Resource Set
  *===========================================================================*/
 
-struct yetty_render_gpu_resource_set_result
+struct yetty_yrender_gpu_resource_set_result
 yetty_yimage_get_gpu_resource_set(struct yetty_yimage *img);
 
 bool yetty_yimage_is_dirty(const struct yetty_yimage *img);
