@@ -1,5 +1,5 @@
 # CDB Font Generation
-# Generates MSDF CDB files from TTF fonts using yetty-msdf-gen tool
+# Generates MSDF CDB files from TTF fonts using yetty-ymsdf-gen tool
 # Outputs to ${CMAKE_BINARY_DIR}/assets/msdf-fonts/
 
 set(CDB_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets/msdf-fonts")
@@ -17,7 +17,7 @@ set(CDB_STAMP_FILE "${CDB_OUTPUT_DIR}/.cdb_generated")
 if(CMAKE_CROSSCOMPILING)
     # Cross-compiling (Emscripten): build host tools using standalone CMakeLists.txt
     set(HOST_TOOLS_DIR "${CMAKE_BINARY_DIR}/host-tools")
-    set(HOST_MSDF_GEN "${HOST_TOOLS_DIR}/yetty-msdf-gen")
+    set(HOST_MSDF_GEN "${HOST_TOOLS_DIR}/yetty-ymsdf-gen")
 
     # Configure host tools build using standalone CMakeLists.txt (no X11/GLFW deps)
     add_custom_command(
@@ -35,9 +35,9 @@ if(CMAKE_CROSSCOMPILING)
     # Build host msdf-gen tool
     add_custom_command(
         OUTPUT "${HOST_MSDF_GEN}"
-        COMMAND ${CMAKE_COMMAND} --build "${HOST_TOOLS_DIR}" --target yetty-msdf-gen --parallel
+        COMMAND ${CMAKE_COMMAND} --build "${HOST_TOOLS_DIR}" --target yetty-ymsdf-gen --parallel
         DEPENDS "${HOST_TOOLS_DIR}/build.ninja"
-        COMMENT "Building host yetty-msdf-gen tool"
+        COMMENT "Building host yetty-ymsdf-gen tool"
         VERBATIM
     )
 
@@ -59,12 +59,12 @@ else()
     add_custom_command(
         OUTPUT ${CDB_STAMP_FILE}
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CDB_OUTPUT_DIR}"
-        COMMAND $<TARGET_FILE:yetty-msdf-gen> --all "${FONT_DIR}/DejaVuSansMNerdFontMono-Regular.ttf" "${CDB_OUTPUT_DIR}"
-        COMMAND $<TARGET_FILE:yetty-msdf-gen> --all "${FONT_DIR}/DejaVuSansMNerdFontMono-Bold.ttf" "${CDB_OUTPUT_DIR}"
-        COMMAND $<TARGET_FILE:yetty-msdf-gen> --all "${FONT_DIR}/DejaVuSansMNerdFontMono-Oblique.ttf" "${CDB_OUTPUT_DIR}"
-        COMMAND $<TARGET_FILE:yetty-msdf-gen> --all "${FONT_DIR}/DejaVuSansMNerdFontMono-BoldOblique.ttf" "${CDB_OUTPUT_DIR}"
+        COMMAND $<TARGET_FILE:yetty-ymsdf-gen> --all "${FONT_DIR}/DejaVuSansMNerdFontMono-Regular.ttf" "${CDB_OUTPUT_DIR}"
+        COMMAND $<TARGET_FILE:yetty-ymsdf-gen> --all "${FONT_DIR}/DejaVuSansMNerdFontMono-Bold.ttf" "${CDB_OUTPUT_DIR}"
+        COMMAND $<TARGET_FILE:yetty-ymsdf-gen> --all "${FONT_DIR}/DejaVuSansMNerdFontMono-Oblique.ttf" "${CDB_OUTPUT_DIR}"
+        COMMAND $<TARGET_FILE:yetty-ymsdf-gen> --all "${FONT_DIR}/DejaVuSansMNerdFontMono-BoldOblique.ttf" "${CDB_OUTPUT_DIR}"
         COMMAND ${CMAKE_COMMAND} -E touch "${CDB_STAMP_FILE}"
-        DEPENDS yetty-msdf-gen ${FONT_FILES}
+        DEPENDS yetty-ymsdf-gen ${FONT_FILES}
         COMMENT "Generating MSDF CDB files from TTF fonts"
         VERBATIM
     )
