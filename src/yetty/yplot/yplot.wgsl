@@ -161,10 +161,43 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Convert UV to pixel coords within bounds
+    // Viewport is the full pane. Transform this fragment's pane pixel into
+    // the plot's SOURCE pixel by composing TWO independent zoom transforms:
+    //     visual_zoom_* : non-intrusive (Ctrl+Scroll, mouse-anchored)
+    //     cell_zoom_*   : intrusive (Ctrl+Shift+Scroll, cell-size scale)
+    // Each has the same shape — source = (pane - c)/scale + c + off — so
+    // applying them in sequence gives a combined zoom whose scale is the
+    // product. SDF math runs at the final `source`, edges stay sharp at any
+    // zoom level. No bitmap stretch anywhere. That is the point of yetty.
+    let vz_scale = uniforms.yplot_visual_zoom_scale;
+    let vz_off   = vec2<f32>(uniforms.yplot_visual_zoom_off_x,
+                             uniforms.yplot_visual_zoom_off_y);
+    let cz_scale = uniforms.yplot_cell_zoom_scale;
+    let cz_off   = vec2<f32>(uniforms.yplot_cell_zoom_off_x,
+                             uniforms.yplot_cell_zoom_off_y);
+    let vp       = vec2<f32>(uniforms.yplot_viewport_w,
+                             uniforms.yplot_viewport_h);
+    let vp_c     = vp * 0.5;
+
+    // visual_zoom is mouse-anchored around pane center (like Ctrl+Scroll).
+    // cell_zoom is structural — zooms around the pane ORIGIN (0,0) so plot
+    // positions grow the same direction as text cells growing from top-left.
+    let pane_px = in.position.xy;
+    let after_visual = (pane_px - vp_c) / max(vz_scale, 0.0001) + vp_c + vz_off;
+    let source_px    = after_visual / max(cz_scale, 0.0001) + cz_off;
+
+    let bounds_x = yplot_get_bounds_x();
+    let bounds_y = yplot_get_bounds_y();
     let bounds_w = yplot_get_bounds_w();
     let bounds_h = yplot_get_bounds_h();
-    let local_pos = in.uv * vec2<f32>(bounds_w, bounds_h);
+
+    // Cull fragments outside this plot's rect (both when zoom is identity
+    // and when zoom moves the rect partly off-screen).
+    let local_pos = source_px - vec2<f32>(bounds_x, bounds_y);
+    if (local_pos.x < 0.0 || local_pos.y < 0.0 ||
+        local_pos.x >= bounds_w || local_pos.y >= bounds_h) {
+        discard;
+    }
 
     return yplot_render(local_pos);
 }

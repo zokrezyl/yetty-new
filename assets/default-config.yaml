@@ -37,9 +37,11 @@ terminal:
   text-layer:
     font:
       # Font rendering method: "raster" or "msdf"
-      # - raster: Traditional bitmap rendering (faster, less GPU)
-      # - msdf: Multi-channel signed distance field (smoother scaling)
-      render-method: "raster"
+      # - raster: Traditional bitmap rendering (faster, but magnifies as
+      #           pixels when Ctrl+Scroll-zoomed — looks blurry at large zoom)
+      # - msdf:   Multi-channel signed distance field. Crisp at any zoom
+      #           level because MSDF is re-evaluated per fragment.
+      render-method: "msdf"
       # Font size in pixels (for msdf)
       size: 14
 

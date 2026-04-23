@@ -46,6 +46,13 @@ struct render_target_texture {
 	WGPUBuffer uniform_buffer;
 	WGPUTexture placeholder_texture;
 	WGPUTextureView placeholder_view;
+
+	/* Visual zoom state. scale=1.0 disables zoom. Offsets are in source
+	 * pixels within this target. Read by blend()/present() and packed into
+	 * the blend uniform buffer. */
+	float visual_zoom_scale;
+	float visual_zoom_offset_x;
+	float visual_zoom_offset_y;
 };
 
 /*=============================================================================
@@ -382,7 +389,7 @@ static struct yetty_ycore_void_result create_blend_pipeline(struct render_target
 	entries[MAX_BLEND_SOURCES + 1].binding = MAX_BLEND_SOURCES + 1;
 	entries[MAX_BLEND_SOURCES + 1].visibility = WGPUShaderStage_Fragment;
 	entries[MAX_BLEND_SOURCES + 1].buffer.type = WGPUBufferBindingType_Uniform;
-	entries[MAX_BLEND_SOURCES + 1].buffer.minBindingSize = 16;
+	entries[MAX_BLEND_SOURCES + 1].buffer.minBindingSize = 32;
 
 	WGPUBindGroupLayoutDescriptor bgl_desc = {0};
 	bgl_desc.entryCount = MAX_BLEND_SOURCES + 2;
@@ -442,10 +449,13 @@ static struct yetty_ycore_void_result create_blend_pipeline(struct render_target
 	if (!rt->sampler)
 		return YETTY_ERR(yetty_ycore_void, "failed to create sampler");
 
-	/* Uniform buffer */
+	/* Uniform buffer - BlendUniforms is 32 bytes:
+	 *   u32 layer_count; u32 target_w; u32 target_h; u32 _pad;
+	 *   f32 visual_zoom_scale; f32 visual_zoom_offset_x;
+	 *   f32 visual_zoom_offset_y; f32 _pad2; */
 	WGPUBufferDescriptor buf_desc = {0};
 	buf_desc.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-	buf_desc.size = 16;
+	buf_desc.size = 32;
 
 	rt->uniform_buffer = wgpuDeviceCreateBuffer(rt->device, &buf_desc);
 	if (!rt->uniform_buffer)
@@ -496,9 +506,25 @@ render_target_texture_blend(struct yetty_yrender_target *self,
 			return res;
 	}
 
-	/* Update uniforms */
-	uint32_t uniforms[4] = {(uint32_t)count, 0, 0, 0};
-	wgpuQueueWriteBuffer(rt->queue, rt->uniform_buffer, 0, uniforms, sizeof(uniforms));
+	/* Update uniforms. See BlendUniforms layout in blend.wgsl. */
+	struct {
+		uint32_t layer_count;
+		uint32_t target_w;
+		uint32_t target_h;
+		uint32_t _pad;
+		float zoom_scale;
+		float zoom_offset_x;
+		float zoom_offset_y;
+		float _pad2;
+	} uniforms = {
+		.layer_count = (uint32_t)count,
+		.target_w = (uint32_t)rt->base.viewport.w,
+		.target_h = (uint32_t)rt->base.viewport.h,
+		.zoom_scale = rt->visual_zoom_scale > 0.0f ? rt->visual_zoom_scale : 1.0f,
+		.zoom_offset_x = rt->visual_zoom_offset_x,
+		.zoom_offset_y = rt->visual_zoom_offset_y,
+	};
+	wgpuQueueWriteBuffer(rt->queue, rt->uniform_buffer, 0, &uniforms, sizeof(uniforms));
 
 	/* Collect source views */
 	WGPUTextureView source_views[MAX_BLEND_SOURCES];
@@ -519,7 +545,7 @@ render_target_texture_blend(struct yetty_yrender_target *self,
 	bg_entries[MAX_BLEND_SOURCES].sampler = rt->sampler;
 	bg_entries[MAX_BLEND_SOURCES + 1].binding = MAX_BLEND_SOURCES + 1;
 	bg_entries[MAX_BLEND_SOURCES + 1].buffer = rt->uniform_buffer;
-	bg_entries[MAX_BLEND_SOURCES + 1].size = 16;
+	bg_entries[MAX_BLEND_SOURCES + 1].size = 32;
 
 	WGPUBindGroupDescriptor bg_desc = {0};
 	bg_desc.layout = rt->blend_layout;
@@ -578,8 +604,10 @@ render_target_texture_blend(struct yetty_yrender_target *self,
 	wgpuCommandEncoderRelease(encoder);
 	wgpuBindGroupRelease(bind_group);
 
-	ydebug("render_target_texture: blended %zu sources at (%.0f,%.0f) %.0fx%.0f",
-	       count, vp.x, vp.y, vp.w, vp.h);
+	ydebug("render_target_texture[%p]: blended %zu sources at (%.0f,%.0f) %.0fx%.0f zoom=%.2f off=(%.1f,%.1f)",
+	       (void *)rt, count, vp.x, vp.y, vp.w, vp.h,
+	       rt->visual_zoom_scale,
+	       rt->visual_zoom_offset_x, rt->visual_zoom_offset_y);
 	return YETTY_OK_VOID();
 }
 
@@ -616,9 +644,24 @@ render_target_texture_present(struct yetty_yrender_target *self)
 		}
 	}
 
-	/* Update uniforms - single source */
-	uint32_t uniforms[4] = {1, 0, 0, 0};
-	wgpuQueueWriteBuffer(rt->queue, rt->uniform_buffer, 0, uniforms, sizeof(uniforms));
+	/* Update uniforms - single source (present path). Zoom is applied during
+	 * blend(), so present blits 1:1. Match the 32-byte BlendUniforms layout. */
+	struct {
+		uint32_t layer_count;
+		uint32_t target_w;
+		uint32_t target_h;
+		uint32_t _pad;
+		float zoom_scale;
+		float zoom_offset_x;
+		float zoom_offset_y;
+		float _pad2;
+	} uniforms = {
+		.layer_count = 1,
+		.target_w = (uint32_t)rt->base.viewport.w,
+		.target_h = (uint32_t)rt->base.viewport.h,
+		.zoom_scale = 1.0f,
+	};
+	wgpuQueueWriteBuffer(rt->queue, rt->uniform_buffer, 0, &uniforms, sizeof(uniforms));
 
 	/* Create bind group with this target's texture as source */
 	WGPUTextureView source_views[MAX_BLEND_SOURCES];
@@ -635,7 +678,7 @@ render_target_texture_present(struct yetty_yrender_target *self)
 	bg_entries[MAX_BLEND_SOURCES].sampler = rt->sampler;
 	bg_entries[MAX_BLEND_SOURCES + 1].binding = MAX_BLEND_SOURCES + 1;
 	bg_entries[MAX_BLEND_SOURCES + 1].buffer = rt->uniform_buffer;
-	bg_entries[MAX_BLEND_SOURCES + 1].size = 16;
+	bg_entries[MAX_BLEND_SOURCES + 1].size = 32;
 
 	WGPUBindGroupDescriptor bg_desc = {0};
 	bg_desc.layout = rt->blend_layout;
@@ -706,6 +749,21 @@ render_target_texture_present(struct yetty_yrender_target *self)
  * vtable and create
  *===========================================================================*/
 
+static struct yetty_ycore_void_result
+render_target_texture_set_visual_zoom(struct yetty_yrender_target *self,
+				      float scale, float offset_x, float offset_y)
+{
+	struct render_target_texture *rt = (struct render_target_texture *)self;
+	if (!(scale > 0.0f))
+		scale = 1.0f;
+	rt->visual_zoom_scale = scale;
+	rt->visual_zoom_offset_x = offset_x;
+	rt->visual_zoom_offset_y = offset_y;
+	ydebug("render_target_texture[%p]: set_visual_zoom scale=%.2f off=(%.1f,%.1f)",
+	       (void *)rt, scale, offset_x, offset_y);
+	return YETTY_OK_VOID();
+}
+
 static const struct yetty_yrender_target_ops render_target_texture_ops = {
 	.destroy = render_target_texture_destroy,
 	.clear = render_target_texture_clear,
@@ -715,6 +773,7 @@ static const struct yetty_yrender_target_ops render_target_texture_ops = {
 	.get_view = render_target_texture_get_view,
 	.get_texture = render_target_texture_get_texture,
 	.resize = render_target_texture_resize,
+	.set_visual_zoom = render_target_texture_set_visual_zoom,
 };
 
 struct yetty_yrender_target_ptr_result
@@ -734,6 +793,7 @@ yetty_yrender_target_texture_create(WGPUDevice device, WGPUQueue queue,
 	rt->format = format;
 	rt->allocator = allocator;
 	rt->surface = surface;  /* NULL for layer/terminal targets */
+	rt->visual_zoom_scale = 1.0f;
 
 	/* Create binder */
 	struct yetty_yrender_gpu_resource_binder_result binder_res =

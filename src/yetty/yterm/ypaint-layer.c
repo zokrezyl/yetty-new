@@ -22,7 +22,11 @@
 #define U_CELL_SIZE 1
 #define U_ROLLING_ROW_0 2
 #define U_PRIM_COUNT 3
-#define U_COUNT 4
+#define U_VZ_SCALE 4
+#define U_VZ_OFF 5
+#define U_CZ_SCALE 6
+#define U_CZ_OFF 7
+#define U_COUNT 8
 
 /* Setters */
 static inline void set_grid_size(struct yetty_yrender_gpu_resource_set *rs,
@@ -43,6 +47,18 @@ static inline void set_prim_count(struct yetty_yrender_gpu_resource_set *rs,
                                   uint32_t count) {
   rs->uniforms[U_PRIM_COUNT].u32 = count;
 }
+static inline void set_visual_zoom(struct yetty_yrender_gpu_resource_set *rs,
+                                   float scale, float off_x, float off_y) {
+  rs->uniforms[U_VZ_SCALE].f32 = scale;
+  rs->uniforms[U_VZ_OFF].vec2[0] = off_x;
+  rs->uniforms[U_VZ_OFF].vec2[1] = off_y;
+}
+static inline void set_cell_zoom(struct yetty_yrender_gpu_resource_set *rs,
+                                 float scale, float off_x, float off_y) {
+  rs->uniforms[U_CZ_SCALE].f32 = scale;
+  rs->uniforms[U_CZ_OFF].vec2[0] = off_x;
+  rs->uniforms[U_CZ_OFF].vec2[1] = off_y;
+}
 
 /* Init uniforms */
 static void init_uniforms(struct yetty_yrender_gpu_resource_set *rs) {
@@ -56,14 +72,29 @@ static void init_uniforms(struct yetty_yrender_gpu_resource_set *rs) {
       "ypaint_rolling_row_0", YETTY_YRENDER_UNIFORM_U32};
   rs->uniforms[U_PRIM_COUNT] = (struct yetty_yrender_uniform){
       "ypaint_prim_count", YETTY_YRENDER_UNIFORM_U32};
+  rs->uniforms[U_VZ_SCALE] = (struct yetty_yrender_uniform){
+      "ypaint_visual_zoom_scale", YETTY_YRENDER_UNIFORM_F32};
+  rs->uniforms[U_VZ_OFF] = (struct yetty_yrender_uniform){
+      "ypaint_visual_zoom_off", YETTY_YRENDER_UNIFORM_VEC2};
+  rs->uniforms[U_CZ_SCALE] = (struct yetty_yrender_uniform){
+      "ypaint_cell_zoom_scale", YETTY_YRENDER_UNIFORM_F32};
+  rs->uniforms[U_CZ_OFF] = (struct yetty_yrender_uniform){
+      "ypaint_cell_zoom_off", YETTY_YRENDER_UNIFORM_VEC2};
 
   set_rolling_row_0(rs, 0);
   set_prim_count(rs, 0);
+  set_visual_zoom(rs, 1.0f, 0.0f, 0.0f);
+  set_cell_zoom(rs, 1.0f, 0.0f, 0.0f);
 }
 
 /* YPaint layer - embeds base as first member */
 struct yetty_yterm_ypaint_layer {
   struct yetty_yterm_terminal_layer base;
+  /* Initial cell size captured at creation — used to derive the cumulative
+   * cell-zoom factor and push it to complex-prim factories (yplot, …) so
+   * their shaders can apply the "intrusive" zoom the same way they apply
+   * the non-intrusive visual zoom. */
+  struct pixel_size initial_cell_size;
   struct yetty_ypaint_canvas *canvas;
   int scrolling_mode;
   struct yetty_yrender_gpu_resource_set rs;
@@ -145,11 +176,68 @@ on_canvas_cursor_set(struct yetty_ycore_void_result *user_data,
   return YETTY_OK_VOID();
 }
 
+static struct yetty_ycore_void_result
+ypaint_layer_set_cell_size(struct yetty_yterm_terminal_layer *self,
+                           struct pixel_size cell_size)
+{
+    struct yetty_yterm_ypaint_layer *layer =
+        (struct yetty_yterm_ypaint_layer *)self;
+    if (cell_size.width <= 0.0f || cell_size.height <= 0.0f)
+        return YETTY_ERR(yetty_ycore_void, "invalid cell size");
+    if (!layer->canvas)
+        return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
+
+    self->cell_size = cell_size;
+    self->dirty = 1;
+
+    /* Don't touch the canvas — keeping canvas cell_size/grid_size constant
+     * preserves the existing primitive buckets (ypaint prims store absolute
+     * pixel coords in the same frame the canvas was built in). The zoom is
+     * achieved purely via a shader uniform transform, same mechanism as the
+     * non-intrusive visual zoom, semantically separate (own uniform pair). */
+    float base_h = layer->initial_cell_size.height;
+    float cz = (base_h > 0.0f) ? (cell_size.height / base_h) : 1.0f;
+    set_cell_zoom(&layer->rs, cz, 0.0f, 0.0f);
+
+    /* Fan out to complex-prim factories so yplot and friends apply the
+     * same transform in their own shaders. */
+    struct yetty_ypaint_complex_prim_factory *f =
+        yetty_ypaint_canvas_get_complex_prim_factory(layer->canvas);
+    yetty_ypaint_complex_prim_factory_set_cell_zoom(f, cz, 0.0f, 0.0f);
+
+    ydebug("ypaint_layer_set_cell_size: %.1fx%.1f cell_zoom=%.3f",
+           cell_size.width, cell_size.height, cz);
+    return YETTY_OK_VOID();
+}
+
+static struct yetty_ycore_void_result
+ypaint_layer_set_visual_zoom(struct yetty_yterm_terminal_layer *self,
+                             float scale, float off_x, float off_y)
+{
+    struct yetty_yterm_ypaint_layer *layer =
+        (struct yetty_yterm_ypaint_layer *)self;
+    set_visual_zoom(&layer->rs, scale, off_x, off_y);
+    self->dirty = 1;
+
+    /* Complex primitives (yplot / yimage / …) render through their own
+     * pipelines with their own fragment shaders — they don't go through the
+     * ypaint-layer shader. Push the zoom into every concrete factory's shared
+     * uniforms so each type's shader can apply the same transform. */
+    if (layer->canvas) {
+        struct yetty_ypaint_complex_prim_factory *f =
+            yetty_ypaint_canvas_get_complex_prim_factory(layer->canvas);
+        yetty_ypaint_complex_prim_factory_set_visual_zoom(f, scale, off_x, off_y);
+    }
+    return YETTY_OK_VOID();
+}
+
 /* Ops */
 static const struct yetty_yterm_terminal_layer_ops ypaint_layer_ops = {
     .destroy = ypaint_layer_destroy,
     .write = ypaint_layer_write,
     .resize_grid = ypaint_layer_resize_grid,
+    .set_cell_size = ypaint_layer_set_cell_size,
+    .set_visual_zoom = ypaint_layer_set_visual_zoom,
     .get_gpu_resource_set = ypaint_layer_get_gpu_resource_set,
     .render = ypaint_layer_render,
     .is_empty = ypaint_layer_is_empty,
@@ -191,6 +279,8 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_ypaint_layer_create(
   layer->base.grid_size.rows = rows;
   layer->base.cell_size.width = cell_width;
   layer->base.cell_size.height = cell_height;
+  layer->initial_cell_size.width = cell_width;
+  layer->initial_cell_size.height = cell_height;
   layer->base.dirty = 0;
   layer->base.pty_write_fn = NULL; /* ypaint layer doesn't write to PTY */
   layer->base.pty_write_userdata = NULL;

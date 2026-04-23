@@ -61,6 +61,18 @@ struct yetty_yterm_terminal_layer_ops {
                                          const char *data, size_t len);
   struct yetty_ycore_void_result (*resize_grid)(
       struct yetty_yterm_terminal_layer *self, struct grid_size grid_size);
+  /* Change the layer's cell pixel size. Implementations must also push the
+   * new value into any GPU uniform the layer maintains. Used by structural
+   * zoom (YETTY_EVENT_ZOOM_CELL_SIZE). */
+  struct yetty_ycore_void_result (*set_cell_size)(
+      struct yetty_yterm_terminal_layer *self, struct pixel_size cell_size);
+  /* Push visual (shader-level) zoom state into the layer's uniforms. The
+   * layer's fragment shader applies the transform at the start of fs_main so
+   * all downstream MSDF/SDF math runs at the *transformed* pixel — unlike
+   * blend-stage zoom which is a post-rasterization bitmap stretch. */
+  struct yetty_ycore_void_result (*set_visual_zoom)(
+      struct yetty_yterm_terminal_layer *self,
+      float scale, float offset_x, float offset_y);
   struct yetty_yrender_gpu_resource_set_result (*get_gpu_resource_set)(
       const struct yetty_yterm_terminal_layer *self);
   /* Render layer to target */

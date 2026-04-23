@@ -655,6 +655,85 @@ terminal_view_on_event(struct yetty_yui_view *view,
     return YETTY_OK(yetty_ycore_int, 1);
   }
 
+  case YETTY_EVENT_ZOOM_CELL_SIZE: {
+    /* Structural zoom — scale each layer's cell pixel size (via set_cell_size,
+     * which updates BOTH the layer field AND the shader uniform), then
+     * re-derive cols/rows from the current view bounds and propagate to the
+     * PTY + vterm. */
+    float delta = event->zoom_cell_size.delta;
+    float factor;
+    if (event->zoom_cell_size.reset) {
+      /* Baseline isn't currently cached; treat reset as "no scale change". */
+      factor = 1.0f;
+    } else {
+      factor = 1.0f + delta;
+      if (factor < 0.5f) factor = 0.5f;
+      if (factor > 3.0f) factor = 3.0f;
+    }
+    ydebug("terminal: ZOOM_CELL_SIZE delta=%.3f factor=%.3f", delta, factor);
+    if (factor == 1.0f)
+      return YETTY_OK(yetty_ycore_int, 1);
+
+    float view_w = terminal->view.bounds.w;
+    float view_h = terminal->view.bounds.h;
+    if (view_w <= 0.0f || view_h <= 0.0f) {
+      ydebug("terminal: ZOOM_CELL_SIZE skipped, zero view bounds");
+      return YETTY_OK(yetty_ycore_int, 1);
+    }
+
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+      struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
+      if (!layer) continue;
+      struct pixel_size new_cs = layer->cell_size;
+      if (new_cs.width > 0) new_cs.width *= factor;
+      if (new_cs.height > 0) new_cs.height *= factor;
+      if (layer->ops && layer->ops->set_cell_size) {
+        layer->ops->set_cell_size(layer, new_cs);
+      } else {
+        layer->cell_size = new_cs;
+        layer->dirty = 1;
+      }
+    }
+
+    if (terminal->layer_count > 0) {
+      struct yetty_yterm_terminal_layer *layer = terminal->layers[0];
+      float cw = layer->cell_size.width > 0 ? layer->cell_size.width : 10.0f;
+      float ch = layer->cell_size.height > 0 ? layer->cell_size.height : 20.0f;
+      uint32_t new_cols = (uint32_t)(view_w / cw);
+      uint32_t new_rows = (uint32_t)(view_h / ch);
+      if (new_cols == 0) new_cols = 1;
+      if (new_rows == 0) new_rows = 1;
+      if (new_cols != terminal->cols || new_rows != terminal->rows) {
+        yetty_yterm_terminal_resize_grid(
+            terminal, (struct grid_size){.cols = new_cols, .rows = new_rows});
+        if (terminal->context.pty && terminal->context.pty->ops &&
+            terminal->context.pty->ops->resize)
+          terminal->context.pty->ops->resize(terminal->context.pty,
+                                             new_cols, new_rows);
+      }
+    }
+
+    if (terminal->context.yetty_context.event_loop &&
+        terminal->context.yetty_context.event_loop->ops->request_render)
+      terminal->context.yetty_context.event_loop->ops->request_render(
+          terminal->context.yetty_context.event_loop);
+    return YETTY_OK(yetty_ycore_int, 1);
+  }
+
+  case YETTY_EVENT_ZOOM_VISUAL_APPLY: {
+    float scale = event->zoom_visual_apply.scale;
+    float ox    = event->zoom_visual_apply.offset_x;
+    float oy    = event->zoom_visual_apply.offset_y;
+    for (size_t i = 0; i < terminal->layer_count; i++) {
+      struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
+      if (layer && layer->ops && layer->ops->set_visual_zoom)
+        layer->ops->set_visual_zoom(layer, scale, ox, oy);
+    }
+    ydebug("terminal: ZOOM_VISUAL_APPLY scale=%.2f off=(%.1f,%.1f)",
+           scale, ox, oy);
+    return YETTY_OK(yetty_ycore_int, 1);
+  }
+
   case YETTY_EVENT_SHUTDOWN:
     ydebug("terminal: SHUTDOWN received");
     terminal->shutting_down = 1;

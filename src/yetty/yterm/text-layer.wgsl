@@ -56,12 +56,21 @@ fn read_cell_bg(cell_index: u32) -> vec3<f32> {
 
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let pixel_pos = input.position.xy;
     let grid_size = uniforms.text_grid_grid_size;
     let cell_size = uniforms.text_grid_cell_size;
 
     let grid_pixel_w = grid_size.x * cell_size.x;
     let grid_pixel_h = grid_size.y * cell_size.y;
+
+    // Visual zoom — transform the screen pixel into the *source* pixel the
+    // cell/glyph math should evaluate at. Because MSDF/SDF are re-evaluated
+    // per fragment, the edges stay sharp at any scale. When scale==1 this is
+    // the identity transform (no runtime cost beyond a multiply + add).
+    let vz_scale = uniforms.text_grid_visual_zoom_scale;
+    let vz_off   = uniforms.text_grid_visual_zoom_off;
+    let vz_center = vec2<f32>(grid_pixel_w * 0.5, grid_pixel_h * 0.5);
+    let pixel_pos = (input.position.xy - vz_center) / max(vz_scale, 0.0001)
+                  + vz_center + vz_off;
 
     if (pixel_pos.x < 0.0 || pixel_pos.y < 0.0 ||
         pixel_pos.x >= grid_pixel_w || pixel_pos.y >= grid_pixel_h) {
