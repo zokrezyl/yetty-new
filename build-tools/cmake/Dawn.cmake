@@ -22,8 +22,8 @@
 include(FetchContent)
 
 # Dawn release version (date-based versioning)
-set(DAWN_VERSION "20260214.164635" CACHE STRING "Dawn version to use")
-set(DAWN_COMMIT "1a3afc99a7ef7dacaab73b71d44575c4f1bf2dd7" CACHE STRING "Dawn commit hash")
+set(DAWN_VERSION "20260422.215810" CACHE STRING "Dawn version to use")
+set(DAWN_COMMIT "6701fe7a9a10398164e847bf6cdf2c580d3d150c" CACHE STRING "Dawn commit hash")
 
 # iOS uses XCFramework from dawn-apple package
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -92,16 +92,80 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     message(STATUS "  Library: ${DAWN_LIB_PATH}")
     message(STATUS "  Headers: ${DAWN_INCLUDE_DIR}")
 
-else()
-    # Desktop platforms: Linux, macOS, Windows
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
-            set(DAWN_PLATFORM "ubuntu-latest")
-            set(DAWN_LIB_DIR_NAME "lib64")
-        else()
-            message(FATAL_ERROR "Unsupported Linux architecture for Dawn: ${CMAKE_SYSTEM_PROCESSOR}\n"
-                "Dawn pre-built binaries are only available for x86_64 on Linux.")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    # aarch64 Linux: prebuilt install bundle (lib + headers + cmake config) from
+    # dawn-exotic releases. Set DAWN_LOCAL_DIR to override with a local build tree.
+    set(DAWN_LOCAL_DIR "" CACHE PATH "Optional local Dawn build tree (aarch64 Linux)")
+    set(DAWN_LOCAL_BUILD_TYPE "Release"
+        CACHE STRING "Build type of the local Dawn tree (Debug or Release)")
+
+    if(DAWN_LOCAL_DIR)
+        set(DAWN_LIB_PATH "${DAWN_LOCAL_DIR}/out/${DAWN_LOCAL_BUILD_TYPE}/src/dawn/native/libwebgpu_dawn.a")
+        set(DAWN_PRIMARY_INCLUDE_DIR "${DAWN_LOCAL_DIR}/include")
+        set(DAWN_INCLUDE_DIRS
+            "${DAWN_LOCAL_DIR}/include"
+            "${DAWN_LOCAL_DIR}/out/${DAWN_LOCAL_BUILD_TYPE}/gen/include"
+        )
+        set(_dawn_aarch64_source "local ${DAWN_LOCAL_BUILD_TYPE}")
+
+        if(NOT EXISTS "${DAWN_LIB_PATH}")
+            message(FATAL_ERROR "Local Dawn library not found: ${DAWN_LIB_PATH}")
         endif()
+        if(NOT EXISTS "${DAWN_LOCAL_DIR}/include/webgpu/webgpu.h")
+            message(FATAL_ERROR "Missing webgpu.h in ${DAWN_LOCAL_DIR}/include/webgpu/")
+        endif()
+    else()
+        # Always Release for the prebuilt (Debug Dawn is huge).
+        set(DAWN_AARCH64_URL
+            "https://github.com/zokrezyl/dawn-exotic/releases/download/v${DAWN_VERSION}/dawn-linux-aarch64-release-${DAWN_VERSION}.tar.gz")
+
+        message(STATUS "Downloading Dawn aarch64 install bundle from dawn-exotic v${DAWN_VERSION}")
+        message(STATUS "  URL: ${DAWN_AARCH64_URL}")
+        FetchContent_Declare(
+            dawn_aarch64
+            URL "${DAWN_AARCH64_URL}"
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+        )
+        FetchContent_MakeAvailable(dawn_aarch64)
+
+        set(DAWN_LIB_PATH "${dawn_aarch64_SOURCE_DIR}/lib/libwebgpu_dawn.a")
+        set(DAWN_PRIMARY_INCLUDE_DIR "${dawn_aarch64_SOURCE_DIR}/include")
+        set(DAWN_INCLUDE_DIRS "${DAWN_PRIMARY_INCLUDE_DIR}")
+
+        if(NOT EXISTS "${DAWN_LIB_PATH}")
+            message(FATAL_ERROR "Dawn aarch64 library not found in extracted tarball: ${DAWN_LIB_PATH}")
+        endif()
+        if(NOT EXISTS "${DAWN_PRIMARY_INCLUDE_DIR}/webgpu/webgpu.h")
+            message(FATAL_ERROR "webgpu.h not found at ${DAWN_PRIMARY_INCLUDE_DIR}/webgpu/")
+        endif()
+        set(_dawn_aarch64_source "prebuilt v${DAWN_VERSION}")
+    endif()
+
+    find_package(X11 REQUIRED)
+    add_library(webgpu STATIC IMPORTED GLOBAL)
+    set_target_properties(webgpu PROPERTIES
+        IMPORTED_LOCATION "${DAWN_LIB_PATH}"
+        INTERFACE_INCLUDE_DIRECTORIES "${DAWN_INCLUDE_DIRS}"
+        INTERFACE_LINK_LIBRARIES "${X11_LIBRARIES};${CMAKE_DL_LIBS};pthread"
+    )
+    target_compile_definitions(webgpu INTERFACE WEBGPU_BACKEND_DAWN)
+
+    message(STATUS "Dawn (aarch64, ${_dawn_aarch64_source}) ready:")
+    message(STATUS "  Library: ${DAWN_LIB_PATH}")
+    message(STATUS "  Headers: ${DAWN_INCLUDE_DIRS}")
+
+    set(DAWN_NATIVE_INCLUDE_DIR "${DAWN_PRIMARY_INCLUDE_DIR}" CACHE INTERNAL "")
+    set(DAWN_NATIVE_LIB_PATH "${DAWN_LIB_PATH}" CACHE INTERNAL "")
+    set(CPM_PACKAGES "${CPM_PACKAGES};webgpu" CACHE INTERNAL "")
+    set(webgpu_SOURCE_DIR "${DAWN_PRIMARY_INCLUDE_DIR}" CACHE INTERNAL "")
+    set(webgpu_VERSION "${DAWN_VERSION}" CACHE INTERNAL "")
+    return()
+
+else()
+    # Desktop platforms: Linux x86_64, macOS, Windows
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(DAWN_PLATFORM "ubuntu-latest")
+        set(DAWN_LIB_DIR_NAME "lib64")
         set(DAWN_LIB_NAME "libwebgpu_dawn.a")
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64")

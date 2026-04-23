@@ -130,10 +130,13 @@ if(DEFINED ENV{NIX_CC})
     message(STATUS "Nix detected - using static fontconfig: ${FONTCONFIG_STATIC_LIB}")
     set(FONTCONFIG_LINK_LIBS ${FONTCONFIG_STATIC_LIB} ${EXPAT_STATIC_LIB} ${UUID_STATIC_LIB})
 else()
-    # System: use static libs
-    find_library(FONTCONFIG_STATIC_LIB libfontconfig.a PATHS /usr/lib/x86_64-linux-gnu /usr/lib NO_DEFAULT_PATH REQUIRED)
-    find_library(EXPAT_STATIC_LIB libexpat.a PATHS /usr/lib/x86_64-linux-gnu /usr/lib NO_DEFAULT_PATH REQUIRED)
-    find_library(UUID_STATIC_LIB libuuid.a PATHS /usr/lib/x86_64-linux-gnu /usr/lib NO_DEFAULT_PATH REQUIRED)
+    # System: use static libs (search arch-specific dirs first, then default paths)
+    find_library(FONTCONFIG_STATIC_LIB libfontconfig.a
+        PATHS /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE} /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /usr/lib REQUIRED)
+    find_library(EXPAT_STATIC_LIB libexpat.a
+        PATHS /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE} /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /usr/lib REQUIRED)
+    find_library(UUID_STATIC_LIB libuuid.a
+        PATHS /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE} /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /usr/lib REQUIRED)
     message(STATUS "Using static fontconfig/expat/uuid")
     set(FONTCONFIG_LINK_LIBS ${FONTCONFIG_STATIC_LIB} ${EXPAT_STATIC_LIB} ${UUID_STATIC_LIB})
 endif()

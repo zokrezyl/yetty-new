@@ -17,7 +17,7 @@ CPMAddPackage(
         "GLFW_BUILD_TESTS OFF"
         "GLFW_BUILD_EXAMPLES OFF"
         "GLFW_INSTALL OFF"
-        "GLFW_BUILD_WAYLAND OFF"
+	"GLFW_BUILD_WAYLAND ON"
 )
 
 # glfw3webgpu adapter
@@ -29,7 +29,7 @@ if(NOT TARGET glfw3webgpu)
     )
     # glfw3webgpu needs platform define for native surface creation
     if(UNIX AND NOT APPLE)
-        target_compile_definitions(glfw3webgpu PRIVATE _GLFW_X11)
+        target_compile_definitions(glfw3webgpu PRIVATE _GLFW_X11 _GLFW_WAYLAND)
     elseif(WIN32)
         target_compile_definitions(glfw3webgpu PRIVATE _GLFW_WIN32)
     endif()
