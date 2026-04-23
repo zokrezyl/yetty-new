@@ -58,9 +58,11 @@ enum yetty_ycore_event_type {
     YETTY_EVENT_SHUTDOWN,
     /* Named zoom events (produced from raw SCROLL + modifier combinations by
      * yetty_event_handler; decoupled so rpc/kb-mapping can inject them too).
-     * ZOOM_VISUAL  = non-intrusive shader-level zoom (uniform only).
-     * ZOOM_CELL_SIZE = structural zoom (changes cell pixel size → cols/rows). */
+     * ZOOM_VISUAL      = non-intrusive shader-level zoom (uniform only).
+     * ZOOM_VISUAL_PAN  = pan the visually-zoomed view (drag translated).
+     * ZOOM_CELL_SIZE   = structural zoom (changes cell pixel size → cols/rows). */
     YETTY_EVENT_ZOOM_VISUAL,
+    YETTY_EVENT_ZOOM_VISUAL_PAN,
     YETTY_EVENT_ZOOM_CELL_SIZE,
     /* Must be last - used for array sizing */
     YETTY_EVENT_COUNT
@@ -179,6 +181,11 @@ struct yetty_ycore_event_zoom_visual {
     float anchor_y;
 };
 
+struct yetty_ycore_event_zoom_visual_pan {
+    float dx; /* screen-space pixel delta (positive = dragged right) */
+    float dy; /* screen-space pixel delta (positive = dragged down)  */
+};
+
 struct yetty_ycore_event_zoom_cell_size {
     float delta; /* multiplicative delta applied to cell_size; e.g. 0.04 */
     int reset;   /* non-zero -> restore baseline cell size */
@@ -207,6 +214,7 @@ struct yetty_ycore_event {
         struct yetty_ycore_event_card_repack card_repack;
         struct yetty_ycore_event_set_frame_rate set_frame_rate;
         struct yetty_ycore_event_zoom_visual zoom_visual;
+        struct yetty_ycore_event_zoom_visual_pan zoom_visual_pan;
         struct yetty_ycore_event_zoom_cell_size zoom_cell_size;
     };
     void *payload;  /* optional heap-allocated data (copy/paste text) */

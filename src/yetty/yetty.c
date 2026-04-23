@@ -60,6 +60,13 @@ struct yetty_yetty {
     float visual_zoom_offset_x; /* source-pixel pan */
     float visual_zoom_offset_y;
 
+    /* Drag-to-pan state while visual zoom is active. Mouse button 0 enters
+     * drag; move events translate into ZOOM_VISUAL_PAN with the screen-space
+     * delta; button-up exits. */
+    int visual_zoom_dragging;
+    float visual_zoom_drag_last_x;
+    float visual_zoom_drag_last_y;
+
     /* Cached window size so ZOOM_CELL_SIZE can re-post a RESIZE that
      * forces the terminal to re-derive cols/rows. */
     float window_width;
@@ -170,26 +177,100 @@ static struct yetty_ycore_int_result yetty_event_handler(
         /* No zoom modifier — fall through to workspace forwarding below. */
     }
 
+    /* Mouse drag translation while visual zoom is active. Button-0 down starts
+     * a drag; subsequent moves emit ZOOM_VISUAL_PAN with the pixel delta; up
+     * ends it. We swallow these events so the terminal underneath doesn't see
+     * a phantom click-drag. */
+    if (event->type == YETTY_EVENT_MOUSE_DOWN &&
+        event->mouse.button == 0 && yetty->visual_zoom_scale > 1.0f) {
+        yetty->visual_zoom_dragging = 1;
+        yetty->visual_zoom_drag_last_x = event->mouse.x;
+        yetty->visual_zoom_drag_last_y = event->mouse.y;
+        ydebug("yetty: visual zoom drag START at (%.1f,%.1f)",
+               event->mouse.x, event->mouse.y);
+        return YETTY_OK(yetty_ycore_int, 1);
+    }
+    if ((event->type == YETTY_EVENT_MOUSE_MOVE ||
+         event->type == YETTY_EVENT_MOUSE_DRAG) &&
+        yetty->visual_zoom_dragging) {
+        float dx = event->mouse.x - yetty->visual_zoom_drag_last_x;
+        float dy = event->mouse.y - yetty->visual_zoom_drag_last_y;
+        yetty->visual_zoom_drag_last_x = event->mouse.x;
+        yetty->visual_zoom_drag_last_y = event->mouse.y;
+        if (dx != 0.0f || dy != 0.0f) {
+            struct yetty_ycore_event ev = {0};
+            ev.type = YETTY_EVENT_ZOOM_VISUAL_PAN;
+            ev.zoom_visual_pan.dx = dx;
+            ev.zoom_visual_pan.dy = dy;
+            yetty_post_event_async(yetty, &ev);
+        }
+        return YETTY_OK(yetty_ycore_int, 1);
+    }
+    if (event->type == YETTY_EVENT_MOUSE_UP &&
+        yetty->visual_zoom_dragging) {
+        yetty->visual_zoom_dragging = 0;
+        ydebug("yetty: visual zoom drag END");
+        return YETTY_OK(yetty_ycore_int, 1);
+    }
+
     /* ZOOM_VISUAL — update the blend-uniform state on the big render target.
-     * This is "non-intrusive": cols/rows/cell-size don't change, only the
-     * composite's UV transform. Cheap, instant, fully reversible. */
+     * Zoom is anchored at the mouse cursor: the point under the cursor before
+     * the scale change stays under the cursor after. This matches the user's
+     * mental model of "zoom here, not at the center of the window".
+     *
+     * Derivation: the blend shader computes the source sample UV as
+     *     s_uv = 0.5 + (uv - 0.5)/scale + off/size
+     * For the anchor at screen pixel m = (mx,my), m_uv = m/size. Pinning
+     * s_uv_mouse across a scale change yields
+     *     off_new = off_old + (m - size/2) * (1/scale_old - 1/scale_new).
+     */
     if (event->type == YETTY_EVENT_ZOOM_VISUAL) {
         if (event->zoom_visual.reset) {
             yetty->visual_zoom_scale = 1.0f;
             yetty->visual_zoom_offset_x = 0.0f;
             yetty->visual_zoom_offset_y = 0.0f;
         } else {
-            yetty->visual_zoom_scale = yetty_clampf(
-                yetty->visual_zoom_scale + event->zoom_visual.delta,
-                1.0f, 100.0f);
-            if (yetty->visual_zoom_scale <= 1.0f) {
+            float old_scale = yetty->visual_zoom_scale;
+            float new_scale = yetty_clampf(
+                old_scale + event->zoom_visual.delta, 1.0f, 100.0f);
+
+            if (new_scale <= 1.0f) {
+                /* Bottom of the range — collapse offsets too so the next
+                 * zoom-in starts fresh around the new anchor. */
                 yetty->visual_zoom_scale = 1.0f;
                 yetty->visual_zoom_offset_x = 0.0f;
                 yetty->visual_zoom_offset_y = 0.0f;
+            } else {
+                float W = yetty->window_width  > 0 ? yetty->window_width  : 1.0f;
+                float H = yetty->window_height > 0 ? yetty->window_height : 1.0f;
+                float cx = W * 0.5f, cy = H * 0.5f;
+                float mx = event->zoom_visual.anchor_x;
+                float my = event->zoom_visual.anchor_y;
+                /* First zoom step from 1.0 — seed the offset to the anchor
+                 * so the subsequent delta math is continuous. */
+                if (old_scale > 0.0f && new_scale != old_scale) {
+                    float k = (1.0f / old_scale) - (1.0f / new_scale);
+                    yetty->visual_zoom_offset_x += (mx - cx) * k;
+                    yetty->visual_zoom_offset_y += (my - cy) * k;
+                }
+                yetty->visual_zoom_scale = new_scale;
+
+                /* Clamp pan so we never reveal beyond-edge source pixels.
+                 * Matches POC clampVisualZoomOffset. */
+                float max_off_x = (W * 0.5f) * (1.0f - 1.0f / new_scale);
+                float max_off_y = (H * 0.5f) * (1.0f - 1.0f / new_scale);
+                if (max_off_x < 0) max_off_x = 0;
+                if (max_off_y < 0) max_off_y = 0;
+                yetty->visual_zoom_offset_x = yetty_clampf(
+                    yetty->visual_zoom_offset_x, -max_off_x, max_off_x);
+                yetty->visual_zoom_offset_y = yetty_clampf(
+                    yetty->visual_zoom_offset_y, -max_off_y, max_off_y);
             }
         }
 
-        ydebug("yetty: ZOOM_VISUAL scale=%.2f rt=%p", yetty->visual_zoom_scale,
+        ydebug("yetty: ZOOM_VISUAL scale=%.2f off=(%.1f,%.1f) rt=%p",
+               yetty->visual_zoom_scale,
+               yetty->visual_zoom_offset_x, yetty->visual_zoom_offset_y,
                (void *)yetty->render_target);
         if (yetty->render_target && yetty->render_target->ops->set_visual_zoom) {
             yetty->render_target->ops->set_visual_zoom(
@@ -203,6 +284,40 @@ static struct yetty_ycore_int_result yetty_event_handler(
         }
         if (yetty->event_loop && yetty->event_loop->ops->request_render)
             yetty->event_loop->ops->request_render(yetty->event_loop);
+        return YETTY_OK(yetty_ycore_int, 1);
+    }
+
+    /* ZOOM_VISUAL_PAN — translate the zoomed view by a screen-space delta.
+     * Normally produced by drag translation below, but also dispatchable by
+     * RPC/kb. The offset moves opposite to the drag (so content follows the
+     * cursor) and is scaled down by the zoom factor (a pixel of drag moves
+     * fewer source pixels when zoomed in). */
+    if (event->type == YETTY_EVENT_ZOOM_VISUAL_PAN) {
+        if (yetty->visual_zoom_scale > 1.0f) {
+            float inv = 1.0f / yetty->visual_zoom_scale;
+            yetty->visual_zoom_offset_x -= event->zoom_visual_pan.dx * inv;
+            yetty->visual_zoom_offset_y -= event->zoom_visual_pan.dy * inv;
+
+            float W = yetty->window_width  > 0 ? yetty->window_width  : 1.0f;
+            float H = yetty->window_height > 0 ? yetty->window_height : 1.0f;
+            float max_off_x = (W * 0.5f) * (1.0f - inv);
+            float max_off_y = (H * 0.5f) * (1.0f - inv);
+            if (max_off_x < 0) max_off_x = 0;
+            if (max_off_y < 0) max_off_y = 0;
+            yetty->visual_zoom_offset_x = yetty_clampf(
+                yetty->visual_zoom_offset_x, -max_off_x, max_off_x);
+            yetty->visual_zoom_offset_y = yetty_clampf(
+                yetty->visual_zoom_offset_y, -max_off_y, max_off_y);
+
+            if (yetty->render_target && yetty->render_target->ops->set_visual_zoom)
+                yetty->render_target->ops->set_visual_zoom(
+                    yetty->render_target,
+                    yetty->visual_zoom_scale,
+                    yetty->visual_zoom_offset_x,
+                    yetty->visual_zoom_offset_y);
+            if (yetty->event_loop && yetty->event_loop->ops->request_render)
+                yetty->event_loop->ops->request_render(yetty->event_loop);
+        }
         return YETTY_OK(yetty_ycore_int, 1);
     }
 
@@ -311,9 +426,12 @@ static struct yetty_ycore_void_result register_event_listeners(struct yetty_yett
     res = el->ops->register_listener(el, YETTY_EVENT_SHUTDOWN, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
 
-    /* Named zoom events — consumed here (ZOOM_VISUAL) or forwarded to the
-     * workspace (ZOOM_CELL_SIZE). Same entry point for RPC / kb-map injection. */
+    /* Named zoom events — consumed here (ZOOM_VISUAL / ZOOM_VISUAL_PAN) or
+     * forwarded to the workspace (ZOOM_CELL_SIZE). Same entry point for
+     * RPC / kb-map injection. */
     res = el->ops->register_listener(el, YETTY_EVENT_ZOOM_VISUAL, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_ZOOM_VISUAL_PAN, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
     res = el->ops->register_listener(el, YETTY_EVENT_ZOOM_CELL_SIZE, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
