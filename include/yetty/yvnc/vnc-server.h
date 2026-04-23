@@ -49,11 +49,15 @@ typedef void (*yetty_vnc_on_char_with_mods_fn)(uint32_t codepoint, uint8_t mods,
 					       void *userdata);
 typedef void (*yetty_vnc_on_input_received_fn)(void *userdata);
 
-/* Create server */
+struct yplatform_wgpu;
+
+/* Create server. wgpu provides the coroutine-aware GPU await machinery used
+ * by the readback path; must be non-NULL. */
 struct yetty_vnc_server_ptr_result
 yetty_vnc_server_create(WGPUInstance instance, WGPUDevice device,
 			WGPUQueue queue,
-			struct yetty_ycore_event_loop *event_loop);
+			struct yetty_ycore_event_loop *event_loop,
+			struct yplatform_wgpu *wgpu);
 
 /* Destroy server (handles NULL) */
 void yetty_vnc_server_destroy(struct yetty_vnc_server *server);

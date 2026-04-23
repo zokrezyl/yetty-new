@@ -42,6 +42,11 @@ add_subdirectory(yrender)
 # WebGPU utilities
 add_subdirectory(ywebgpu)
 
+# Coroutine wrappers (libco on desktop, emscripten_fiber_t on web)
+if(NOT EMSCRIPTEN)
+    add_subdirectory(yco)
+endif()
+
 # UI subsystem (workspace, tile, view)
 add_subdirectory(yui)
 

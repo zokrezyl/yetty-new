@@ -58,6 +58,10 @@ if(YETTY_ENABLE_LIB_LIBUV)
     include(${YETTY_ROOT}/build-tools/cmake/libs/libuv.cmake)
 endif()
 
+if(YETTY_ENABLE_LIB_LIBCO)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/co.cmake)
+endif()
+
 if(YETTY_ENABLE_LIB_GLM)
     include(${YETTY_ROOT}/build-tools/cmake/libs/glm.cmake)
 endif()

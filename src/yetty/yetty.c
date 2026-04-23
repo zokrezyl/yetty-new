@@ -5,6 +5,7 @@
 #include <yetty/yetty.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/event-loop.h>
+#include <yetty/yplatform/ywebgpu.h>
 #include <yetty/ycore/event.h>
 #include <yetty/yrender/gpu-allocator.h>
 #include <yetty/yrender/render-target.h>
@@ -38,6 +39,10 @@ struct yetty_yetty {
     WGPUDevice device;
     WGPUQueue queue;
     WGPUTextureFormat surface_format;
+
+    /* Coroutine-aware wgpu await machinery (loop-thread tick + completion
+     * routing). Owned by Yetty; lifetime spans event_loop + wgpu instance. */
+    struct yplatform_wgpu *wgpu;
 
     /* Big render target - window-sized texture with surface for presentation */
     struct yetty_yrender_target *render_target;
@@ -518,7 +523,7 @@ static struct yetty_ycore_void_result init_webgpu(struct yetty_yetty *yetty)
     if (vnc_enabled) {
         struct yetty_vnc_server_ptr_result vnc_res =
             yetty_vnc_server_create(instance, yetty->device, yetty->queue,
-                                    yetty->event_loop);
+                                    yetty->event_loop, yetty->wgpu);
         if (!YETTY_IS_OK(vnc_res)) {
             return YETTY_ERR(yetty_ycore_void, "failed to create VNC server");
         }
@@ -620,6 +625,18 @@ struct yetty_yetty_result yetty_create(const struct yetty_app_context *app_conte
     yetty->context.event_loop = yetty->event_loop;
     ydebug("yetty_create: event loop created at %p", (void *)yetty->event_loop);
 
+    /* Create the GPU await machinery before init_webgpu so the VNC server
+     * (which init_webgpu may create) has it available. */
+    struct yplatform_wgpu_ptr_result wgpu_res = yplatform_wgpu_create(
+        yetty->context.app_context.app_gpu_context.instance,
+        yetty->event_loop);
+    if (!YETTY_IS_OK(wgpu_res)) {
+        yetty_destroy(yetty);
+        return YETTY_ERR(yetty_yetty, "yplatform_wgpu_create failed");
+    }
+    yetty->wgpu = wgpu_res.value;
+    ydebug("yetty_create: ywebgpu await machinery created");
+
     /* Initialize WebGPU */
     struct yetty_ycore_void_result res = init_webgpu(yetty);
     if (!YETTY_IS_OK(res)) {
@@ -705,6 +722,13 @@ void yetty_destroy(struct yetty_yetty *yetty)
         yetty_yui_workspace_destroy(yetty->workspace);
         yetty->workspace = NULL;
         ydebug("yetty_destroy: workspace destroyed");
+    }
+
+    /* Tear down the GPU await machinery before the event loop. The tick
+     * timer is owned by the loop, so this must happen first. */
+    if (yetty->wgpu) {
+        yplatform_wgpu_destroy(yetty->wgpu);
+        yetty->wgpu = NULL;
     }
 
     /* Destroy event loop */

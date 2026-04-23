@@ -5,6 +5,8 @@
 #include <yetty/yvnc/vnc-server.h>
 #include <yetty/ycore/event-loop.h>
 #include <yetty/webgpu/error.h>
+#include <yetty/yplatform/ycoroutine.h>
+#include <yetty/yplatform/ywebgpu.h>
 #include <yetty/ytrace.h>
 #include "protocol.h"
 
@@ -36,6 +38,7 @@ struct yetty_vnc_server {
 	WGPUInstance instance;
 	WGPUDevice device;
 	WGPUQueue queue;
+	struct yplatform_wgpu *wgpu;
 
 	/* Event loop for async I/O */
 	struct yetty_ycore_event_loop *event_loop;
@@ -347,10 +350,13 @@ static void vnc_server_on_disconnect(void *conn_ctx)
 struct yetty_vnc_server_ptr_result
 yetty_vnc_server_create(WGPUInstance instance, WGPUDevice device,
 			WGPUQueue queue,
-			struct yetty_ycore_event_loop *event_loop)
+			struct yetty_ycore_event_loop *event_loop,
+			struct yplatform_wgpu *wgpu)
 {
 	if (!event_loop)
 		return YETTY_ERR(yetty_vnc_server_ptr, "event_loop is NULL");
+	if (!wgpu)
+		return YETTY_ERR(yetty_vnc_server_ptr, "wgpu is NULL");
 
 	struct yetty_vnc_server *server =
 		calloc(1, sizeof(struct yetty_vnc_server));
@@ -360,6 +366,7 @@ yetty_vnc_server_create(WGPUInstance instance, WGPUDevice device,
 	server->instance = instance;
 	server->device = device;
 	server->queue = queue;
+	server->wgpu = wgpu;
 	server->event_loop = event_loop;
 	server->tcp_server_id = -1;
 	server->jpeg_quality = 80;
@@ -970,30 +977,9 @@ yetty_vnc_server_send_frame_cpu(struct yetty_vnc_server *server,
 	return YETTY_OK_VOID();
 }
 
-/* Map callback for dirty_flags_readback. Fires from inside
- * wgpuInstanceProcessEvents on whichever thread is calling it. */
-static void flags_map_callback(WGPUMapAsyncStatus status,
-			       WGPUStringView msg, void *userdata1, void *userdata2)
-{
-	(void)msg;
-	(void)userdata2;
-	struct yetty_vnc_server *server = userdata1;
-	if (status != WGPUMapAsyncStatus_Success)
-		server->map_status = status;
-	server->flags_map_pending = 0;
-}
-
-/* Map callback for tile_readback_buffer. */
-static void pixels_map_callback(WGPUMapAsyncStatus status,
-				WGPUStringView msg, void *userdata1, void *userdata2)
-{
-	(void)msg;
-	(void)userdata2;
-	struct yetty_vnc_server *server = userdata1;
-	if (status != WGPUMapAsyncStatus_Success)
-		server->map_status = status;
-	server->pixels_map_pending = 0;
-}
+/* (flags_map_callback / pixels_map_callback removed — replaced by
+ * yplatform_wgpu_buffer_map_await which yields the coroutine and resumes
+ * it on the loop thread when the map completes.) */
 
 /* Encode and send dirty tiles */
 static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
@@ -1058,24 +1044,43 @@ static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
 	return YETTY_OK_VOID();
 }
 
-/* Synchronous capture + send.
+/* Coroutine-driven capture + send.
  *
- * Submits compute-diff + copy-to-prev + copy-to-readback in one
- * command buffer, then blocks this call calling
- * wgpuInstanceProcessEvents until both buffer maps complete. No
- * state machine; no cross-frame pending work; no one-keystroke
- * lag. Blocks the caller for the GPU readback duration (~1-5 ms). */
-struct yetty_ycore_void_result
-yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
-				WGPUTexture texture,
-				uint32_t width, uint32_t height)
+ * The public entry point spawns a coroutine that does the full readback and
+ * returns immediately. The coroutine yields at each GPU map_async via
+ * yplatform_wgpu_buffer_map_await; the libuv loop runs other work while the
+ * GPU completes the maps. The poll thread translates the wgpu callback into
+ * a resume request posted to the loop thread.
+ *
+ * The texture is consumed entirely during the encode + submit phase, before
+ * the first yield, so no addref is needed — it stays valid because the coro's
+ * first slice runs synchronously inside the spawner. */
+
+struct vnc_send_frame_args {
+	struct yetty_vnc_server *server;
+	WGPUTexture texture;
+	uint32_t width;
+	uint32_t height;
+};
+
+static void vnc_send_frame_gpu_coro_entry(void *arg)
 {
-	if (!server || !server->running || server->client_count == 0)
-		return YETTY_OK_VOID();
+	ydebug("vnc coro: entry, arg=%p", arg);
+	struct vnc_send_frame_args *args = arg;
+	struct yetty_vnc_server *server = args->server;
+	WGPUTexture texture = args->texture;
+	uint32_t width = args->width;
+	uint32_t height = args->height;
+	ydebug("vnc coro: copied args server=%p tex=%p %ux%u, freeing args",
+	       (void *)server, (void *)texture, width, height);
+	free(args);
+	ydebug("vnc coro: args freed, calling ensure_resources");
 
 	struct yetty_ycore_void_result res = ensure_resources(server, width, height);
-	if (!YETTY_IS_OK(res))
-		return res;
+	if (!YETTY_IS_OK(res)) {
+		ywarn("vnc coro: ensure_resources failed: %s", res.error.msg);
+		return;
+	}
 
 	uint32_t num_tiles = server->tiles_x * server->tiles_y;
 
@@ -1085,8 +1090,10 @@ yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 	if (server->gpu_readback_pixels_size < pixel_size) {
 		free(server->gpu_readback_pixels);
 		server->gpu_readback_pixels = malloc(pixel_size);
-		if (!server->gpu_readback_pixels)
-			return YETTY_ERR(yetty_ycore_void, "failed to allocate readback buffer");
+		if (!server->gpu_readback_pixels) {
+			ywarn("vnc coro: failed to allocate readback buffer");
+			return;
+		}
 		server->gpu_readback_pixels_size = pixel_size;
 	}
 
@@ -1185,42 +1192,30 @@ yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 	wgpuCommandBufferRelease(cmd_buf);
 	wgpuCommandEncoderRelease(encoder);
 
-	server->flags_map_pending = !do_full;
-	server->pixels_map_pending = 1;
-	server->map_status = WGPUMapAsyncStatus_Success;
+	/* Below this point the texture is no longer touched. */
 
 	if (!do_full) {
-		WGPUBufferMapCallbackInfo fcb = {0};
-		fcb.mode = WGPUCallbackMode_AllowSpontaneous;
-		fcb.callback = flags_map_callback;
-		fcb.userdata1 = server;
-		wgpuBufferMapAsync(server->dirty_flags_readback, WGPUMapMode_Read,
-				   0, num_tiles * sizeof(uint32_t), fcb);
-	}
-	{
-		WGPUBufferMapCallbackInfo pcb = {0};
-		pcb.mode = WGPUCallbackMode_AllowSpontaneous;
-		pcb.callback = pixels_map_callback;
-		pcb.userdata1 = server;
-		wgpuBufferMapAsync(server->tile_readback_buffer, WGPUMapMode_Read,
-				   0, tile_buf_size, pcb);
-	}
-
-	while (server->flags_map_pending || server->pixels_map_pending)
-		wgpuInstanceProcessEvents(server->instance);
-
-	if (server->map_status != WGPUMapAsyncStatus_Success) {
-		ywarn("VNC map failed status=%u", server->map_status);
-		return YETTY_ERR(yetty_ycore_void, "buffer map failed");
-	}
-
-	if (!do_full) {
+		res = yplatform_wgpu_buffer_map_await(server->wgpu,
+			server->dirty_flags_readback, WGPUMapMode_Read,
+			0, num_tiles * sizeof(uint32_t));
+		if (!YETTY_IS_OK(res)) {
+			ywarn("vnc coro: flags map failed: %s", res.error.msg);
+			return;
+		}
 		const uint32_t *flags = wgpuBufferGetConstMappedRange(
 			server->dirty_flags_readback,
 			0, num_tiles * sizeof(uint32_t));
 		for (uint32_t i = 0; i < num_tiles; i++)
 			server->dirty_tiles[i] = (flags[i] != 0);
 		wgpuBufferUnmap(server->dirty_flags_readback);
+	}
+
+	res = yplatform_wgpu_buffer_map_await(server->wgpu,
+		server->tile_readback_buffer, WGPUMapMode_Read,
+		0, tile_buf_size);
+	if (!YETTY_IS_OK(res)) {
+		ywarn("vnc coro: pixels map failed: %s", res.error.msg);
+		return;
 	}
 
 	uint32_t unaligned_row = width * 4;
@@ -1234,7 +1229,41 @@ yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 
 	server->prev_has_content = 1;
 
-	return encode_and_send_dirty_tiles(server, width, height);
+	res = encode_and_send_dirty_tiles(server, width, height);
+	if (!YETTY_IS_OK(res))
+		ywarn("vnc coro: encode_and_send failed: %s", res.error.msg);
+}
+
+struct yetty_ycore_void_result
+yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
+				WGPUTexture texture,
+				uint32_t width, uint32_t height)
+{
+	if (!server || !server->running || server->client_count == 0)
+		return YETTY_OK_VOID();
+
+	struct vnc_send_frame_args *args = malloc(sizeof(*args));
+	if (!args)
+		return YETTY_ERR(yetty_ycore_void, "malloc failed");
+	args->server = server;
+	args->texture = texture;
+	args->width = width;
+	args->height = height;
+
+	struct yplatform_coro_ptr_result coro_res = yplatform_coro_spawn(
+		vnc_send_frame_gpu_coro_entry, args, 0, "vnc-send-frame");
+	if (!YETTY_IS_OK(coro_res)) {
+		free(args);
+		return YETTY_ERR(yetty_ycore_void, "vnc coro spawn failed");
+	}
+
+	yplatform_coro_resume(coro_res.value);
+	if (yplatform_coro_is_finished(coro_res.value))
+		yplatform_coro_destroy(coro_res.value);
+	/* Otherwise the coro yielded into the GPU await; resume_coro_on_loop
+	 * (in ywebgpu.c) will destroy it once it finishes. */
+
+	return YETTY_OK_VOID();
 }
 
 struct yetty_ycore_void_result
