@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /* TinyEMU headers */
@@ -52,8 +53,9 @@ struct tinyemu_pty {
     char *config_path;
 };
 
-/* External: get data directory (platform-specific) */
+/* External: get data/config directories (platform-specific) */
 extern const char *yetty_yplatform_get_data_dir(void);
+extern const char *yetty_yplatform_get_config_dir(void);
 
 /* Forward declarations */
 static void tinyemu_pty_destroy(struct yetty_yplatform_pty *self);
@@ -487,7 +489,7 @@ static struct yetty_yplatform_pty_pipe_source *tinyemu_pty_pipe_source(struct ye
 }
 
 /* Create TinyEMU PTY */
-static struct yetty_yplatform_pty_result tinyemu_pty_create(struct yetty_yconfig *config)
+struct yetty_yplatform_pty_result tinyemu_pty_create(struct yetty_yconfig *config)
 {
     struct tinyemu_pty *pty;
 
@@ -527,12 +529,70 @@ static struct yetty_yplatform_pty_result tinyemu_pty_create(struct yetty_yconfig
     /* Terminal polls pty_pipe[0] for VM output */
     pty->pipe_source.abstract = pty->pty_pipe[0];
 
-    /* Get VM config path - use data directory */
+    /* Resolve VM config path under <config_dir>/temu/root-riscv64.cfg.
+     * The shared RISC-V runtime (kernel, opensbi, rootfs) lives in
+     * <data_dir>/yemu/. If the cfg does not exist yet, emit it with
+     * absolute paths so tinyemu's get_file_path() resolves them as-is. */
     {
+        const char *config_dir = yetty_yplatform_get_config_dir();
         const char *data_dir = yetty_yplatform_get_data_dir();
-        char path_buf[512];
-        snprintf(path_buf, sizeof(path_buf), "%s/tinyemu/root-riscv64.cfg", data_dir);
-        pty->config_path = strdup(path_buf);
+        char cfg_dir[512];
+        char cfg_path[512];
+        int cfg_ready = 1;
+
+        snprintf(cfg_dir, sizeof(cfg_dir), "%s/temu", config_dir);
+        snprintf(cfg_path, sizeof(cfg_path), "%s/root-riscv64.cfg", cfg_dir);
+
+        /* mkdir -p <config_dir>/temu */
+        {
+            char tmp[512];
+            snprintf(tmp, sizeof(tmp), "%s", cfg_dir);
+            for (char *p = tmp + 1; *p && cfg_ready; p++) {
+                if (*p == '/') {
+                    *p = 0;
+                    if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
+                        cfg_ready = 0;
+                    *p = '/';
+                }
+            }
+            if (cfg_ready && mkdir(tmp, 0755) != 0 && errno != EEXIST)
+                cfg_ready = 0;
+        }
+
+        if (cfg_ready && access(cfg_path, F_OK) != 0) {
+            FILE *f = fopen(cfg_path, "w");
+            if (f) {
+                fprintf(f,
+                    "/* TinyEMU VM Configuration (auto-generated; edit to customize) */\n"
+                    "{\n"
+                    "    version: 1,\n"
+                    "    machine: \"riscv64\",\n"
+                    "    memory_size: 256,\n"
+                    "    bios: \"%s/yemu/opensbi-fw_jump.elf\",\n"
+                    "    kernel: \"%s/yemu/kernel-riscv64.bin\",\n"
+                    "    cmdline: \"earlycon=sbi console=hvc0 root=/dev/root rootfstype=9p rootflags=trans=virtio,cache=mmap,msize=8192 rw init=/init\",\n"
+                    "    fs0: { file: \"%s/yemu/alpine-rootfs\", tag: \"/dev/root\" },\n"
+                    "    eth0: { driver: \"user\" }\n"
+                    "}\n",
+                    data_dir, data_dir, data_dir);
+                fclose(f);
+                yinfo("tinyemu: wrote default cfg to %s", cfg_path);
+            } else {
+                cfg_ready = 0;
+            }
+        }
+
+        if (!cfg_ready) {
+            close(pty->os_input_pipe[0]);
+            close(pty->os_input_pipe[1]);
+            close(pty->pty_pipe[0]);
+            close(pty->pty_pipe[1]);
+            free(pty);
+            return YETTY_ERR(yetty_yplatform_pty,
+                "failed to prepare temu cfg under config dir");
+        }
+
+        pty->config_path = strdup(cfg_path);
     }
 
     /* Initialize VM */

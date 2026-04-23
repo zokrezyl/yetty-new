@@ -50,6 +50,7 @@ option(YETTY_ENABLE_LIB_LIBMAGIC    "libmagic — file type detection"         O
 
 # Virtual machine (--virtual flag: run shell in RISC-V Linux VM)
 option(YETTY_ENABLE_LIB_TINYEMU     "tinyemu — RISC-V emulator for --virtual" ON)
+option(YETTY_ENABLE_LIB_QEMU        "qemu — QEMU RISC-V emulator (via telnet)" ON)
 
 #-----------------------------------------------------------------------------
 # Features (internal source directories / modules)
@@ -60,8 +61,8 @@ option(YETTY_ENABLE_LIB_TINYEMU     "tinyemu — RISC-V emulator for --virtual" 
 option(YETTY_ENABLE_FEATURE_YCORE      "yetty_core — core utilities"          ON)
 option(YETTY_ENABLE_FEATURE_YFONT      "yetty_yfont — font subsystem"          ON)
 option(YETTY_ENABLE_FEATURE_YSHADERS   "shaders — WGSL shader sources"        ON)
-option(YETTY_ENABLE_FEATURE_MSDF_WGSL "msdf-wgsl — MSDF shader lib"         OFF)
-option(YETTY_ENABLE_FEATURE_MSDF_GEN  "msdf-gen — MSDF font generator"       OFF)
+option(YETTY_ENABLE_FEATURE_MSDF_WGSL "ymsdf-wgsl — MSDF shader lib"         OFF)
+option(YETTY_ENABLE_FEATURE_MSDF_GEN  "ymsdf-gen — MSDF font generator"       OFF)
 
 # Terminal / display
 option(YETTY_ENABLE_FEATURE_YECHO     "yecho — echo/display"                 OFF)
@@ -86,7 +87,7 @@ option(YETTY_ENABLE_FEATURE_YVIDEO    "yvideo — video codec support"         O
 
 # Network / connectivity
 option(YETTY_ENABLE_FEATURE_YVNC       "vnc — VNC client/server"              ON)
-option(YETTY_ENABLE_FEATURE_TELNET    "telnet — telnet connectivity"         OFF)
+option(YETTY_ENABLE_FEATURE_TELNET    "telnet — telnet connectivity"         ON)
 option(YETTY_ENABLE_FEATURE_SSH       "ssh — SSH connectivity"               OFF)
 option(YETTY_ENABLE_FEATURE_YRPC      "yrpc — msgpack-RPC interface"         ON)
 

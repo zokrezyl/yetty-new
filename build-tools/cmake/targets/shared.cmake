@@ -339,35 +339,52 @@ function(yetty_embed_assets TARGET)
     # Embed config (not compressed)
     incbin_add_directory(${TARGET} "config" "${INCBIN_CONFIG_DIR}" "*" FALSE)
 
-    # Embed TinyEMU runtime assets if enabled
-    # Assets are built at configure time, then embedded via incbin_add_directory
-    if(YETTY_ENABLE_LIB_TINYEMU)
-        set(TINYEMU_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets/tinyemu")
-        set(INCBIN_TINYEMU_DIR "${CMAKE_BINARY_DIR}/incbin-tinyemu")
+    # Embed shared RISC-V runtime (kernel, opensbi, rootfs) under yemu/ prefix
+    # Used by both --temu (TinyEMU, in-process) and --qemu (external QEMU via telnet).
+    # Assets are produced at configure time by opensbi_build/linux_kernel_build/
+    # alpine_rootfs_download and live in ${CMAKE_BINARY_DIR}/assets/yemu.
+    if(YETTY_ENABLE_LIB_TINYEMU OR YETTY_ENABLE_LIB_QEMU)
+        set(YEMU_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets/yemu")
+        set(INCBIN_YEMU_DIR "${CMAKE_BINARY_DIR}/incbin-yemu")
 
-        # Create incbin staging directory and copy assets
-        file(MAKE_DIRECTORY "${INCBIN_TINYEMU_DIR}")
+        file(MAKE_DIRECTORY "${INCBIN_YEMU_DIR}")
 
-        if(EXISTS "${TINYEMU_ASSETS_DIR}/kernel-riscv64.bin")
-            file(COPY "${TINYEMU_ASSETS_DIR}/kernel-riscv64.bin" DESTINATION "${INCBIN_TINYEMU_DIR}")
+        if(EXISTS "${YEMU_ASSETS_DIR}/kernel-riscv64.bin")
+            file(COPY "${YEMU_ASSETS_DIR}/kernel-riscv64.bin" DESTINATION "${INCBIN_YEMU_DIR}")
         endif()
-        if(EXISTS "${TINYEMU_ASSETS_DIR}/opensbi-fw_jump.elf")
-            file(COPY "${TINYEMU_ASSETS_DIR}/opensbi-fw_jump.elf" DESTINATION "${INCBIN_TINYEMU_DIR}")
+        if(EXISTS "${YEMU_ASSETS_DIR}/opensbi-fw_jump.elf")
+            file(COPY "${YEMU_ASSETS_DIR}/opensbi-fw_jump.elf" DESTINATION "${INCBIN_YEMU_DIR}")
         endif()
-        if(EXISTS "${TINYEMU_ASSETS_DIR}/root-riscv64.cfg")
-            file(COPY "${TINYEMU_ASSETS_DIR}/root-riscv64.cfg" DESTINATION "${INCBIN_TINYEMU_DIR}")
+        if(EXISTS "${YEMU_ASSETS_DIR}/opensbi-fw_dynamic.bin")
+            file(COPY "${YEMU_ASSETS_DIR}/opensbi-fw_dynamic.bin" DESTINATION "${INCBIN_YEMU_DIR}")
         endif()
 
-        # Create tarball of alpine-rootfs at configure time (preserves symlinks)
-        if(EXISTS "${TINYEMU_ASSETS_DIR}/alpine-rootfs")
+        # Tar alpine-rootfs (preserves symlinks / permissions)
+        if(EXISTS "${YEMU_ASSETS_DIR}/alpine-rootfs")
             execute_process(
-                COMMAND ${CMAKE_COMMAND} -E tar cf "${INCBIN_TINYEMU_DIR}/alpine-rootfs.tar" .
-                WORKING_DIRECTORY "${TINYEMU_ASSETS_DIR}/alpine-rootfs"
+                COMMAND ${CMAKE_COMMAND} -E tar cf "${INCBIN_YEMU_DIR}/alpine-rootfs.tar" .
+                WORKING_DIRECTORY "${YEMU_ASSETS_DIR}/alpine-rootfs"
             )
         endif()
 
-        # Embed TinyEMU assets (not compressed - binary files)
-        incbin_add_directory(${TARGET} "tinyemu" "${INCBIN_TINYEMU_DIR}" "*" FALSE)
+        incbin_add_directory(${TARGET} "yemu" "${INCBIN_YEMU_DIR}" "*" FALSE)
+    endif()
+
+    # Embed QEMU binary if enabled
+    # QEMU is built at configure time, then embedded via incbin_add_directory
+    if(YETTY_ENABLE_LIB_QEMU)
+        set(QEMU_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets/qemu")
+        set(INCBIN_QEMU_DIR "${CMAKE_BINARY_DIR}/incbin-qemu")
+
+        # Create incbin staging directory and copy QEMU binary
+        file(MAKE_DIRECTORY "${INCBIN_QEMU_DIR}")
+
+        if(EXISTS "${QEMU_ASSETS_DIR}/qemu-system-riscv64")
+            file(COPY "${QEMU_ASSETS_DIR}/qemu-system-riscv64" DESTINATION "${INCBIN_QEMU_DIR}")
+        endif()
+
+        # Embed QEMU binary (not compressed - executable)
+        incbin_add_directory(${TARGET} "qemu" "${INCBIN_QEMU_DIR}" "*" FALSE)
     endif()
 
     # Make manifest headers available

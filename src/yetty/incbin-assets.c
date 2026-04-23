@@ -40,8 +40,12 @@ struct yetty_incbin_assets {
 #include "yetty_config_manifest.h"
 #endif
 
-#ifdef HAS_TINYEMU_MANIFEST
-#include "yetty_tinyemu_manifest.h"
+#ifdef HAS_YEMU_MANIFEST
+#include "yetty_yemu_manifest.h"
+#endif
+
+#ifdef HAS_QEMU_MANIFEST
+#include "yetty_qemu_manifest.h"
 #endif
 
 /* Helper to add asset entry */
@@ -87,9 +91,14 @@ struct yetty_incbin_assets *yetty_incbin_assets_create(void) {
   ydebug("Registered config assets from manifest");
 #endif
 
-#ifdef HAS_TINYEMU_MANIFEST
-  register_tinyemu_assets_c(register_asset_callback);
-  ydebug("Registered tinyemu assets from manifest");
+#ifdef HAS_YEMU_MANIFEST
+  register_yemu_assets_c(register_asset_callback);
+  ydebug("Registered yemu (shared RISC-V runtime) assets from manifest");
+#endif
+
+#ifdef HAS_QEMU_MANIFEST
+  register_qemu_assets_c(register_asset_callback);
+  ydebug("Registered qemu assets from manifest");
 #endif
 
   g_current_assets = NULL;
@@ -356,31 +365,31 @@ static int extract_tarball(const char *tar_path, const char *dest_dir) {
   return 1;
 }
 
-/* Extract tinyemu assets to data directory */
-int yetty_incbin_assets_extract_tinyemu_to(struct yetty_incbin_assets *assets,
-                                           const char *data_dir) {
-  char tinyemu_dir[MAX_PATH_LEN];
+/* Extract shared RISC-V runtime (kernel, opensbi, rootfs) to <data_dir>/yemu */
+int yetty_incbin_assets_extract_yemu_to(struct yetty_incbin_assets *assets,
+                                        const char *data_dir) {
+  char yemu_dir[MAX_PATH_LEN];
   char rootfs_tar[MAX_PATH_LEN];
   char rootfs_dir[MAX_PATH_LEN];
 
-  snprintf(tinyemu_dir, sizeof(tinyemu_dir), "%s/tinyemu", data_dir);
-  ydebug("extract_tinyemu_to: starting extraction to %s", tinyemu_dir);
+  snprintf(yemu_dir, sizeof(yemu_dir), "%s/yemu", data_dir);
+  ydebug("extract_yemu_to: starting extraction to %s", yemu_dir);
 
-  if (mkdir_p(tinyemu_dir) != 0) {
-    ydebug("Failed to create tinyemu directory: %s", tinyemu_dir);
+  if (mkdir_p(yemu_dir) != 0) {
+    ydebug("Failed to create yemu directory: %s", yemu_dir);
     return 0;
   }
 
-  if (!extract_with_prefix(assets, "tinyemu/", tinyemu_dir))
+  if (!extract_with_prefix(assets, "yemu/", yemu_dir))
     return 0;
 
   /* Extract alpine-rootfs.tar if present */
-  snprintf(rootfs_tar, sizeof(rootfs_tar), "%s/alpine-rootfs.tar", tinyemu_dir);
-  snprintf(rootfs_dir, sizeof(rootfs_dir), "%s/alpine-rootfs", tinyemu_dir);
+  snprintf(rootfs_tar, sizeof(rootfs_tar), "%s/alpine-rootfs.tar", yemu_dir);
+  snprintf(rootfs_dir, sizeof(rootfs_dir), "%s/alpine-rootfs", yemu_dir);
 
   struct stat st;
   if (stat(rootfs_tar, &st) == 0) {
-    ydebug("extract_tinyemu_to: extracting rootfs tarball");
+    ydebug("extract_yemu_to: extracting rootfs tarball");
     if (!extract_tarball(rootfs_tar, rootfs_dir)) {
       ydebug("Failed to extract rootfs tarball");
       return 0;
@@ -389,16 +398,54 @@ int yetty_incbin_assets_extract_tinyemu_to(struct yetty_incbin_assets *assets,
     unlink(rootfs_tar);
   }
 
-  ydebug("TinyEMU asset extraction complete");
+  ydebug("yemu asset extraction complete");
   return 1;
 }
 
-/* Check if tinyemu assets are available */
-int yetty_incbin_assets_has_tinyemu(struct yetty_incbin_assets *assets) {
+/* Check if yemu (shared RISC-V runtime) assets are available */
+int yetty_incbin_assets_has_yemu(struct yetty_incbin_assets *assets) {
   size_t i;
 
   for (i = 0; i < assets->count; i++) {
-    if (strncmp(assets->entries[i].name, "tinyemu/", 8) == 0)
+    if (strncmp(assets->entries[i].name, "yemu/", 5) == 0)
+      return 1;
+  }
+  return 0;
+}
+
+/* Extract QEMU binary to data directory */
+int yetty_incbin_assets_extract_qemu_to(struct yetty_incbin_assets *assets,
+                                        const char *data_dir) {
+  char qemu_dir[MAX_PATH_LEN];
+  char qemu_bin[MAX_PATH_LEN];
+
+  snprintf(qemu_dir, sizeof(qemu_dir), "%s/qemu", data_dir);
+  ydebug("extract_qemu_to: starting extraction to %s", qemu_dir);
+
+  if (mkdir_p(qemu_dir) != 0) {
+    ydebug("Failed to create qemu directory: %s", qemu_dir);
+    return 0;
+  }
+
+  if (!extract_with_prefix(assets, "qemu/", qemu_dir))
+    return 0;
+
+  /* Make QEMU binary executable */
+  snprintf(qemu_bin, sizeof(qemu_bin), "%s/qemu-system-riscv64", qemu_dir);
+  if (chmod(qemu_bin, 0755) != 0) {
+    ydebug("Failed to make QEMU executable: %s", strerror(errno));
+  }
+
+  ydebug("QEMU asset extraction complete");
+  return 1;
+}
+
+/* Check if QEMU assets are available */
+int yetty_incbin_assets_has_qemu(struct yetty_incbin_assets *assets) {
+  size_t i;
+
+  for (i = 0; i < assets->count; i++) {
+    if (strncmp(assets->entries[i].name, "qemu/", 5) == 0)
       return 1;
   }
   return 0;

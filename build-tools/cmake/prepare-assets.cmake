@@ -36,9 +36,9 @@ else()
     # Build directory for host tools
     set(HOST_TOOLS_BUILD_DIR "${CMAKE_BINARY_DIR}/_host-tools-bootstrap")
     if(WIN32)
-        set(HOST_MSDF_GEN "${HOST_TOOLS_BUILD_DIR}/yetty-msdf-gen.exe")
+        set(HOST_MSDF_GEN "${HOST_TOOLS_BUILD_DIR}/yetty-ymsdf-gen.exe")
     else()
-        set(HOST_MSDF_GEN "${HOST_TOOLS_BUILD_DIR}/yetty-msdf-gen")
+        set(HOST_MSDF_GEN "${HOST_TOOLS_BUILD_DIR}/yetty-ymsdf-gen")
     endif()
 
     # Determine generator and compiler args for host tools
@@ -92,9 +92,9 @@ else()
         message(FATAL_ERROR "Failed to configure host tools:\nSTDOUT:\n${CONFIG_OUTPUT}\nSTDERR:\n${CONFIG_ERROR}")
     endif()
 
-    # Build yetty-msdf-gen
-    message(STATUS "  Building yetty-msdf-gen...")
-    set(HOST_BUILD_ARGS --build "${HOST_TOOLS_BUILD_DIR}" --target yetty-msdf-gen --parallel)
+    # Build yetty-ymsdf-gen
+    message(STATUS "  Building yetty-ymsdf-gen...")
+    set(HOST_BUILD_ARGS --build "${HOST_TOOLS_BUILD_DIR}" --target yetty-ymsdf-gen --parallel)
     # Note: using Ninja (single-config) on all platforms, no --config needed
 
     execute_process(
@@ -104,7 +104,7 @@ else()
         ERROR_VARIABLE BUILD_ERROR
     )
     if(NOT BUILD_RESULT EQUAL 0)
-        message(FATAL_ERROR "Failed to build yetty-msdf-gen:\nSTDOUT:\n${BUILD_OUTPUT}\nSTDERR:\n${BUILD_ERROR}")
+        message(FATAL_ERROR "Failed to build yetty-ymsdf-gen:\nSTDOUT:\n${BUILD_OUTPUT}\nSTDERR:\n${BUILD_ERROR}")
     endif()
 
     # Generate CDB files

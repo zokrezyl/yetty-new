@@ -15,8 +15,8 @@ set(ALPINE_RELEASE "3.21.7" CACHE STRING "Alpine Linux release")
 # URL
 set(ALPINE_URL "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/riscv64/alpine-minirootfs-${ALPINE_RELEASE}-riscv64.tar.gz")
 
-# Output paths
-set(ALPINE_ROOTFS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets/tinyemu" CACHE PATH "Rootfs output directory")
+# Output paths (shared RISC-V runtime assets — used by both TinyEMU and QEMU)
+set(ALPINE_ROOTFS_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets/yemu" CACHE PATH "Rootfs output directory")
 
 #-----------------------------------------------------------------------------
 # alpine_rootfs_download()

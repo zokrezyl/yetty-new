@@ -16,7 +16,7 @@ set(LINUX_URL "https://github.com/torvalds/linux/archive/refs/tags/v${LINUX_VERS
 
 # Paths
 set(LINUX_KERNEL_CONFIG "${YETTY_ROOT}/poc/qemu/configs/linux-kernel-7.0.config")
-set(LINUX_KERNEL_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets/tinyemu" CACHE PATH "Kernel output directory")
+set(LINUX_KERNEL_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets/yemu" CACHE PATH "Kernel output directory")
 
 # Cross-compiler (must be installed on system)
 set(LINUX_CROSS_COMPILE "riscv64-linux-gnu-" CACHE STRING "Cross-compiler prefix for RISC-V")

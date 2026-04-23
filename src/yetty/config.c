@@ -670,17 +670,22 @@ static void parse_arg_to_config(struct config_impl *impl, int argc, char *argv[]
     }
 }
 
-/* Parse command line for --virtual flag */
+/* Parse command line for --temu and --qemu flags */
 
-static void parse_virtual_arg(struct config_impl *impl, int argc, char *argv[])
+static void parse_vm_args(struct config_impl *impl, int argc, char *argv[])
 {
+    char key[MAX_KEY_LEN];
+    struct config_node *parent;
+
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--virtual") == 0) {
-            char key[MAX_KEY_LEN];
-            struct config_node *parent = navigate_or_create(impl->root, YETTY_YCONFIG_KEY_VIRTUAL, key);
+        if (strcmp(argv[i], "--temu") == 0) {
+            parent = navigate_or_create(impl->root, YETTY_YCONFIG_KEY_TEMU, key);
             if (parent)
                 node_set_value(parent, key, "true");
-            return;
+        } else if (strcmp(argv[i], "--qemu") == 0) {
+            parent = navigate_or_create(impl->root, YETTY_YCONFIG_KEY_QEMU, key);
+            if (parent)
+                node_set_value(parent, key, "true");
         }
     }
 }
@@ -706,7 +711,7 @@ struct yetty_yconfig_result yetty_yconfig_create(int argc, char *argv[],
     parse_arg_to_config(impl, argc, argv, "-e", NULL, "shell/command");
     parse_arg_to_config(impl, argc, argv, NULL, "--rpc-host", YETTY_YCONFIG_KEY_RPC_HOST);
     parse_arg_to_config(impl, argc, argv, "-r", "--rpc-port", YETTY_YCONFIG_KEY_RPC_PORT);
-    parse_virtual_arg(impl, argc, argv);
+    parse_vm_args(impl, argc, argv);
 
     return YETTY_OK(yetty_yconfig, &impl->base);
 }

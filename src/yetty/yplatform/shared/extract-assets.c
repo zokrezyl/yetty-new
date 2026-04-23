@@ -18,8 +18,10 @@ void yetty_incbin_assets_destroy(struct yetty_incbin_assets *assets);
 int yetty_incbin_assets_needs_extraction(struct yetty_incbin_assets *assets, const char *dir);
 int yetty_incbin_assets_extract_data_to(struct yetty_incbin_assets *assets, const char *data_dir);
 int yetty_incbin_assets_extract_config_to(struct yetty_incbin_assets *assets, const char *config_dir);
-int yetty_incbin_assets_extract_tinyemu_to(struct yetty_incbin_assets *assets, const char *data_dir);
-int yetty_incbin_assets_has_tinyemu(struct yetty_incbin_assets *assets);
+int yetty_incbin_assets_extract_yemu_to(struct yetty_incbin_assets *assets, const char *data_dir);
+int yetty_incbin_assets_has_yemu(struct yetty_incbin_assets *assets);
+int yetty_incbin_assets_extract_qemu_to(struct yetty_incbin_assets *assets, const char *data_dir);
+int yetty_incbin_assets_has_qemu(struct yetty_incbin_assets *assets);
 
 struct yetty_ycore_void_result yetty_yplatform_extract_assets(struct yetty_yconfig *config)
 {
@@ -60,14 +62,27 @@ struct yetty_ycore_void_result yetty_yplatform_extract_assets(struct yetty_yconf
         }
     }
 
-    /* Extract tinyemu if embedded and config file doesn't exist */
-    if (yetty_incbin_assets_has_tinyemu(assets)) {
-        char tinyemu_cfg[512];
-        snprintf(tinyemu_cfg, sizeof(tinyemu_cfg), "%s/tinyemu/root-riscv64.cfg", data_dir);
-        if (access(tinyemu_cfg, F_OK) != 0) {
-            if (!yetty_incbin_assets_extract_tinyemu_to(assets, data_dir)) {
+    /* Extract shared RISC-V runtime (kernel/opensbi/rootfs) to <data_dir>/yemu.
+     * Presence of the kernel is our gate — both --temu and --qemu need it. */
+    if (yetty_incbin_assets_has_yemu(assets)) {
+        char yemu_kernel[512];
+        snprintf(yemu_kernel, sizeof(yemu_kernel), "%s/yemu/kernel-riscv64.bin", data_dir);
+        if (access(yemu_kernel, F_OK) != 0) {
+            if (!yetty_incbin_assets_extract_yemu_to(assets, data_dir)) {
                 yetty_incbin_assets_destroy(assets);
-                return YETTY_ERR(yetty_ycore_void, "failed to extract tinyemu assets");
+                return YETTY_ERR(yetty_ycore_void, "failed to extract yemu assets");
+            }
+        }
+    }
+
+    /* Extract QEMU binary to <data_dir>/qemu if embedded and not yet extracted */
+    if (yetty_incbin_assets_has_qemu(assets)) {
+        char qemu_bin[512];
+        snprintf(qemu_bin, sizeof(qemu_bin), "%s/qemu/qemu-system-riscv64", data_dir);
+        if (access(qemu_bin, X_OK) != 0) {
+            if (!yetty_incbin_assets_extract_qemu_to(assets, data_dir)) {
+                yetty_incbin_assets_destroy(assets);
+                return YETTY_ERR(yetty_ycore_void, "failed to extract qemu assets");
             }
         }
     }
