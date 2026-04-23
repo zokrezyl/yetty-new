@@ -62,6 +62,10 @@ static struct option long_options[] = {
     {"vnc-headless", no_argument,       0, 'H'},
     {"vnc-port",     required_argument, 0, 'p'},
     {"vnc-client",   required_argument, 0, 'C'},
+    {"rpc-host",     required_argument, 0,  0 },
+    {"rpc-port",     required_argument, 0, 'r'},
+    {"temu",         no_argument,       0,  0 },
+    {"qemu",         no_argument,       0,  0 },
     {"help",         no_argument,       0, 'h'},
     {0, 0, 0, 0}
 };
@@ -76,6 +80,10 @@ static void print_usage(const char *prog)
     fprintf(stderr, "  -H, --vnc-headless     Run VNC server (headless - no window)\n");
     fprintf(stderr, "  -p, --vnc-port=PORT    VNC server port (default: 5900)\n");
     fprintf(stderr, "  -C, --vnc-client=HOST  Connect as VNC client to HOST[:PORT]\n");
+    fprintf(stderr, "      --rpc-host=HOST    RPC server host\n");
+    fprintf(stderr, "  -r, --rpc-port=PORT    RPC server port\n");
+    fprintf(stderr, "      --temu             Run in-process TinyEMU RISC-V VM\n");
+    fprintf(stderr, "      --qemu             Run external QEMU RISC-V VM (via telnet)\n");
     fprintf(stderr, "  -h, --help             Show this help\n");
 }
 
@@ -83,8 +91,12 @@ static void parse_cmdline(int argc, char **argv, struct yetty_yconfig *config)
 {
     optind = 1; /* reset getopt */
     int c;
-    while ((c = getopt_long(argc, argv, "c:e:sHp:C:h", long_options, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "c:e:sHp:C:r:h", long_options, NULL)) != -1) {
         switch (c) {
+        case 0:
+            /* long-only option (--rpc-host, --temu, --qemu) already handled
+             * by yetty_yconfig_create; getopt just needs to accept it */
+            break;
         case 'c':
             /* config file already handled by yetty_yconfig_create */
             break;
@@ -102,6 +114,9 @@ static void parse_cmdline(int argc, char **argv, struct yetty_yconfig *config)
             break;
         case 'C':
             config->ops->set_string(config, "vnc/client", optarg);
+            break;
+        case 'r':
+            /* rpc-port already handled by yetty_yconfig_create */
             break;
         case 'h':
             print_usage(argv[0]);
