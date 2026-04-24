@@ -157,6 +157,11 @@ if(YETTY_ENABLE_LIB_LIBJPEG_TURBO)
     include(${YETTY_ROOT}/build-tools/cmake/libs/libjpeg-turbo.cmake)
 endif()
 
+# Reusable render utilities (GPU tile diff, …). Lives outside src/yetty so it
+# can be consumed by both the main yetty modules and standalone tools. Must
+# be declared before src/yetty so yetty_vnc (et al.) can link against it.
+add_subdirectory(${YETTY_ROOT}/src/yrender-utils ${CMAKE_BINARY_DIR}/src/yrender-utils)
+
 # Add src/yetty (populates YETTY_SOURCES, YETTY_CORE_SOURCES, builds feature libraries)
 add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
 
@@ -241,7 +246,7 @@ endif()
 
 # Core libraries (always linked)
 # Note: yetty_yui comes first because it depends on yetty_term
-list(APPEND YETTY_LIBS yetty_yui yetty_yterm yetty_yrender yetty_webgpu)
+list(APPEND YETTY_LIBS yetty_yui yetty_yterm yetty_yrender yetty_yrender_utils yetty_webgpu)
 
 # Feature library link targets
 if(YETTY_ENABLE_FEATURE_BASE)

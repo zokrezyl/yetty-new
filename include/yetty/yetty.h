@@ -24,6 +24,13 @@ struct yetty_app_gpu_context {
     WGPUSurface surface;
     uint32_t surface_width;
     uint32_t surface_height;
+
+    /* Optional X11 native handles. Populated by the platform layer on
+     * Linux/X11 (opaque here to keep Xlib out of this header); NULL / 0 on
+     * every other platform. yetty uses these only when the X11-tile render
+     * target is selected — see yetty_log_gpu_info / initWebGPU. */
+    void *x11_display;        /* Display * */
+    unsigned long x11_window; /* Window (XID) */
 };
 
 /* App context - passed from platform main to yetty_create */
@@ -63,6 +70,12 @@ void yetty_destroy(struct yetty_yetty *yetty);
 
 /* Run yetty (main loop integration) */
 struct yetty_ycore_void_result yetty_run(struct yetty_yetty *yetty);
+
+/* Dump WebGPU adapter info (vendor, backend, adapter type, IDs, key limits)
+ * via yinfo. Safe to call any time after the adapter is available — used at
+ * startup and can be re-invoked for diagnostics (e.g. when a GPU error
+ * occurs or on demand via a debug command). */
+void yetty_log_gpu_info(WGPUAdapter adapter);
 
 #ifdef __cplusplus
 }

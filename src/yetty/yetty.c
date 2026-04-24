@@ -9,6 +9,9 @@
 #include <yetty/ycore/event.h>
 #include <yetty/yrender/gpu-allocator.h>
 #include <yetty/yrender/render-target.h>
+#ifdef YETTY_HAS_X11_TILE
+#include <yetty/yrender/render-target-x11-tile.h>
+#endif
 #include <yetty/yterm/terminal.h>
 #include <yetty/webgpu/error.h>
 #include <yetty/ytrace.h>
@@ -19,6 +22,7 @@
 #include <yetty/yvnc/vnc-server.h>
 #include <yetty/platform/platform-input-pipe.h>
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -112,6 +116,18 @@ static struct yetty_ycore_int_result yetty_event_handler(
     struct yetty_yetty *yetty =
         container_of(listener, struct yetty_yetty, listener);
 
+    /* X11 Expose / window-uncover: mark every tile dirty on damage-aware
+     * targets so the next render actually repaints the window. Fall through
+     * to the normal RENDER path below (no early return). */
+    if (event->type == YETTY_EVENT_WINDOW_REFRESH) {
+        if (yetty->render_target && yetty->render_target->ops->refresh_full)
+            yetty->render_target->ops->refresh_full(yetty->render_target);
+        /* Re-dispatch as a normal RENDER so the single render pipeline runs
+         * exactly once, via the same code path used by all other triggers. */
+        struct yetty_ycore_event re = { .type = YETTY_EVENT_RENDER };
+        return yetty_event_handler(listener, &re);
+    }
+
     /* Handle RENDER event directly - yetty owns the render cycle */
     if (event->type == YETTY_EVENT_RENDER) {
         if (!yetty->render_target) {
@@ -119,16 +135,38 @@ static struct yetty_ycore_int_result yetty_event_handler(
             return YETTY_OK(yetty_ycore_int, 0);
         }
 
+        /* Back-pressure: if the target is still flushing an async readback
+         * (x11-tile, vnc with a pending wire send), skip the entire
+         * pipeline — running workspace_render now would submit GPU work
+         * that feeds a present() we'd just drop, starving the driver of
+         * handles (NVIDIA fd exhaustion during bursty scroll). Tell the
+         * target we skipped so it knows to fire a catch-up render via
+         * on_idle once it's free again — otherwise the skip is silent and
+         * the display stays one event behind (visible as the "one-char
+         * delay" in nvim bursts). */
+        if (yetty->render_target->ops->is_busy &&
+            yetty->render_target->ops->is_busy(yetty->render_target)) {
+            if (yetty->render_target->ops->notify_render_skipped)
+                yetty->render_target->ops->notify_render_skipped(yetty->render_target);
+            ydebug("yetty: RENDER skipped (target busy)");
+            return YETTY_OK(yetty_ycore_int, 1);
+        }
+
         ydebug("yetty: RENDER event - calling workspace render");
 
+        ytime_start(full_frame);
+
         /* Clear the big target once before rendering all panes */
+        ytime_start(clear);
         struct yetty_ycore_void_result clr_res =
             yetty->render_target->ops->clear(yetty->render_target);
+        ytime_report(clear);
         if (!YETTY_IS_OK(clr_res)) {
             yerror("yetty: clear failed: %s", clr_res.error.msg);
         }
 
         /* Render workspace tree - pass render_target down */
+        ytime_start(workspace_render);
         if (yetty->workspace) {
             struct yetty_ycore_void_result res =
                 yetty_yui_workspace_render(yetty->workspace, yetty->render_target);
@@ -136,13 +174,18 @@ static struct yetty_ycore_int_result yetty_event_handler(
                 yerror("yetty: workspace render failed: %s", res.error.msg);
             }
         }
+        ytime_report(workspace_render);
 
         /* Present the big target to surface */
+        ytime_start(present);
         struct yetty_ycore_void_result res =
             yetty->render_target->ops->present(yetty->render_target);
+        ytime_report(present);
         if (!YETTY_IS_OK(res)) {
             yerror("yetty: present failed: %s", res.error.msg);
         }
+
+        ytime_report(full_frame);
 
         return YETTY_OK(yetty_ycore_int, 1);
     }
@@ -448,6 +491,8 @@ static struct yetty_ycore_void_result register_event_listeners(struct yetty_yett
     if (!YETTY_IS_OK(res)) return res;
     res = el->ops->register_listener(el, YETTY_EVENT_RENDER, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_WINDOW_REFRESH, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
     res = el->ops->register_listener(el, YETTY_EVENT_SHUTDOWN, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
 
@@ -472,6 +517,74 @@ static struct yetty_ycore_void_result register_event_listeners(struct yetty_yett
 /*===========================================================================
  * WebGPU initialization
  *===========================================================================*/
+
+static const char *backend_type_name(WGPUBackendType t)
+{
+    switch (t) {
+    case WGPUBackendType_Undefined: return "Undefined";
+    case WGPUBackendType_Null:      return "Null";
+    case WGPUBackendType_WebGPU:    return "WebGPU";
+    case WGPUBackendType_D3D11:     return "D3D11";
+    case WGPUBackendType_D3D12:     return "D3D12";
+    case WGPUBackendType_Metal:     return "Metal";
+    case WGPUBackendType_Vulkan:    return "Vulkan";
+    case WGPUBackendType_OpenGL:    return "OpenGL";
+    case WGPUBackendType_OpenGLES:  return "OpenGLES";
+    default:                        return "Unknown";
+    }
+}
+
+static const char *adapter_type_name(WGPUAdapterType t)
+{
+    switch (t) {
+    case WGPUAdapterType_DiscreteGPU:   return "DiscreteGPU";
+    case WGPUAdapterType_IntegratedGPU: return "IntegratedGPU";
+    case WGPUAdapterType_CPU:           return "CPU";
+    case WGPUAdapterType_Unknown:       return "Unknown";
+    default:                            return "Unknown";
+    }
+}
+
+void yetty_log_gpu_info(WGPUAdapter adapter)
+{
+    if (!adapter) {
+        ywarn("yetty_log_gpu_info: adapter is NULL");
+        return;
+    }
+
+    WGPUAdapterInfo info = {0};
+    if (wgpuAdapterGetInfo(adapter, &info) != WGPUStatus_Success) {
+        ywarn("yetty_log_gpu_info: wgpuAdapterGetInfo failed");
+        return;
+    }
+
+    yinfo("GPU backend:     %s", backend_type_name(info.backendType));
+    yinfo("GPU adapter:     %s", adapter_type_name(info.adapterType));
+    yinfo("GPU vendor:      %.*s (vendorID=0x%04x)",
+          (int)info.vendor.length, info.vendor.data ? info.vendor.data : "",
+          info.vendorID);
+    yinfo("GPU device:      %.*s (deviceID=0x%04x)",
+          (int)info.device.length, info.device.data ? info.device.data : "",
+          info.deviceID);
+    yinfo("GPU arch:        %.*s",
+          (int)info.architecture.length,
+          info.architecture.data ? info.architecture.data : "");
+    yinfo("GPU description: %.*s",
+          (int)info.description.length,
+          info.description.data ? info.description.data : "");
+
+    wgpuAdapterInfoFreeMembers(info);
+
+    WGPULimits limits = {0};
+    if (wgpuAdapterGetLimits(adapter, &limits) == WGPUStatus_Success) {
+        yinfo("GPU limits:      maxTextureDimension2D=%u  maxBufferSize=%llu  "
+              "maxStorageBufferBindingSize=%llu  maxUniformBufferBindingSize=%llu",
+              limits.maxTextureDimension2D,
+              (unsigned long long)limits.maxBufferSize,
+              (unsigned long long)limits.maxStorageBufferBindingSize,
+              (unsigned long long)limits.maxUniformBufferBindingSize);
+    }
+}
 
 /* Adapter callback data */
 struct adapter_callback_data {
@@ -657,14 +770,8 @@ static struct yetty_ycore_void_result init_webgpu(struct yetty_yetty *yetty)
     }
     ydebug("initWebGPU: Adapter obtained");
 
-    /* Log adapter info */
-    {
-        WGPUAdapterInfo info = {0};
-        if (wgpuAdapterGetInfo(yetty->adapter, &info) == WGPUStatus_Success) {
-            ydebug("GPU: adapter obtained, backend=%d", (int)info.backendType);
-            wgpuAdapterInfoFreeMembers(info);
-        }
-    }
+    /* Log adapter info (backend, vendor, device, limits) at yinfo level */
+    yetty_log_gpu_info(yetty->adapter);
 
     /* Request device */
     WGPULimits adapter_limits = {0};
@@ -836,6 +943,25 @@ static struct yetty_ycore_void_result init_webgpu(struct yetty_yetty *yetty)
     };
 
     struct yetty_yrender_target_ptr_result target_res;
+
+    /*
+     * When we're running on X11 — and the platform handed us native Display
+     * and Window handles (GLFW's X11 backend; Wayland/Cocoa/Win32 leave
+     * these NULL/0) — use the X11-tile target. It renders offscreen and
+     * XShmPutImage's only the dirty tiles into the X window, which keeps
+     * per-frame wire traffic tiny on remote displays (VNC+VGL) and stays
+     * competitive locally where XShm is a shared-memory memcpy.
+     *
+     * No opt-in flag: X11 means tile target, Wayland/other means the
+     * standard WebGPU surface path. VNC-server mode always wins above.
+     */
+    bool x11_tile_available = false;
+#ifdef YETTY_HAS_X11_TILE
+    x11_tile_available =
+        yetty->context.app_context.app_gpu_context.x11_display != NULL &&
+        yetty->context.app_context.app_gpu_context.x11_window != 0UL;
+#endif
+
     if (vnc_enabled) {
         /* VNC render target: sends frames to VNC, optionally presents to surface */
         target_res = yetty_yrender_target_vnc_create(
@@ -846,6 +972,27 @@ static struct yetty_ycore_void_result init_webgpu(struct yetty_yetty *yetty)
             surface,  /* NULL for headless, non-NULL for mirror */
             yetty->vnc_server,
             vp);
+#ifdef YETTY_HAS_X11_TILE
+    } else if (x11_tile_available) {
+        yinfo("render target: X11-tile (XShmPutImage per dirty tile)");
+        target_res = yetty_yrender_target_x11_tile_create(
+            yetty->device,
+            yetty->queue,
+            yetty->surface_format,
+            alloc_res.value,
+            yetty->wgpu,
+            yetty->event_loop,
+            yetty->context.app_context.app_gpu_context.x11_display,
+            yetty->context.app_context.app_gpu_context.x11_window,
+            vp);
+        if (!YETTY_IS_OK(target_res)) {
+            ywarn("X11-tile target failed (%s); falling back to texture target",
+                  target_res.error.msg);
+            target_res = yetty_yrender_target_texture_create(
+                yetty->device, yetty->queue, yetty->surface_format,
+                alloc_res.value, surface, vp);
+        }
+#endif
     } else {
         /* Standard texture render target */
         target_res = yetty_yrender_target_texture_create(

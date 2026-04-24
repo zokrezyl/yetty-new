@@ -1,6 +1,7 @@
 #ifndef YETTY_YRENDER_TARGET_H
 #define YETTY_YRENDER_TARGET_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <yetty/ycore/result.h>
@@ -73,6 +74,29 @@ struct yetty_yrender_target_ops {
 	struct yetty_ycore_void_result (*set_visual_zoom)(
 		struct yetty_yrender_target *self,
 		float scale, float offset_x, float offset_y);
+
+	/* Hint that the next present() must produce a full-window repaint even
+	 * if the GPU content is unchanged. Called by the event loop on X11
+	 * Expose / window-refresh so damage-aware targets (X11-tile) re-ship
+	 * every tile — otherwise their delta would be empty and the window
+	 * stays broken after being uncovered. Optional — NULL means "the
+	 * target's present() already repaints everything unconditionally". */
+	void (*refresh_full)(struct yetty_yrender_target *self);
+
+	/* Optional: return true if the target currently can't accept a new
+	 * render (e.g. an async readback is still in flight). When true, the
+	 * render loop skips the WHOLE pipeline — clear + workspace_render +
+	 * present — because otherwise the layer renders would submit GPU work
+	 * that feeds a present() we'd only drop anyway. The target is
+	 * responsible for asking for a catch-up render once it's free again.
+	 * NULL means "always ready". */
+	bool (*is_busy)(const struct yetty_yrender_target *self);
+
+	/* Called when the render loop skipped a pipeline because is_busy() was
+	 * true. The target must remember to fire a catch-up render once it
+	 * becomes idle — without this the skip is silent and the display
+	 * lags behind by one event. NULL iff is_busy is NULL. */
+	void (*notify_render_skipped)(struct yetty_yrender_target *self);
 };
 
 /* Render target base - embed as first member in subclasses */

@@ -10,6 +10,27 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Native X11 handles — only on Linux when yrender was built with X11-tile
+ * support (which also pulls in X11 headers via the yetty_yrender link). On
+ * Wayland, glfwGetX11Display() / glfwGetX11Window() return NULL/0, which is
+ * exactly what yetty_create expects when the X11-tile path isn't usable. */
+#if defined(__linux__) && defined(YETTY_HAS_X11_TILE)
+#define GLFW_EXPOSE_NATIVE_X11
+#include <GLFW/glfw3native.h>
+static void platform_get_x11_handles(GLFWwindow *win, void **disp, unsigned long *xwin)
+{
+    *disp = (void *)glfwGetX11Display();
+    *xwin = win ? (unsigned long)glfwGetX11Window(win) : 0UL;
+}
+#else
+static void platform_get_x11_handles(GLFWwindow *win, void **disp, unsigned long *xwin)
+{
+    (void)win;
+    *disp = NULL;
+    *xwin = 0UL;
+}
+#endif
+
 #include <yetty/yetty.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/event.h>
@@ -277,12 +298,18 @@ int main(int argc, char **argv)
         fb_height = height;
     }
 
+    void *x11_display = NULL;
+    unsigned long x11_window = 0UL;
+    platform_get_x11_handles(window, &x11_display, &x11_window);
+
     struct yetty_app_context app_context = {
         .app_gpu_context = {
             .instance = instance,
             .surface = surface,
             .surface_width = (uint32_t)fb_width,
-            .surface_height = (uint32_t)fb_height
+            .surface_height = (uint32_t)fb_height,
+            .x11_display = x11_display,
+            .x11_window = x11_window
         },
         .config = config,
         .platform_input_pipe = platform_input_pipe,
