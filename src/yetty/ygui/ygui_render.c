@@ -1,17 +1,24 @@
 /*
- * ygui_render.c - Render context implementation
+ * ygui_render.c — render helpers that drop ypaint-core primitives directly.
  *
- * Bridges YGui widgets to YDraw buffer via the YDraw C API.
+ * Bridges YGui widgets to a yetty_ypaint_core_buffer. Shapes go through
+ * yetty_ysdf_add_* (generated from ysdf/primitives.yaml); text goes through
+ * yetty_ypaint_core_buffer_add_text (canvas decomposes text_spans into
+ * YPAINT_SDF_GLYPH primitives in PASS4). No shim layer in between.
  */
 
 #include "ygui_internal.h"
-#include "ydraw-capi.gen.h"
+
+#include <yetty/ypaint-core/buffer.h>
+#include <yetty/ysdf/funcs.gen.h>
+#include <yetty/ysdf/types.gen.h>
 
 /*=============================================================================
  * Render Context
  *===========================================================================*/
 
-void ygui_render_ctx_init(ygui_render_ctx_t* ctx, ydraw_buffer_t* buffer,
+void ygui_render_ctx_init(ygui_render_ctx_t* ctx,
+                          struct yetty_ypaint_core_buffer* buffer,
                           const ygui_theme_t* theme) {
     ctx->buffer = buffer;
     ctx->theme = theme;
@@ -32,23 +39,30 @@ void ygui_render_box(ygui_render_ctx_t* ctx, float x, float y, float w, float h,
                      uint32_t color, float radius) {
     if (!ctx->buffer) return;
 
-    /* Apply offset */
     float ax = x + ctx->offset_x;
     float ay = y + ctx->offset_y;
-
-    /* Convert corner+size to center+half-size */
     float cx = ax + w * 0.5f;
     float cy = ay + h * 0.5f;
     float hw = w * 0.5f;
     float hh = h * 0.5f;
 
     if (radius > 0) {
-        ydraw_add_rounded_box(ctx->buffer, 0, cx, cy, hw, hh,
-                              radius, radius, radius, radius,
-                              color, 0, 0.0f, 0.0f);
+        struct yetty_ysdf_rounded_box geom = {
+            .center_x = cx, .center_y = cy,
+            .half_width = hw, .half_height = hh,
+            .radius_top_right    = radius,
+            .radius_bottom_right = radius,
+            .radius_top_left     = radius,
+            .radius_bottom_left  = radius,
+        };
+        yetty_ysdf_add_rounded_box(ctx->buffer, 0, color, 0, 0.0f, &geom);
     } else {
-        ydraw_add_box(ctx->buffer, 0, cx, cy, hw, hh,
-                      color, 0, 0.0f, 0.0f);
+        struct yetty_ysdf_box geom = {
+            .center_x = cx, .center_y = cy,
+            .half_width = hw, .half_height = hh,
+            .corner_radius = 0.0f,
+        };
+        yetty_ysdf_add_box(ctx->buffer, 0, color, 0, 0.0f, &geom);
     }
 }
 
@@ -64,12 +78,22 @@ void ygui_render_box_outline(ygui_render_ctx_t* ctx, float x, float y, float w, 
     float hh = h * 0.5f;
 
     if (radius > 0) {
-        ydraw_add_rounded_box(ctx->buffer, 0, cx, cy, hw, hh,
-                              radius, radius, radius, radius,
-                              0, color, stroke_width, 0.0f);
+        struct yetty_ysdf_rounded_box geom = {
+            .center_x = cx, .center_y = cy,
+            .half_width = hw, .half_height = hh,
+            .radius_top_right    = radius,
+            .radius_bottom_right = radius,
+            .radius_top_left     = radius,
+            .radius_bottom_left  = radius,
+        };
+        yetty_ysdf_add_rounded_box(ctx->buffer, 0, 0, color, stroke_width, &geom);
     } else {
-        ydraw_add_box(ctx->buffer, 0, cx, cy, hw, hh,
-                      0, color, stroke_width, 0.0f);
+        struct yetty_ysdf_box geom = {
+            .center_x = cx, .center_y = cy,
+            .half_width = hw, .half_height = hh,
+            .corner_radius = 0.0f,
+        };
+        yetty_ysdf_add_box(ctx->buffer, 0, 0, color, stroke_width, &geom);
     }
 }
 
@@ -80,9 +104,19 @@ void ygui_render_text(ygui_render_ctx_t* ctx, const char* text, float x, float y
     float ax = x + ctx->offset_x;
     float ay = y + ctx->offset_y;
 
-    /* Store as text span - builder converts to glyphs during GPU upload */
-    ydraw_add_text(ctx->buffer, ax, ay + font_size * 0.8f, text,
-                   font_size, color, 0, -1);
+    /* Text spans live on the ypaint-core buffer and get decomposed into
+     * YPAINT_SDF_GLYPH primitives by the canvas's add_buffer (PASS4). */
+    size_t tlen = 0;
+    while (text[tlen] != '\0') tlen++;
+    struct yetty_ycore_buffer tbuf = {
+        .data = (uint8_t *)(uintptr_t)text,
+        .size = tlen,
+        .capacity = tlen,
+    };
+    yetty_ypaint_core_buffer_add_text(ctx->buffer, ax, ay + font_size * 0.8f,
+                                      &tbuf, font_size, color,
+                                      /*layer*/ 0, /*font_id*/ -1,
+                                      /*rotation*/ 0.0f);
 }
 
 void ygui_render_circle(ygui_render_ctx_t* ctx, float cx, float cy, float r,
@@ -92,7 +126,8 @@ void ygui_render_circle(ygui_render_ctx_t* ctx, float cx, float cy, float r,
     float ax = cx + ctx->offset_x;
     float ay = cy + ctx->offset_y;
 
-    ydraw_add_circle(ctx->buffer, 0, ax, ay, r, color, 0, 0.0f, 0.0f);
+    struct yetty_ysdf_circle geom = { .center_x = ax, .center_y = ay, .radius = r };
+    yetty_ysdf_add_circle(ctx->buffer, 0, color, 0, 0.0f, &geom);
 }
 
 void ygui_render_triangle(ygui_render_ctx_t* ctx, float x0, float y0,
@@ -102,9 +137,10 @@ void ygui_render_triangle(ygui_render_ctx_t* ctx, float x0, float y0,
     float ox = ctx->offset_x;
     float oy = ctx->offset_y;
 
-    ydraw_add_triangle(ctx->buffer, 0,
-                       x0 + ox, y0 + oy,
-                       x1 + ox, y1 + oy,
-                       x2 + ox, y2 + oy,
-                       color, 0, 0.0f, 0.0f);
+    struct yetty_ysdf_triangle geom = {
+        .vertex_a_x = x0 + ox, .vertex_a_y = y0 + oy,
+        .vertex_b_x = x1 + ox, .vertex_b_y = y1 + oy,
+        .vertex_c_x = x2 + ox, .vertex_c_y = y2 + oy,
+    };
+    yetty_ysdf_add_triangle(ctx->buffer, 0, color, 0, 0.0f, &geom);
 }

@@ -39,7 +39,6 @@ void ygui_shutdown(void);
 typedef struct ygui_engine ygui_engine_t;
 typedef struct ygui_widget ygui_widget_t;
 typedef struct ygui_theme ygui_theme_t;
-typedef struct ydraw_buffer ydraw_buffer_t;
 
 /*=============================================================================
  * Enums

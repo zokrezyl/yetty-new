@@ -4,8 +4,8 @@
 # Feature subdirectories — guarded by YETTY_ENABLE_FEATURE_*
 #-----------------------------------------------------------------------------
 
-if(YETTY_ENABLE_FEATURE_YGUI_C)
-    add_subdirectory(ygui-c)
+if(YETTY_ENABLE_FEATURE_YGUI)
+    add_subdirectory(ygui)
 endif()
 
 if(YETTY_ENABLE_FEATURE_YDRAW_ZOO)

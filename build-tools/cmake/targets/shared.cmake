@@ -325,6 +325,9 @@ function(yetty_embed_assets TARGET)
     # Collect shaders from module locations
     file(COPY "${YETTY_ROOT}/src/yetty/yterm/text-layer.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
     file(COPY "${YETTY_ROOT}/src/yetty/yterm/ypaint-layer.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
+    # Generated SDF dispatcher + sdf_* functions — attached at runtime as a
+    # child resource set of ypaint-layer; see src/yetty/ysdf/gen-sdf-code.py.
+    file(COPY "${YETTY_ROOT}/src/yetty/ysdf/ysdf.gen.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
     file(COPY "${YETTY_ROOT}/src/yetty/yrender/blend.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
     file(RENAME "${INCBIN_DATA_DIR}/shaders/blend.wgsl" "${INCBIN_DATA_DIR}/shaders/blender.wgsl")
     file(COPY "${YETTY_ROOT}/src/yetty/yfont/ms-msdf-font.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")

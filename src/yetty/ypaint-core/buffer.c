@@ -21,7 +21,90 @@ struct yetty_ypaint_core_buffer {
   uint32_t text_span_count;
 
   float scene_min_x, scene_min_y, scene_max_x, scene_max_y;
+
+  /* serialize() scratch — reused across calls, grows on demand. */
+  uint8_t *serial_data;
+  size_t serial_cap;
 };
+
+/* Framed wire format. Magic chosen so it can't look like a valid
+ * ysdf primitive header (primitive types are < 256, scene bounds start
+ * with a float). */
+#define YPAINT_SERIAL_MAGIC 0x31425059u  /* 'YPB1' little-endian */
+
+/* Read helpers — advance *p if enough bytes remain, else bail. */
+static int _read_u32(const uint8_t **p, const uint8_t *end, uint32_t *out) {
+  if ((size_t)(end - *p) < 4) return 0;
+  memcpy(out, *p, 4); *p += 4; return 1;
+}
+static int _read_i32(const uint8_t **p, const uint8_t *end, int32_t *out) {
+  if ((size_t)(end - *p) < 4) return 0;
+  memcpy(out, *p, 4); *p += 4; return 1;
+}
+static int _read_f32(const uint8_t **p, const uint8_t *end, float *out) {
+  if ((size_t)(end - *p) < 4) return 0;
+  memcpy(out, *p, 4); *p += 4; return 1;
+}
+
+static int parse_framed_payload(struct yetty_ypaint_core_buffer *buf,
+                                const uint8_t *data, size_t size) {
+  const uint8_t *p = data;
+  const uint8_t *end = data + size;
+
+  /* magic already validated by caller; skip past it. */
+  p += 4;
+
+  if (!_read_f32(&p, end, &buf->scene_min_x)) return 0;
+  if (!_read_f32(&p, end, &buf->scene_min_y)) return 0;
+  if (!_read_f32(&p, end, &buf->scene_max_x)) return 0;
+  if (!_read_f32(&p, end, &buf->scene_max_y)) return 0;
+
+  uint32_t prim_size;
+  if (!_read_u32(&p, end, &prim_size)) return 0;
+  if ((size_t)(end - p) < prim_size) return 0;
+  if (prim_size > 0) {
+    uint8_t *pd = malloc(prim_size);
+    if (!pd) return 0;
+    memcpy(pd, p, prim_size);
+    free(buf->primitives.buf.data);
+    buf->primitives.buf.data = pd;
+    buf->primitives.buf.size = prim_size;
+    buf->primitives.buf.capacity = prim_size;
+  }
+  p += prim_size;
+
+  uint32_t text_count;
+  if (!_read_u32(&p, end, &text_count)) return 0;
+  if (text_count > YPAINT_MAX_TEXT_SPANS) text_count = YPAINT_MAX_TEXT_SPANS;
+  for (uint32_t i = 0; i < text_count; i++) {
+    struct yetty_text_span *ts = &buf->text_spans[i];
+    if (!_read_f32(&p, end, &ts->x)) return 0;
+    if (!_read_f32(&p, end, &ts->y)) return 0;
+    if (!_read_f32(&p, end, &ts->font_size)) return 0;
+    if (!_read_f32(&p, end, &ts->rotation)) return 0;
+    uint32_t color;
+    if (!_read_u32(&p, end, &color)) return 0;
+    ts->color.r = color & 0xFF;
+    ts->color.g = (color >> 8) & 0xFF;
+    ts->color.b = (color >> 16) & 0xFF;
+    ts->color.a = (color >> 24) & 0xFF;
+    if (!_read_u32(&p, end, &ts->layer)) return 0;
+    if (!_read_i32(&p, end, &ts->font_id)) return 0;
+    uint32_t tl;
+    if (!_read_u32(&p, end, &tl)) return 0;
+    if ((size_t)(end - p) < tl) return 0;
+    if (tl > 0) {
+      ts->named_buf.buf.data = malloc(tl);
+      if (!ts->named_buf.buf.data) return 0;
+      memcpy(ts->named_buf.buf.data, p, tl);
+      ts->named_buf.buf.size = tl;
+      ts->named_buf.buf.capacity = tl;
+    }
+    p += tl;
+  }
+  buf->text_span_count = text_count;
+  return 1;
+}
 
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
     const struct yetty_ycore_buffer *base64_buf) {
@@ -36,18 +119,33 @@ struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base
   if (!buf)
     return YETTY_ERR(yetty_ypaint_core_buffer, "calloc failed");
 
-  buf->primitives.buf.data = calloc(1, decoded_cap);
-  if (!buf->primitives.buf.data) {
+  uint8_t *decoded = calloc(1, decoded_cap);
+  if (!decoded) {
     free(buf);
     return YETTY_ERR(yetty_ypaint_core_buffer, "calloc for data failed");
   }
-  buf->primitives.buf.capacity = decoded_cap;
-  strncpy(buf->primitives.name, "prims", YETTY_YCORE_NAMED_BUFFER_MAX_NAME_LENGTH - 1);
-
-  // Decode using existing util function
-  buf->primitives.buf.size = yetty_ycore_base64_decode(
+  size_t decoded_len = yetty_ycore_base64_decode(
       (const char *)base64_buf->data, base64_buf->size,
-      (char *)buf->primitives.buf.data, decoded_cap);
+      (char *)decoded, decoded_cap);
+
+  /* Framed (magic-tagged) payload = prims + text_spans + scene_bounds.
+   * Otherwise the decoded bytes are treated as a bare prim stream (the
+   * legacy path: caller only had primitive data to send). */
+  if (decoded_len >= 4 &&
+      *(uint32_t *)decoded == YPAINT_SERIAL_MAGIC) {
+    if (!parse_framed_payload(buf, decoded, decoded_len)) {
+      free(decoded);
+      yetty_ypaint_core_buffer_destroy(buf);
+      return YETTY_ERR(yetty_ypaint_core_buffer, "framed payload parse failed");
+    }
+    free(decoded);
+  } else {
+    buf->primitives.buf.data = decoded;
+    buf->primitives.buf.capacity = decoded_cap;
+    buf->primitives.buf.size = decoded_len;
+  }
+  strncpy(buf->primitives.name, "prims",
+          YETTY_YCORE_NAMED_BUFFER_MAX_NAME_LENGTH - 1);
 
   return YETTY_OK(yetty_ypaint_core_buffer, buf);
 }
@@ -98,6 +196,7 @@ void yetty_ypaint_core_buffer_destroy(struct yetty_ypaint_core_buffer *buf) {
     return;
 
   free(buf->primitives.buf.data);
+  free(buf->serial_data);
 
   /* Free text span data (text_spans is embedded array, only free inner data) */
   for (uint32_t i = 0; i < buf->text_span_count; i++)
@@ -112,6 +211,105 @@ void yetty_ypaint_core_buffer_clear(struct yetty_ypaint_core_buffer *buf) {
     return;
   }
   buf->primitives.buf.size = 0;
+  /* Free any text-span data allocated between clears, then reset count. */
+  for (uint32_t i = 0; i < buf->text_span_count; i++) {
+    free(buf->text_spans[i].named_buf.buf.data);
+    buf->text_spans[i].named_buf.buf.data = NULL;
+    buf->text_spans[i].named_buf.buf.size = 0;
+  }
+  buf->text_span_count = 0;
+}
+
+const void *yetty_ypaint_core_buffer_data(const struct yetty_ypaint_core_buffer *buf) {
+  return buf ? buf->primitives.buf.data : NULL;
+}
+
+size_t yetty_ypaint_core_buffer_size(const struct yetty_ypaint_core_buffer *buf) {
+  return buf ? buf->primitives.buf.size : 0;
+}
+
+void yetty_ypaint_core_buffer_set_scene_bounds(struct yetty_ypaint_core_buffer *buf,
+                                               float min_x, float min_y,
+                                               float max_x, float max_y) {
+  if (!buf)
+    return;
+  buf->scene_min_x = min_x;
+  buf->scene_min_y = min_y;
+  buf->scene_max_x = max_x;
+  buf->scene_max_y = max_y;
+}
+
+/* Little helpers for packing the framed wire format (mirror of the _read_*
+ * readers above). Caller sizes the buffer up front and hands in `*p`. */
+static void _write_u32(uint8_t **p, uint32_t v) { memcpy(*p, &v, 4); *p += 4; }
+static void _write_i32(uint8_t **p, int32_t v)  { memcpy(*p, &v, 4); *p += 4; }
+static void _write_f32(uint8_t **p, float v)    { memcpy(*p, &v, 4); *p += 4; }
+
+size_t yetty_ypaint_core_buffer_serialize(
+    struct yetty_ypaint_core_buffer *buf, const uint8_t **out_data) {
+  if (!buf || !out_data) {
+    if (out_data) *out_data = NULL;
+    return 0;
+  }
+
+  /* Compute required size. See parse_framed_payload for the layout; must
+   * stay in sync with it. */
+  size_t need =
+      4                              /* magic */
+    + 16                             /* scene bounds */
+    + 4                              /* prim_size */
+    + buf->primitives.buf.size
+    + 4;                             /* text_span_count */
+  for (uint32_t i = 0; i < buf->text_span_count; i++) {
+    /* x,y,font_size,rotation,color,layer,font_id,text_len + payload */
+    need += 4 * 7 + 4 + buf->text_spans[i].named_buf.buf.size;
+  }
+
+  if (buf->serial_cap < need) {
+    uint8_t *np = realloc(buf->serial_data, need);
+    if (!np) {
+      *out_data = NULL;
+      return 0;
+    }
+    buf->serial_data = np;
+    buf->serial_cap = need;
+  }
+
+  uint8_t *p = buf->serial_data;
+  _write_u32(&p, YPAINT_SERIAL_MAGIC);
+  _write_f32(&p, buf->scene_min_x);
+  _write_f32(&p, buf->scene_min_y);
+  _write_f32(&p, buf->scene_max_x);
+  _write_f32(&p, buf->scene_max_y);
+  _write_u32(&p, (uint32_t)buf->primitives.buf.size);
+  if (buf->primitives.buf.size > 0) {
+    memcpy(p, buf->primitives.buf.data, buf->primitives.buf.size);
+    p += buf->primitives.buf.size;
+  }
+  _write_u32(&p, buf->text_span_count);
+  for (uint32_t i = 0; i < buf->text_span_count; i++) {
+    const struct yetty_text_span *ts = &buf->text_spans[i];
+    _write_f32(&p, ts->x);
+    _write_f32(&p, ts->y);
+    _write_f32(&p, ts->font_size);
+    _write_f32(&p, ts->rotation);
+    uint32_t color = (uint32_t)ts->color.r
+                   | ((uint32_t)ts->color.g << 8)
+                   | ((uint32_t)ts->color.b << 16)
+                   | ((uint32_t)ts->color.a << 24);
+    _write_u32(&p, color);
+    _write_u32(&p, ts->layer);
+    _write_i32(&p, ts->font_id);
+    uint32_t tl = (uint32_t)ts->named_buf.buf.size;
+    _write_u32(&p, tl);
+    if (tl > 0) {
+      memcpy(p, ts->named_buf.buf.data, tl);
+      p += tl;
+    }
+  }
+
+  *out_data = buf->serial_data;
+  return (size_t)(p - buf->serial_data);
 }
 
 const struct yetty_ycore_buffer *

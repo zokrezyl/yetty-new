@@ -43,64 +43,60 @@ static void write_osc(const char* data, size_t len) {
     (void)written; /* Ignore return value - best effort */
 }
 
-/* Vendor ID for yetty OSC commands */
-#define VENDOR_ID "666666"
+/* Vendor ID = yetty ypaint-layer OSC sink (see terminal.c register_osc_sink).
+ * The layer's write() handler accepts:
+ *   \033]666674;--clear\033\     — empty the canvas
+ *   \033]666674;--bin;<base64>\033\ — append a base64 ypaint buffer
+ *
+ * ygui's semantics are "the whole UI is re-rendered every tick". We map
+ * that onto the layer by sending --clear followed by --bin on every
+ * create_card / update_card — the canvas ends up holding exactly the
+ * latest UI each frame. Positioning args (-x/-y/-w/-h) are ignored: the
+ * ypaint primitives already carry absolute pixel coords. */
+#define VENDOR_ID "666674"
+
+static void write_clear_and_bin(const uint8_t* data, uint32_t size) {
+    /* 1) Clear the ypaint canvas. */
+    static const char clear_seq[] = "\033]" VENDOR_ID ";--clear\033\\";
+    write_osc(clear_seq, sizeof(clear_seq) - 1);
+
+    if (size == 0 || !data) return;
+
+    /* 2) Append base64(primitive bytes) as --bin. */
+    size_t b64_size = ((size + 2) / 3) * 4 + 1;
+    size_t buf_size = 64 + b64_size;
+    char* buf = (char*)malloc(buf_size);
+    if (!buf) return;
+
+    int header_len = snprintf(buf, 64, "\033]" VENDOR_ID ";--bin;");
+
+    char* b64_start = buf + header_len;
+    size_t b64_len = base64_encode(data, size, b64_start,
+                                   buf_size - header_len - 3);
+
+    b64_start[b64_len] = '\033';
+    b64_start[b64_len + 1] = '\\';
+
+    write_osc(buf, header_len + b64_len + 2);
+    free(buf);
+}
 
 void ygui_osc_create_card(const char* name, int x, int y, int w, int h,
                           const uint8_t* data, uint32_t size) {
-    /* Allocate buffer for full OSC sequence */
-    size_t b64_size = ((size + 2) / 3) * 4 + 1;
-    size_t buf_size = 256 + b64_size;
-    char* buf = (char*)malloc(buf_size);
-    if (!buf) return;
-
-    /* Build header */
-    int header_len = snprintf(buf, 256,
-        "\033]" VENDOR_ID ";run -c ydraw -x %d -y %d -w %d -h %d -r --name %s;;",
-        x, y, w, h, name);
-
-    /* Encode data */
-    char* b64_start = buf + header_len;
-    size_t b64_len = base64_encode(data, size, b64_start, buf_size - header_len - 3);
-
-    /* Add terminator */
-    b64_start[b64_len] = '\033';
-    b64_start[b64_len + 1] = '\\';
-
-    /* Write */
-    write_osc(buf, header_len + b64_len + 2);
-    free(buf);
+    (void)name; (void)x; (void)y; (void)w; (void)h;
+    write_clear_and_bin(data, size);
 }
 
 void ygui_osc_update_card(const char* name, const uint8_t* data, uint32_t size) {
-    /* Allocate buffer for full OSC sequence */
-    size_t b64_size = ((size + 2) / 3) * 4 + 1;
-    size_t buf_size = 128 + b64_size;
-    char* buf = (char*)malloc(buf_size);
-    if (!buf) return;
-
-    /* Build header */
-    int header_len = snprintf(buf, 128,
-        "\033]" VENDOR_ID ";update --name %s;;", name);
-
-    /* Encode data */
-    char* b64_start = buf + header_len;
-    size_t b64_len = base64_encode(data, size, b64_start, buf_size - header_len - 3);
-
-    /* Add terminator */
-    b64_start[b64_len] = '\033';
-    b64_start[b64_len + 1] = '\\';
-
-    /* Write */
-    write_osc(buf, header_len + b64_len + 2);
-    free(buf);
+    (void)name;
+    write_clear_and_bin(data, size);
 }
 
 void ygui_osc_kill_card(const char* name) {
-    char buf[256];
-    int len = snprintf(buf, sizeof(buf),
-        "\033]" VENDOR_ID ";kill --name %s\033\\", name);
-    write_osc(buf, len);
+    /* No named-card concept on this sink — kill = clear the canvas. */
+    (void)name;
+    static const char clear_seq[] = "\033]" VENDOR_ID ";--clear\033\\";
+    write_osc(clear_seq, sizeof(clear_seq) - 1);
 }
 
 void ygui_osc_subscribe_clicks(int enable) {

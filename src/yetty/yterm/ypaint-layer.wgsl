@@ -14,15 +14,12 @@
 
 // RENDER_LAYER_BINDINGS_PLACEHOLDER
 
-// =============================================================================
-// SDF Primitive Types (must match ypaint-sdf-types.gen.h)
-// =============================================================================
-const YPAINT_SDF_CIRCLE: u32 = 0u;
-const YPAINT_SDF_BOX: u32 = 1u;
-const YPAINT_SDF_SEGMENT: u32 = 2u;
-const YPAINT_SDF_TRIANGLE: u32 = 3u;
-const YPAINT_SDF_ELLIPSE: u32 = 6u;
-const YPAINT_SDF_CAPSULE: u32 = 18u;
+// SDF functions + evaluate_sdf_2d() dispatcher come from the GENERATED
+// src/yetty/ysdf/ysdf.gen.wgsl — prepended to this file by ypaint-layer.c
+// at shader-load time. Don't hand-add SDF cases here; update the .yaml and
+// regenerate.
+
+// GLYPH is ypaint's own primitive (not SDF), kept here next to its reader fns.
 const YPAINT_SDF_GLYPH: u32 = 200u;
 
 // =============================================================================
@@ -41,40 +38,6 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
     output.position = vec4<f32>(input.position, 0.0, 1.0);
     return output;
-}
-
-// =============================================================================
-// SDF Functions
-// =============================================================================
-
-fn sd_circle(p: vec2<f32>, c: vec2<f32>, r: f32) -> f32 {
-    return length(p - c) - r;
-}
-
-fn sd_box(p: vec2<f32>, c: vec2<f32>, hw: f32, hh: f32, round: f32) -> f32 {
-    let d = abs(p - c) - vec2<f32>(hw, hh) + vec2<f32>(round);
-    return length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - round;
-}
-
-fn sd_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
-    let pa = p - a;
-    let ba = b - a;
-    let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-    return length(pa - ba * h);
-}
-
-fn sd_ellipse(p: vec2<f32>, c: vec2<f32>, rx: f32, ry: f32) -> f32 {
-    let pp = p - c;
-    let k0 = length(pp / vec2<f32>(rx, ry));
-    let k1 = length(pp / (vec2<f32>(rx, ry) * vec2<f32>(rx, ry)));
-    return k0 * (k0 - 1.0) / k1;
-}
-
-fn sd_capsule(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-    let pa = p - a;
-    let ba = b - a;
-    let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-    return length(pa - ba * h) - r;
 }
 
 // =============================================================================
@@ -150,52 +113,9 @@ fn glyph_read_color(prim_offset: u32) -> u32 {
 //   font_glyph_size(i) -> vec2<f32>  (in base-size pixels)
 //   font_glyph_sample(i, glyph_uv, pixel_scale) -> f32  (alpha 0..1)
 
-// Evaluate SDF for a primitive at given scene position
-fn ypaint_evaluate_sdf(prim_offset: u32, scene_pos: vec2<f32>) -> f32 {
-    let prim_type = ypaint_read_prim_type(prim_offset);
-
-    switch (prim_type) {
-        case YPAINT_SDF_CIRCLE: {
-            let cx = ypaint_read_geom_f32(prim_offset, 0u);
-            let cy = ypaint_read_geom_f32(prim_offset, 1u);
-            let r = ypaint_read_geom_f32(prim_offset, 2u);
-            return sd_circle(scene_pos, vec2<f32>(cx, cy), r);
-        }
-        case YPAINT_SDF_BOX: {
-            let cx = ypaint_read_geom_f32(prim_offset, 0u);
-            let cy = ypaint_read_geom_f32(prim_offset, 1u);
-            let hw = ypaint_read_geom_f32(prim_offset, 2u);
-            let hh = ypaint_read_geom_f32(prim_offset, 3u);
-            let round = ypaint_read_geom_f32(prim_offset, 4u);
-            return sd_box(scene_pos, vec2<f32>(cx, cy), hw, hh, round);
-        }
-        case YPAINT_SDF_SEGMENT: {
-            let x0 = ypaint_read_geom_f32(prim_offset, 0u);
-            let y0 = ypaint_read_geom_f32(prim_offset, 1u);
-            let x1 = ypaint_read_geom_f32(prim_offset, 2u);
-            let y1 = ypaint_read_geom_f32(prim_offset, 3u);
-            return sd_segment(scene_pos, vec2<f32>(x0, y0), vec2<f32>(x1, y1));
-        }
-        case YPAINT_SDF_ELLIPSE: {
-            let cx = ypaint_read_geom_f32(prim_offset, 0u);
-            let cy = ypaint_read_geom_f32(prim_offset, 1u);
-            let rx = ypaint_read_geom_f32(prim_offset, 2u);
-            let ry = ypaint_read_geom_f32(prim_offset, 3u);
-            return sd_ellipse(scene_pos, vec2<f32>(cx, cy), rx, ry);
-        }
-        case YPAINT_SDF_CAPSULE: {
-            let ax = ypaint_read_geom_f32(prim_offset, 0u);
-            let ay = ypaint_read_geom_f32(prim_offset, 1u);
-            let bx = ypaint_read_geom_f32(prim_offset, 2u);
-            let by = ypaint_read_geom_f32(prim_offset, 3u);
-            let r = ypaint_read_geom_f32(prim_offset, 4u);
-            return sd_capsule(scene_pos, vec2<f32>(ax, ay), vec2<f32>(bx, by), r);
-        }
-        default: {
-            return 1000.0;  // Far away = invisible
-        }
-    }
-}
+// SDF evaluation: call the generated evaluate_sdf_2d() (from ysdf.gen.wgsl).
+// The ypaint prim stores rolling_row at word +0 and the raw ysdf record
+// from +1 onward, so pass prim_offset + 1u.
 
 // Unpack RGBA color from u32
 fn ypaint_unpack_color(packed: u32) -> vec4<f32> {
@@ -330,7 +250,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
 
         // Evaluate SDF for non-glyph primitives
-        let d = ypaint_evaluate_sdf(prim_offset, local_pos);
+        let d = evaluate_sdf_2d(prim_offset + 1u, local_pos);
 
         // Render fill
         let fill_color = ypaint_read_fill_color(prim_offset);

@@ -6,6 +6,8 @@
 #define YGUI_INTERNAL_H
 
 #include "ygui.h"
+#include <yetty/ypaint-core/buffer.h>
+#include <yetty/yfont/font.h>
 #include <stdlib.h>
 #include <string.h>
 #include <uv.h>
@@ -18,11 +20,13 @@ typedef struct ygui_render_ctx ygui_render_ctx_t;
 typedef struct ygui_input_event ygui_input_event_t;
 
 /*=============================================================================
- * Render Context (for drawing to YDraw buffer)
+ * Render Context (drawing target = a ypaint-core buffer). The shim that used
+ * to sit here (ydraw-capi.gen.*) is gone; widgets call yetty_ysdf_add_* and
+ * yetty_ypaint_core_buffer_add_text directly.
  *===========================================================================*/
 
 struct ygui_render_ctx {
-    ydraw_buffer_t* buffer;
+    struct yetty_ypaint_core_buffer* buffer;
     const ygui_theme_t* theme;
     float offset_x, offset_y;
     float clip_x, clip_y, clip_w, clip_h;
@@ -218,8 +222,16 @@ typedef struct {
  *===========================================================================*/
 
 struct ygui_engine {
-    /* YDraw buffer (created and owned by engine) */
-    ydraw_buffer_t* buffer;
+    /* ypaint-core buffer (created and owned by engine). Widgets add primitives
+     * via yetty_ysdf_* and text via yetty_ypaint_core_buffer_add_text. */
+    struct yetty_ypaint_core_buffer* buffer;
+
+    /* Raster font in metrics-only mode — used for ygui_text_width() and widget
+     * layout. Opened in engine_alloc_init and reused for every render. See
+     * ypdf's pdf-renderer.c for the pattern (raster_font_create_from_file with
+     * shader_path=NULL). Lazily reopened if the path changes. */
+    struct yetty_font_font* measure_font;
+    float measure_base_size; /* The font's base_size; measurement scales from here. */
 
     /* Spatial grid for hit testing */
     ygui_spatial_grid_t grid;
@@ -324,7 +336,9 @@ void ygui_widget_free(ygui_widget_t* widget);
 void ygui_widget_init_base(ygui_widget_t* widget, float x, float y, float w, float h);
 
 /* Render context */
-void ygui_render_ctx_init(ygui_render_ctx_t* ctx, ydraw_buffer_t* buffer, const ygui_theme_t* theme);
+void ygui_render_ctx_init(ygui_render_ctx_t* ctx,
+                          struct yetty_ypaint_core_buffer* buffer,
+                          const ygui_theme_t* theme);
 void ygui_render_box(ygui_render_ctx_t* ctx, float x, float y, float w, float h,
                      uint32_t color, float radius);
 void ygui_render_box_outline(ygui_render_ctx_t* ctx, float x, float y, float w, float h,

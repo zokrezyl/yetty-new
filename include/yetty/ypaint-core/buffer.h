@@ -64,6 +64,25 @@ struct yetty_ypaint_id_result
 yetty_ypaint_core_buffer_add_prim(struct yetty_ypaint_core_buffer *buf,
                              const void *data, size_t size);
 
+// Read-only access to the accumulated primitive bytes — base64-encode these
+// and the receiver's yetty_ypaint_core_buffer_create_from_base64() rebuilds
+// an equivalent buffer. Lifetime = until next add/clear on this buffer.
+const void *yetty_ypaint_core_buffer_data(const struct yetty_ypaint_core_buffer *buf);
+size_t yetty_ypaint_core_buffer_size(const struct yetty_ypaint_core_buffer *buf);
+
+/* Serialize the whole buffer (scene_bounds + primitives + text_spans) into
+ * a single binary blob, tagged with a magic header. Pass the raw bytes into
+ * create_from_base64() after base64-encoding on the sender; the receiver
+ * recognises the magic and restores all sections. Lifetime of *out_data =
+ * until next serialize/clear/destroy. Returns byte count. */
+size_t yetty_ypaint_core_buffer_serialize(
+    struct yetty_ypaint_core_buffer *buf, const uint8_t **out_data);
+
+// Update scene bounds on an existing buffer.
+void yetty_ypaint_core_buffer_set_scene_bounds(
+    struct yetty_ypaint_core_buffer *buf,
+    float min_x, float min_y, float max_x, float max_y);
+
 // Primitive iterator
 struct yetty_ypaint_core_primitive_iter {
     struct yetty_ypaint_prim_flyweight fw;
