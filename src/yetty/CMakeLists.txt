@@ -8,6 +8,10 @@ if(YETTY_ENABLE_FEATURE_YGUI)
     add_subdirectory(ygui)
 endif()
 
+if(YETTY_ENABLE_FEATURE_YMGUI)
+    add_subdirectory(ymgui)
+endif()
+
 if(YETTY_ENABLE_FEATURE_YDRAW_ZOO)
     add_subdirectory(ydraw-zoo)
 endif()

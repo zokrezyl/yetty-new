@@ -12,6 +12,7 @@ extern "C" {
 /* Yetty OSC vendor IDs */
 #define YETTY_OSC_YPAINT_SCROLL  666674
 #define YETTY_OSC_YPAINT_OVERLAY 666675
+#define YETTY_OSC_YMGUI          666680
 
 struct yetty_yterm_pty_reader;
 

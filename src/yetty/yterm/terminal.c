@@ -14,6 +14,7 @@
 #include <yetty/yterm/terminal.h>
 #include <yetty/yterm/text-layer.h>
 #include <yetty/yterm/ypaint-layer.h>
+#include <yetty/yterm/ymgui-layer.h>
 #include <yetty/ytrace.h>
 #include <yetty/yui/view.h>
 
@@ -410,33 +411,26 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
     }
   }
 
-  /* Create ypaint overlay layer (non-scrolling): draws at the text layer's
-   * cursor but never scrolls in sync with text and never asks the text layer
-   * to scroll when content does not fit — overflow is clipped by the shader. */
+  /* Create ymgui layer (Dear ImGui frame, cursor-anchored, terminal-scrolling) */
   {
     struct yetty_yterm_terminal_layer *text_layer = text_layer_res.value;
-    struct yetty_yterm_terminal_layer_result ypaint_overlay_res =
-        yetty_yterm_ypaint_layer_create(
+    struct yetty_yterm_terminal_layer_result ymgui_res =
+        yetty_yterm_ymgui_layer_create(
             cols, rows, text_layer->cell_size.width,
-            text_layer->cell_size.height, 0, /* scrolling_mode = false */
+            text_layer->cell_size.height,
             yetty_context, terminal_request_render_callback, terminal,
             terminal_scroll_callback, terminal, terminal_cursor_callback,
             terminal);
-    if (YETTY_IS_OK(ypaint_overlay_res)) {
-      yetty_yterm_terminal_layer_add(terminal, ypaint_overlay_res.value);
-      ydebug("terminal_create: ypaint overlay layer created and added");
-
-      /* Register overlay layer for OSC 666675 */
+    if (YETTY_IS_OK(ymgui_res)) {
+      yetty_yterm_terminal_layer_add(terminal, ymgui_res.value);
       if (terminal->pty_reader) {
-        yetty_yterm_pty_reader_register_osc_sink(terminal->pty_reader,
-                                                 YETTY_OSC_YPAINT_OVERLAY,
-                                                 ypaint_overlay_res.value);
-        ydebug("terminal_create: ypaint overlay layer registered for OSC 666675");
+        yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YETTY_OSC_YMGUI, ymgui_res.value);
+        ydebug("terminal_create: ymgui layer registered for OSC 666680");
       }
     } else {
-      ydebug("terminal_create: failed to create ypaint overlay layer "
-             "(non-fatal): %s",
-             ypaint_overlay_res.error.msg);
+      ydebug("terminal_create: failed to create ymgui layer (non-fatal): %s",
+             ymgui_res.error.msg);
     }
   }
 
