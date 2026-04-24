@@ -77,11 +77,11 @@ _CONFIGURE_ARGS=(
     # default here; linux-*.sh re-enables them.
     --disable-virtfs
     --disable-attr
-    --extra-cflags="-Os -ffunction-sections -fdata-sections"
-    --extra-cxxflags="-Os -ffunction-sections -fdata-sections"
 )
-# Non-mach-o linkers support --gc-sections; platform scripts can override
-# _EXTRA_LDFLAGS (e.g. darwin uses -dead_strip).
+# Default GCC-style optimisation flags. Platform scripts override these
+# (windows uses MSVC flags; darwin uses -dead_strip instead of --gc-sections).
+_EXTRA_CFLAGS="-Os -ffunction-sections -fdata-sections"
+_EXTRA_CXXFLAGS="-Os -ffunction-sections -fdata-sections"
 _EXTRA_LDFLAGS="-Wl,--gc-sections"
 # Built artifact (may have a platform-specific suffix, e.g. darwin writes
 # `qemu-system-riscv64-unsigned` before codesigning).
@@ -94,7 +94,11 @@ _STRIP_BIN="strip"
 # shellcheck source=/dev/null
 source "$PLATFORM_SCRIPT"
 
-_CONFIGURE_ARGS+=(--extra-ldflags="$_EXTRA_LDFLAGS")
+_CONFIGURE_ARGS+=(
+    --extra-cflags="$_EXTRA_CFLAGS"
+    --extra-cxxflags="$_EXTRA_CXXFLAGS"
+    --extra-ldflags="$_EXTRA_LDFLAGS"
+)
 
 # Force the bundled slirp meson subproject to a static library so libslirp
 # is linked into the qemu binary; otherwise qemu ends up with

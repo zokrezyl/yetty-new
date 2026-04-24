@@ -17,9 +17,21 @@ set -euo pipefail
 : "${TARGET_PLATFORM:?TARGET_PLATFORM is required}"
 
 case "$TARGET_PLATFORM" in
-    linux-x86_64|linux-aarch64|windows-x86_64|android-arm64-v8a|android-x86_64|\
+    linux-x86_64|linux-aarch64|android-arm64-v8a|android-x86_64|\
     macos-x86_64|macos-arm64|ios-arm64|ios-x86_64|tvos-arm64)
         SHELL_NAME="assets-qemu-${TARGET_PLATFORM}"
+        ;;
+    windows-x86_64)
+        # Windows uses MSVC — no nix shell. The caller (build.ps1 or the
+        # CI workflow) is expected to have already loaded vcvarsall, put
+        # meson + GnuWin32 + vcpkg tools on PATH, and exported
+        # VCPKG_INSTALLED. Skip nix and exec the inner build.sh directly.
+        if ! command -v cl.exe >/dev/null 2>&1 && ! command -v cl >/dev/null 2>&1; then
+            echo "error: windows-x86_64 requires vcvarsall x64 to be loaded" >&2
+            echo "       run via build-tools/assets/qemu/build.ps1 from PowerShell" >&2
+            exit 1
+        fi
+        exec bash "$(dirname "$0")/_build.sh" "$@"
         ;;
     *)
         echo "unknown TARGET_PLATFORM: $TARGET_PLATFORM" >&2
