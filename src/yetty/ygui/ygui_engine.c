@@ -3,7 +3,8 @@
  */
 
 #include "ygui_internal.h"
-#include "ydraw-capi.gen.h"
+#include <yetty/ypaint-core/buffer.h>
+#include <yetty/yfont/raster-font.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -169,12 +170,29 @@ static ygui_engine_t* engine_alloc_init(const char* card_name, int x, int y, int
         return NULL;
     }
 
-    /* Create YDraw buffer */
-    engine->buffer = ydraw_buffer_create();
-    if (!engine->buffer) {
-        ygui_set_error("Failed to create YDraw buffer");
+    /* Create ypaint-core buffer — widgets accumulate SDF primitives + text
+     * spans into it; the engine base64-encodes the serialization and ships
+     * it via OSC 666674 every render. */
+    struct yetty_ypaint_core_buffer_result br =
+        yetty_ypaint_core_buffer_create(NULL);
+    if (!YETTY_IS_OK(br)) {
+        ygui_set_error("Failed to create ypaint buffer");
         free(engine);
         return NULL;
+    }
+    engine->buffer = br.value;
+
+    /* Optional: open a raster font in metrics-only mode for text width
+     * measurement. The env var lets users point at any TTF; absence just
+     * leaves measure_font NULL and ygui falls back to its heuristic. Same
+     * pattern as ypdf (pdf-renderer.c line ~359). */
+    const char* ttf = getenv("YGUI_MEASURE_FONT");
+    if (ttf && ttf[0]) {
+        engine->measure_base_size = 32.0f;
+        struct yetty_font_font_result fr =
+            yetty_font_raster_font_create_from_file(ttf, /*shader*/ NULL,
+                                                    engine->measure_base_size);
+        if (YETTY_IS_OK(fr)) engine->measure_font = fr.value;
     }
 
     /* Store card name, position, and cell dimensions */
@@ -289,10 +307,11 @@ void ygui_engine_destroy(ygui_engine_t* engine) {
         ygui_theme_destroy(engine->theme);
     }
 
-    /* Destroy buffer */
-    if (engine->buffer) {
-        ydraw_buffer_destroy(engine->buffer);
-    }
+    /* Destroy buffer + measurement font */
+    if (engine->buffer) yetty_ypaint_core_buffer_destroy(engine->buffer);
+    if (engine->measure_font && engine->measure_font->ops &&
+        engine->measure_font->ops->destroy)
+        engine->measure_font->ops->destroy(engine->measure_font);
 
     /* Free card name */
     free(engine->card_name);
@@ -393,17 +412,19 @@ void ygui_engine_render(ygui_engine_t* engine) {
     }
 
     /* 1. Clear buffer */
-    ydraw_buffer_clear(engine->buffer);
+    yetty_ypaint_core_buffer_clear(engine->buffer);
 
     /* 2. Set explicit scene bounds to match full canvas */
-    ydraw_buffer_set_scene_bounds(engine->buffer, 0, 0, engine->width, engine->height);
+    yetty_ypaint_core_buffer_set_scene_bounds(engine->buffer,
+                                              0, 0,
+                                              engine->width, engine->height);
 
     /* 3. Rebuild UI */
     engine_rebuild(engine);
 
-    /* 4. Serialize */
+    /* 4. Serialize (framed: prims + text_spans + scene_bounds) */
     const uint8_t* data = NULL;
-    uint32_t size = ydraw_buffer_serialize(engine->buffer, &data);
+    uint32_t size = (uint32_t)yetty_ypaint_core_buffer_serialize(engine->buffer, &data);
     if (size == 0 || !data) return;
 
     /* 5. Send OSC */
@@ -436,11 +457,12 @@ void ygui_engine_show(ygui_engine_t* engine) {
      * The real render happens after we receive the actual pixel size.
      * This prevents the visual "zoom jump" when canvas resizes to match display. */
     if (engine->canvas_mode == YGUI_CANVAS_FIT && !engine->have_pixel_size) {
-        /* Create empty YDraw buffer to establish card */
-        ydraw_buffer_clear(engine->buffer);
-        ydraw_buffer_set_scene_bounds(engine->buffer, 0, 0, 1, 1);  /* Minimal scene */
+        /* Establish the card with an empty buffer so the receiver responds
+         * with the pixel size we need to drive the first real render. */
+        yetty_ypaint_core_buffer_clear(engine->buffer);
+        yetty_ypaint_core_buffer_set_scene_bounds(engine->buffer, 0, 0, 1, 1);
         const uint8_t* data = NULL;
-        uint32_t size = ydraw_buffer_serialize(engine->buffer, &data);
+        uint32_t size = (uint32_t)yetty_ypaint_core_buffer_serialize(engine->buffer, &data);
         if (size > 0 && data) {
             ygui_osc_create_card(engine->card_name,
                                  engine->card_x, engine->card_y,

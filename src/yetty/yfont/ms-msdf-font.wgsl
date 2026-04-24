@@ -31,13 +31,18 @@ fn font_sample(glyph_index: u32, local_px: vec2<f32>, cell_size: vec2<f32>) -> f
         return 0.0;
     }
 
-    let scale = uniforms.ms_msdf_font_scale;
-    let scaled_size = glyph_size * scale;
+    // Fit the font's full ascent+descent into cell_size.y so descenders
+    // (underscore, g, y, p, q) don't spill past the cell bottom. Baseline
+    // sits at (ascent / line_height) of the cell, derived from the actual
+    // metrics tracked on the CPU as glyphs load — not a hardcoded 80%.
+    let line_height_em = max(uniforms.ms_msdf_font_line_height_em, 1.0);
+    let ascent_em      = uniforms.ms_msdf_font_ascent_em;
+    let scale          = cell_size.y / line_height_em;
+    let scaled_size    = glyph_size * scale;
     let scaled_bearing = bearing * scale;
 
-    // Baseline at 80% of cell height
-    let baseline = cell_size.y * 0.8;
-    let glyph_top = baseline - scaled_bearing.y;
+    let baseline   = ascent_em * scale;
+    let glyph_top  = baseline - scaled_bearing.y;
     let glyph_left = scaled_bearing.x;
 
     let glyph_min = vec2<f32>(glyph_left, glyph_top);

@@ -69,7 +69,7 @@ option(YETTY_ENABLE_FEATURE_MSDF_GEN  "ymsdf-gen — MSDF font generator"       
 
 # Terminal / display
 option(YETTY_ENABLE_FEATURE_YECHO     "yecho — echo/display"                 OFF)
-option(YETTY_ENABLE_FEATURE_YGUI_C    "ygui-c — C GUI bindings"              OFF)
+option(YETTY_ENABLE_FEATURE_YGUI      "ygui — pure-C widget library"          ON)
 
 # Drawing / rendering
 option(YETTY_ENABLE_FEATURE_YDRAW     "ydraw — 2D vector drawing"            OFF)
@@ -113,7 +113,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT EMSCRIPTEN AND NOT YETTY_ANDROID A
 else()
     option(YETTY_ENABLE_FEATURE_TESTS "tests — unit tests"                   OFF)
 endif()
-option(YETTY_ENABLE_FEATURE_DEMO      "demo — demo programs"                 OFF)
+option(YETTY_ENABLE_FEATURE_DEMO      "demo — demo programs"                 ON)
 
 # Tools (each tool has its own option)
 option(YETTY_ENABLE_TOOL_GPU_INFO        "gpu-info tool"                     OFF)

@@ -10,7 +10,7 @@ YAML='body:
       color: "#ff0000"
   - text:
       position: [50, 100]
-      content: "This is MSDF text rendering"
+      content: "This is MSDF text rendering with_underscore_test"
       font-size: 16
       color: "#00ff00"
   - text:

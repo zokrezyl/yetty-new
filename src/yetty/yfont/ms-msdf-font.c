@@ -71,6 +71,13 @@ struct ms_msdf_font {
 	float hw_ratio;        /* height/width ratio (from first glyph) */
 	float pixel_range;
 
+	/* Font vertical metrics (base-size units). Tracked as glyphs load so the
+	 * shader can place the baseline correctly — 0.8*cell_height is a hack
+	 * that hides descenders (underscore, g, y, p, q) when the font's real
+	 * descent exceeds 20% of ascent+descent. */
+	float max_ascent;      /* = max(bearing_y) over loaded glyphs */
+	float max_descent;     /* = max(size_y - bearing_y) over loaded glyphs */
+
 	/* Shader code (owned) */
 	struct yetty_ycore_buffer shader_code;
 
@@ -127,6 +134,9 @@ static struct uint32_result load_one(struct ms_msdf_font *f, uint32_t cp)
 	memcpy(&hdr, data, sizeof(hdr));
 	const uint8_t *pixels = (const uint8_t *)data + sizeof(hdr);
 	size_t pixel_bytes = (size_t)hdr.width * hdr.height * 4;
+	ydebug("ms_msdf load_one cp=0x%04X w=%u h=%u size=(%.2f,%.2f) bear=(%.2f,%.2f) adv=%.2f",
+	       cp, hdr.width, hdr.height, hdr.size_x, hdr.size_y,
+	       hdr.bearing_x, hdr.bearing_y, hdr.advance);
 
 	if (data_len < sizeof(hdr) + pixel_bytes) {
 		free(data);
@@ -136,6 +146,14 @@ static struct uint32_result load_one(struct ms_msdf_font *f, uint32_t cp)
 	/* Compute hw_ratio from first real glyph with advance */
 	if (f->hw_ratio == 0.0f && hdr.advance > 0)
 		f->hw_ratio = hdr.size_y / hdr.advance;
+
+	/* Track font vertical extents so the shader can derive baseline */
+	if (hdr.size_y > 0.0f) {
+		float ascent  = hdr.bearing_y;                /* above baseline */
+		float descent = hdr.size_y - hdr.bearing_y;   /* below baseline */
+		if (ascent  > f->max_ascent)  f->max_ascent  = ascent;
+		if (descent > f->max_descent) f->max_descent = descent;
+	}
 
 	/* Allocate slot */
 	uint32_t slot = f->next_slot;
@@ -334,6 +352,10 @@ ms_msdf_get_gpu_resource_set(struct yetty_font_ms_font *self)
 		f->rs.uniforms[0].f32 = f->pixel_range;
 		f->rs.uniforms[1].f32 = (f->base_size > 0) ?
 			f->requested_size / f->base_size : 1.0f;
+		f->rs.uniforms[2].f32 = f->max_ascent;
+		float line_height = f->max_ascent + f->max_descent;
+		f->rs.uniforms[3].f32 = (line_height > 0.0f) ? line_height
+		                                             : f->base_size;
 
 		f->dirty = 0;
 	}
@@ -474,7 +496,7 @@ yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
 	buf->readonly = 1;
 
 	/* Uniforms for shader */
-	font->rs.uniform_count = 2;
+	font->rs.uniform_count = 4;
 	strncpy(font->rs.uniforms[0].name, "pixel_range", YETTY_YRENDER_NAME_MAX - 1);
 	font->rs.uniforms[0].type = YETTY_YRENDER_UNIFORM_F32;
 	font->rs.uniforms[0].f32 = font->pixel_range;
@@ -482,6 +504,16 @@ yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
 	strncpy(font->rs.uniforms[1].name, "scale", YETTY_YRENDER_NAME_MAX - 1);
 	font->rs.uniforms[1].type = YETTY_YRENDER_UNIFORM_F32;
 	font->rs.uniforms[1].f32 = font->requested_size / font->base_size;
+
+	/* Ascent / total-height for proper baseline placement (base-size units,
+	 * shader divides to get 0..1 ratio and cell-relative baseline). */
+	strncpy(font->rs.uniforms[2].name, "ascent_em", YETTY_YRENDER_NAME_MAX - 1);
+	font->rs.uniforms[2].type = YETTY_YRENDER_UNIFORM_F32;
+	font->rs.uniforms[2].f32 = 0.0f;
+
+	strncpy(font->rs.uniforms[3].name, "line_height_em", YETTY_YRENDER_NAME_MAX - 1);
+	font->rs.uniforms[3].type = YETTY_YRENDER_UNIFORM_F32;
+	font->rs.uniforms[3].f32 = font->base_size;
 
 	yetty_yrender_shader_code_set(&font->rs.shader,
 		(const char *)font->shader_code.data, font->shader_code.size);

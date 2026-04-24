@@ -13,7 +13,7 @@ Generates:
   include/yetty/ysdf/prim.gen.h   - C add function declarations
   src/yetty/ysdf/funcs.gen.c       - C add function implementations
   src/yetty/ysdf/aabb.gen.c       - C AABB computation
-  src/yetty/ysdf/wgsl.gen.wgsl         - WGSL SDF functions + dispatch
+  src/yetty/ysdf/ysdf.gen.wgsl         - WGSL SDF functions + dispatch
 """
 
 from pathlib import Path
@@ -27,7 +27,7 @@ SDF_TYPES_OUT = PROJECT_ROOT / "include" / "yetty" / "ysdf" / "types.gen.h"
 SDF_PRIM_H_OUT = PROJECT_ROOT / "include" / "yetty" / "ysdf" / "funcs.gen.h"
 SDF_PRIM_C_OUT = SCRIPT_DIR / "funcs.gen.c"
 SDF_AABB_OUT = SCRIPT_DIR / "aabb.gen.c"
-SDF_WGSL_OUT = SCRIPT_DIR / "wgsl.gen.wgsl"
+SDF_WGSL_OUT = SCRIPT_DIR / "ysdf.gen.wgsl"
 SDF_YAML_FACTORY_H_OUT = PROJECT_ROOT / "include" / "yetty" / "ysdf" / "yaml-factory.gen.h"
 SDF_YAML_FACTORY_C_OUT = SCRIPT_DIR / "yaml-factory.gen.c"
 
@@ -272,16 +272,25 @@ def generate_sdf_wgsl(prims: list[dict], out: Path) -> None:
         lines.append("}")
         lines.append("")
 
+    # Dispatcher bufferaccess — consumers bind an array<u32> called
+    # `storage_buffer`. The SDF args are f32, the prim_type is u32, so we emit
+    # bitcasts at access time. Keeps the generator coupled to one convention
+    # (storage_buffer) instead of inventing per-consumer shims.
+    def _u32(expr):
+        return f"bitcast<u32>(storage_buffer[{expr}])"
+    def _f32(expr):
+        return f"bitcast<f32>(storage_buffer[{expr}])"
+
     # Generate dispatcher for 2D
     sdf2d = [p for p in prims if p["category"] == "sdf2d"]
     if sdf2d:
         lines.append("fn evaluate_sdf_2d(prim_offset: u32, sample_pos: vec2<f32>) -> f32 {")
-        lines.append("    let prim_type = bitcast<u32>(buf[prim_offset]);")
+        lines.append(f"    let prim_type = {_u32('prim_offset')};")
         lines.append("    switch (prim_type) {")
         for p in sdf2d:
             name = p["name"]
             args = p.get("args", [])
-            arg_accesses = [f"buf[prim_offset + {GEOMETRY_OFFSET + i}u]" for i in range(len(args))]
+            arg_accesses = [_f32(f"prim_offset + {GEOMETRY_OFFSET + i}u") for i in range(len(args))]
             lines.append(f"        case {p['type']}u: {{ return sdf_{name}(sample_pos, {', '.join(arg_accesses)}); }}")
         lines.append("        default: { return 1e10; }")
         lines.append("    }")
@@ -292,12 +301,12 @@ def generate_sdf_wgsl(prims: list[dict], out: Path) -> None:
     sdf3d = [p for p in prims if p["category"] == "sdf3d"]
     if sdf3d:
         lines.append("fn evaluate_sdf_3d(prim_offset: u32, sample_pos: vec3<f32>) -> f32 {")
-        lines.append("    let prim_type = bitcast<u32>(buf[prim_offset]);")
+        lines.append(f"    let prim_type = {_u32('prim_offset')};")
         lines.append("    switch (prim_type) {")
         for p in sdf3d:
             name = p["name"]
             args = p.get("args", [])
-            arg_accesses = [f"buf[prim_offset + {GEOMETRY_OFFSET + i}u]" for i in range(len(args))]
+            arg_accesses = [_f32(f"prim_offset + {GEOMETRY_OFFSET + i}u") for i in range(len(args))]
             lines.append(f"        case {p['type']}u: {{ return sdf_{name}(sample_pos, {', '.join(arg_accesses)}); }}")
         lines.append("        default: { return 1e10; }")
         lines.append("    }")
@@ -307,9 +316,9 @@ def generate_sdf_wgsl(prims: list[dict], out: Path) -> None:
     # Style extraction
     lines.append("fn get_sdf_prim_style(prim_offset: u32) -> vec3<u32> {")
     lines.append("    return vec3<u32>(")
-    lines.append("        bitcast<u32>(buf[prim_offset + 2u]),  // fill_color")
-    lines.append("        bitcast<u32>(buf[prim_offset + 3u]),  // stroke_color")
-    lines.append("        bitcast<u32>(buf[prim_offset + 4u])   // stroke_width as bits")
+    lines.append(f"        {_u32('prim_offset + 2u')},  // fill_color")
+    lines.append(f"        {_u32('prim_offset + 3u')},  // stroke_color")
+    lines.append(f"        {_u32('prim_offset + 4u')}   // stroke_width as bits")
     lines.append("    );")
     lines.append("}")
 
