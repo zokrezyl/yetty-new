@@ -45,8 +45,29 @@ if grep -q 'CPU_CFLAGS="-m64"' "$SRC_DIR/configure"; then
     echo "==> patched $SRC_DIR/configure: dropped -m64 for clang-cl"
 fi
 
-# Point pkg-config at the vcpkg tree
-export PKG_CONFIG_PATH="$VCPKG_INSTALLED/lib/pkgconfig"
+# Point pkg-config at the vcpkg tree. PKG_CONFIG_PATH uses `:` as
+# separator even on Windows; a Windows-style `C:/...` entry has a
+# bare `:` that pkg-config parses as a separator, splitting into `C`
+# and `/Users/...`. Convert to mingw/msys POSIX form (`/c/...`).
+_win_to_posix() {
+    case "$1" in
+        [A-Za-z]:/*|[A-Za-z]:\\*)
+            local drive="${1:0:1}"
+            drive="${drive,,}"
+            local rest="${1:2}"
+            rest="${rest//\\//}"
+            echo "/${drive}${rest}"
+            ;;
+        *) echo "$1" ;;
+    esac
+}
+_VCPKG_INSTALLED_POSIX="$(_win_to_posix "$VCPKG_INSTALLED")"
+echo "==> VCPKG_INSTALLED_POSIX=$_VCPKG_INSTALLED_POSIX"
+export PKG_CONFIG_PATH="$_VCPKG_INSTALLED_POSIX/lib/pkgconfig"
+# Also set PKG_CONFIG_LIBDIR — Meson sometimes clears PKG_CONFIG_PATH
+# when it invokes pkgconf (to make builds reproducible), and LIBDIR
+# overrides the default search entirely.
+export PKG_CONFIG_LIBDIR="$_VCPKG_INSTALLED_POSIX/lib/pkgconfig"
 
 # Meson needs a real Windows-native pkgconf.exe here. Strawberry Perl's
 # pkg-config is a Perl-script wrapper that Meson can't execute through
@@ -59,10 +80,21 @@ if [ -z "${PKG_CONFIG:-}" ]; then
     # Normalise VCPKG_ROOT to a POSIX path bash can glob.
     _VCPKG_ROOT_FS="$(cygpath -u "$VCPKG_ROOT" 2>/dev/null || echo "$VCPKG_ROOT")"
     echo "==> searching pkgconf under $_VCPKG_ROOT_FS/downloads/tools/msys2"
+    # Prefer the MINGW64 flavor of pkgconf (native Windows binary, expects
+    # Windows-style paths with `;` separator). The msys-flavored one splits
+    # on `:` and breaks when meson passes `C:/...` entries.
     _PKGCONF_CANDIDATES=()
+    # 1. vcpkg-installed pkgconf (native Windows, if user ran `vcpkg install pkgconf`)
+    : "${VCPKG_TRIPLET:=x64-windows}"
+    _PKGCONF_CANDIDATES+=("$_VCPKG_ROOT_FS/installed/$VCPKG_TRIPLET/tools/pkgconf/pkgconf.exe")
+    # 2. vcpkg-downloaded msys2 mingw64 pkgconf (Windows-native)
     while IFS= read -r -d '' _p; do
         _PKGCONF_CANDIDATES+=("$_p")
-    done < <(find "$_VCPKG_ROOT_FS/downloads/tools/msys2" -name pkgconf.exe -print0 2>/dev/null)
+    done < <(find "$_VCPKG_ROOT_FS/downloads/tools/msys2" -path '*/mingw64/bin/pkgconf.exe' -print0 2>/dev/null)
+    # 3. fallback — msys-flavor pkgconf (broken for meson, last resort)
+    while IFS= read -r -d '' _p; do
+        _PKGCONF_CANDIDATES+=("$_p")
+    done < <(find "$_VCPKG_ROOT_FS/downloads/tools/msys2" -path '*/usr/bin/pkgconf.exe' -print0 2>/dev/null)
     for _c in "${_PKGCONF_CANDIDATES[@]}"; do
         if [ -x "$_c" ]; then PKG_CONFIG="$_c"; break; fi
     done

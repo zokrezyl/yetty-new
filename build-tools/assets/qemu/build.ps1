@@ -103,8 +103,15 @@ $ExtraPath = @(
     "C:\Program Files\Meson",                   # meson.exe
     "C:\Program Files (x86)\GnuWin32\bin",      # bison, flex, m4, make
     "C:\Program Files\Git\cmd",                 # git on PATH
+    "C:\Program Files\Git\mingw64\bin",         # bzip2, sed, tar (Git-Bash --noprofile skips this)
     "C:\Strawberry\perl\bin",                   # perl for QEMU scripts
     "$VcpkgInstalled\tools\pkgconf"             # pkgconf.exe (if vcpkg pkgconf installed)
+)
+# Git\usr\bin goes at the END — it has coreutils `link.exe` that would
+# otherwise shadow MSVC's linker. Keep it reachable for tools like
+# `find`, `grep`, `rm` that bash scripts rely on.
+$TailPath = @(
+    "C:\Program Files\Git\usr\bin"
 )
 # vcpkg downloads an msys2 with pkgconf under it; fall back to that.
 $Msys2PkgConf = Get-ChildItem -Path "$env:VCPKG_ROOT\downloads\tools\msys2" `
@@ -112,7 +119,7 @@ $Msys2PkgConf = Get-ChildItem -Path "$env:VCPKG_ROOT\downloads\tools\msys2" `
     Select-Object -First 1
 if ($Msys2PkgConf) { $ExtraPath += (Split-Path $Msys2PkgConf.FullName) }
 
-$env:PATH = ($ExtraPath -join ";") + ";" + $env:PATH
+$env:PATH = ($ExtraPath -join ";") + ";" + $env:PATH + ";" + ($TailPath -join ";")
 
 #-----------------------------------------------------------------------------
 # Hand off to Git Bash running build.sh
@@ -145,7 +152,70 @@ $RepoRootPosix = To-PosixPath $RepoRoot.Path
 
 Push-Location $RepoRoot
 try {
-    & $GitBash --noprofile --norc -c "export PATH='$PosixPath'; cd '$RepoRootPosix' && exec ./build-tools/assets/qemu/build.sh"
+    # Pass env to bash via an explicit here-string. PowerShell's
+    # inline string interpolation of multi-arg command lines was
+    # eating single quotes when $env:TARGET_PLATFORM etc. got
+    # embedded — causing `TARGET_PLATFORM required` inside bash.
+    # Bash -c over the Windows CreateProcess boundary is flaky with
+    # multi-line args, so write the script to a temp file and invoke
+    # bash on it. That also sidesteps any quoting surprises.
+    $TempScript = [System.IO.Path]::GetTempFileName() + ".sh"
+    $ScriptBody = @"
+set -euo pipefail
+export PATH='$PosixPath'
+export TARGET_PLATFORM='$env:TARGET_PLATFORM'
+export VERSION='$env:VERSION'
+export OUTPUT_DIR='$env:OUTPUT_DIR'
+export WORK_DIR='$env:WORK_DIR'
+export VCPKG_ROOT='$env:VCPKG_ROOT'
+export VCPKG_INSTALLED='$env:VCPKG_INSTALLED'
+export LIB='$env:LIB'
+export INCLUDE='$env:INCLUDE'
+export LIBPATH='$env:LIBPATH'
+echo "[tempfile] TARGET_PLATFORM=[`$TARGET_PLATFORM] VERSION=[`$VERSION] cwd=[`$(pwd)]" >&2
+declare -p TARGET_PLATFORM VERSION OUTPUT_DIR WORK_DIR 2>&1 | sed 's/^/[tempfile] /' >&2
+cd /c/Users/misi/yetty-builds/src
+# Use `env` explicitly so the child definitely sees them — sidesteps
+# any bash weirdness about `export` propagating across `exec`.
+# TMP/TEMP are needed by clang-cl for intermediate files.
+exec env \
+    TARGET_PLATFORM="`$TARGET_PLATFORM" \
+    VERSION="`$VERSION" \
+    OUTPUT_DIR="`$OUTPUT_DIR" \
+    WORK_DIR="`$WORK_DIR" \
+    VCPKG_ROOT="`$VCPKG_ROOT" \
+    VCPKG_INSTALLED="`$VCPKG_INSTALLED" \
+    LIB="`$LIB" \
+    INCLUDE="`$INCLUDE" \
+    LIBPATH="`$LIBPATH" \
+    PATH="`$PATH" \
+    TMP="`${TMP:-/tmp}" \
+    TEMP="`${TEMP:-/tmp}" \
+    USERPROFILE="`$USERPROFILE" \
+    APPDATA="`$APPDATA" \
+    LOCALAPPDATA="`$LOCALAPPDATA" \
+    SYSTEMROOT="`$SYSTEMROOT" \
+    bash ./build-tools/assets/qemu/build.sh
+"@
+    # Windows line endings (CRLF) break bash parsing — especially after
+    # quoted values, where the trailing \r ends up inside the var. Force
+    # LF-only, UTF-8 no-BOM.
+    $Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    $ScriptBodyLf = $ScriptBody.Replace("`r`n", "`n").Replace("`r", "`n")
+    [System.IO.File]::WriteAllText($TempScript, $ScriptBodyLf, $Utf8NoBom)
+    $TempScriptPosix = To-PosixPath $TempScript
+    Write-Host "==> handoff: TARGET_PLATFORM=$env:TARGET_PLATFORM VERSION=$env:VERSION"
+    Write-Host "==> bash script at $TempScript ($TempScriptPosix)"
+    Write-Host "==> first 15 lines:"
+    Get-Content $TempScript -TotalCount 15 | ForEach-Object { Write-Host "    $_" }
+    try {
+        & $GitBash --noprofile --norc $TempScriptPosix
+    } finally {
+        # Keep the tempfile for post-mortem if the build failed
+        if ($LASTEXITCODE -eq 0) {
+            Remove-Item -Force -ErrorAction SilentlyContinue $TempScript
+        }
+    }
     if ($LASTEXITCODE -ne 0) { throw "build.sh failed with exit $LASTEXITCODE" }
 } finally {
     Pop-Location

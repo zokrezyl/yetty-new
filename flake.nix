@@ -326,30 +326,47 @@
           #
           # This shell only supplies the build-side tooling; the NDK comes
           # in via the `ANDROID_NDK_HOME` env and PATH additions below.
+          # glib's meson.build does `python.find_installation('python3', modules: ['packaging'])`,
+          # and meson's `find_installation` prefers meson's own bundled python over $PATH.
+          # Override meson to use a python with `packaging` so the dep check passes.
+          mesonWithPackaging = pkgs.meson.override {
+            python3 = pkgs.python3.override {
+              packageOverrides = self: super: {};
+            };
+          };
+          python3Packaging = pkgs.python3.withPackages (ps: [ ps.packaging ]);
+
           assets-qemu-android-arm64-v8a = pkgs.mkShell {
             buildInputs = commonDeps ++ androidDeps ++ (with pkgs; [
-              meson ninja python3 bison flex gnumake perl
+              ninja bison flex gnumake perl
               curl gnutar xz gzip pkg-config
-            ]);
+            ]) ++ [ python3Packaging ];
             ANDROID_NDK_HOME = androidNdk;
-            ANDROID_API = "26";
+            # API 28 — bionic gained iconv here, glib requires it.
+            ANDROID_API = "28";
             ANDROID_TARGET_ABI = "arm64-v8a";
             shellHook = ''
               export PATH="${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+              # Force meson to run under our python3+packaging. glib uses
+              # meson's python module which prefers meson's bundled python
+              # otherwise, and that one has no `packaging`.
+              export MESON_PYTHON="${python3Packaging}/bin/python3"
               echo "Yetty asset-build (qemu android-arm64-v8a) — NDK direct"
             '';
           };
 
           assets-qemu-android-x86_64 = pkgs.mkShell {
             buildInputs = commonDeps ++ androidDeps ++ (with pkgs; [
-              meson ninja python3 bison flex gnumake perl
+              ninja bison flex gnumake perl
               curl gnutar xz gzip pkg-config
-            ]);
+            ]) ++ [ python3Packaging ];
             ANDROID_NDK_HOME = androidNdk;
-            ANDROID_API = "26";
+            # API 28 — bionic gained iconv here, glib requires it.
+            ANDROID_API = "28";
             ANDROID_TARGET_ABI = "x86_64";
             shellHook = ''
               export PATH="${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+              export MESON_PYTHON="${python3Packaging}/bin/python3"
               echo "Yetty asset-build (qemu android-x86_64) — NDK direct"
             '';
           };
