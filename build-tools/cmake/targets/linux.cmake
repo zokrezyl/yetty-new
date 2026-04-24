@@ -60,6 +60,7 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/term.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/fs.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/time.c
 )
 
 # TinyEMU PTY source (for --virtual flag)

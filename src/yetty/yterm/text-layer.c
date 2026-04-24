@@ -129,8 +129,12 @@ static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
     struct yetty_yterm_terminal_text_layer *text_layer = user;
     VTermResolvedGlyph result = {0, 0};
 
-    if (!text_layer->font || !text_layer->font->ops || count == 0)
+    ydebug("resolve_glyph ENTER: count=%d cp=U+%04X bold=%d italic=%d", count, count > 0 ? chars[0] : 0u, bold, italic);
+
+    if (!text_layer->font || !text_layer->font->ops || count == 0) {
+        ydebug("resolve_glyph EXIT early: font=%p count=%d", (void *)text_layer->font, count);
         return result;
+    }
 
     enum yetty_font_ms_style style = YETTY_YFONT_MS_STYLE_REGULAR;
     if (bold && italic)      style = YETTY_YFONT_MS_STYLE_BOLD_ITALIC;
@@ -141,8 +145,11 @@ static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
         text_layer->font, chars[0], style);
     if (YETTY_IS_OK(glyph_res))
         result.glyph_index = glyph_res.value;
+    else
+        ydebug("resolve_glyph: get_glyph_index_styled ERR for U+%04X: %s", chars[0], glyph_res.error.msg);
     result.font_type = 0;
 
+    ydebug("resolve_glyph EXIT: U+%04X -> glyph_index=%u", chars[0], result.glyph_index);
     return result;
 }
 
@@ -451,8 +458,24 @@ text_layer_write(struct yetty_yterm_terminal_layer *self,
     if (!text_layer->vterm)
         return YETTY_ERR(yetty_ycore_void, "vterm is NULL");
 
-    if (len > 0)
+    if (len > 0) {
+        char hex[256] = {0};
+        char asc[128] = {0};
+        size_t dump_n = len > 40 ? 40 : len;
+        size_t hoff = 0, aoff = 0;
+        for (size_t i = 0; i < dump_n; i++) {
+            unsigned char c = (unsigned char)data[i];
+            if (hoff + 4 < sizeof(hex))
+                hoff += (size_t)snprintf(hex + hoff, sizeof(hex) - hoff, "%02x ", c);
+            if (aoff + 2 < sizeof(asc))
+                asc[aoff++] = (c >= 0x20 && c < 0x7f) ? (char)c : '.';
+        }
+        ydebug("text_layer_write: len=%zu dump=[%s] ascii=[%s] -> vterm_input_write",
+               len, hex, asc);
         vterm_input_write(text_layer->vterm, data, len);
+        ydebug("text_layer_write: vterm_input_write returned; dirty=%d",
+               text_layer->base.dirty);
+    }
 
     return YETTY_OK_VOID();
 }
@@ -594,8 +617,8 @@ static struct yetty_ycore_void_result text_layer_render(
 static int on_damage(VTermRect rect, void *user)
 {
     struct yetty_yterm_terminal_text_layer *text_layer = user;
-    (void)rect;
-    /* Just set dirty flag - buffer is read directly from vterm in get_gpu_resource_set */
+    ydebug("on_damage: rect(%d,%d)-(%d,%d) -> dirty=1",
+           rect.start_row, rect.start_col, rect.end_row, rect.end_col);
     text_layer->base.dirty = 1;
     return 1;
 }

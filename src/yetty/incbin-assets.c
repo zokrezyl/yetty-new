@@ -2,13 +2,12 @@
 
 #include <brotli/decode.h>
 #include <yetty/ytrace.h>
+#include <yetty/yplatform/fs.h>
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #ifndef YETTY_BUILD_VERSION
 #define YETTY_BUILD_VERSION "dev"
@@ -131,13 +130,13 @@ static int mkdir_p(const char *path) {
   for (p = tmp + 1; *p; p++) {
     if (*p == '/') {
       *p = 0;
-      if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
+      if (yplatform_mkdir(tmp) != 0 && errno != EEXIST)
         return -1;
       *p = '/';
     }
   }
 
-  if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
+  if (yplatform_mkdir(tmp) != 0 && errno != EEXIST)
     return -1;
 
   return 0;
@@ -391,15 +390,14 @@ int yetty_incbin_assets_extract_yemu_to(struct yetty_incbin_assets *assets,
   snprintf(rootfs_tar, sizeof(rootfs_tar), "%s/alpine-rootfs.tar", yemu_dir);
   snprintf(rootfs_dir, sizeof(rootfs_dir), "%s/alpine-rootfs", yemu_dir);
 
-  struct stat st;
-  if (stat(rootfs_tar, &st) == 0) {
+  if (yplatform_file_exists(rootfs_tar)) {
     ydebug("extract_yemu_to: extracting rootfs tarball");
     if (!extract_tarball(rootfs_tar, rootfs_dir)) {
       ydebug("Failed to extract rootfs tarball");
       return 0;
     }
     /* Remove tarball after extraction */
-    unlink(rootfs_tar);
+    yplatform_unlink(rootfs_tar);
   }
 
   ydebug("yemu asset extraction complete");

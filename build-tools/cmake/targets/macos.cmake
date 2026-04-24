@@ -38,6 +38,7 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/fs.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
     ${YETTY_ROOT}/src/yetty/yplatform/macos/platform-paths.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/time.c
 )
 
 # Create executable with core sources + platform

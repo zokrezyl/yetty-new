@@ -106,6 +106,9 @@ static void process_data(struct yetty_yterm_pty_reader *r, const char *data, siz
     size_t i = 0;
     size_t normal_start = 0;
 
+    ydebug("pty_reader process_data ENTER: len=%zu state=%d default_sink=%p",
+           len, (int)r->state, (void *)r->default_sink);
+
     while (i < len) {
         char c = data[i];
 
@@ -115,6 +118,8 @@ static void process_data(struct yetty_yterm_pty_reader *r, const char *data, siz
                 /* Flush normal data before ESC */
                 if (i > normal_start && r->default_sink &&
                     r->default_sink->ops && r->default_sink->ops->write) {
+                    ydebug("pty_reader: flush normal %zu bytes -> default_sink",
+                           i - normal_start);
                     r->default_sink->ops->write(r->default_sink,
                         data + normal_start, i - normal_start);
                 }
@@ -183,9 +188,13 @@ static void process_data(struct yetty_yterm_pty_reader *r, const char *data, siz
     /* Flush remaining normal data */
     if (r->state == OSC_STATE_NORMAL && i > normal_start &&
         r->default_sink && r->default_sink->ops && r->default_sink->ops->write) {
+        ydebug("pty_reader: tail flush %zu bytes -> default_sink",
+               i - normal_start);
         r->default_sink->ops->write(r->default_sink,
             data + normal_start, i - normal_start);
     }
+    ydebug("pty_reader process_data EXIT: state=%d normal_start=%zu i=%zu",
+           (int)r->state, normal_start, i);
 }
 
 struct yetty_yterm_pty_reader_result yetty_yterm_pty_reader_create(

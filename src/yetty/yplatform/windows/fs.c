@@ -2,6 +2,7 @@
 
 #include <yetty/yplatform/fs.h>
 #include <direct.h>
+#include <io.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -27,4 +28,14 @@ void yplatform_mkdir_p(const char *path)
         }
     }
     _mkdir(tmp);
+}
+
+int yplatform_file_exists(const char *path)
+{
+    return _access(path, 0) == 0;
+}
+
+int yplatform_unlink(const char *path)
+{
+    return _unlink(path);
 }

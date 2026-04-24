@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 
 int yplatform_mkdir(const char *path)
 {
@@ -27,4 +28,14 @@ void yplatform_mkdir_p(const char *path)
         }
     }
     mkdir(tmp, 0755);
+}
+
+int yplatform_file_exists(const char *path)
+{
+    return access(path, F_OK) == 0;
+}
+
+int yplatform_unlink(const char *path)
+{
+    return unlink(path);
 }

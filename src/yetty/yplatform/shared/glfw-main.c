@@ -4,11 +4,11 @@
 #include <webgpu/webgpu.h>
 #include <yetty/yplatform/thread.h>
 #include <yetty/yplatform/fs.h>
-#include <getopt.h>
+#include <yetty/yplatform/getopt.h>
+#include <yetty/yplatform/time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <yetty/yetty.h>
 #include <yetty/yconfig.h>
@@ -328,7 +328,7 @@ int main(int argc, char **argv)
     } else {
         /* Headless mode: just wait for render thread to finish */
         while (running) {
-            usleep(100000); /* 100ms */
+            ytime_sleep_ms(100);
         }
     }
     ythread_join(render_thread);
