@@ -18,15 +18,15 @@ prelude = bundled
 target_platform_detector_spec = target:root//...->prelude//platforms:default
 
 [build]
-execution_platforms = prelude//platforms:default
+execution_platforms = root//buck-build-tools/platforms:remote_cache
 
 [buck2]
 materializations = deferred
 digest_algorithms = SHA256
 
-# Remote execution (uncomment when ready)
-# [buck2_re_client]
-# engine_address = grpc://192.168.1.10:8980
-# cas_address = grpc://192.168.1.10:8980
-# action_cache_address = grpc://192.168.1.10:8980
-# instance_name = default
+[buck2_re_client]
+engine_address = grpc://127.0.0.1:50052
+action_cache_address = grpc://127.0.0.1:50051
+cas_address = grpc://127.0.0.1:50051
+instance_name =
+tls = false

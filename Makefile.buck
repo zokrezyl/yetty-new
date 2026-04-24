@@ -1,0 +1,49 @@
+# Yetty Buck2 Build System
+# Usage: make -f Makefile.buck <target>
+
+# Build acceleration
+USE_CCACHE ?= 0
+
+# Buck2 wrapper (runs inside nix shell)
+BUCK2 := nix develop '.\#buck2' --command buck2
+
+# Build output location
+BUCK_OUT := buck-out/v2/gen/root
+
+#=============================================================================
+# Desktop - ytrace release
+#=============================================================================
+
+.PHONY: build-desktop-ytrace-release-buck
+build-desktop-ytrace-release-buck: ## Build desktop ytrace release with Buck2
+	@$(BUCK2) kill 2>/dev/null || true
+	$(BUCK2) build //:yetty
+	@echo "Built: $$(find $(BUCK_OUT) -name 'yetty' -type f 2>/dev/null | head -1)"
+
+.PHONY: run-desktop-ytrace-release-buck
+run-desktop-ytrace-release-buck: build-desktop-ytrace-release-buck ## Run desktop ytrace release Buck2 build
+	@$$(find $(BUCK_OUT) -name 'yetty' -type f 2>/dev/null | head -1)
+
+.PHONY: clean-buck
+clean-buck: ## Clean Buck2 build artifacts
+	$(BUCK2) clean
+
+#=============================================================================
+# Help
+#=============================================================================
+
+.PHONY: help
+help:
+	@echo "Yetty Buck2 Build System"
+	@echo ""
+	@echo "Usage: make -f Makefile.buck <target>"
+	@echo ""
+	@echo "Targets:"
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-35s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Cache server:"
+	@echo "  Run: bazel-remote --dir ~/.cache/bazel-remote --max_size 100 --port 8980"
+	@echo "  Config: ~/.buckconfig with [buck2_re_client] section"
+
+.PHONY: all
+all: help

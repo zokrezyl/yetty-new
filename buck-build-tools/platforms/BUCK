@@ -1,5 +1,7 @@
 # Platform constraints and definitions for yetty
 
+load(":defs.bzl", "host_configuration", "remote_cache_execution_platform")
+
 #=============================================================================
 # OS constraints
 #=============================================================================
@@ -145,5 +147,16 @@ platform(
 
 platform(
     name = "default",
+    visibility = ["PUBLIC"],
+)
+
+#=============================================================================
+# Execution platform with bazel-remote cache enabled
+#=============================================================================
+
+remote_cache_execution_platform(
+    name = "remote_cache",
+    cpu_configuration = host_configuration.cpu,
+    os_configuration = host_configuration.os,
     visibility = ["PUBLIC"],
 )

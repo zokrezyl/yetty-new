@@ -81,7 +81,7 @@ genrule(
         VTERM="$SRCDIR/src/libvterm-0.3.3"
         mkdir -p "$OUT/lib" "$OUT/include"
         for f in encoding keyboard mouse parser pen screen state unicode vterm; do
-            cc -c -fPIC -O2 -w -std=c99 -I"$VTERM/include" "$VTERM/src/$f.c" -o "$BUCK_SCRATCH_PATH/$f.o"
+            clang -c -fPIC -O2 -w -std=c99 -I"$VTERM/include" "$VTERM/src/$f.c" -o "$BUCK_SCRATCH_PATH/$f.o"
         done
         ar rcs "$OUT/lib/libvterm.a" "$BUCK_SCRATCH_PATH"/*.o
         cp "$VTERM/include/"*.h "$OUT/include/"
@@ -97,7 +97,7 @@ genrule(
 cxx_library(
     name = "ytrace",
     srcs = ["src/yetty/ytrace.c"],
-    exported_headers = ["include/yetty/ytrace.h"],
+    exported_headers = glob(["include/yetty/**/*.h", "src/yetty/**/*.h"]),
     header_namespace = "",
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
@@ -117,7 +117,7 @@ cxx_library(
     srcs = glob(["src/yetty/ycore/**/*.c"]),
     headers = glob(["include/yetty/ycore/**/*.h"]),
     header_namespace = "",
-    exported_headers = glob(["include/yetty/ycore/**/*.h"]),
+    exported_headers = glob(["include/yetty/**/*.h", "src/yetty/**/*.h"]),
     compiler_flags = YETTY_C_FLAGS,
     include_directories = YETTY_INCLUDES,
     preferred_linkage = "static",
