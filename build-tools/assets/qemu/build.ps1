@@ -70,6 +70,7 @@ foreach ($line in $envDump) {
 # Prepend extra tool dirs to PATH so Git Bash inherits them
 #-----------------------------------------------------------------------------
 $ExtraPath = @(
+    "C:\Program Files\LLVM\bin",                # clang-cl (QEMU requires Clang, not cl.exe)
     "C:\Program Files\Meson",                   # meson.exe
     "C:\Program Files (x86)\GnuWin32\bin",      # bison, flex, m4, make
     "C:\Program Files\Git\cmd",                 # git on PATH

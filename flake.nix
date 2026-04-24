@@ -3,17 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    # Separate pin for Android cross-builds: nixos-unstable shipped
-    # clang 21.1.8 with a compiler-rt regression that can't find
-    # pthread.h while bootstrapping the android sysroot. nixos-25.05
-    # has the same bug (clang 19.1.7). nixos-24.11 ships clang 18.x,
-    # which predates the regression and builds the android cross
-    # toolchain cleanly.
-    nixpkgs-android.url = "github:NixOS/nixpkgs/nixos-24.11";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, nixpkgs-android, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -21,28 +14,6 @@
           config = {
             allowUnfree = true;
             android_sdk.accept_license = true;
-          };
-        };
-
-        # Stable-pinned nixpkgs used only for Android cross-compiles.
-        pkgsAndroid = import nixpkgs-android {
-          inherit system;
-          config.allowUnfree = true;
-        };
-
-        # Custom pkgsCross for x86_64-android: nixpkgs only ships
-        # aarch64-android as a first-class crossSystem, but defining an
-        # x86_64 variant by the same shape gives us glib/pixman/zlib
-        # cross-built for the Android emulator ABI.
-        pkgsX86_64Android = import nixpkgs-android {
-          inherit system;
-          config.allowUnfree = true;
-          crossSystem = {
-            config = "x86_64-unknown-linux-android";
-            libc = "bionic";
-            useLLVM = true;
-            androidSdkVersion = "35";
-            androidNdkVersion = "27";
           };
         };
 
@@ -346,38 +317,40 @@
             shellHook = "echo 'Yetty asset-build (qemu windows-x86_64)'";
           };
 
-          # android-arm64-v8a: stable-pinned nixpkgs (pkgsAndroid) to
-          # dodge the unstable clang-21 compiler-rt regression.
-          assets-qemu-android-arm64-v8a = pkgsAndroid.pkgsCross.aarch64-android.mkShell {
-            nativeBuildInputs = with pkgsAndroid; [
+          # android targets: use the Android NDK directly (same toolchain
+          # yetty's own Android build uses via gradle). Sidesteps
+          # pkgsCross.*-android, whose compiler-rt rebuild has been broken
+          # across clang-19/20/21. We build glib + pixman from source into
+          # a sysroot with NDK clang — see build-tools/assets/qemu/
+          # platforms/android-*.sh.
+          #
+          # This shell only supplies the build-side tooling; the NDK comes
+          # in via the `ANDROID_NDK_HOME` env and PATH additions below.
+          assets-qemu-android-arm64-v8a = pkgs.mkShell {
+            buildInputs = commonDeps ++ androidDeps ++ (with pkgs; [
               meson ninja python3 bison flex gnumake perl
-              curl gnutar xz gzip
-              pkgsCross.aarch64-android.buildPackages.pkg-config
-            ];
-            buildInputs = with pkgsAndroid.pkgsCross.aarch64-android; [
-              glib pixman zlib
-            ];
+              curl gnutar xz gzip pkg-config
+            ]);
+            ANDROID_NDK_HOME = androidNdk;
+            ANDROID_API = "26";
+            ANDROID_TARGET_ABI = "arm64-v8a";
             shellHook = ''
-              export PKG_CONFIG=aarch64-unknown-linux-android-pkg-config
-              echo "Yetty asset-build (qemu android-arm64-v8a)"
+              export PATH="${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+              echo "Yetty asset-build (qemu android-arm64-v8a) — NDK direct"
             '';
           };
 
-          # android-x86_64: uses our custom pkgsX86_64Android crossSystem
-          # (defined above in the let binding) — same shape as nixpkgs'
-          # aarch64-android, but targeting x86_64 bionic for the emulator.
-          assets-qemu-android-x86_64 = pkgsX86_64Android.mkShell {
-            nativeBuildInputs = with pkgs; [
+          assets-qemu-android-x86_64 = pkgs.mkShell {
+            buildInputs = commonDeps ++ androidDeps ++ (with pkgs; [
               meson ninja python3 bison flex gnumake perl
-              curl gnutar xz gzip
-              pkgsX86_64Android.buildPackages.pkg-config
-            ];
-            buildInputs = with pkgsX86_64Android; [
-              glib pixman zlib
-            ];
+              curl gnutar xz gzip pkg-config
+            ]);
+            ANDROID_NDK_HOME = androidNdk;
+            ANDROID_API = "26";
+            ANDROID_TARGET_ABI = "x86_64";
             shellHook = ''
-              export PKG_CONFIG=x86_64-unknown-linux-android-pkg-config
-              echo "Yetty asset-build (qemu android-x86_64)"
+              export PATH="${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+              echo "Yetty asset-build (qemu android-x86_64) — NDK direct"
             '';
           };
 

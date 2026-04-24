@@ -1,15 +1,10 @@
-# QEMU platform: android-x86_64 (custom pkgsX86_64Android crossSystem)
-#
-# Shell provides a nix-cross clang with prefix
-# x86_64-unknown-linux-android-, plus glib/pixman/zlib cross-built for
-# x86_64 Android bionic. Produces a binary for the emulator.
+# QEMU platform: android-x86_64 (Android NDK direct; no pkgsCross).
+# glib/pixman/pcre2/libffi are built from source into a per-ABI sysroot —
+# see android-common.sh. NDK clang comes from the .#assets-qemu-android-*
+# nix shell.
 
-: "${CROSS_PREFIX:=x86_64-unknown-linux-android-}"
+ANDROID_TRIPLE="x86_64-linux-android"
+ANDROID_CPU="x86_64"
 
-_CONFIGURE_ARGS+=(
-    --cross-prefix="$CROSS_PREFIX"
-    --cc="${CROSS_PREFIX}clang"
-    --cxx="${CROSS_PREFIX}clang++"
-    --host-cc=gcc
-)
-_STRIP_BIN="${CROSS_PREFIX}strip"
+# shellcheck source=android-common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/android-common.sh"

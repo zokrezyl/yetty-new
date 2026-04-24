@@ -1,15 +1,10 @@
-# QEMU platform: android-arm64-v8a (nixpkgs pkgsCross.aarch64-android)
-#
-# The shell sets $CC etc. to aarch64-unknown-linux-android-clang. The
-# resulting binary targets Android's bionic libc (not glibc) and
-# should run on Android 10+ (API 29) by default for this nix target.
+# QEMU platform: android-arm64-v8a (Android NDK direct; no pkgsCross).
+# glib/pixman/pcre2/libffi are built from source into a per-ABI sysroot —
+# see android-common.sh. NDK clang comes from the .#assets-qemu-android-*
+# nix shell.
 
-: "${CROSS_PREFIX:=aarch64-unknown-linux-android-}"
+ANDROID_TRIPLE="aarch64-linux-android"
+ANDROID_CPU="aarch64"
 
-_CONFIGURE_ARGS+=(
-    --cross-prefix="$CROSS_PREFIX"
-    --cc="${CROSS_PREFIX}clang"
-    --cxx="${CROSS_PREFIX}clang++"
-    --host-cc=gcc
-)
-_STRIP_BIN="${CROSS_PREFIX}strip"
+# shellcheck source=android-common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/android-common.sh"

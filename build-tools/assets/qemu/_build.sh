@@ -108,9 +108,9 @@ _CONFIGURE_ARGS+=(
 )
 
 # Force the bundled slirp meson subproject to a static library so libslirp
-# is linked into the qemu binary; otherwise qemu ends up with
-# RUNPATH=$ORIGIN/subprojects/slirp and a separate libslirp.so.0 to ship.
-# QEMU's configure forwards -D<opt>=<val> to meson.
+# is linked into the qemu binary rather than shipping as a .so under
+# $ORIGIN/subprojects/slirp — libslirp is the one dep end-user Linuxes
+# can't be relied on to have. libm/libglib/libc stay dynamic (ubiquitous).
 _CONFIGURE_ARGS+=(-Dslirp:default_library=static)
 
 #-----------------------------------------------------------------------------

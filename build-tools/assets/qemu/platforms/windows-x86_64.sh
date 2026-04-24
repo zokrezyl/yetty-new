@@ -25,6 +25,17 @@ if grep -q 'pyvenv/bin' "$SRC_DIR/configure"; then
     echo "==> patched $SRC_DIR/configure: pyvenv/bin -> pyvenv/Scripts"
 fi
 
+# QEMU's meson.build line ~334 whitelists only 'gcc' / 'clang' /
+# 'emscripten' compiler IDs, but clang-cl identifies as 'clang-cl' and
+# falls through to the "You either need GCC ..." error. Extend the
+# clang branch to also accept clang-cl — it's still Clang, just with
+# MSVC-driver personality.
+if grep -q "compiler.get_id() == 'clang' and compiler.compiles" "$SRC_DIR/meson.build"; then
+    sed -i "s|compiler.get_id() == 'clang' and compiler.compiles|(compiler.get_id() == 'clang' or compiler.get_id() == 'clang-cl') and compiler.compiles|" \
+        "$SRC_DIR/meson.build"
+    echo "==> patched $SRC_DIR/meson.build: clang-cl accepted as Clang"
+fi
+
 # Point pkg-config at the vcpkg tree
 export PKG_CONFIG_PATH="$VCPKG_INSTALLED/lib/pkgconfig"
 : "${PKG_CONFIG:=pkgconf}"
@@ -40,9 +51,13 @@ _EXTRA_CXXFLAGS="$_EXTRA_CFLAGS"
 _EXTRA_LDFLAGS="/OPT:REF /OPT:ICF /LIBPATH:$VCPKG_INSTALLED/lib"
 
 _CONFIGURE_ARGS+=(
-    --cc=cl
-    --cxx=cl
-    --host-cc=cl
+    # QEMU's meson.build:348 requires GCC or Clang — cl.exe is rejected.
+    # clang-cl is Clang's MSVC-compatible driver: accepts MSVC flags,
+    # uses MSVC's linker, produces MSVC-ABI .exe, but the compiler
+    # frontend is Clang so meson accepts it.
+    --cc=clang-cl
+    --cxx=clang-cl
+    --host-cc=clang-cl
 )
 
 _QEMU_BINARY_NAME="qemu-system-riscv64.exe"
