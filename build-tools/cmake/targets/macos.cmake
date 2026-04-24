@@ -10,6 +10,12 @@ if(YETTY_ENABLE_LIB_LIBMAGIC)
     include(${YETTY_ROOT}/build-tools/cmake/Libmagic.cmake)
 endif()
 
+# TinyEMU - in-process RISC-V emulator for --virtual flag
+if(YETTY_ENABLE_LIB_TINYEMU)
+    include(${YETTY_ROOT}/build-tools/cmake/tinyemu.cmake)
+    include(${YETTY_ROOT}/build-tools/cmake/tinyemu-runtime.cmake)
+endif()
+
 # Desktop-specific subdirectories
 if(YETTY_ENABLE_FEATURE_GPU)
     add_subdirectory(${YETTY_ROOT}/src/yetty/gpu ${CMAKE_BINARY_DIR}/src/yetty/gpu)
@@ -29,7 +35,10 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-window.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-clipboard-manager.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/libuv-event-loop.c
-    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pty.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/ycoroutine.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/ywebgpu.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/fork-pty.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pty-factory.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pipe.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-socket.c
@@ -40,6 +49,13 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/macos/platform-paths.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/time.c
 )
+
+# TinyEMU PTY source (for --virtual flag)
+if(YETTY_ENABLE_LIB_TINYEMU)
+    list(APPEND YETTY_PLATFORM_SOURCES
+        ${YETTY_ROOT}/src/yetty/yplatform/shared/tinyemu-pty.c
+    )
+endif()
 
 # Create executable with core sources + platform
 add_executable(yetty
@@ -66,6 +82,9 @@ target_compile_definitions(yetty PRIVATE
     YETTY_USE_CORETEXT=1
     YETTY_USE_FORKPTY=1
     YETTY_HAS_VNC=1
+    $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:YETTY_HAS_TINYEMU=1>
+    $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:CONFIG_SLIRP>
+    $<$<BOOL:${YETTY_ENABLE_LIB_QEMU}>:YETTY_HAS_QEMU=1>
 )
 
 set_target_properties(yetty PROPERTIES ENABLE_EXPORTS TRUE)
@@ -78,6 +97,10 @@ target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
     ${CORETEXT_LIBRARY}
     ${COREFOUNDATION_LIBRARY}
+    $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:tinyemu>
+    $<$<BOOL:${YETTY_ENABLE_LIB_QEMU}>:yetty_qemu>
+    yetty_telnet
+    yetty_yco
 )
 
 # Copy runtime assets to build directory

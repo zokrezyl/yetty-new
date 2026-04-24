@@ -95,7 +95,6 @@ _CONFIGURE_ARGS=(
     --enable-tcg
     --enable-slirp
     --enable-virtfs
-    --enable-attr
     --enable-fdt=internal
     --enable-trace-backends=nop
     --disable-werror
@@ -119,12 +118,13 @@ _STRIP_BIN="strip"
 case "$TARGET_PLATFORM" in
 
 linux-x86_64)
-    _CONFIGURE_ARGS+=(--cc=gcc --cxx=g++)
+    _CONFIGURE_ARGS+=(--enable-attr --cc=gcc --cxx=g++)
     ;;
 
 linux-aarch64)
     : "${CROSS_PREFIX:=aarch64-unknown-linux-gnu-}"
     _CONFIGURE_ARGS+=(
+        --enable-attr
         --cross-prefix="$CROSS_PREFIX"
         --cc="${CROSS_PREFIX}gcc"
         --cxx="${CROSS_PREFIX}g++"
@@ -329,6 +329,10 @@ macos-arm64|macos-x86_64)
 ios-arm64|ios-x86_64|tvos-arm64)
     # Cross from macOS. The nix shell puts xcbuild's stub xcrun on PATH —
     # call Apple's /usr/bin/xcrun directly to resolve Xcode SDK paths.
+    # The shell also exports DEVELOPER_DIR=<nix apple-sdk> which /usr/bin/xcrun
+    # honors and would search for iphoneos/appletvos SDKs there (not present);
+    # unset so xcrun falls back to `xcode-select -p` (real Xcode.app).
+    unset DEVELOPER_DIR
     case "$TARGET_PLATFORM" in
         ios-arm64)
             _SDK_NAME="iphoneos";         _ARCH="arm64"
