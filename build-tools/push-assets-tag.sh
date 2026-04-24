@@ -36,8 +36,22 @@ VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
 
 TAG="assets-$VERSION"
 
+# Refuse to create the tag if the target remote isn't configured —
+# otherwise we'd cut a local tag we can't push and the caller would
+# have to clean it up manually.
+if ! REMOTE_URL="$(git remote get-url "$REMOTE" 2>/dev/null)"; then
+    echo "error: git remote '$REMOTE' is not configured in this repo." >&2
+    echo "       set it with:  git remote add $REMOTE <url>" >&2
+    echo "       or pass --remote <name> to use a different one." >&2
+    echo "       configured remotes: $(git remote | paste -sd, -)" >&2
+    exit 1
+fi
+echo "target remote: $REMOTE -> $REMOTE_URL"
+
 if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "warning: working tree has uncommitted changes — tag will point to HEAD as of now" >&2
+    echo "error: working tree has uncommitted changes — commit or stash them first." >&2
+    git status --short >&2
+    exit 1
 fi
 
 # Local tag check
