@@ -434,7 +434,7 @@ int yetty_incbin_assets_extract_qemu_to(struct yetty_incbin_assets *assets,
 
   /* Make QEMU binary executable */
   snprintf(qemu_bin, sizeof(qemu_bin), "%s/qemu-system-riscv64", qemu_dir);
-  if (chmod(qemu_bin, 0755) != 0) {
+  if (yplatform_chmod(qemu_bin, 0755) != 0) {
     ydebug("Failed to make QEMU executable: %s", strerror(errno));
   }
 

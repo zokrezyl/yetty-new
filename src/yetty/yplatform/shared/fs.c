@@ -39,3 +39,8 @@ int yplatform_unlink(const char *path)
 {
     return unlink(path);
 }
+
+int yplatform_chmod(const char *path, unsigned int mode)
+{
+    return chmod(path, (mode_t)mode);
+}

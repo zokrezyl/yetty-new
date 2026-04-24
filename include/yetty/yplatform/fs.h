@@ -21,6 +21,10 @@ int yplatform_file_exists(const char *path);
 /* Remove a file. Returns 0 on success, -1 on error (errno set). */
 int yplatform_unlink(const char *path);
 
+/* Change file mode. Returns 0 on success, -1 on error (errno set).
+ * On Windows this is a no-op since POSIX permission bits do not apply. */
+int yplatform_chmod(const char *path, unsigned int mode);
+
 #ifdef __cplusplus
 }
 #endif
