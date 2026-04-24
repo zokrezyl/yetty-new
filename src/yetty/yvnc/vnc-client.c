@@ -13,6 +13,10 @@
 #include <string.h>
 #include <turbojpeg.h>
 
+#ifdef YETTY_HAS_YVIDEO
+#include <yetty/yvideo/decoder.h>
+#endif
+
 #define RECV_BUFFER_SIZE 65536
 
 /* Recv state machine */
@@ -109,6 +113,14 @@ struct yetty_vnc_client {
 
 	/* Tile pixel buffer */
 	uint8_t *tile_pixels;
+
+#ifdef YETTY_HAS_YVIDEO
+	/* H.264 decoder — lazily created the first time we see an H.264 tile.
+	 * Also a reusable BGRA buffer for the YUV→BGRA conversion output. */
+	struct yetty_yvideo_decoder *h264_decoder;
+	uint8_t *h264_bgra_buf;
+	size_t   h264_bgra_buf_size;
+#endif
 
 	/* Callbacks */
 	yetty_vnc_on_frame_fn on_frame_fn;
@@ -227,6 +239,109 @@ static void process_tile_data(struct yetty_vnc_client *client)
 		}
 		return;
 	}
+
+#ifdef YETTY_HAS_YVIDEO
+	case VNC_ENCODING_H264: {
+		/*
+		 * Wire layout (produced by h264_send_full_frame on the server):
+		 *     [vnc_video_frame_header] [NAL bytes ...]
+		 * The enclosing tile header's data_size counts both parts; the
+		 * inner data_size is the NAL-only size.
+		 */
+		if (client->current_tile.data_size < sizeof(struct vnc_video_frame_header)) {
+			ywarn("vnc_client: H.264 tile too small (%u bytes)",
+			      client->current_tile.data_size);
+			break;
+		}
+		const struct vnc_video_frame_header *vhdr =
+			(const struct vnc_video_frame_header *)client->recv_buffer;
+		const uint8_t *nal_data = client->recv_buffer +
+		                          sizeof(struct vnc_video_frame_header);
+		size_t nal_size = client->current_tile.data_size -
+		                  sizeof(struct vnc_video_frame_header);
+
+		if (vhdr->data_size != nal_size) {
+			ywarn("vnc_client: H.264 inner data_size mismatch (hdr=%u, avail=%zu)",
+			      vhdr->data_size, nal_size);
+			break;
+		}
+
+		if (!client->h264_decoder) {
+			struct yetty_yvideo_decoder_ptr_result dres =
+				yetty_yvideo_decoder_create_h264();
+			if (!YETTY_IS_OK(dres)) {
+				ywarn("vnc_client: H.264 decoder create failed: %s",
+				      dres.error.msg);
+				break;
+			}
+			client->h264_decoder = dres.value;
+		}
+
+		struct yetty_ycore_void_result fres = yetty_yvideo_decoder_feed(
+			client->h264_decoder, nal_data, nal_size);
+		if (!YETTY_IS_OK(fres)) {
+			ywarn("vnc_client: H.264 feed failed: %s", fres.error.msg);
+			break;
+		}
+
+		struct yetty_yvideo_yuv_frame yuv;
+		bool got_frame = false;
+		fres = yetty_yvideo_decoder_get_frame(client->h264_decoder,
+		                                      &yuv, &got_frame);
+		if (!YETTY_IS_OK(fres)) {
+			ywarn("vnc_client: H.264 decode failed: %s", fres.error.msg);
+			break;
+		}
+		if (!got_frame) {
+			/* Reordering / SPS-PPS-only NAL / partial frame — no pixels
+			 * yet. Still count the tile so the frame ack fires. */
+			break;
+		}
+
+		/* Convert to BGRA and upload. Reuse a persistent buffer so we
+		 * don't malloc/free a full framebuffer every frame. */
+		size_t bgra_size = (size_t)yuv.width * yuv.height * 4;
+		if (bgra_size > client->h264_bgra_buf_size) {
+			free(client->h264_bgra_buf);
+			client->h264_bgra_buf = malloc(bgra_size);
+			if (!client->h264_bgra_buf) {
+				client->h264_bgra_buf_size = 0;
+				ywarn("vnc_client: H.264 BGRA alloc failed (%zu bytes)",
+				      bgra_size);
+				break;
+			}
+			client->h264_bgra_buf_size = bgra_size;
+		}
+		yetty_yvideo_yuv420_to_bgra(&yuv, client->h264_bgra_buf);
+
+		if (client->texture &&
+		    (uint16_t)yuv.width == client->width &&
+		    (uint16_t)yuv.height == client->height) {
+			WGPUTexelCopyTextureInfo dst = {0};
+			dst.texture = client->texture;
+			dst.origin = (WGPUOrigin3D){0, 0, 0};
+
+			WGPUTexelCopyBufferLayout layout = {0};
+			layout.bytesPerRow = yuv.width * 4;
+			layout.rowsPerImage = yuv.height;
+
+			WGPUExtent3D size = {yuv.width, yuv.height, 1};
+			wgpuQueueWriteTexture(client->queue, &dst,
+			                      client->h264_bgra_buf, bgra_size,
+			                      &layout, &size);
+		}
+
+		client->tiles_received++;
+		client->stats_tiles_window++;
+		if (client->tiles_received >= client->current_frame.num_tiles) {
+			client->stats_frames_window++;
+			client->recv_state = RECV_FRAME_HEADER;
+			client->recv_needed = sizeof(struct vnc_frame_header);
+			yetty_vnc_client_send_frame_ack(client);
+		}
+		return;
+	}
+#endif
 
 	default:
 		break;
@@ -683,6 +798,12 @@ void yetty_vnc_client_destroy(struct yetty_vnc_client *client)
 
 	if (client->jpeg_decompressor)
 		tjDestroy(client->jpeg_decompressor);
+
+#ifdef YETTY_HAS_YVIDEO
+	if (client->h264_decoder)
+		yetty_yvideo_decoder_destroy(client->h264_decoder);
+	free(client->h264_bgra_buf);
+#endif
 
 	if (client->pipeline)
 		wgpuRenderPipelineRelease(client->pipeline);

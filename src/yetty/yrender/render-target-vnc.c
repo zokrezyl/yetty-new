@@ -137,6 +137,25 @@ render_target_vnc_set_visual_zoom(struct yetty_yrender_target *self,
 	return YETTY_OK_VOID();
 }
 
+/* Back-pressure plumbing: if the vnc server's tile-diff engine is still
+ * reading back the previous frame, skip the whole render pipeline (layer
+ * renders + blend) to avoid piling up GPU handles — same fd exhaustion we
+ * fixed on x11-tile. The server's on_idle hook (set in
+ * yetty_vnc_server_send_frame_gpu) fires a catch-up render when it drains. */
+static bool render_target_vnc_is_busy(const struct yetty_yrender_target *self)
+{
+	const struct render_target_vnc *rt = (const struct render_target_vnc *)self;
+	return rt->vnc_server &&
+	       yetty_vnc_server_is_busy(rt->vnc_server);
+}
+
+static void render_target_vnc_notify_render_skipped(struct yetty_yrender_target *self)
+{
+	struct render_target_vnc *rt = (struct render_target_vnc *)self;
+	if (rt->vnc_server)
+		yetty_vnc_server_mark_redraw_pending(rt->vnc_server);
+}
+
 static const struct yetty_yrender_target_ops render_target_vnc_ops = {
 	.destroy = render_target_vnc_destroy,
 	.clear = render_target_vnc_clear,
@@ -147,6 +166,8 @@ static const struct yetty_yrender_target_ops render_target_vnc_ops = {
 	.get_texture = render_target_vnc_get_texture,
 	.resize = render_target_vnc_resize,
 	.set_visual_zoom = render_target_vnc_set_visual_zoom,
+	.is_busy = render_target_vnc_is_busy,
+	.notify_render_skipped = render_target_vnc_notify_render_skipped,
 };
 
 struct yetty_yrender_target_ptr_result

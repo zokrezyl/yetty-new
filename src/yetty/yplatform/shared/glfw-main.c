@@ -75,20 +75,43 @@ static int render_thread_func(void *arg)
     return 0;
 }
 
+/* Long-only option identifiers. Picked above 255 so they don't collide with
+ * the short-form ASCII values getopt_long returns for single-letter options. */
+enum {
+    OPT_VNC_RAW = 1000,
+    OPT_VNC_COMPRESSION_QUALITY,
+    OPT_VNC_ALWAYS_FULL,
+    OPT_VNC_USE_H264,
+    OPT_VNC_MERGE_RECTS,
+    OPT_VNC_H264_BITRATE,
+    OPT_VNC_H264_FRAMERATE,
+    OPT_VNC_H264_IDR_INTERVAL,
+    OPT_VNC_H264_SCREEN_CONTENT,
+};
+
 /* Command line options */
 static struct option long_options[] = {
-    {"config",       required_argument, 0, 'c'},
-    {"execute",      required_argument, 0, 'e'},
-    {"vnc-server",   no_argument,       0, 's'},
-    {"vnc-headless", no_argument,       0, 'H'},
-    {"vnc-port",     required_argument, 0, 'p'},
-    {"vnc-client",   required_argument, 0, 'C'},
-    {"rpc-host",     required_argument, 0,  0 },
-    {"rpc-port",     required_argument, 0, 'r'},
-    {"temu",         no_argument,       0,  0 },
-    {"qemu",         no_argument,       0,  0 },
-    {"ssh",          optional_argument, 0,  0 },
-    {"help",         no_argument,       0, 'h'},
+    {"config",                    required_argument, 0, 'c'},
+    {"execute",                   required_argument, 0, 'e'},
+    {"vnc-server",                no_argument,       0, 's'},
+    {"vnc-headless",              no_argument,       0, 'H'},
+    {"vnc-port",                  required_argument, 0, 'p'},
+    {"vnc-client",                required_argument, 0, 'C'},
+    {"vnc-raw",                   no_argument,       0, OPT_VNC_RAW},
+    {"vnc-compression-quality",   required_argument, 0, OPT_VNC_COMPRESSION_QUALITY},
+    {"vnc-always-full",           no_argument,       0, OPT_VNC_ALWAYS_FULL},
+    {"vnc-use-h264",              no_argument,       0, OPT_VNC_USE_H264},
+    {"vnc-merge-rects",           no_argument,       0, OPT_VNC_MERGE_RECTS},
+    {"vnc-h264-bitrate",          required_argument, 0, OPT_VNC_H264_BITRATE},
+    {"vnc-h264-framerate",        required_argument, 0, OPT_VNC_H264_FRAMERATE},
+    {"vnc-h264-idr-interval",     required_argument, 0, OPT_VNC_H264_IDR_INTERVAL},
+    {"vnc-h264-screen-content",   required_argument, 0, OPT_VNC_H264_SCREEN_CONTENT},
+    {"rpc-host",                  required_argument, 0,  0 },
+    {"rpc-port",                  required_argument, 0, 'r'},
+    {"temu",                      no_argument,       0,  0 },
+    {"qemu",                      no_argument,       0,  0 },
+    {"ssh",                       optional_argument, 0,  0 },
+    {"help",                      no_argument,       0, 'h'},
     {0, 0, 0, 0}
 };
 
@@ -102,6 +125,15 @@ static void print_usage(const char *prog)
     fprintf(stderr, "  -H, --vnc-headless     Run VNC server (headless - no window)\n");
     fprintf(stderr, "  -p, --vnc-port=PORT    VNC server port (default: 5900)\n");
     fprintf(stderr, "  -C, --vnc-client=HOST  Connect as VNC client to HOST[:PORT]\n");
+    fprintf(stderr, "      --vnc-raw                  Disable JPEG, send raw BGRA tiles\n");
+    fprintf(stderr, "      --vnc-compression-quality Q  JPEG quality 1-100 (default: 80)\n");
+    fprintf(stderr, "      --vnc-always-full          Disable delta, send full frame every time\n");
+    fprintf(stderr, "      --vnc-use-h264             Use H.264 encoder instead of JPEG (requires openh264)\n");
+    fprintf(stderr, "      --vnc-merge-rects          Merge adjacent dirty tiles into bigger rectangles\n");
+    fprintf(stderr, "      --vnc-h264-bitrate BPS     H.264 target bitrate in bps (default: auto-scales with resolution)\n");
+    fprintf(stderr, "      --vnc-h264-framerate FPS   H.264 encode framerate (default: 30)\n");
+    fprintf(stderr, "      --vnc-h264-idr-interval N  Frames between H.264 keyframes (default: 60 — 2s at 30 fps)\n");
+    fprintf(stderr, "      --vnc-h264-screen-content 0|1  H.264 screen-content optimisation (default: 1)\n");
     fprintf(stderr, "      --rpc-host=HOST    RPC server host\n");
     fprintf(stderr, "  -r, --rpc-port=PORT    RPC server port\n");
     fprintf(stderr, "      --temu             Run in-process TinyEMU RISC-V VM\n");
@@ -137,6 +169,33 @@ static void parse_cmdline(int argc, char **argv, struct yetty_yconfig *config)
             break;
         case 'C':
             config->ops->set_string(config, "vnc/client", optarg);
+            break;
+        case OPT_VNC_RAW:
+            config->ops->set_string(config, "vnc/raw", "true");
+            break;
+        case OPT_VNC_COMPRESSION_QUALITY:
+            config->ops->set_string(config, "vnc/compression-quality", optarg);
+            break;
+        case OPT_VNC_ALWAYS_FULL:
+            config->ops->set_string(config, "vnc/always-full", "true");
+            break;
+        case OPT_VNC_USE_H264:
+            config->ops->set_string(config, "vnc/use-h264", "true");
+            break;
+        case OPT_VNC_MERGE_RECTS:
+            config->ops->set_string(config, "vnc/merge-rects", "true");
+            break;
+        case OPT_VNC_H264_BITRATE:
+            config->ops->set_string(config, "vnc/h264/bitrate", optarg);
+            break;
+        case OPT_VNC_H264_FRAMERATE:
+            config->ops->set_string(config, "vnc/h264/framerate", optarg);
+            break;
+        case OPT_VNC_H264_IDR_INTERVAL:
+            config->ops->set_string(config, "vnc/h264/idr-interval", optarg);
+            break;
+        case OPT_VNC_H264_SCREEN_CONTENT:
+            config->ops->set_string(config, "vnc/h264/screen-content", optarg);
             break;
         case 'r':
             /* rpc-port already handled by yetty_yconfig_create */
@@ -319,7 +378,7 @@ int main(int argc, char **argv)
     /* Yetty */
     struct yetty_yetty_result yetty_result = yetty_create(&app_context);
     if (!YETTY_IS_OK(yetty_result)) {
-        fprintf(stderr, "Failed to create Yetty\n");
+        yerror("Failed to create Yetty: %s", yetty_result.error.msg);
         /* Note: yetty_destroy already released surface if it was configured */
         wgpuInstanceRelease(instance);
         pty_factory->ops->destroy(pty_factory);

@@ -36,8 +36,8 @@ option(YETTY_ENABLE_LIB_CDB         "cdb — constant database"               OF
 # Media / codecs
 option(YETTY_ENABLE_LIB_LIBJPEG_TURBO "libjpeg-turbo — JPEG support"       ON)
 option(YETTY_ENABLE_LIB_DAV1D       "dav1d — AV1 decoder"                   OFF)
-option(YETTY_ENABLE_LIB_OPENH264    "openh264 — H.264 codec"                OFF)
-option(YETTY_ENABLE_LIB_MINIMP4     "minimp4 — MP4 container"               OFF)
+set(YETTY_ENABLE_LIB_OPENH264 ON CACHE BOOL "openh264 — H.264 codec" FORCE)
+set(YETTY_ENABLE_LIB_MINIMP4  ON CACHE BOOL "minimp4 — MP4 container" FORCE)
 
 # Misc
 option(YETTY_ENABLE_LIB_TREESITTER  "tree-sitter — source code parsing"     ON)

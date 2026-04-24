@@ -237,7 +237,7 @@ static struct yetty_ycore_int_result vnc_viewer_view_on_event(
 		yetty_vnc_client_send_mouse_move(viewer->client,
 						 (int16_t)rel_x,
 						 (int16_t)rel_y,
-						 0);
+						 (uint8_t)event->mouse.mods);
 		return YETTY_OK(yetty_ycore_int, 1);
 
 	case YETTY_EVENT_MOUSE_DOWN:
@@ -247,7 +247,8 @@ static struct yetty_ycore_int_result vnc_viewer_view_on_event(
 						   (int16_t)rel_x,
 						   (int16_t)rel_y,
 						   (uint8_t)event->mouse.button,
-						   1, 0);
+						   1,
+						   (uint8_t)event->mouse.mods);
 		return YETTY_OK(yetty_ycore_int, 1);
 
 	case YETTY_EVENT_MOUSE_UP:
@@ -257,7 +258,8 @@ static struct yetty_ycore_int_result vnc_viewer_view_on_event(
 						   (int16_t)rel_x,
 						   (int16_t)rel_y,
 						   (uint8_t)event->mouse.button,
-						   0, 0);
+						   0,
+						   (uint8_t)event->mouse.mods);
 		return YETTY_OK(yetty_ycore_int, 1);
 
 	case YETTY_EVENT_SCROLL:
@@ -268,7 +270,7 @@ static struct yetty_ycore_int_result vnc_viewer_view_on_event(
 						   (int16_t)rel_y,
 						   (int16_t)event->scroll.dx,
 						   (int16_t)event->scroll.dy,
-						   0);
+						   (uint8_t)event->scroll.mods);
 		return YETTY_OK(yetty_ycore_int, 1);
 
 	default:
