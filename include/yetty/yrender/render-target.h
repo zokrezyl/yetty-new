@@ -91,6 +91,12 @@ struct yetty_yrender_target_ops {
 	 * responsible for asking for a catch-up render once it's free again.
 	 * NULL means "always ready". */
 	bool (*is_busy)(const struct yetty_yrender_target *self);
+
+	/* Called when the render loop skipped a pipeline because is_busy() was
+	 * true. The target must remember to fire a catch-up render once it
+	 * becomes idle — without this the skip is silent and the display
+	 * lags behind by one event. NULL iff is_busy is NULL. */
+	void (*notify_render_skipped)(struct yetty_yrender_target *self);
 };
 
 /* Render target base - embed as first member in subclasses */

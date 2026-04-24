@@ -497,6 +497,13 @@ bool yetty_yrender_utils_tile_diff_engine_is_busy(
     return eng && eng->submit_in_flight;
 }
 
+void yetty_yrender_utils_tile_diff_engine_mark_redraw_pending(
+    struct yetty_yrender_utils_tile_diff_engine *eng)
+{
+    if (eng)
+        eng->redraw_pending = true;
+}
+
 void yetty_yrender_utils_tile_diff_engine_set_always_full(
     struct yetty_yrender_utils_tile_diff_engine *eng, bool on)
 {

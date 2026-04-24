@@ -325,6 +325,12 @@ static bool x11_tile_is_busy(const struct yetty_yrender_target *self)
     return yetty_yrender_utils_tile_diff_engine_is_busy(rt->diff_engine);
 }
 
+static void x11_tile_notify_render_skipped(struct yetty_yrender_target *self)
+{
+    struct render_target_x11_tile *rt = (struct render_target_x11_tile *)self;
+    yetty_yrender_utils_tile_diff_engine_mark_redraw_pending(rt->diff_engine);
+}
+
 static struct yetty_ycore_void_result
 x11_tile_present(struct yetty_yrender_target *self)
 {
@@ -374,6 +380,7 @@ static const struct yetty_yrender_target_ops x11_tile_ops = {
     .set_visual_zoom = x11_tile_set_visual_zoom,
     .refresh_full = x11_tile_refresh_full,
     .is_busy = x11_tile_is_busy,
+    .notify_render_skipped = x11_tile_notify_render_skipped,
 };
 
 /*=============================================================================

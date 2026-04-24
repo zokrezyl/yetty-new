@@ -139,10 +139,15 @@ static struct yetty_ycore_int_result yetty_event_handler(
          * (x11-tile, vnc with a pending wire send), skip the entire
          * pipeline — running workspace_render now would submit GPU work
          * that feeds a present() we'd just drop, starving the driver of
-         * handles (NVIDIA fd exhaustion during bursty scroll). The target
-         * fires a catch-up render via on_idle once it's free again. */
+         * handles (NVIDIA fd exhaustion during bursty scroll). Tell the
+         * target we skipped so it knows to fire a catch-up render via
+         * on_idle once it's free again — otherwise the skip is silent and
+         * the display stays one event behind (visible as the "one-char
+         * delay" in nvim bursts). */
         if (yetty->render_target->ops->is_busy &&
             yetty->render_target->ops->is_busy(yetty->render_target)) {
+            if (yetty->render_target->ops->notify_render_skipped)
+                yetty->render_target->ops->notify_render_skipped(yetty->render_target);
             ydebug("yetty: RENDER skipped (target busy)");
             return YETTY_OK(yetty_ycore_int, 1);
         }

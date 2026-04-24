@@ -82,6 +82,14 @@ void yetty_yrender_utils_tile_diff_engine_force_full(
 bool yetty_yrender_utils_tile_diff_engine_is_busy(
     const struct yetty_yrender_utils_tile_diff_engine *eng);
 
+/* Record that a render was skipped above the engine (no submit was even
+ * attempted) so the engine still fires its on_idle catch-up when the
+ * current coroutine completes. Without this, a gate that bypasses
+ * engine_submit while busy would miss the "someone wanted a redraw"
+ * signal — manifesting as a one-character input lag in bursty flows. */
+void yetty_yrender_utils_tile_diff_engine_mark_redraw_pending(
+    struct yetty_yrender_utils_tile_diff_engine *eng);
+
 /* Force every submit to report all tiles dirty. Useful for testing/debug. */
 void yetty_yrender_utils_tile_diff_engine_set_always_full(
     struct yetty_yrender_utils_tile_diff_engine *eng, bool on);
