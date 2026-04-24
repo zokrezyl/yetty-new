@@ -239,11 +239,116 @@ void yetty_ypaint_core_buffer_set_scene_bounds(struct yetty_ypaint_core_buffer *
   buf->scene_max_y = max_y;
 }
 
-/* Little helpers for packing the framed wire format (mirror of the _read_*
- * readers above). Caller sizes the buffer up front and hands in `*p`. */
-static void _write_u32(uint8_t **p, uint32_t v) { memcpy(*p, &v, 4); *p += 4; }
-static void _write_i32(uint8_t **p, int32_t v)  { memcpy(*p, &v, 4); *p += 4; }
-static void _write_f32(uint8_t **p, float v)    { memcpy(*p, &v, 4); *p += 4; }
+/* Shared emitter for the framed wire format. Both _serialize (writes raw
+ * bytes into the reusable scratch) and _to_base64 (streams base64 chars
+ * directly into a caller-sized output, no intermediate blob) feed their
+ * sinks through this. Mirror of parse_framed_payload — layouts must stay
+ * in sync. */
+typedef void (*ypaint_emit_fn)(const void *data, size_t size, void *ctx);
+
+static size_t ypaint_framed_size(const struct yetty_ypaint_core_buffer *buf) {
+  size_t need = 4 + 16 + 4 + buf->primitives.buf.size + 4;
+  for (uint32_t i = 0; i < buf->text_span_count; i++) {
+    /* x,y,font_size,rotation,color,layer,font_id,text_len + payload */
+    need += 4 * 7 + 4 + buf->text_spans[i].named_buf.buf.size;
+  }
+  return need;
+}
+
+static void ypaint_framed_emit(const struct yetty_ypaint_core_buffer *buf,
+                                ypaint_emit_fn emit, void *ctx) {
+  uint32_t u;
+  u = YPAINT_SERIAL_MAGIC;           emit(&u, 4, ctx);
+  emit(&buf->scene_min_x, 4, ctx);
+  emit(&buf->scene_min_y, 4, ctx);
+  emit(&buf->scene_max_x, 4, ctx);
+  emit(&buf->scene_max_y, 4, ctx);
+  u = (uint32_t)buf->primitives.buf.size;
+  emit(&u, 4, ctx);
+  if (buf->primitives.buf.size > 0)
+    emit(buf->primitives.buf.data, buf->primitives.buf.size, ctx);
+  u = buf->text_span_count;
+  emit(&u, 4, ctx);
+  for (uint32_t i = 0; i < buf->text_span_count; i++) {
+    const struct yetty_text_span *ts = &buf->text_spans[i];
+    emit(&ts->x, 4, ctx);
+    emit(&ts->y, 4, ctx);
+    emit(&ts->font_size, 4, ctx);
+    emit(&ts->rotation, 4, ctx);
+    uint32_t color = (uint32_t)ts->color.r
+                   | ((uint32_t)ts->color.g << 8)
+                   | ((uint32_t)ts->color.b << 16)
+                   | ((uint32_t)ts->color.a << 24);
+    emit(&color, 4, ctx);
+    emit(&ts->layer, 4, ctx);
+    emit(&ts->font_id, 4, ctx);
+    uint32_t tl = (uint32_t)ts->named_buf.buf.size;
+    emit(&tl, 4, ctx);
+    if (tl > 0)
+      emit(ts->named_buf.buf.data, tl, ctx);
+  }
+}
+
+/* Sink 1: raw bytes, advancing a write cursor. */
+struct ypaint_raw_sink { uint8_t *p; };
+static void ypaint_raw_emit(const void *data, size_t size, void *ctx) {
+  struct ypaint_raw_sink *s = ctx;
+  memcpy(s->p, data, size);
+  s->p += size;
+}
+
+/* Sink 2: streaming base64 — 3-byte rolling window, 4 chars at a time. */
+static const char YPAINT_B64_ALPHABET[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+struct ypaint_b64_sink {
+  char   *out;
+  size_t  olen;
+  uint8_t window[3];
+  int     wc;        /* 0..3 bytes currently buffered in `window` */
+};
+
+static inline void ypaint_b64_flush_triple(struct ypaint_b64_sink *s) {
+  uint32_t t = ((uint32_t)s->window[0] << 16)
+             | ((uint32_t)s->window[1] <<  8)
+             |  (uint32_t)s->window[2];
+  s->out[s->olen++] = YPAINT_B64_ALPHABET[(t >> 18) & 0x3F];
+  s->out[s->olen++] = YPAINT_B64_ALPHABET[(t >> 12) & 0x3F];
+  s->out[s->olen++] = YPAINT_B64_ALPHABET[(t >>  6) & 0x3F];
+  s->out[s->olen++] = YPAINT_B64_ALPHABET[ t        & 0x3F];
+  s->wc = 0;
+}
+
+static void ypaint_b64_emit(const void *data, size_t size, void *ctx) {
+  struct ypaint_b64_sink *s = ctx;
+  const uint8_t *p = data;
+  while (size > 0) {
+    while (s->wc < 3 && size > 0) {
+      s->window[s->wc++] = *p++;
+      size--;
+    }
+    if (s->wc == 3)
+      ypaint_b64_flush_triple(s);
+  }
+}
+
+static void ypaint_b64_finalize(struct ypaint_b64_sink *s) {
+  if (s->wc == 1) {
+    uint32_t t = (uint32_t)s->window[0] << 16;
+    s->out[s->olen++] = YPAINT_B64_ALPHABET[(t >> 18) & 0x3F];
+    s->out[s->olen++] = YPAINT_B64_ALPHABET[(t >> 12) & 0x3F];
+    s->out[s->olen++] = '=';
+    s->out[s->olen++] = '=';
+  } else if (s->wc == 2) {
+    uint32_t t = ((uint32_t)s->window[0] << 16)
+               | ((uint32_t)s->window[1] <<  8);
+    s->out[s->olen++] = YPAINT_B64_ALPHABET[(t >> 18) & 0x3F];
+    s->out[s->olen++] = YPAINT_B64_ALPHABET[(t >> 12) & 0x3F];
+    s->out[s->olen++] = YPAINT_B64_ALPHABET[(t >>  6) & 0x3F];
+    s->out[s->olen++] = '=';
+  }
+  s->out[s->olen] = '\0';
+}
 
 size_t yetty_ypaint_core_buffer_serialize(
     struct yetty_ypaint_core_buffer *buf, const uint8_t **out_data) {
@@ -252,18 +357,7 @@ size_t yetty_ypaint_core_buffer_serialize(
     return 0;
   }
 
-  /* Compute required size. See parse_framed_payload for the layout; must
-   * stay in sync with it. */
-  size_t need =
-      4                              /* magic */
-    + 16                             /* scene bounds */
-    + 4                              /* prim_size */
-    + buf->primitives.buf.size
-    + 4;                             /* text_span_count */
-  for (uint32_t i = 0; i < buf->text_span_count; i++) {
-    /* x,y,font_size,rotation,color,layer,font_id,text_len + payload */
-    need += 4 * 7 + 4 + buf->text_spans[i].named_buf.buf.size;
-  }
+  size_t need = ypaint_framed_size(buf);
 
   if (buf->serial_cap < need) {
     uint8_t *np = realloc(buf->serial_data, need);
@@ -275,41 +369,36 @@ size_t yetty_ypaint_core_buffer_serialize(
     buf->serial_cap = need;
   }
 
-  uint8_t *p = buf->serial_data;
-  _write_u32(&p, YPAINT_SERIAL_MAGIC);
-  _write_f32(&p, buf->scene_min_x);
-  _write_f32(&p, buf->scene_min_y);
-  _write_f32(&p, buf->scene_max_x);
-  _write_f32(&p, buf->scene_max_y);
-  _write_u32(&p, (uint32_t)buf->primitives.buf.size);
-  if (buf->primitives.buf.size > 0) {
-    memcpy(p, buf->primitives.buf.data, buf->primitives.buf.size);
-    p += buf->primitives.buf.size;
-  }
-  _write_u32(&p, buf->text_span_count);
-  for (uint32_t i = 0; i < buf->text_span_count; i++) {
-    const struct yetty_text_span *ts = &buf->text_spans[i];
-    _write_f32(&p, ts->x);
-    _write_f32(&p, ts->y);
-    _write_f32(&p, ts->font_size);
-    _write_f32(&p, ts->rotation);
-    uint32_t color = (uint32_t)ts->color.r
-                   | ((uint32_t)ts->color.g << 8)
-                   | ((uint32_t)ts->color.b << 16)
-                   | ((uint32_t)ts->color.a << 24);
-    _write_u32(&p, color);
-    _write_u32(&p, ts->layer);
-    _write_i32(&p, ts->font_id);
-    uint32_t tl = (uint32_t)ts->named_buf.buf.size;
-    _write_u32(&p, tl);
-    if (tl > 0) {
-      memcpy(p, ts->named_buf.buf.data, tl);
-      p += tl;
-    }
-  }
+  struct ypaint_raw_sink sink = { .p = buf->serial_data };
+  ypaint_framed_emit(buf, ypaint_raw_emit, &sink);
 
   *out_data = buf->serial_data;
-  return (size_t)(p - buf->serial_data);
+  return need;
+}
+
+/* Single-pass, single-allocation base64 of the framed wire format. Writes
+ * base64 chars directly into the output as the framed fields are produced
+ * — no intermediate raw blob, no double copy. */
+struct yetty_ycore_buffer_result yetty_ypaint_core_buffer_to_base64(
+    const struct yetty_ypaint_core_buffer *buf) {
+  if (!buf)
+    return YETTY_ERR(yetty_ycore_buffer, "buf is NULL");
+
+  size_t need = ypaint_framed_size(buf);
+  size_t cap = ((need + 2) / 3) * 4 + 1;  /* base64 len + NUL */
+  char *out = malloc(cap);
+  if (!out)
+    return YETTY_ERR(yetty_ycore_buffer, "malloc failed");
+
+  struct ypaint_b64_sink sink = { .out = out, .olen = 0, .wc = 0 };
+  ypaint_framed_emit(buf, ypaint_b64_emit, &sink);
+  ypaint_b64_finalize(&sink);
+
+  struct yetty_ycore_buffer b = {0};
+  b.data = (uint8_t *)out;
+  b.size = sink.olen;
+  b.capacity = cap;
+  return YETTY_OK(yetty_ycore_buffer, b);
 }
 
 const struct yetty_ycore_buffer *
