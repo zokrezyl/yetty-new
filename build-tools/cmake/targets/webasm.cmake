@@ -8,11 +8,6 @@ set(YETTY_ENABLE_LIB_LIBCO OFF CACHE BOOL "" FORCE)
 
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
-# CDB font generation (builds host tools automatically)
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
-endif()
-
 # Copy runtime assets (fonts, etc.) to build directory
 if(YETTY_ENABLE_FEATURE_ASSETS)
     add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
@@ -60,10 +55,6 @@ if(YETTY_ENABLE_LIB_INCBIN)
         Logo "${YETTY_ROOT}/docs/logo.jpeg"
         DefaultConfig "${YETTY_ROOT}/assets/default-config.yaml"
     )
-endif()
-
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    add_dependencies(yetty generate-cdb)
 endif()
 
 if(YETTY_ENABLE_FEATURE_ASSETS)
@@ -132,10 +123,13 @@ if(YETTY_ENABLE_FEATURE_DEMO)
     )
 endif()
 
-# Remove stamp file that can cause issues with Emscripten file packaging
+# Remove stamp files that can cause issues with Emscripten file packaging
 add_custom_command(TARGET yetty PRE_LINK
-    COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_BINARY_DIR}/assets/msdf-fonts/.cdb_generated
-    COMMENT "Removing CDB stamp file before linking"
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+        ${CMAKE_BINARY_DIR}/assets/msdf-fonts/.cdb_generated
+        ${CMAKE_BINARY_DIR}/assets/msdf-fonts/.fetched
+        ${CMAKE_BINARY_DIR}/assets/msdf-fonts/.expanded
+    COMMENT "Removing asset stamp files before linking"
 )
 
 # Copy web files

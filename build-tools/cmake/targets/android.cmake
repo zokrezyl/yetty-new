@@ -80,11 +80,6 @@ target_link_libraries(yetty PRIVATE
     log
 )
 
-# CDB font generation (builds host tools for cross-compilation)
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
-endif()
-
 # Generate demo outputs (pre-run demo scripts to capture output for Android)
 if(YETTY_ENABLE_FEATURE_DEMO)
     message(STATUS "Generating demo outputs for Android...")
@@ -103,12 +98,12 @@ if(YETTY_ENABLE_FEATURE_ASSETS)
     file(COPY ${ASSET_FILES} DESTINATION ${ANDROID_ASSETS_DIR})
 endif()
 
-# Ensure CDB, shaders, and assets are built before yetty
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    add_dependencies(yetty generate-cdb copy-shaders copy-shaders-for-incbin copy-fonts-for-incbin)
+# Ensure shaders and assets are built before yetty
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_dependencies(yetty copy-shaders copy-shaders-for-incbin copy-fonts-for-incbin)
 endif()
 
-# Copy generated CDB fonts to Android assets dir after build
+# Copy prebuilt CDB fonts to Android assets dir after build
 if(YETTY_ENABLE_FEATURE_CDB_GEN)
     add_custom_command(TARGET yetty POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/assets/msdf-fonts ${ANDROID_ASSETS_DIR}/msdf-fonts

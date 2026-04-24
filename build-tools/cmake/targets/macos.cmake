@@ -80,11 +80,6 @@ target_link_libraries(yetty PRIVATE
     ${COREFOUNDATION_LIBRARY}
 )
 
-# CDB font generation
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
-endif()
-
 # Copy runtime assets to build directory
 if(YETTY_ENABLE_FEATURE_ASSETS)
     add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
@@ -93,9 +88,6 @@ endif()
 # Ensure all runtime assets are in build output before yetty
 if(YETTY_ENABLE_FEATURE_ASSETS)
     add_dependencies(yetty copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
-endif()
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    add_dependencies(yetty generate-cdb)
 endif()
 
 # Verify all required assets are present

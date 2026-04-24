@@ -24,18 +24,9 @@ if(YETTY_ENABLE_LIB_TINYEMU)
     include(${YETTY_ROOT}/build-tools/cmake/tinyemu-runtime.cmake)
 endif()
 
-# Shared RISC-V runtime: OpenSBI firmware, Linux kernel, Alpine rootfs.
-# Needed by either --temu (TinyEMU) or --qemu (external QEMU via telnet).
-if(YETTY_ENABLE_LIB_TINYEMU OR YETTY_ENABLE_LIB_QEMU)
-    include(${YETTY_ROOT}/build-tools/cmake/opensbi.cmake)
-    include(${YETTY_ROOT}/build-tools/cmake/linux-kernel.cmake)
-    include(${YETTY_ROOT}/build-tools/cmake/alpine-rootfs.cmake)
-endif()
-
-# QEMU - external RISC-V emulator (accessed via telnet) for --qemu flag
-if(YETTY_ENABLE_LIB_QEMU)
-    include(${YETTY_ROOT}/build-tools/cmake/qemu.cmake)
-endif()
+# The shared RISC-V runtime (OpenSBI firmware, Linux kernel, Alpine rootfs)
+# and the QEMU binary are now fetched as prebuilt release assets from
+# shared.cmake via assets-fetch.cmake — no local toolchain build here.
 
 # Desktop-specific subdirectories
 if(YETTY_ENABLE_FEATURE_GPU)
@@ -88,23 +79,9 @@ add_executable(yetty
 
 target_include_directories(yetty PRIVATE ${YETTY_INCLUDES} ${YETTY_RENDERER_INCLUDES} ${JPEG_INCLUDE_DIRS} ${BROTLI_INCLUDE_DIR})
 
-# Build shared RISC-V runtime (OpenSBI, Linux kernel, Alpine rootfs) BEFORE
-# embedding assets. These live in ${CMAKE_BINARY_DIR}/assets/yemu and are
-# shared between --temu and --qemu modes. The .cfg is created at runtime in
-# the user config dir (see tinyemu-pty.c), not here.
-if(YETTY_ENABLE_LIB_TINYEMU OR YETTY_ENABLE_LIB_QEMU)
-    opensbi_build()
-    linux_kernel_build()
-    alpine_rootfs_download()
-    alpine_rootfs_create_image()
-endif()
-
-# QEMU: Build at configure time BEFORE embedding assets
-if(YETTY_ENABLE_LIB_QEMU)
-    qemu_build()
-endif()
-
-# Embed all assets (logo, shaders, fonts, CDB files, TinyEMU)
+# Embed all assets (logo, shaders, fonts, CDB files, TinyEMU).
+# Shared RISC-V runtime (OpenSBI, kernel, Alpine rootfs) and QEMU binary have
+# already been fetched at configure time in shared.cmake.
 yetty_embed_assets(yetty)
 
 # Dummy targets for dependency tracking (legacy)
@@ -162,11 +139,6 @@ target_link_libraries(yetty PRIVATE
     util
 )
 
-# CDB font generation
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
-endif()
-
 # Copy runtime assets to build directory
 if(YETTY_ENABLE_FEATURE_ASSETS)
     add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
@@ -175,9 +147,6 @@ endif()
 # Ensure all runtime assets are in build output before yetty
 if(YETTY_ENABLE_FEATURE_ASSETS)
     add_dependencies(yetty copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
-endif()
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    add_dependencies(yetty generate-cdb)
 endif()
 
 # Verify all required assets are present

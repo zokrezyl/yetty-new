@@ -92,11 +92,6 @@ target_link_libraries(yetty PRIVATE
 # Copy TinyEMU runtime files (RISC-V disk images) to app bundle
 tinyemu_copy_runtime_to_bundle(yetty)
 
-# CDB font generation (builds host tools for cross-compilation)
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
-endif()
-
 # Generate demo outputs (pre-run demo scripts to capture output for iOS)
 if(YETTY_ENABLE_FEATURE_DEMO)
     message(STATUS "Generating demo outputs for iOS...")
@@ -115,12 +110,12 @@ if(YETTY_ENABLE_FEATURE_ASSETS)
     file(COPY ${ASSET_FILES} DESTINATION ${IOS_ASSETS_DIR})
 endif()
 
-# Ensure CDB, shaders, and assets are built before yetty
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    add_dependencies(yetty generate-cdb copy-shaders copy-shaders-for-incbin copy-fonts-for-incbin)
+# Ensure shaders and assets are built before yetty
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_dependencies(yetty copy-shaders copy-shaders-for-incbin copy-fonts-for-incbin)
 endif()
 
-# Copy generated CDB fonts and shaders to iOS assets dir after build
+# Copy prebuilt CDB fonts and shaders to iOS assets dir after build
 if(YETTY_ENABLE_FEATURE_CDB_GEN)
     add_custom_command(TARGET yetty POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/assets/msdf-fonts ${IOS_ASSETS_DIR}/msdf-fonts

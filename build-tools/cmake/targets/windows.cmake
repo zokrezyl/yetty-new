@@ -76,19 +76,14 @@ target_link_libraries(yetty PRIVATE
     ws2_32
 )
 
-# CDB font generation
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    include(${YETTY_ROOT}/build-tools/cmake/cdb-gen.cmake)
-endif()
-
 # Copy runtime assets to build directory
 if(YETTY_ENABLE_FEATURE_ASSETS)
     add_subdirectory(${YETTY_ROOT}/assets ${CMAKE_BINARY_DIR}/assets-build)
 endif()
 
 # Ensure all runtime assets are in build output before yetty
-if(YETTY_ENABLE_FEATURE_CDB_GEN AND YETTY_ENABLE_FEATURE_ASSETS)
-    add_dependencies(yetty generate-cdb copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
+if(YETTY_ENABLE_FEATURE_ASSETS)
+    add_dependencies(yetty copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
 endif()
 
 # Copy DirectX runtime DLLs needed by Dawn (shader compiler + DXIL signing)

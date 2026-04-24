@@ -96,6 +96,12 @@ source "$PLATFORM_SCRIPT"
 
 _CONFIGURE_ARGS+=(--extra-ldflags="$_EXTRA_LDFLAGS")
 
+# Force the bundled slirp meson subproject to a static library so libslirp
+# is linked into the qemu binary; otherwise qemu ends up with
+# RUNPATH=$ORIGIN/subprojects/slirp and a separate libslirp.so.0 to ship.
+# QEMU's configure forwards -D<opt>=<val> to meson.
+_CONFIGURE_ARGS+=(-Dslirp:default_library=static)
+
 #-----------------------------------------------------------------------------
 # Configure + build
 #-----------------------------------------------------------------------------
