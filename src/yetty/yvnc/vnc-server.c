@@ -885,6 +885,19 @@ static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
 }
 
 /*
+ * Invoked by the tile-diff engine on the loop thread after a submit has
+ * completed and at least one subsequent submit was dropped for back-
+ * pressure. Requests another render so the engine can catch up with the
+ * latest render-target texture content.
+ */
+static void vnc_on_engine_idle(void *ctx)
+{
+	struct yetty_vnc_server *server = ctx;
+	if (server && server->event_loop && server->event_loop->ops->request_render)
+		server->event_loop->ops->request_render(server->event_loop);
+}
+
+/*
  * Sink callback invoked by the tile-diff engine once the GPU diff + readback
  * have completed. `frame->pixels` is a row-aligned mapped range that's only
  * valid until this function returns, so we pack it into gpu_readback_pixels
@@ -960,6 +973,16 @@ yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 		if (!YETTY_IS_OK(eng_res))
 			return YETTY_ERR(yetty_ycore_void, eng_res.error.msg);
 		server->diff_engine = eng_res.value;
+
+		/* Engine back-pressure: if a second submit arrives while the first
+		 * is still reading back, it's dropped to avoid racing on the shared
+		 * GPU buffers. The engine fires this callback on the loop thread
+		 * once it's idle; we ask for another render so the catch-up frame
+		 * ships. Without this, a burst of terminal output (nvim initial
+		 * draw, `find /nix` storm) would stall visibly until the next
+		 * unrelated event nudged the render loop. */
+		yetty_yrender_utils_tile_diff_engine_set_on_idle(
+			server->diff_engine, vnc_on_engine_idle, server);
 	}
 
 	/* Propagate VNC-level full-frame requests (e.g. new client) to the

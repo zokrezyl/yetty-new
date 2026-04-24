@@ -31,6 +31,7 @@ extern "C" {
 
 struct yplatform_wgpu;
 struct yetty_yrender_gpu_allocator;
+struct yetty_ycore_event_loop;
 
 /*
  * Create the X11-tile render target.
@@ -38,6 +39,10 @@ struct yetty_yrender_gpu_allocator;
  * `x11_display` is an opaque `Display *` (void* here to keep Xlib out of the
  * public header). `x11_window` is the X11 `Window` ID as an unsigned long.
  * Both must come from the platform layer (glfwGetX11Display/Window on GLFW).
+ *
+ * `event_loop` is used to schedule a catch-up render when a present() is
+ * dropped due to an in-flight readback (avoids the "one-character delay"
+ * symptom on bursty input like nvim's initial draw).
  *
  * Returns an error if XShm is unavailable or initial setup fails. Callers
  * should fall back to the regular texture target on failure.
@@ -48,6 +53,7 @@ yetty_yrender_target_x11_tile_create(WGPUDevice device,
                                      WGPUTextureFormat format,
                                      struct yetty_yrender_gpu_allocator *allocator,
                                      struct yplatform_wgpu *wgpu,
+                                     struct yetty_ycore_event_loop *event_loop,
                                      void *x11_display,
                                      unsigned long x11_window,
                                      struct yetty_yrender_viewport viewport);

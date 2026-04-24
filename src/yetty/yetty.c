@@ -135,6 +135,18 @@ static struct yetty_ycore_int_result yetty_event_handler(
             return YETTY_OK(yetty_ycore_int, 0);
         }
 
+        /* Back-pressure: if the target is still flushing an async readback
+         * (x11-tile, vnc with a pending wire send), skip the entire
+         * pipeline — running workspace_render now would submit GPU work
+         * that feeds a present() we'd just drop, starving the driver of
+         * handles (NVIDIA fd exhaustion during bursty scroll). The target
+         * fires a catch-up render via on_idle once it's free again. */
+        if (yetty->render_target->ops->is_busy &&
+            yetty->render_target->ops->is_busy(yetty->render_target)) {
+            ydebug("yetty: RENDER skipped (target busy)");
+            return YETTY_OK(yetty_ycore_int, 1);
+        }
+
         ydebug("yetty: RENDER event - calling workspace render");
 
         ytime_start(full_frame);
@@ -964,6 +976,7 @@ static struct yetty_ycore_void_result init_webgpu(struct yetty_yetty *yetty)
             yetty->surface_format,
             alloc_res.value,
             yetty->wgpu,
+            yetty->event_loop,
             yetty->context.app_context.app_gpu_context.x11_display,
             yetty->context.app_context.app_gpu_context.x11_window,
             vp);

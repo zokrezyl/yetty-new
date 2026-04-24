@@ -75,9 +75,40 @@ void yetty_yrender_utils_tile_diff_engine_destroy(
 void yetty_yrender_utils_tile_diff_engine_force_full(
     struct yetty_yrender_utils_tile_diff_engine *eng);
 
+/* True while a submit coroutine is still in flight (GPU readback pending).
+ * Callers use this to short-circuit their whole render pipeline on bursty
+ * output: running layer renders that feed a submit we'd just drop is pure
+ * GPU-handle waste and can starve the NVIDIA driver of file descriptors. */
+bool yetty_yrender_utils_tile_diff_engine_is_busy(
+    const struct yetty_yrender_utils_tile_diff_engine *eng);
+
 /* Force every submit to report all tiles dirty. Useful for testing/debug. */
 void yetty_yrender_utils_tile_diff_engine_set_always_full(
     struct yetty_yrender_utils_tile_diff_engine *eng, bool on);
+
+/*
+ * Install a callback invoked on the loop thread after a submit completes IF
+ * at least one submit was dropped while the engine was busy. The caller is
+ * expected to request a fresh render so the engine can catch up to the
+ * latest texture content.
+ *
+ * Why it exists: engine_submit is asynchronous — the actual readback + sink
+ * run via a coroutine that yields on GPU map_await. If `submit` is called
+ * again while a prior submit is still in flight, the second call is dropped
+ * (allowing a second concurrent readback would race on the shared buffers
+ * and blow up the GPU driver's handle accounting). The dropped call used
+ * to manifest as a "one-character delay" in nvim: the first render put the
+ * texture on-screen, the second render updated the texture but its submit
+ * was dropped, and the user only saw it after yet another input triggered
+ * a third render. With this callback, engines fire a catch-up render on
+ * their own as soon as they're idle again.
+ *
+ * Pass NULL/NULL to clear.
+ */
+typedef void (*yetty_yrender_utils_tile_diff_on_idle_fn)(void *ctx);
+void yetty_yrender_utils_tile_diff_engine_set_on_idle(
+    struct yetty_yrender_utils_tile_diff_engine *eng,
+    yetty_yrender_utils_tile_diff_on_idle_fn fn, void *ctx);
 
 /*
  * Submit a texture for diffing + readback.

@@ -84,6 +84,16 @@ struct yetty_yrender_utils_tile_diff_engine {
     bool prev_has_content;
     bool force_full_frame;
     bool always_full_frame;
+
+    /* Backpressure: at most one submit coroutine in flight at a time. A
+     * second submit while busy is dropped and `redraw_pending` is set. When
+     * the in-flight coro finishes, it fires `on_idle_fn` so the owner can
+     * request a catch-up render (which will produce the latest texture
+     * content). */
+    bool submit_in_flight;
+    bool redraw_pending;
+    yetty_yrender_utils_tile_diff_on_idle_fn on_idle_fn;
+    void *on_idle_ctx;
 };
 
 /* Per-submit coroutine args. Freed inside the coro. */
@@ -238,6 +248,18 @@ ensure_resources(struct yetty_yrender_utils_tile_diff_engine *eng,
  * awaits, yields through yplatform_wgpu_buffer_map_await, then calls the
  * sink and unmaps.
  */
+/* Clear the in-flight flag and fire the on_idle callback if someone asked
+ * for a redraw while we were busy. Always called before the coro returns,
+ * regardless of which path (success or early-return) we took. */
+static void submit_coro_finish(struct yetty_yrender_utils_tile_diff_engine *eng)
+{
+    eng->submit_in_flight = false;
+    bool fire = eng->redraw_pending;
+    eng->redraw_pending = false;
+    if (fire && eng->on_idle_fn)
+        eng->on_idle_fn(eng->on_idle_ctx);
+}
+
 static void submit_coro_entry(void *arg)
 {
     struct submit_args *args = arg;
@@ -252,6 +274,7 @@ static void submit_coro_entry(void *arg)
     struct yetty_ycore_void_result res = ensure_resources(eng, width, height);
     if (!YETTY_IS_OK(res)) {
         ywarn("tile_diff: ensure_resources failed: %s", res.error.msg);
+        submit_coro_finish(eng);
         return;
     }
 
@@ -366,6 +389,7 @@ static void submit_coro_entry(void *arg)
             0, num_tiles * sizeof(uint32_t));
         if (!YETTY_IS_OK(res)) {
             ywarn("tile_diff: flags map failed: %s", res.error.msg);
+            submit_coro_finish(eng);
             return;
         }
         const uint32_t *flags = wgpuBufferGetConstMappedRange(
@@ -380,6 +404,7 @@ static void submit_coro_entry(void *arg)
         eng->tile_readback_buffer, WGPUMapMode_Read, 0, full_buf_size);
     if (!YETTY_IS_OK(res)) {
         ywarn("tile_diff: pixels map failed: %s", res.error.msg);
+        submit_coro_finish(eng);
         return;
     }
 
@@ -409,6 +434,8 @@ static void submit_coro_entry(void *arg)
         sink_fn(sink_ctx, &frame);
 
     wgpuBufferUnmap(eng->tile_readback_buffer);
+
+    submit_coro_finish(eng);
 }
 
 struct yetty_yrender_utils_tile_diff_engine_ptr_result
@@ -464,11 +491,27 @@ void yetty_yrender_utils_tile_diff_engine_force_full(
         eng->force_full_frame = true;
 }
 
+bool yetty_yrender_utils_tile_diff_engine_is_busy(
+    const struct yetty_yrender_utils_tile_diff_engine *eng)
+{
+    return eng && eng->submit_in_flight;
+}
+
 void yetty_yrender_utils_tile_diff_engine_set_always_full(
     struct yetty_yrender_utils_tile_diff_engine *eng, bool on)
 {
     if (eng)
         eng->always_full_frame = on;
+}
+
+void yetty_yrender_utils_tile_diff_engine_set_on_idle(
+    struct yetty_yrender_utils_tile_diff_engine *eng,
+    yetty_yrender_utils_tile_diff_on_idle_fn fn, void *ctx)
+{
+    if (!eng)
+        return;
+    eng->on_idle_fn = fn;
+    eng->on_idle_ctx = ctx;
 }
 
 struct yetty_ycore_void_result
@@ -479,6 +522,17 @@ yetty_yrender_utils_tile_diff_engine_submit(
 {
     if (!eng || !texture || width == 0 || height == 0)
         return YETTY_ERR(yetty_ycore_void, "invalid arguments");
+
+    /* Backpressure: only one coroutine in flight. Concurrent submits would
+     * race on prev_texture / dirty_flags_buffer / tile_readback_buffer and
+     * leak driver-side handles (seen as "NVIDIA: Ran out of file
+     * descriptors" during bursty output). Drop the second call and remember
+     * that someone wanted a redraw; the on_idle hook fires one when the
+     * current submit lands. */
+    if (eng->submit_in_flight) {
+        eng->redraw_pending = true;
+        return YETTY_OK_VOID();
+    }
 
     struct submit_args *args = malloc(sizeof(*args));
     if (!args)
@@ -498,6 +552,7 @@ yetty_yrender_utils_tile_diff_engine_submit(
         return YETTY_ERR(yetty_ycore_void, "tile_diff coro spawn failed");
     }
 
+    eng->submit_in_flight = true;
     yplatform_coro_resume(coro_res.value);
     if (yplatform_coro_is_finished(coro_res.value))
         yplatform_coro_destroy(coro_res.value);

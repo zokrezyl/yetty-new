@@ -12,6 +12,7 @@
 
 #include <yetty/yrender/render-target-x11-tile.h>
 #include <yetty/yrender-utils/tile-diff.h>
+#include <yetty/ycore/event-loop.h>
 #include <yetty/ytrace.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -32,6 +33,10 @@ struct render_target_x11_tile {
 
     /* Tile-diff engine (shared with other potential sinks). */
     struct yetty_yrender_utils_tile_diff_engine *diff_engine;
+
+    /* Event loop — used only to post a catch-up render after a dropped
+     * present() (see on_engine_idle). */
+    struct yetty_ycore_event_loop *event_loop;
 
     /* X11 state. */
     Display *display;
@@ -302,6 +307,24 @@ static void x11_tile_refresh_full(struct yetty_yrender_target *self)
         yetty_yrender_utils_tile_diff_engine_force_full(rt->diff_engine);
 }
 
+/* Fired by the tile-diff engine on the loop thread when a submit lands and
+ * at least one subsequent submit had been dropped for back-pressure. We
+ * just kick a new render event — yetty's handler will re-run the pipeline
+ * and engine_submit will pick up the latest inner-texture content. */
+static void on_engine_idle(void *ctx)
+{
+    struct render_target_x11_tile *rt = ctx;
+    if (rt && rt->event_loop && rt->event_loop->ops->request_render)
+        rt->event_loop->ops->request_render(rt->event_loop);
+}
+
+static bool x11_tile_is_busy(const struct yetty_yrender_target *self)
+{
+    const struct render_target_x11_tile *rt =
+        (const struct render_target_x11_tile *)self;
+    return yetty_yrender_utils_tile_diff_engine_is_busy(rt->diff_engine);
+}
+
 static struct yetty_ycore_void_result
 x11_tile_present(struct yetty_yrender_target *self)
 {
@@ -350,6 +373,7 @@ static const struct yetty_yrender_target_ops x11_tile_ops = {
     .resize = x11_tile_resize,
     .set_visual_zoom = x11_tile_set_visual_zoom,
     .refresh_full = x11_tile_refresh_full,
+    .is_busy = x11_tile_is_busy,
 };
 
 /*=============================================================================
@@ -371,6 +395,7 @@ yetty_yrender_target_x11_tile_create(WGPUDevice device,
                                      WGPUTextureFormat format,
                                      struct yetty_yrender_gpu_allocator *allocator,
                                      struct yplatform_wgpu *wgpu,
+                                     struct yetty_ycore_event_loop *event_loop,
                                      void *x11_display,
                                      unsigned long x11_window,
                                      struct yetty_yrender_viewport viewport)
@@ -408,6 +433,7 @@ yetty_yrender_target_x11_tile_create(WGPUDevice device,
     rt->depth = attrs.depth;
     rt->xshm_available = 1;
     rt->tile_size = X11_TILE_SIZE;
+    rt->event_loop = event_loop;
 
     rt->gc = XCreateGC(display, rt->window, 0, NULL);
     if (!rt->gc) {
@@ -436,6 +462,9 @@ yetty_yrender_target_x11_tile_create(WGPUDevice device,
         return YETTY_ERR(yetty_yrender_target_ptr, eng_res.error.msg);
     }
     rt->diff_engine = eng_res.value;
+
+    yetty_yrender_utils_tile_diff_engine_set_on_idle(
+        rt->diff_engine, on_engine_idle, rt);
 
     yinfo("x11_tile: created %.0fx%.0f, depth=%d, tile=%u",
           viewport.w, viewport.h, rt->depth, rt->tile_size);
