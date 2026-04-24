@@ -1,0 +1,22 @@
+# yetty-ythorvg — CLI that renders SVG/Lottie into a ypaint buffer via the
+# ythorvg C interface and emits the result as a ypaint OSC sequence.
+
+add_executable(yetty-ythorvg
+    main.c
+    ${YETTY_ROOT}/src/yetty/yplatform/getopt.c
+    # ytrace stubs used by libraries we pull in (ypaint-core, ythorvg).
+    ${YETTY_ROOT}/src/yetty/ytrace.c
+    # Platform shims (ymutex_*, yplatform_*) needed by ytrace.
+    ${YETTY_YPLATFORM_THREAD_SOURCES}
+)
+
+target_include_directories(yetty-ythorvg PRIVATE
+    ${YETTY_ROOT}/include
+    ${YETTY_ROOT}/src
+)
+
+target_link_libraries(yetty-ythorvg PRIVATE
+    yetty_ythorvg
+    yetty_ypaint_core
+    yetty_ycore
+)

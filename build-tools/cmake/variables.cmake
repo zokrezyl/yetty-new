@@ -43,7 +43,7 @@ option(YETTY_ENABLE_LIB_MINIMP4     "minimp4 — MP4 container"               OF
 option(YETTY_ENABLE_LIB_TREESITTER  "tree-sitter — source code parsing"     ON)
 option(YETTY_ENABLE_LIB_WASM3       "wasm3 — WASM interpreter"              OFF)
 option(YETTY_ENABLE_LIB_LIBSSH2     "libssh2 — SSH protocol"                ON)
-option(YETTY_ENABLE_LIB_THORVG      "thorvg — SVG/Lottie rendering"         OFF)
+option(YETTY_ENABLE_LIB_THORVG      "thorvg — SVG/Lottie rendering"         ON)
 
 # Platform-conditional (desktop only: linux, macos, windows)
 option(YETTY_ENABLE_LIB_GLFW        "glfw — windowing (desktop only)"       ON)
@@ -83,7 +83,7 @@ option(YETTY_ENABLE_FEATURE_YPLOT     "yplot — plotting"                     O
 # Cards
 option(YETTY_ENABLE_FEATURE_CARDS     "cards — card plugin system"           OFF)
 option(YETTY_ENABLE_FEATURE_YGRID     "ygrid — grid card"                    OFF)
-option(YETTY_ENABLE_FEATURE_YTHORVG   "ythorvg — thorvg card"               OFF)
+option(YETTY_ENABLE_FEATURE_YTHORVG   "ythorvg — thorvg card"               ON)
 
 # Video / media
 option(YETTY_ENABLE_FEATURE_YVIDEO    "yvideo — video codec support"         OFF)
@@ -134,6 +134,7 @@ option(YETTY_ENABLE_TOOL_YDOC            "ydoc tool"                         OFF
 option(YETTY_ENABLE_TOOL_YSPREADSHEET    "yspreadsheet tool"                 OFF)
 option(YETTY_ENABLE_TOOL_YSLIDES         "yslides tool"                      OFF)
 option(YETTY_ENABLE_TOOL_QA              "qa static analysis tools"          ON)
+option(YETTY_ENABLE_TOOL_YTHORVG         "yetty-ythorvg CLI (SVG/Lottie -> OSC)" ON)
 
 # Auto-disable QA tools for cross-compilation (requires host LLVM/Clang libs)
 # Also disabled on macOS for now — tools/qa/CMakeLists.txt hardcodes Linux LLVM paths.
