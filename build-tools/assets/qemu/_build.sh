@@ -295,6 +295,16 @@ CROSS_EOF
     [ -e "$_PKGCONFIG_SHIM" ] || ln -s "$(command -v pkg-config)" "$_PKGCONFIG_SHIM"
     export PATH="$SYSROOT/bin:$PATH"
 
+    # Bionic doesn't ship shm_open for arm64/x86_64 (only arm/i386), and
+    # there's no standalone librt on Android. QEMU's meson.build:1361
+    # hard-requires librt when shm_open isn't found — patch it to
+    # required:false so the detection degrades gracefully.
+    if grep -q "rt = cc.find_library('rt', required: true)" "$SRC_DIR/meson.build"; then
+        sed -i "s|rt = cc.find_library('rt', required: true)|rt = cc.find_library('rt', required: false)|" \
+            "$SRC_DIR/meson.build"
+        echo "==> patched $SRC_DIR/meson.build: rt library required:false for android"
+    fi
+
     _EXTRA_CFLAGS="-Os -ffunction-sections -fdata-sections -I$SYSROOT/include"
     _EXTRA_CXXFLAGS="$_EXTRA_CFLAGS"
     _EXTRA_LDFLAGS="-Wl,--gc-sections -L$SYSROOT/lib"
@@ -305,6 +315,10 @@ CROSS_EOF
         --cxx="$_CXX"
         --host-cc=gcc
     )
+    # Bionic has getxattr/setxattr in libc with <sys/xattr.h> (no
+    # standalone libattr), so we don't pass --enable-attr — QEMU's
+    # meson.build:1190 tries `cc.links(libattr_test)` without -lattr
+    # first, which succeeds on Android.
     _STRIP_BIN="llvm-strip"
     ;;
 
