@@ -31,6 +31,18 @@ struct yetty_ycore_buffer_result yetty_ycore_read_file(const char *path);
 size_t yetty_ycore_base64_decode(const char *in, size_t in_len, char *out,
                                 size_t out_cap);
 
+/**
+ * Encode raw bytes as base64. Allocates the output buffer; caller owns it
+ * and must free buffer.data. The encoded string is null-terminated (size
+ * excludes the terminator, capacity includes it).
+ *
+ * @param in  Input bytes
+ * @param in_len Input length
+ * @return Result containing the base64 buffer or an error
+ */
+struct yetty_ycore_buffer_result yetty_ycore_base64_encode(const void *in,
+                                                           size_t in_len);
+
 #ifdef __cplusplus
 }
 #endif

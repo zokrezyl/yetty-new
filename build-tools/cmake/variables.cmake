@@ -134,6 +134,7 @@ option(YETTY_ENABLE_TOOL_YDOC            "ydoc tool"                         OFF
 option(YETTY_ENABLE_TOOL_YSPREADSHEET    "yspreadsheet tool"                 OFF)
 option(YETTY_ENABLE_TOOL_YSLIDES         "yslides tool"                      OFF)
 option(YETTY_ENABLE_TOOL_QA              "qa static analysis tools"          ON)
+option(YETTY_ENABLE_TOOL_YTHORVG         "yetty-ythorvg CLI (SVG/Lottie -> OSC)" ON)
 
 # Auto-disable QA tools for cross-compilation (requires host LLVM/Clang libs)
 # Also disabled on macOS for now — tools/qa/CMakeLists.txt hardcodes Linux LLVM paths.

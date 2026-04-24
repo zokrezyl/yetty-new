@@ -42,6 +42,12 @@ struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(
     const struct yetty_ypaint_core_buffer_config *config);
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
     const struct yetty_ycore_buffer *base64_buf);
+
+/* Base64-encode the buffer's raw primitive bytes. Allocates the output —
+ * caller owns result.value.data and must free() it. Symmetric inverse of
+ * yetty_ypaint_core_buffer_create_from_base64. */
+struct yetty_ycore_buffer_result yetty_ypaint_core_buffer_to_base64(
+    const struct yetty_ypaint_core_buffer *buf);
 void yetty_ypaint_core_buffer_destroy(struct yetty_ypaint_core_buffer *buf);
 
 // Scene bounds accessors (populated from config at create time, 0s otherwise)

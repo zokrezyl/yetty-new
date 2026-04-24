@@ -43,6 +43,68 @@ size_t yetty_ycore_base64_decode(const char *in, size_t in_len, char *out, size_
     return out_len;
 }
 
+/* Standard base64 alphabet */
+static const char b64_alphabet[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+struct yetty_ycore_buffer_result yetty_ycore_base64_encode(const void *in, size_t in_len)
+{
+    const uint8_t *src;
+    size_t out_len;
+    size_t capacity;
+    char *out;
+    size_t i;
+    size_t o;
+    size_t rem;
+    struct yetty_ycore_buffer buffer = {0};
+
+    if (in_len > 0 && !in)
+        return YETTY_ERR(yetty_ycore_buffer, "input is NULL");
+
+    /* 3 bytes -> 4 base64 chars, rounded up; +1 for null terminator */
+    out_len = ((in_len + 2) / 3) * 4;
+    capacity = out_len + 1;
+
+    out = malloc(capacity);
+    if (!out)
+        return YETTY_ERR(yetty_ycore_buffer, "malloc failed");
+
+    src = (const uint8_t *)in;
+    o = 0;
+    for (i = 0; i + 3 <= in_len; i += 3) {
+        uint32_t triple = ((uint32_t)src[i] << 16) |
+                          ((uint32_t)src[i + 1] << 8) |
+                          (uint32_t)src[i + 2];
+        out[o++] = b64_alphabet[(triple >> 18) & 0x3F];
+        out[o++] = b64_alphabet[(triple >> 12) & 0x3F];
+        out[o++] = b64_alphabet[(triple >> 6) & 0x3F];
+        out[o++] = b64_alphabet[triple & 0x3F];
+    }
+
+    rem = in_len - i;
+    if (rem == 1) {
+        uint32_t triple = (uint32_t)src[i] << 16;
+        out[o++] = b64_alphabet[(triple >> 18) & 0x3F];
+        out[o++] = b64_alphabet[(triple >> 12) & 0x3F];
+        out[o++] = '=';
+        out[o++] = '=';
+    } else if (rem == 2) {
+        uint32_t triple = ((uint32_t)src[i] << 16) |
+                          ((uint32_t)src[i + 1] << 8);
+        out[o++] = b64_alphabet[(triple >> 18) & 0x3F];
+        out[o++] = b64_alphabet[(triple >> 12) & 0x3F];
+        out[o++] = b64_alphabet[(triple >> 6) & 0x3F];
+        out[o++] = '=';
+    }
+
+    out[o] = '\0';
+
+    buffer.data = (uint8_t *)out;
+    buffer.size = o;
+    buffer.capacity = capacity;
+    return YETTY_OK(yetty_ycore_buffer, buffer);
+}
+
 struct yetty_ycore_buffer_result yetty_ycore_read_file(const char *path)
 {
     FILE *file;
