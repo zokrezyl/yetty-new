@@ -156,6 +156,10 @@ if(YETTY_ENABLE_FEATURE_YPDF)
     add_subdirectory(ypdf)
 endif()
 
+if(YETTY_ENABLE_FEATURE_YMARKDOWN)
+    add_subdirectory(ymarkdown)
+endif()
+
 if(YETTY_ENABLE_FEATURE_YIMAGE)
     add_subdirectory(yimage)
 endif()

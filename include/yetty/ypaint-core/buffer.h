@@ -53,6 +53,12 @@ float yetty_ypaint_core_buffer_scene_max_y(const struct yetty_ypaint_core_buffer
 // Clear all data (keeps allocation)
 void yetty_ypaint_core_buffer_clear(struct yetty_ypaint_core_buffer *buf);
 
+// Read-only view into the primitives payload. Used by serializers that base64-
+// encode the raw primitive bytes (the wire format accepted by
+// yetty_ypaint_core_buffer_create_from_base64). NULL on invalid buf.
+const struct yetty_ycore_buffer *
+yetty_ypaint_core_buffer_primitives(const struct yetty_ypaint_core_buffer *buf);
+
 // Add raw primitive data, returns byte offset
 struct yetty_ypaint_id_result
 yetty_ypaint_core_buffer_add_prim(struct yetty_ypaint_core_buffer *buf,

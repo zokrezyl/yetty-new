@@ -14,6 +14,10 @@ if(YETTY_ENABLE_TOOL_YPAINT_BENCH)
     add_subdirectory(ypaint-bench)
 endif()
 
+if(YETTY_ENABLE_TOOL_YCAT)
+    add_subdirectory(ycat)
+endif()
+
 if(YETTY_ENABLE_TOOL_YDRAW_MAZE)
     add_subdirectory(ydraw-maze)
 endif()
