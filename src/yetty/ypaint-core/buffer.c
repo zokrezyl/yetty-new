@@ -8,7 +8,7 @@
 
 #define YPAINT_BUFFER_INITIAL_CAPACITY 1024
 #define YPAINT_MAX_FONTS 8
-#define YPAINT_MAX_TEXT_SPANS 64
+#define YPAINT_MAX_TEXT_SPANS 4096
 
 // YPaint buffer - contains primitive data, fonts, text spans
 struct yetty_ypaint_core_buffer {
@@ -112,6 +112,13 @@ void yetty_ypaint_core_buffer_clear(struct yetty_ypaint_core_buffer *buf) {
     return;
   }
   buf->primitives.buf.size = 0;
+}
+
+const struct yetty_ycore_buffer *
+yetty_ypaint_core_buffer_primitives(const struct yetty_ypaint_core_buffer *buf) {
+  if (!buf)
+    return NULL;
+  return &buf->primitives.buf;
 }
 
 struct yetty_ypaint_id_result

@@ -1,13 +1,21 @@
 # Linux desktop build target
 
+# Libraries consumed by feature subdirs must be included BEFORE shared.cmake —
+# shared.cmake's add_subdirectory(src/yetty) processes those subdirs, and
+# their `if(TARGET ...)` guards only see targets declared before that point.
+# (Tree-sitter is already wired via shared.cmake → TreeSitter.cmake.)
+if(YETTY_ENABLE_LIB_LIBMAGIC)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/libmagic.cmake)
+endif()
+if(YETTY_ENABLE_LIB_LIBCURL)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/libcurl.cmake)
+endif()
+
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
-# Linux-specific libraries (guarded by variables.cmake)
+# Linux-specific libraries needed only by the main yetty executable.
 if(YETTY_ENABLE_LIB_GLFW)
     include(${YETTY_ROOT}/build-tools/cmake/libs/glfw.cmake)
-endif()
-if(YETTY_ENABLE_LIB_LIBMAGIC)
-    include(${YETTY_ROOT}/build-tools/cmake/Libmagic.cmake)
 endif()
 
 # TinyEMU - in-process RISC-V emulator for --temu flag

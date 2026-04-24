@@ -40,14 +40,15 @@ option(YETTY_ENABLE_LIB_OPENH264    "openh264 — H.264 codec"                OF
 option(YETTY_ENABLE_LIB_MINIMP4     "minimp4 — MP4 container"               OFF)
 
 # Misc
-option(YETTY_ENABLE_LIB_TREESITTER  "tree-sitter — parsing"                 OFF)
+option(YETTY_ENABLE_LIB_TREESITTER  "tree-sitter — source code parsing"     ON)
 option(YETTY_ENABLE_LIB_WASM3       "wasm3 — WASM interpreter"              OFF)
 option(YETTY_ENABLE_LIB_LIBSSH2     "libssh2 — SSH protocol"                ON)
 option(YETTY_ENABLE_LIB_THORVG      "thorvg — SVG/Lottie rendering"         OFF)
 
 # Platform-conditional (desktop only: linux, macos, windows)
 option(YETTY_ENABLE_LIB_GLFW        "glfw — windowing (desktop only)"       ON)
-option(YETTY_ENABLE_LIB_LIBMAGIC    "libmagic — file type detection"         OFF)
+option(YETTY_ENABLE_LIB_LIBMAGIC    "libmagic — file type detection"         ON)
+option(YETTY_ENABLE_LIB_LIBCURL     "libcurl — HTTP(S) fetching"             ON)
 option(YETTY_ENABLE_LIB_PDFIO       "pdfio — PDF parsing (C)"                ON)
 
 # Virtual machine (--virtual flag: run shell in RISC-V Linux VM)
@@ -99,7 +100,7 @@ option(YETTY_ENABLE_FEATURE_YEXPR     "yexpr — expression parser"            O
 option(YETTY_ENABLE_FEATURE_YFSVM     "yfsvm — fragment shader VM"           ON)
 option(YETTY_ENABLE_FEATURE_YIMAGE    "yimage — image complex primitive"     ON)
 option(YETTY_ENABLE_FEATURE_YMSDF_GEN "ymsdf-gen — MSDF glyph generator"    ON)
-option(YETTY_ENABLE_FEATURE_YCAT      "ycat — file viewer"                   OFF)
+option(YETTY_ENABLE_FEATURE_YCAT      "ycat — MIME-dispatched cat for cards"  ON)
 option(YETTY_ENABLE_FEATURE_YPDF      "ypdf — PDF to ypaint buffer"          ON)
 option(YETTY_ENABLE_FEATURE_YMARKDOWN "ymarkdown — Markdown to ypaint buffer" ON)
 
@@ -119,6 +120,7 @@ option(YETTY_ENABLE_TOOL_GPU_INFO        "gpu-info tool"                     OFF
 option(YETTY_ENABLE_TOOL_CARD_RUNNER     "card-runner tool"                  OFF)
 option(YETTY_ENABLE_TOOL_YDRAW_GENERATOR "ydraw-generator tool"              OFF)
 option(YETTY_ENABLE_TOOL_YPAINT_BENCH    "ypaint-bench tool"                 ON)
+option(YETTY_ENABLE_TOOL_YCAT            "ycat tool"                         ON)
 option(YETTY_ENABLE_TOOL_YDRAW_MAZE      "ydraw-maze tool"                   OFF)
 option(YETTY_ENABLE_TOOL_YDRAW_ZOO       "ydraw-zoo tool"                    OFF)
 option(YETTY_ENABLE_TOOL_YMUX            "ymux tool"                         OFF)

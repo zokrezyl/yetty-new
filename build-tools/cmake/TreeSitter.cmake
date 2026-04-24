@@ -20,13 +20,16 @@ endif()
 # Usage: add_ts_grammar(NAME c REPO tree-sitter/tree-sitter-c TAG v0.24.1)
 #        add_ts_grammar(NAME cpp REPO tree-sitter/tree-sitter-cpp TAG v0.23.4 SCANNER)
 #        add_ts_grammar(NAME xml ... SUBDIR xml QUERIES_SUBDIR xml)
+#        add_ts_grammar(NAME markdown ... SUBDIR tree-sitter-md QUERIES_DIR tree-sitter-md/queries)
 #
-# SUBDIR: subdirectory for source files (parser.c, scanner.c)
-# QUERIES_SUBDIR: subdirectory under queries/ for highlights.scm
+# SUBDIR: subdirectory under the repo root that holds src/parser.c etc.
+# QUERIES_SUBDIR: subdirectory under queries/ (queries/${QUERIES_SUBDIR}/highlights.scm)
+# QUERIES_DIR: full relative path overriding QUERIES_SUBDIR (for layouts like
+#              tree-sitter-markdown where queries live inside the SUBDIR)
 #
 # Downloads release tarballs instead of cloning git repos for faster builds.
 function(add_ts_grammar)
-    cmake_parse_arguments(G "SCANNER" "NAME;REPO;TAG;SUBDIR;QUERIES_SUBDIR" "" ${ARGN})
+    cmake_parse_arguments(G "SCANNER" "NAME;REPO;TAG;SUBDIR;QUERIES_SUBDIR;QUERIES_DIR" "" ${ARGN})
 
     # Download tarball from GitHub releases instead of git clone
     CPMAddPackage(
@@ -56,8 +59,10 @@ function(add_ts_grammar)
     )
 
     # Export the queries directory path
-    # QUERIES_SUBDIR: look in queries/${QUERIES_SUBDIR}/ for highlights.scm
-    if(G_QUERIES_SUBDIR)
+    if(G_QUERIES_DIR)
+        set(TS_QUERIES_DIR_${G_NAME} "${tree-sitter-${G_NAME}_SOURCE_DIR}/${G_QUERIES_DIR}"
+            CACHE PATH "Queries dir for tree-sitter-${G_NAME}" FORCE)
+    elseif(G_QUERIES_SUBDIR)
         set(TS_QUERIES_DIR_${G_NAME} "${tree-sitter-${G_NAME}_SOURCE_DIR}/queries/${G_QUERIES_SUBDIR}"
             CACHE PATH "Queries dir for tree-sitter-${G_NAME}" FORCE)
     else()
@@ -81,3 +86,8 @@ add_ts_grammar(NAME yaml       REPO tree-sitter-grammars/tree-sitter-yaml TAG v0
 add_ts_grammar(NAME toml       REPO tree-sitter-grammars/tree-sitter-toml TAG v0.7.0 SCANNER)
 add_ts_grammar(NAME html       REPO tree-sitter/tree-sitter-html          TAG v0.23.2 SCANNER)
 add_ts_grammar(NAME xml        REPO tree-sitter-grammars/tree-sitter-xml  TAG v0.7.0  SCANNER SUBDIR xml QUERIES_SUBDIR xml)
+# Markdown: split grammar (block + inline). We wire the block grammar only;
+# it covers headers/emphasis/code/etc. Queries live inside the subdir.
+add_ts_grammar(NAME markdown   REPO tree-sitter-grammars/tree-sitter-markdown TAG v0.4.1 SCANNER
+               SUBDIR tree-sitter-markdown
+               QUERIES_DIR tree-sitter-markdown/queries)
