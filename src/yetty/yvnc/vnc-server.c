@@ -16,6 +16,10 @@
 #include <string.h>
 #include <turbojpeg.h>
 
+#ifdef YETTY_HAS_YVIDEO
+#include <yetty/yvideo/encoder.h>
+#endif
+
 #define MAX_CLIENTS 16
 #define FULL_REFRESH_INTERVAL 300
 #define RECV_BUFFER_SIZE 65536
@@ -89,6 +93,19 @@ struct yetty_vnc_server {
 
 	/* JPEG compression */
 	tjhandle jpeg_compressor;
+
+#ifdef YETTY_HAS_YVIDEO
+	/* H.264 encoding state — allocated lazily on first H.264 frame, torn
+	 * down on resolution change. yuv_buf is a single heap block holding the
+	 * three planes back-to-back at the strides below (16-byte aligned). */
+	struct yetty_yvideo_encoder *h264_encoder;
+	uint8_t *yuv_buf;
+	size_t   yuv_buf_size;
+	uint32_t yuv_y_stride;
+	uint32_t yuv_uv_stride;
+	uint32_t h264_enc_width;
+	uint32_t h264_enc_height;
+#endif
 
 	/* Stats */
 	struct yetty_vnc_server_stats stats;
@@ -345,6 +362,12 @@ void yetty_vnc_server_destroy(struct yetty_vnc_server *server)
 
 	if (server->jpeg_compressor)
 		tjDestroy(server->jpeg_compressor);
+
+#ifdef YETTY_HAS_YVIDEO
+	if (server->h264_encoder)
+		yetty_yvideo_encoder_destroy(server->h264_encoder);
+	free(server->yuv_buf);
+#endif
 
 	free(server->dirty_tiles);
 	free(server->gpu_readback_pixels);
@@ -954,6 +977,138 @@ static struct yetty_ycore_void_result encode_rect(
  * Selects tile mode or rectangle mode based on server->merge_rectangles.
  *===========================================================================*/
 
+#ifdef YETTY_HAS_YVIDEO
+/*
+ * H.264 full-frame send path. The encoder wants a contiguous BGRA framebuffer
+ * → convert to YUV420 → hand to openh264 → wrap the resulting bitstream in a
+ * single synthetic "tile" (tile 0,0) with encoding = VNC_ENCODING_H264.
+ *
+ * H.264 only wins when > half the tiles are dirty; isolated cell updates
+ * compress better as per-tile JPEG. Caller is responsible for choosing this
+ * path only when it's actually better than tile or rect mode.
+ */
+static struct yetty_ycore_void_result h264_send_full_frame(
+	struct yetty_vnc_server *server, uint32_t width, uint32_t height)
+{
+	const uint8_t *pixels = server->cpu_pixels
+	                        ? server->cpu_pixels
+	                        : server->gpu_readback_pixels;
+	if (!pixels)
+		return YETTY_ERR(yetty_ycore_void, "no pixels for H.264");
+
+	/* H.264 requires even dimensions — round down. Very occasionally this
+	 * loses a pixel row/col on the right/bottom; acceptable for streaming. */
+	uint32_t enc_w = width & ~1u;
+	uint32_t enc_h = height & ~1u;
+
+	/* Rebuild encoder + YUV scratch buffer if first use or resolution
+	 * changed. `yuv_y_stride` is the Y-plane row stride aligned to 16 for
+	 * encoder-friendly layout; `yuv_uv_stride` covers both U and V planes. */
+	if (!server->h264_encoder ||
+	    server->h264_enc_width != enc_w ||
+	    server->h264_enc_height != enc_h) {
+		if (server->h264_encoder) {
+			yetty_yvideo_encoder_destroy(server->h264_encoder);
+			server->h264_encoder = NULL;
+		}
+
+		struct yetty_yvideo_encoder_config cfg;
+		yetty_yvideo_encoder_config_defaults(&cfg, enc_w, enc_h);
+		struct yetty_yvideo_encoder_ptr_result eres =
+			yetty_yvideo_encoder_create(&cfg);
+		if (!YETTY_IS_OK(eres)) {
+			ywarn("VNC: H.264 encoder create failed: %s", eres.error.msg);
+			/* Disable H.264 so the caller falls back to JPEG next frame. */
+			server->use_h264 = 0;
+			return YETTY_ERR(yetty_ycore_void, eres.error.msg);
+		}
+		server->h264_encoder = eres.value;
+
+		server->yuv_y_stride = (enc_w + 15) & ~15u;
+		server->yuv_uv_stride = (server->yuv_y_stride / 2 + 15) & ~15u;
+		size_t y_size = (size_t)server->yuv_y_stride * enc_h;
+		size_t uv_size = (size_t)server->yuv_uv_stride * (enc_h / 2);
+		size_t need = y_size + uv_size * 2;
+		if (need > server->yuv_buf_size) {
+			free(server->yuv_buf);
+			server->yuv_buf = malloc(need);
+			if (!server->yuv_buf) {
+				server->yuv_buf_size = 0;
+				return YETTY_ERR(yetty_ycore_void, "yuv alloc failed");
+			}
+			server->yuv_buf_size = need;
+		}
+		server->h264_enc_width = enc_w;
+		server->h264_enc_height = enc_h;
+		yinfo("VNC: H.264 encoder %ux%u (from %ux%u source), yuv buf %zu KiB",
+		      enc_w, enc_h, width, height, need / 1024);
+	}
+
+	size_t y_size = (size_t)server->yuv_y_stride * enc_h;
+	size_t uv_size = (size_t)server->yuv_uv_stride * (enc_h / 2);
+	uint8_t *y_plane = server->yuv_buf;
+	uint8_t *u_plane = y_plane + y_size;
+	uint8_t *v_plane = u_plane + uv_size;
+
+	yetty_yvideo_bgra_to_yuv420(pixels, enc_w, enc_h, width * 4,
+	                            y_plane, u_plane, v_plane,
+	                            server->yuv_y_stride, server->yuv_uv_stride);
+
+	struct yetty_yvideo_encoded_frame encoded;
+	struct yetty_ycore_void_result res = yetty_yvideo_encoder_encode(
+		server->h264_encoder, y_plane, u_plane, v_plane,
+		server->yuv_y_stride, server->yuv_uv_stride, &encoded);
+	if (!YETTY_IS_OK(res)) {
+		ywarn("VNC: H.264 encode failed: %s", res.error.msg);
+		server->use_h264 = 0;
+		return res;
+	}
+
+	/* Rate-control skip — no bytes this tick, nothing to send. Leave the
+	 * dirty bitmap as-is; the next submit will retry. */
+	if (encoded.size == 0)
+		return YETTY_OK_VOID();
+
+	/* Wire layout: frame header + synthetic tile header (encoding=H264) +
+	 * video frame header + NALs. The legacy tile header carries the payload
+	 * size including the inner video header; existing decoders branch on
+	 * encoding==H264 to parse the inner wrapping. */
+	struct vnc_frame_header fhdr = {
+		.magic = VNC_FRAME_MAGIC,
+		.width = (uint16_t)enc_w,
+		.height = (uint16_t)enc_h,
+		.tile_size = VNC_TILE_SIZE,   /* non-zero: tile-layer parsing */
+		.num_tiles = 1,
+	};
+	struct vnc_tile_header thdr = {
+		.tile_x = 0,
+		.tile_y = 0,
+		.encoding = VNC_ENCODING_H264,
+		.data_size = (uint32_t)(sizeof(struct vnc_video_frame_header) + encoded.size),
+	};
+	struct vnc_video_frame_header vhdr = {
+		.frame_type = encoded.is_idr ? 0u : 1u,   /* 0=IDR, 1=P */
+		.reserved = {0, 0, 0},
+		.timestamp = (uint32_t)(encoded.timestamp_us / 1000u),
+		.data_size = (uint32_t)encoded.size,
+	};
+
+	send_to_all_clients(server, &fhdr, sizeof(fhdr));
+	send_to_all_clients(server, &thdr, sizeof(thdr));
+	send_to_all_clients(server, &vhdr, sizeof(vhdr));
+	send_to_all_clients(server, encoded.data, encoded.size);
+
+	/* H.264 path consumes the entire frame; clear dirty tracking so the
+	 * tile-mode fallback doesn't re-send the same pixels. */
+	uint32_t num_tiles = server->tiles_x * server->tiles_y;
+	memset(server->dirty_tiles, 0, num_tiles * sizeof(int));
+
+	server->awaiting_ack = 1;
+	server->current_stats.frames++;
+	return YETTY_OK_VOID();
+}
+#endif /* YETTY_HAS_YVIDEO */
+
 static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
 	struct yetty_vnc_server *server, uint32_t width, uint32_t height)
 {
@@ -968,6 +1123,26 @@ static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
 
 	if (dirty_count == 0)
 		return YETTY_OK_VOID();
+
+#ifdef YETTY_HAS_YVIDEO
+	/*-------------------------------------------------------------------
+	 * H.264 full-frame mode — streaming video encoder. Worthwhile only
+	 * when the delta is big enough that per-tile JPEG would waste more
+	 * bytes than a full inter-frame compressed H.264 payload. Rule of
+	 * thumb from yetty-poc: kick in when > half the tiles are dirty, and
+	 * never when force_raw is set. Falls through to JPEG on encoder
+	 * failure (use_h264 gets cleared inside h264_send_full_frame).
+	 *-------------------------------------------------------------------*/
+	if (server->use_h264 && !server->force_raw &&
+	    dirty_count > (uint16_t)(num_tiles / 2u)) {
+		struct yetty_ycore_void_result res =
+			h264_send_full_frame(server, width, height);
+		if (YETTY_IS_OK(res))
+			return res;
+		/* H.264 failed mid-encode; use_h264 is already cleared. Fall
+		 * through to JPEG below with dirty_tiles still set. */
+	}
+#endif
 
 	/*-------------------------------------------------------------------
 	 * Rectangle mode — merge dirty tiles into solid rectangles, encode

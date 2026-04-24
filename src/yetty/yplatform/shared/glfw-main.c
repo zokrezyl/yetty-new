@@ -354,7 +354,7 @@ int main(int argc, char **argv)
     /* Yetty */
     struct yetty_yetty_result yetty_result = yetty_create(&app_context);
     if (!YETTY_IS_OK(yetty_result)) {
-        fprintf(stderr, "Failed to create Yetty\n");
+        yerror("Failed to create Yetty: %s", yetty_result.error.msg);
         /* Note: yetty_destroy already released surface if it was configured */
         wgpuInstanceRelease(instance);
         pty_factory->ops->destroy(pty_factory);

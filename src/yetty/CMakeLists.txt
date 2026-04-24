@@ -42,6 +42,12 @@ add_subdirectory(yrender)
 # WebGPU utilities
 add_subdirectory(ywebgpu)
 
+# Video codec facade (H.264 encode/decode via openh264). Must be declared
+# before yvnc so vnc-server can link against it.
+if(YETTY_ENABLE_LIB_OPENH264)
+    add_subdirectory(yvideo)
+endif()
+
 # Coroutine wrappers (libco on desktop, emscripten_fiber_t on web)
 if(NOT EMSCRIPTEN)
     add_subdirectory(yco)

@@ -18,3 +18,8 @@ target_link_libraries(yetty_vnc PUBLIC
     yetty_ycore
     yetty_yrender_utils
 )
+
+if(YETTY_ENABLE_LIB_OPENH264)
+    target_compile_definitions(yetty_vnc PUBLIC YETTY_HAS_YVIDEO=1)
+    target_link_libraries(yetty_vnc PUBLIC yetty_yvideo)
+endif()
