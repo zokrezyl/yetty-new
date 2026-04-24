@@ -121,14 +121,19 @@ static struct yetty_ycore_int_result yetty_event_handler(
 
         ydebug("yetty: RENDER event - calling workspace render");
 
+        ytime_start(full_frame);
+
         /* Clear the big target once before rendering all panes */
+        ytime_start(clear);
         struct yetty_ycore_void_result clr_res =
             yetty->render_target->ops->clear(yetty->render_target);
+        ytime_report(clear);
         if (!YETTY_IS_OK(clr_res)) {
             yerror("yetty: clear failed: %s", clr_res.error.msg);
         }
 
         /* Render workspace tree - pass render_target down */
+        ytime_start(workspace_render);
         if (yetty->workspace) {
             struct yetty_ycore_void_result res =
                 yetty_yui_workspace_render(yetty->workspace, yetty->render_target);
@@ -136,13 +141,18 @@ static struct yetty_ycore_int_result yetty_event_handler(
                 yerror("yetty: workspace render failed: %s", res.error.msg);
             }
         }
+        ytime_report(workspace_render);
 
         /* Present the big target to surface */
+        ytime_start(present);
         struct yetty_ycore_void_result res =
             yetty->render_target->ops->present(yetty->render_target);
+        ytime_report(present);
         if (!YETTY_IS_OK(res)) {
             yerror("yetty: present failed: %s", res.error.msg);
         }
+
+        ytime_report(full_frame);
 
         return YETTY_OK(yetty_ycore_int, 1);
     }
@@ -473,6 +483,74 @@ static struct yetty_ycore_void_result register_event_listeners(struct yetty_yett
  * WebGPU initialization
  *===========================================================================*/
 
+static const char *backend_type_name(WGPUBackendType t)
+{
+    switch (t) {
+    case WGPUBackendType_Undefined: return "Undefined";
+    case WGPUBackendType_Null:      return "Null";
+    case WGPUBackendType_WebGPU:    return "WebGPU";
+    case WGPUBackendType_D3D11:     return "D3D11";
+    case WGPUBackendType_D3D12:     return "D3D12";
+    case WGPUBackendType_Metal:     return "Metal";
+    case WGPUBackendType_Vulkan:    return "Vulkan";
+    case WGPUBackendType_OpenGL:    return "OpenGL";
+    case WGPUBackendType_OpenGLES:  return "OpenGLES";
+    default:                        return "Unknown";
+    }
+}
+
+static const char *adapter_type_name(WGPUAdapterType t)
+{
+    switch (t) {
+    case WGPUAdapterType_DiscreteGPU:   return "DiscreteGPU";
+    case WGPUAdapterType_IntegratedGPU: return "IntegratedGPU";
+    case WGPUAdapterType_CPU:           return "CPU";
+    case WGPUAdapterType_Unknown:       return "Unknown";
+    default:                            return "Unknown";
+    }
+}
+
+void yetty_log_gpu_info(WGPUAdapter adapter)
+{
+    if (!adapter) {
+        ywarn("yetty_log_gpu_info: adapter is NULL");
+        return;
+    }
+
+    WGPUAdapterInfo info = {0};
+    if (wgpuAdapterGetInfo(adapter, &info) != WGPUStatus_Success) {
+        ywarn("yetty_log_gpu_info: wgpuAdapterGetInfo failed");
+        return;
+    }
+
+    yinfo("GPU backend:     %s", backend_type_name(info.backendType));
+    yinfo("GPU adapter:     %s", adapter_type_name(info.adapterType));
+    yinfo("GPU vendor:      %.*s (vendorID=0x%04x)",
+          (int)info.vendor.length, info.vendor.data ? info.vendor.data : "",
+          info.vendorID);
+    yinfo("GPU device:      %.*s (deviceID=0x%04x)",
+          (int)info.device.length, info.device.data ? info.device.data : "",
+          info.deviceID);
+    yinfo("GPU arch:        %.*s",
+          (int)info.architecture.length,
+          info.architecture.data ? info.architecture.data : "");
+    yinfo("GPU description: %.*s",
+          (int)info.description.length,
+          info.description.data ? info.description.data : "");
+
+    wgpuAdapterInfoFreeMembers(info);
+
+    WGPULimits limits = {0};
+    if (wgpuAdapterGetLimits(adapter, &limits) == WGPUStatus_Success) {
+        yinfo("GPU limits:      maxTextureDimension2D=%u  maxBufferSize=%llu  "
+              "maxStorageBufferBindingSize=%llu  maxUniformBufferBindingSize=%llu",
+              limits.maxTextureDimension2D,
+              (unsigned long long)limits.maxBufferSize,
+              (unsigned long long)limits.maxStorageBufferBindingSize,
+              (unsigned long long)limits.maxUniformBufferBindingSize);
+    }
+}
+
 /* Adapter callback data */
 struct adapter_callback_data {
     WGPUAdapter *adapter_out;
@@ -657,14 +735,8 @@ static struct yetty_ycore_void_result init_webgpu(struct yetty_yetty *yetty)
     }
     ydebug("initWebGPU: Adapter obtained");
 
-    /* Log adapter info */
-    {
-        WGPUAdapterInfo info = {0};
-        if (wgpuAdapterGetInfo(yetty->adapter, &info) == WGPUStatus_Success) {
-            ydebug("GPU: adapter obtained, backend=%d", (int)info.backendType);
-            wgpuAdapterInfoFreeMembers(info);
-        }
-    }
+    /* Log adapter info (backend, vendor, device, limits) at yinfo level */
+    yetty_log_gpu_info(yetty->adapter);
 
     /* Request device */
     WGPULimits adapter_limits = {0};

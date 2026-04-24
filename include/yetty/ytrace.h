@@ -26,6 +26,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <yetty/yplatform/time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -105,6 +106,52 @@ const ytrace_point_t* ytrace_get_points(void);
 
 /* List all trace points to stderr */
 void ytrace_list(void);
+
+/* Maximum number of timer objects (increase if needed) */
+#ifndef YTIME_MAX_TIMERS
+#define YTIME_MAX_TIMERS 256
+#endif
+
+/*
+ * Timer object — one per ytime_report() call site.
+ *
+ * Populated by ytime_timer_observe() on first use (registered = true after
+ * that). Subsequent observations update the running stats in place.
+ */
+struct ytime_timer {
+    const char *name;
+    const char *file;
+    int line;
+    const char *function;
+    bool registered;
+    uint64_t count;
+    double sum_ms;
+    double last_ms;
+    double min_ms;
+    double max_ms;
+    double avg_ms;
+};
+
+/*
+ * Record an observation for the given timer. On first call the timer is
+ * registered into the global registry so ytime_timer_list() can report it.
+ */
+void ytime_timer_observe(struct ytime_timer *t,
+                         const char *name,
+                         const char *file,
+                         int line,
+                         const char *function,
+                         double elapsed_ms);
+
+/* Query functions for timer objects */
+size_t ytime_timer_get_count(void);
+const struct ytime_timer *const *ytime_timer_get_all(void);
+
+/* List all registered timers to stderr */
+void ytime_timer_list(void);
+
+/* Reset stats on all registered timers (keeps registration). */
+void ytime_timer_reset_all(void);
 
 /*
  * Trace macros
@@ -200,6 +247,42 @@ void ytrace_list(void);
 #define yerror(fmt, ...) ((void)0)
 #endif
 
+/*
+ * Simple timer macros
+ *
+ * Usage:
+ *   ytime_start(frame_render);
+ *   ... work ...
+ *   ytime_report(frame_render);
+ *
+ * ytime_start(name) declares a local double `ytime_<name>` holding the start
+ * time. ytime_report(name) computes the elapsed time, feeds it into a static
+ * `struct ytime_timer` registered once per call site (like ytrace points),
+ * and emits via ydebug:
+ *
+ *     frame_render: 1.234 ms  (avg 1.111 ms, min 0.900, max 3.200, n=42)
+ *
+ * Because it uses ydebug, it obeys the standard ytrace enable/disable
+ * controls. Start and report must live in the same scope.
+ */
+#define ytime_start(name) \
+    double ytime_##name = ytime_monotonic_sec()
+
+#define ytime_report(name) \
+    do { \
+        static struct ytime_timer _ytime_timer_##name; \
+        double _ytime_elapsed_ms_ = \
+            (ytime_monotonic_sec() - ytime_##name) * 1000.0; \
+        ytime_timer_observe(&_ytime_timer_##name, #name, __FILE__, \
+                            __LINE__, __func__, _ytime_elapsed_ms_); \
+        ydebug(#name ": %.3f ms  (avg %.3f ms, min %.3f, max %.3f, n=%llu)", \
+               _ytime_elapsed_ms_, \
+               _ytime_timer_##name.avg_ms, \
+               _ytime_timer_##name.min_ms, \
+               _ytime_timer_##name.max_ms, \
+               (unsigned long long)_ytime_timer_##name.count); \
+    } while (0)
+
 /* Generic log macro with explicit level */
 #define ylog(lvl, fmt, ...) \
     do { \
@@ -223,6 +306,8 @@ void ytrace_list(void);
 #define ywarn(fmt, ...)  ((void)0)
 #define yerror(fmt, ...) ((void)0)
 #define ylog(lvl, fmt, ...) ((void)0)
+#define ytime_start(name) ((void)0)
+#define ytime_report(name) ((void)0)
 
 static inline void ytrace_init(void) {}
 static inline void ytrace_shutdown(void) {}
@@ -233,6 +318,15 @@ static inline void ytrace_set_function_enabled(const char* function, bool enable
 static inline size_t ytrace_get_point_count(void) { return 0; }
 static inline const ytrace_point_t* ytrace_get_points(void) { return NULL; }
 static inline void ytrace_list(void) {}
+struct ytime_timer;
+static inline void ytime_timer_observe(struct ytime_timer *t, const char *name,
+                                       const char *file, int line,
+                                       const char *function, double elapsed_ms)
+{ (void)t; (void)name; (void)file; (void)line; (void)function; (void)elapsed_ms; }
+static inline size_t ytime_timer_get_count(void) { return 0; }
+static inline const struct ytime_timer *const *ytime_timer_get_all(void) { return NULL; }
+static inline void ytime_timer_list(void) {}
+static inline void ytime_timer_reset_all(void) {}
 
 #endif /* YTRACE_C_ENABLED */
 

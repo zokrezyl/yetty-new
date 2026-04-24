@@ -63,7 +63,7 @@ static void terminal_pty_pipe_alloc(void *ctx, size_t suggested_size,
                                     char **buf, size_t *buflen) {
   (void)ctx;
   (void)suggested_size;
-  static char pty_read_buf[8192];
+  static char pty_read_buf[65536];
   *buf = pty_read_buf;
   *buflen = sizeof(pty_read_buf);
 }
@@ -215,8 +215,14 @@ terminal_render_frame(struct yetty_yterm_terminal *terminal,
   }
 
   ydebug("terminal_render_frame: starting");
+  ytime_start(frame_render);
 
-  /* Render each layer to its target */
+  /*
+   * Render each layer to its target. Layer 0 is text_layer, layer 1 is
+   * ypaint_layer (see terminal_create). Time them separately so we can tell
+   * which layer dominates the frame cost.
+   */
+  ytime_start(layers);
   for (size_t i = 0; i < terminal->layer_count; i++) {
     struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
     struct yetty_yrender_target *layer_target = terminal->layer_targets[i];
@@ -227,8 +233,18 @@ terminal_render_frame(struct yetty_yterm_terminal *terminal,
       continue;
     }
 
-    struct yetty_ycore_void_result res =
-        layer->ops->render(layer, layer_target);
+    struct yetty_ycore_void_result res;
+    if (i == 0) {
+      ytime_start(text_layer);
+      res = layer->ops->render(layer, layer_target);
+      ytime_report(text_layer);
+    } else if (i == 1) {
+      ytime_start(ypaint_layer);
+      res = layer->ops->render(layer, layer_target);
+      ytime_report(ypaint_layer);
+    } else {
+      res = layer->ops->render(layer, layer_target);
+    }
 
     if (!YETTY_IS_OK(res)) {
       yerror("terminal_render_frame: layer %zu render failed: %s", i,
@@ -236,10 +252,13 @@ terminal_render_frame(struct yetty_yterm_terminal *terminal,
       return res;
     }
   }
+  ytime_report(layers);
 
   /* Blend all layer targets into the provided target (big_target from yetty) */
+  ytime_start(blend);
   struct yetty_ycore_void_result res = target->ops->blend(
       target, terminal->layer_targets, terminal->layer_count);
+  ytime_report(blend);
 
   if (!YETTY_IS_OK(res)) {
     yerror("terminal_render_frame: blend failed: %s", res.error.msg);
@@ -248,6 +267,7 @@ terminal_render_frame(struct yetty_yterm_terminal *terminal,
 
   ydebug("terminal_render_frame: done, rendered %zu layers",
          terminal->layer_count);
+  ytime_report(frame_render);
   return YETTY_OK_VOID();
 }
 

@@ -277,27 +277,34 @@ render_target_texture_render_layer(struct yetty_yrender_target *self,
 	const struct yetty_yrender_gpu_resource_set *rs = rs_res.value;
 
 	/* Submit to binder */
+	ytime_start(rt_submit);
 	struct yetty_ycore_void_result res = rt->binder->ops->submit(rt->binder, rs);
+	ytime_report(rt_submit);
 	if (!YETTY_IS_OK(res))
 		return res;
 
 	/* Finalize (compile shader if needed) */
+	ytime_start(rt_finalize);
 	res = rt->binder->ops->finalize(rt->binder);
+	ytime_report(rt_finalize);
 	if (!YETTY_IS_OK(res))
 		return res;
 
 	/* Update uniforms/buffers */
+	ytime_start(rt_update);
 	res = rt->binder->ops->update(rt->binder);
+	ytime_report(rt_update);
 	if (!YETTY_IS_OK(res))
 		return res;
 
-	/* Create command encoder */
+	/* Encode + draw + submit command buffer to GPU */
+	ytime_start(rt_gpu);
+
 	WGPUCommandEncoderDescriptor enc_desc = {0};
 	WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(rt->device, &enc_desc);
 	if (!encoder)
 		return YETTY_ERR(yetty_ycore_void, "failed to create encoder");
 
-	/* Begin render pass */
 	WGPURenderPassColorAttachment color_attachment = {0};
 	color_attachment.view = rt->view;
 	color_attachment.loadOp = WGPULoadOp_Clear;
@@ -315,7 +322,6 @@ render_target_texture_render_layer(struct yetty_yrender_target *self,
 		return YETTY_ERR(yetty_ycore_void, "failed to begin render pass");
 	}
 
-	/* Bind and draw */
 	WGPURenderPipeline pipeline = rt->binder->ops->get_pipeline(rt->binder);
 	WGPUBuffer quad_vb = rt->binder->ops->get_quad_vertex_buffer(rt->binder);
 
@@ -329,12 +335,15 @@ render_target_texture_render_layer(struct yetty_yrender_target *self,
 	wgpuRenderPassEncoderEnd(pass);
 	wgpuRenderPassEncoderRelease(pass);
 
-	/* Submit */
 	WGPUCommandBufferDescriptor cmd_desc = {0};
 	WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, &cmd_desc);
+	ytime_start(rt_submit_queue);
 	wgpuQueueSubmit(rt->queue, 1, &cmd);
+	ytime_report(rt_submit_queue);
 	wgpuCommandBufferRelease(cmd);
 	wgpuCommandEncoderRelease(encoder);
+
+	ytime_report(rt_gpu);
 
 	/* Clear dirty flag */
 	layer->dirty = 0;
@@ -623,9 +632,13 @@ render_target_texture_present(struct yetty_yrender_target *self)
 	if (!rt->surface)
 		return YETTY_ERR(yetty_ycore_void, "no surface configured for present");
 
-	/* Acquire surface texture */
+	/* Acquire surface texture — on X11/VNC (incl. VirtualGL) this can block
+	 * waiting for the compositor/VNC-server to hand back a free swapchain
+	 * image, so this is one of the prime suspects on slow remote displays. */
+	ytime_start(present_acquire);
 	WGPUSurfaceTexture surface_texture;
 	wgpuSurfaceGetCurrentTexture(rt->surface, &surface_texture);
+	ytime_report(present_acquire);
 
 	if (surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
 	    surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal)
@@ -727,17 +740,24 @@ render_target_texture_present(struct yetty_yrender_target *self)
 	wgpuRenderPassEncoderEnd(pass);
 	wgpuRenderPassEncoderRelease(pass);
 
-	/* Submit */
+	/* Submit the blit-to-surface command buffer */
 	WGPUCommandBufferDescriptor cmd_desc = {0};
 	WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(encoder, &cmd_desc);
+	ytime_start(present_submit);
 	wgpuQueueSubmit(rt->queue, 1, &cmd);
+	ytime_report(present_submit);
 	wgpuCommandBufferRelease(cmd);
 	wgpuCommandEncoderRelease(encoder);
 	wgpuBindGroupRelease(bind_group);
 
-	/* Present */
+	/* Hand texture to the window system. On X11/VNC with VirtualGL this is
+	 * where the GPU->CPU readback happens and the image is shipped to the
+	 * X server (and then to the VNC client over the network). Expect this
+	 * to dominate on remote displays. */
 #ifndef __EMSCRIPTEN__
+	ytime_start(surface_present);
 	wgpuSurfacePresent(rt->surface);
+	ytime_report(surface_present);
 #endif
 	wgpuTextureViewRelease(surface_view);
 

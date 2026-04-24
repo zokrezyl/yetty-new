@@ -57,3 +57,22 @@ CPMAddPackage(
 if(EMSCRIPTEN OR YETTY_ANDROID)
     target_compile_definitions(ytrace INTERFACE YTRACE_NO_CONTROL_SOCKET)
 endif()
+
+# Propagate log-level switches to the C ytrace implementation
+# (src/yetty/ytrace.c + include/yetty/ytrace.h). That header uses separate
+# compile-time switches (YTRACE_C_ENABLE_*) from the external ytrace C++ lib,
+# so the YTRACE_ENABLE_* options above do not disable ydebug/ytrace in our C
+# macros by themselves. Emit project-wide compile definitions so every TU
+# that includes <yetty/ytrace.h> sees the correct level.
+if(NOT YTRACE_ENABLE_YTRACE)
+    add_compile_definitions(YTRACE_C_ENABLE_TRACE=0)
+endif()
+if(NOT YTRACE_ENABLE_YDEBUG)
+    add_compile_definitions(YTRACE_C_ENABLE_DEBUG=0)
+endif()
+if(NOT YTRACE_ENABLE_YINFO)
+    add_compile_definitions(YTRACE_C_ENABLE_INFO=0)
+endif()
+if(NOT YTRACE_ENABLE_YWARN)
+    add_compile_definitions(YTRACE_C_ENABLE_WARN=0)
+endif()

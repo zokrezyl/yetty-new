@@ -20,6 +20,10 @@ static ymutex_t *g_mutex = NULL;
 static bool g_initialized = false;
 static bool g_default_enabled = false;
 
+/* Timer registry */
+static struct ytime_timer *g_timers[YTIME_MAX_TIMERS];
+static size_t g_timer_count = 0;
+
 static void ensure_mutex(void) {
     if (!g_mutex)
         g_mutex = ymutex_create();
@@ -259,6 +263,108 @@ void ytrace_list(void) {
     }
 
     fprintf(stderr, "\n");
+    YTRACE_UNLOCK();
+}
+
+void ytime_timer_observe(struct ytime_timer *t,
+                         const char *name,
+                         const char *file,
+                         int line,
+                         const char *function,
+                         double elapsed_ms) {
+    YTRACE_LOCK();
+
+    if (!t->registered) {
+        t->name = name;
+        t->file = file;
+        t->line = line;
+        t->function = function;
+        t->count = 0;
+        t->sum_ms = 0.0;
+        t->last_ms = 0.0;
+        t->min_ms = elapsed_ms;
+        t->max_ms = elapsed_ms;
+        t->avg_ms = 0.0;
+
+        if (g_timer_count < YTIME_MAX_TIMERS) {
+            g_timers[g_timer_count++] = t;
+        } else {
+            static bool warned = false;
+            if (!warned) {
+                fprintf(stderr, "[ytrace-c] WARNING: max timers (%d) exceeded\n",
+                        YTIME_MAX_TIMERS);
+                warned = true;
+            }
+        }
+
+        t->registered = true;
+    }
+
+    t->count++;
+    t->sum_ms += elapsed_ms;
+    t->last_ms = elapsed_ms;
+    t->avg_ms = t->sum_ms / (double)t->count;
+    if (elapsed_ms < t->min_ms) t->min_ms = elapsed_ms;
+    if (elapsed_ms > t->max_ms) t->max_ms = elapsed_ms;
+
+    YTRACE_UNLOCK();
+}
+
+size_t ytime_timer_get_count(void) {
+    YTRACE_LOCK();
+    size_t count = g_timer_count;
+    YTRACE_UNLOCK();
+    return count;
+}
+
+const struct ytime_timer *const *ytime_timer_get_all(void) {
+    return (const struct ytime_timer *const *)g_timers;
+}
+
+void ytime_timer_list(void) {
+    YTRACE_LOCK();
+
+    fprintf(stderr, "\n[ytrace-c] Registered timers: %zu\n", g_timer_count);
+    fprintf(stderr, "%-4s %-20s %-30s %10s %10s %10s %10s %10s\n",
+            "IDX", "NAME", "FILE:LINE",
+            "N", "LAST(ms)", "AVG(ms)", "MIN(ms)", "MAX(ms)");
+
+    for (size_t i = 0; i < g_timer_count; i++) {
+        const struct ytime_timer *t = g_timers[i];
+
+        const char *bname = strrchr(t->file, '/');
+        if (!bname) bname = strrchr(t->file, '\\');
+        bname = bname ? bname + 1 : t->file;
+
+        char loc_buf[32];
+        snprintf(loc_buf, sizeof(loc_buf), "%s:%d", bname, t->line);
+
+        fprintf(stderr, "%-4zu %-20s %-30s %10llu %10.3f %10.3f %10.3f %10.3f\n",
+                i,
+                t->name ? t->name : "",
+                loc_buf,
+                (unsigned long long)t->count,
+                t->last_ms,
+                t->avg_ms,
+                t->min_ms,
+                t->max_ms);
+    }
+
+    fprintf(stderr, "\n");
+    YTRACE_UNLOCK();
+}
+
+void ytime_timer_reset_all(void) {
+    YTRACE_LOCK();
+    for (size_t i = 0; i < g_timer_count; i++) {
+        struct ytime_timer *t = g_timers[i];
+        t->count = 0;
+        t->sum_ms = 0.0;
+        t->last_ms = 0.0;
+        t->min_ms = 0.0;
+        t->max_ms = 0.0;
+        t->avg_ms = 0.0;
+    }
     YTRACE_UNLOCK();
 }
 
