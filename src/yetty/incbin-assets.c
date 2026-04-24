@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #ifndef YETTY_BUILD_VERSION
 #define YETTY_BUILD_VERSION "dev"

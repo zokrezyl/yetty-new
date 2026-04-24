@@ -36,9 +36,21 @@ else()
 endif()
 
 
-# Auto-generate MSDF CDB fonts if not present (must run before incbin)
-if(YETTY_ENABLE_FEATURE_MSDF_GEN)
-    include(${YETTY_ROOT}/build-tools/cmake/prepare-assets.cmake)
+# Prebuilt assets: downloads pinned tarballs from GitHub releases into
+# ${CMAKE_BINARY_DIR}/assets so the rest of the build can consume them as
+# if they had been generated locally.
+include(${YETTY_ROOT}/build-tools/cmake/assets-fetch.cmake)
+
+if(YETTY_ENABLE_FEATURE_CDB_GEN OR YETTY_ENABLE_FEATURE_MSDF_GEN)
+    assets_fetch_cdb()
+endif()
+
+if(YETTY_ENABLE_LIB_TINYEMU OR YETTY_ENABLE_LIB_QEMU)
+    assets_fetch_yemu()
+endif()
+
+if(YETTY_ENABLE_LIB_QEMU)
+    assets_fetch_qemu()
 endif()
 
 #-----------------------------------------------------------------------------
@@ -299,13 +311,6 @@ if(YETTY_ENABLE_FEATURE_YVIDEO)
 endif()
 
 #-----------------------------------------------------------------------------
-# Prepare assets at configure time (generates CDB files if missing)
-#-----------------------------------------------------------------------------
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
-    include(${YETTY_ROOT}/build-tools/cmake/prepare-assets.cmake)
-endif()
-
-#-----------------------------------------------------------------------------
 # yetty_embed_assets(TARGET)
 #
 # Embeds shaders, fonts, and CDB files into the target binary.
@@ -372,8 +377,8 @@ function(yetty_embed_assets TARGET)
 
     # Embed shared RISC-V runtime (kernel, opensbi, rootfs) under yemu/ prefix
     # Used by both --temu (TinyEMU, in-process) and --qemu (external QEMU via telnet).
-    # Assets are produced at configure time by opensbi_build/linux_kernel_build/
-    # alpine_rootfs_download and live in ${CMAKE_BINARY_DIR}/assets/yemu.
+    # Assets are fetched at configure time by assets_fetch_yemu() and live in
+    # ${CMAKE_BINARY_DIR}/assets/yemu.
     if(YETTY_ENABLE_LIB_TINYEMU OR YETTY_ENABLE_LIB_QEMU)
         set(YEMU_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets/yemu")
         set(INCBIN_YEMU_DIR "${CMAKE_BINARY_DIR}/incbin-yemu")
@@ -401,7 +406,7 @@ function(yetty_embed_assets TARGET)
         incbin_add_directory(${TARGET} "yemu" "${INCBIN_YEMU_DIR}" "*" FALSE)
     endif()
 
-    # Embed QEMU binary if enabled (built by qemu_build() in qemu.cmake)
+    # Embed QEMU binary if enabled (fetched by assets_fetch_qemu())
     if(YETTY_ENABLE_LIB_QEMU)
         qemu_embed_runtime(${TARGET})
     endif()
