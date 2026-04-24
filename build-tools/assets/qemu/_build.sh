@@ -352,6 +352,11 @@ ios-arm64|ios-x86_64|tvos-arm64)
     # `-mios-version-min=...`. Use Apple's /usr/bin/clang directly and strip
     # the env vars so xcrun + our -isysroot fully determine the target.
     unset DEVELOPER_DIR MACOSX_DEPLOYMENT_TARGET SDKROOT NIX_APPLE_SDK_VERSION
+
+    # Meson also auto-detects an Objective-C compiler for Darwin targets and
+    # defaults to `clang` on PATH — which is nix's wrapper. Force Apple's too.
+    export OBJC=/usr/bin/clang
+    export OBJCXX=/usr/bin/clang++
     case "$TARGET_PLATFORM" in
         ios-arm64)
             _SDK_NAME="iphoneos";         _ARCH="arm64"
@@ -374,6 +379,7 @@ ios-arm64|ios-x86_64|tvos-arm64)
     _CONFIGURE_ARGS+=(
         --cc=/usr/bin/clang
         --cxx=/usr/bin/clang++
+        --objcc=/usr/bin/clang
         --host-cc=/usr/bin/clang
         "${_EXTRA_QCFG[@]}"
         --extra-cflags="$_DARWIN_CFLAGS"
