@@ -250,7 +250,10 @@ CROSS_EOF
             "glib-${GLIB_VERSION}.tar.xz"
         [ -d "$DEPS_DIR/glib-${GLIB_VERSION}" ] || tar -C "$DEPS_DIR" -xJf "$DEPS_DIR/glib-${GLIB_VERSION}.tar.xz"
         export PKG_CONFIG_LIBDIR="$SYSROOT/lib/pkgconfig:$SYSROOT/lib64/pkgconfig"
-        export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
+        # Empty, not $SYSROOT: the .pc files we just installed via
+        # `--prefix=$SYSROOT` contain absolute paths already; a non-empty
+        # PKG_CONFIG_SYSROOT_DIR would double-prefix them.
+        export PKG_CONFIG_SYSROOT_DIR=""
         _meson_build "glib" "$DEPS_DIR/glib-${GLIB_VERSION}" \
             -Dtests=false \
             -Dinstalled_tests=false \
@@ -284,6 +287,13 @@ CROSS_EOF
     export RANLIB="llvm-ranlib"
     export NM="llvm-nm"
     export OBJCOPY="llvm-objcopy"
+
+    # QEMU's configure with --cross-prefix looks for `<prefix>pkg-config`.
+    # We only have plain pkg-config, so drop a shim on PATH that forwards.
+    mkdir -p "$SYSROOT/bin"
+    _PKGCONFIG_SHIM="$SYSROOT/bin/${ANDROID_TRIPLE}${ANDROID_API}-pkg-config"
+    [ -e "$_PKGCONFIG_SHIM" ] || ln -s "$(command -v pkg-config)" "$_PKGCONFIG_SHIM"
+    export PATH="$SYSROOT/bin:$PATH"
 
     _EXTRA_CFLAGS="-Os -ffunction-sections -fdata-sections -I$SYSROOT/include"
     _EXTRA_CXXFLAGS="$_EXTRA_CFLAGS"

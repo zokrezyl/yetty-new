@@ -114,6 +114,17 @@
           pkgs.qemu  # For ARM emulation
         ];
 
+        # meson wrapped so `packaging` is importable from its python.
+        # glib's meson.build:2422 does `find_installation(modules: ['packaging'])`
+        # with no name, which resolves to meson's sys.executable. The stock
+        # meson's shebang points at a bare python3 that has no `packaging`,
+        # so wrap meson with a shell script that prepends packaging's
+        # site-packages to PYTHONPATH before exec'ing.
+        mesonWithPackaging = pkgs.writeShellScriptBin "meson" ''
+          export PYTHONPATH="${pkgs.python3.pkgs.packaging}/${pkgs.python3.sitePackages}''${PYTHONPATH:+:$PYTHONPATH}"
+          exec ${pkgs.meson}/bin/meson "$@"
+        '';
+
         # ARM emulator script using QEMU
         armEmulatorScript = pkgs.writeShellScriptBin "run-arm-emulator" ''
           SYSTEM_IMG="${androidSdk}/libexec/android-sdk/system-images/android-34/google_apis/arm64-v8a"
@@ -326,47 +337,40 @@
           #
           # This shell only supplies the build-side tooling; the NDK comes
           # in via the `ANDROID_NDK_HOME` env and PATH additions below.
-          # glib's meson.build does `python.find_installation('python3', modules: ['packaging'])`,
-          # and meson's `find_installation` prefers meson's own bundled python over $PATH.
-          # Override meson to use a python with `packaging` so the dep check passes.
-          mesonWithPackaging = pkgs.meson.override {
-            python3 = pkgs.python3.override {
-              packageOverrides = self: super: {};
-            };
-          };
-          python3Packaging = pkgs.python3.withPackages (ps: [ ps.packaging ]);
-
+          # glib's meson.build does `python.find_installation('python3', modules: ['packaging'])`
+          # and meson prefers its own bundled python over $PATH.
+          # `mesonWithPackaging` (defined in the outer let block) ships a
+          # meson whose site-packages includes `packaging`, and we prepend
+          # its bin dir to PATH because commonDeps already contributes a
+          # plain `meson` that would otherwise shadow it.
           assets-qemu-android-arm64-v8a = pkgs.mkShell {
             buildInputs = commonDeps ++ androidDeps ++ (with pkgs; [
-              ninja bison flex gnumake perl
+              mesonWithPackaging ninja bison flex gnumake perl
               curl gnutar xz gzip pkg-config
-            ]) ++ [ python3Packaging ];
+              (python3.withPackages (ps: [ ps.packaging ]))
+            ]);
             ANDROID_NDK_HOME = androidNdk;
             # API 28 — bionic gained iconv here, glib requires it.
             ANDROID_API = "28";
             ANDROID_TARGET_ABI = "arm64-v8a";
             shellHook = ''
-              export PATH="${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
-              # Force meson to run under our python3+packaging. glib uses
-              # meson's python module which prefers meson's bundled python
-              # otherwise, and that one has no `packaging`.
-              export MESON_PYTHON="${python3Packaging}/bin/python3"
+              export PATH="${mesonWithPackaging}/bin:${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
               echo "Yetty asset-build (qemu android-arm64-v8a) — NDK direct"
             '';
           };
 
           assets-qemu-android-x86_64 = pkgs.mkShell {
             buildInputs = commonDeps ++ androidDeps ++ (with pkgs; [
-              ninja bison flex gnumake perl
+              mesonWithPackaging ninja bison flex gnumake perl
               curl gnutar xz gzip pkg-config
-            ]) ++ [ python3Packaging ];
+              (python3.withPackages (ps: [ ps.packaging ]))
+            ]);
             ANDROID_NDK_HOME = androidNdk;
             # API 28 — bionic gained iconv here, glib requires it.
             ANDROID_API = "28";
             ANDROID_TARGET_ABI = "x86_64";
             shellHook = ''
-              export PATH="${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
-              export MESON_PYTHON="${python3Packaging}/bin/python3"
+              export PATH="${mesonWithPackaging}/bin:${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
               echo "Yetty asset-build (qemu android-x86_64) — NDK direct"
             '';
           };
