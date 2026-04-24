@@ -1,13 +1,13 @@
-# yvideo — H.264 encoder/decoder facade over openh264.
+# yvideo — H.264 encoder/decoder wrapping openh264.
 #
-# Port of yetty-poc/src/yetty/yvideo. The implementations are C++ because
-# openh264 exposes virtual C++ classes, but the public API in
-# include/yetty/yvideo/*.h is pure C — everything else in yetty-perf is C and
-# calls through that facade.
+# Port of yetty-poc/src/yetty/yvideo. openh264 ships both a C++ virtual-class
+# interface and a C COM-style vtable interface (`ISVCEncoder = const
+# ISVCEncoderVtbl*`) — we use the C one so these TUs stay pure C and match
+# the rest of yetty-perf.
 
 add_library(yetty_yvideo STATIC
-    encoder.cpp
-    decoder.cpp
+    encoder.c
+    decoder.c
 )
 
 target_include_directories(yetty_yvideo PUBLIC
