@@ -74,6 +74,22 @@
           configureFlags = (old.configureFlags or []) ++ [ "--enable-static" ];
         });
 
+        # Buck2 build dependencies
+        buck2Deps = with pkgs; [
+          buck2
+          # Build tools buck2 genrules will call
+          cmake
+          ninja
+          pkg-config
+          curl
+          gnutar
+          gzip
+          gperf  # For fontconfig
+          # Compilers
+          llvmPackages_21.clang
+          llvmPackages_21.lld
+        ];
+
         # Desktop build dependencies
         desktopDeps = with pkgs; [
           # Graphics
@@ -228,6 +244,31 @@
               echo "  EMSDK: $EMSDK"
               echo ""
               echo "Run: make web"
+            '';
+          };
+
+          # Buck2 build shell
+          buck2 = pkgs.mkShell {
+            buildInputs = buck2Deps ++ desktopDeps;
+
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath desktopDeps;
+
+            # Ensure clang is used
+            CC = "clang";
+            CXX = "clang++";
+
+            shellHook = ''
+              echo "Yetty Buck2 build environment"
+              echo "  Buck2: $(buck2 --version 2>/dev/null || echo 'available')"
+              echo "  Clang: $(clang --version | head -1)"
+              echo ""
+              echo "Build commands:"
+              echo "  buck2 build //:yetty           # Build main executable"
+              echo "  buck2 build //...              # Build everything"
+              echo "  buck2 targets //...            # List all targets"
+              echo ""
+              echo "Cache info:"
+              echo "  Cache dir: ~/.cache/buck2"
             '';
           };
         };

@@ -1,0 +1,28 @@
+load("@prelude//toolchains:cxx.bzl", "system_cxx_toolchain")
+load("@prelude//toolchains:genrule.bzl", "system_genrule_toolchain")
+load("@prelude//toolchains:python.bzl", "system_python_bootstrap_toolchain")
+
+# System C/C++ toolchain - uses whatever compiler is in PATH
+# When running inside `nix develop`, this will be the nix-provided clang
+system_cxx_toolchain(
+    name = "cxx",
+    visibility = ["PUBLIC"],
+)
+
+# Genrule toolchain for running shell commands
+system_genrule_toolchain(
+    name = "genrule",
+    visibility = ["PUBLIC"],
+)
+
+# Python toolchain for build scripts
+system_python_bootstrap_toolchain(
+    name = "python",
+    visibility = ["PUBLIC"],
+)
+
+# Python bootstrap toolchain (alias expected by prelude)
+system_python_bootstrap_toolchain(
+    name = "python_bootstrap",
+    visibility = ["PUBLIC"],
+)

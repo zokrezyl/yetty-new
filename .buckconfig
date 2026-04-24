@@ -1,0 +1,32 @@
+[cells]
+root = .
+prelude = buck-build-tools/prelude
+toolchains = buck-build-tools/toolchains
+
+[cell_aliases]
+config = prelude
+ovr_config = prelude
+fbcode = prelude
+fbsource = prelude
+fbcode_macros = prelude
+buck = prelude
+
+[external_cells]
+prelude = bundled
+
+[parser]
+target_platform_detector_spec = target:root//...->prelude//platforms:default
+
+[build]
+execution_platforms = root//buck-build-tools/platforms:remote_cache
+
+[buck2]
+materializations = deferred
+digest_algorithms = SHA256
+
+[buck2_re_client]
+engine_address = grpc://127.0.0.1:50052
+action_cache_address = grpc://127.0.0.1:50051
+cas_address = grpc://127.0.0.1:50051
+instance_name =
+tls = false

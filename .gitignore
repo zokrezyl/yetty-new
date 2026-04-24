@@ -25,3 +25,4 @@ src/tinyemu/*.d
 src/tinyemu/js/
 src/tinyemu/Makefile.js
 src/tinyemu/Untitled
+.buckconfig.local
