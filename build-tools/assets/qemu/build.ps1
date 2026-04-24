@@ -32,14 +32,11 @@ $Version   = Require-Env "VERSION"
 $OutputDir = Require-Env "OUTPUT_DIR"
 if (-not $env:TARGET_PLATFORM) { $env:TARGET_PLATFORM = "windows-x86_64" }
 
-if (-not $env:VCPKG_ROOT)    { $env:VCPKG_ROOT    = "C:\Users\misi\vcpkg" }
+# Default vcpkg locations — but only locked in after vcvarsall (which
+# clobbers VCPKG_ROOT with its own VS-bundled copy that has no packages
+# installed).
 if (-not $env:VCPKG_TRIPLET) { $env:VCPKG_TRIPLET = "x64-windows" }
-
-$VcpkgInstalled = Join-Path $env:VCPKG_ROOT "installed\$($env:VCPKG_TRIPLET)"
-if (-not (Test-Path $VcpkgInstalled)) {
-    throw "vcpkg tree not found at $VcpkgInstalled"
-}
-$env:VCPKG_INSTALLED = $VcpkgInstalled.Replace('\', '/')
+$UserVcpkgRoot = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { "C:\Users\misi\vcpkg" }
 
 #-----------------------------------------------------------------------------
 # Locate + invoke vcvarsall x64, mirroring build-tools/windows/build.bat
@@ -65,6 +62,38 @@ foreach ($line in $envDump) {
         [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2])
     }
 }
+
+# vcvarsall's $LIB/$INCLUDE entries live under "C:\Program Files (x86)\..."
+# — paths with spaces. meson/clang-cl pass them down to lld-link, which
+# splits on whitespace and fails. Rewrite each entry to its Windows 8.3
+# short name (PROGRA~2) so every component is space-free.
+function To-ShortPath([string]$p) {
+    $fso = New-Object -ComObject Scripting.FileSystemObject
+    if (Test-Path $p -PathType Container) { return $fso.GetFolder($p).ShortPath }
+    if (Test-Path $p)                     { return $fso.GetFile($p).ShortPath }
+    return $p
+}
+function Convert-PathListToShort([string]$list, [string]$sep = ';') {
+    if (-not $list) { return $list }
+    return (($list -split [regex]::Escape($sep) |
+             Where-Object { $_ } |
+             ForEach-Object { To-ShortPath $_ }) -join $sep)
+}
+foreach ($v in @('LIB', 'INCLUDE', 'LIBPATH')) {
+    $orig = [System.Environment]::GetEnvironmentVariable($v)
+    if ($orig) {
+        [System.Environment]::SetEnvironmentVariable($v, (Convert-PathListToShort $orig))
+    }
+}
+
+# vcvarsall clobbers VCPKG_ROOT with its own (empty) bundled vcpkg —
+# restore our user-level vcpkg after.
+$env:VCPKG_ROOT = $UserVcpkgRoot
+$VcpkgInstalled = Join-Path $env:VCPKG_ROOT "installed\$($env:VCPKG_TRIPLET)"
+if (-not (Test-Path $VcpkgInstalled)) {
+    throw "vcpkg tree not found at $VcpkgInstalled"
+}
+$env:VCPKG_INSTALLED = $VcpkgInstalled.Replace('\', '/')
 
 #-----------------------------------------------------------------------------
 # Prepend extra tool dirs to PATH so Git Bash inherits them

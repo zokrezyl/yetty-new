@@ -52,10 +52,12 @@ if [ ! -f "$SRC_DIR/configure" ]; then
     # symlink churn that breaks extraction on Windows without Developer
     # Mode). The QEMU riscv64-softmmu build doesn't need them — it uses
     # pre-built blobs from pc-bios/.
-    # Also skip tests/lcitool/ (CI tooling with prep-script symlinks).
+    # Also skip tests/lcitool/libvirt-ci/ (nested submodule with prep-script
+    # symlinks). We must keep tests/lcitool/Makefile.include itself — QEMU's
+    # top-level Makefile unconditionally `include`s it.
     tar xf "qemu-${QEMU_VERSION}.tar.xz" \
         --exclude='qemu-*/roms' \
-        --exclude='qemu-*/tests/lcitool'
+        --exclude='qemu-*/tests/lcitool/libvirt-ci'
 fi
 
 # Pruned device config (shared with poc/qemu)
