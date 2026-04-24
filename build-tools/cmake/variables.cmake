@@ -101,6 +101,7 @@ option(YETTY_ENABLE_FEATURE_YIMAGE    "yimage — image complex primitive"     O
 option(YETTY_ENABLE_FEATURE_YMSDF_GEN "ymsdf-gen — MSDF glyph generator"    ON)
 option(YETTY_ENABLE_FEATURE_YCAT      "ycat — file viewer"                   OFF)
 option(YETTY_ENABLE_FEATURE_YPDF      "ypdf — PDF to ypaint buffer"          ON)
+option(YETTY_ENABLE_FEATURE_YMARKDOWN "ymarkdown — Markdown to ypaint buffer" ON)
 
 # Build pipeline
 option(YETTY_ENABLE_FEATURE_ASSETS    "assets — runtime asset copying"       ON)
