@@ -83,7 +83,12 @@ _CONFIGURE_ARGS=(
 # Non-mach-o linkers support --gc-sections; platform scripts can override
 # _EXTRA_LDFLAGS (e.g. darwin uses -dead_strip).
 _EXTRA_LDFLAGS="-Wl,--gc-sections"
+# Built artifact (may have a platform-specific suffix, e.g. darwin writes
+# `qemu-system-riscv64-unsigned` before codesigning).
 _QEMU_BINARY_NAME="qemu-system-riscv64"
+# Name under which the tarball ships the binary. Defaults to the built
+# name; darwin platform scripts normalise it back to `qemu-system-riscv64`.
+_QEMU_OUTPUT_NAME=""
 _STRIP_BIN="strip"
 
 # shellcheck source=/dev/null
@@ -117,7 +122,9 @@ fi
 #-----------------------------------------------------------------------------
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
-cp "$BUILT" "$STAGE/$_QEMU_BINARY_NAME"
+
+OUT_NAME="${_QEMU_OUTPUT_NAME:-$_QEMU_BINARY_NAME}"
+cp "$BUILT" "$STAGE/$OUT_NAME"
 
 echo "==> packaging -> $TARBALL"
 tar -C "$STAGE" -czf "$TARBALL" .

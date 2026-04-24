@@ -13,4 +13,6 @@ _CONFIGURE_ARGS+=(
     --extra-cxxflags="$_TVOS_CFLAGS"
 )
 _EXTRA_LDFLAGS="-Wl,-dead_strip $_TVOS_CFLAGS"
+_QEMU_BINARY_NAME="qemu-system-riscv64-unsigned"
+_QEMU_OUTPUT_NAME="qemu-system-riscv64"
 _STRIP_BIN="strip"

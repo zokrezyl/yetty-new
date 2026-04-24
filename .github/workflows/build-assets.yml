@@ -56,9 +56,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v27
+      - uses: DeterminateSystems/nix-installer-action@main
         with:
-          extra_nix_config: |
+          extra-conf: |
             experimental-features = nix-command flakes
       - run: mkdir -p out
       - run: |
@@ -76,9 +76,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v27
+      - uses: DeterminateSystems/nix-installer-action@main
         with:
-          extra_nix_config: |
+          extra-conf: |
             experimental-features = nix-command flakes
       - run: mkdir -p out
       - run: |
@@ -96,9 +96,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v27
+      - uses: DeterminateSystems/nix-installer-action@main
         with:
-          extra_nix_config: |
+          extra-conf: |
             experimental-features = nix-command flakes
       - run: mkdir -p out
       - run: |
@@ -130,9 +130,9 @@ jobs:
           - android-x86_64
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v27
+      - uses: DeterminateSystems/nix-installer-action@main
         with:
-          extra_nix_config: |
+          extra-conf: |
             experimental-features = nix-command flakes
       - run: mkdir -p out
       - run: |
@@ -159,9 +159,9 @@ jobs:
           - tvos-arm64
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v27
+      - uses: DeterminateSystems/nix-installer-action@main
         with:
-          extra_nix_config: |
+          extra-conf: |
             experimental-features = nix-command flakes
       - run: mkdir -p out
       - run: |
@@ -187,9 +187,9 @@ jobs:
           - ios-x86_64
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v27
+      - uses: DeterminateSystems/nix-installer-action@main
         with:
-          extra_nix_config: |
+          extra-conf: |
             experimental-features = nix-command flakes
       - run: mkdir -p out
       - run: |

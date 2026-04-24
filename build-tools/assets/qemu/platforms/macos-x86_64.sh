@@ -7,4 +7,6 @@ _CONFIGURE_ARGS+=(
     --extra-cxxflags="-arch x86_64"
 )
 _EXTRA_LDFLAGS="-Wl,-dead_strip -arch x86_64"
+_QEMU_BINARY_NAME="qemu-system-riscv64-unsigned"
+_QEMU_OUTPUT_NAME="qemu-system-riscv64"
 _STRIP_BIN="strip"
