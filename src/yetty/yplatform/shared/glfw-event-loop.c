@@ -2,6 +2,7 @@
 
 #include <yetty/platform/platform-input-pipe.h>
 #include <yetty/ycore/event.h>
+#include <yetty/ytrace.h>
 #include <GLFW/glfw3.h>
 
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
@@ -163,10 +164,17 @@ static void window_refresh_callback(GLFWwindow *window)
     struct yetty_yplatform_input_pipe *pipe = glfwGetWindowUserPointer(window);
     struct yetty_ycore_event event = {0};
 
+    yinfo("glfw: window_refresh_callback fired");
+
     if (!pipe)
         return;
 
-    event.type = YETTY_EVENT_RENDER;
+    /* Expose/refresh: GPU texture is unchanged but the window contents were
+     * clobbered. Post WINDOW_REFRESH so damage-aware targets (X11-tile) can
+     * mark every tile dirty before the RENDER dispatch; targets whose
+     * present() repaints the full surface (the WebGPU texture-surface path)
+     * are unaffected since yetty.c falls through to a normal render. */
+    event.type = YETTY_EVENT_WINDOW_REFRESH;
     pipe->ops->write(pipe, &event, sizeof(event));
 }
 

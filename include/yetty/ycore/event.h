@@ -54,6 +54,11 @@ enum yetty_ycore_event_type {
     YETTY_EVENT_SET_FRAME_RATE,
     /* Render */
     YETTY_EVENT_RENDER,
+    /* Window contents need a full repaint (e.g. X11 Expose after being
+     * uncovered). The texture-surface target just re-renders the whole
+     * frame, but damage-aware targets (X11-tile) need to mark every tile
+     * dirty or nothing gets blitted — the GPU content didn't change. */
+    YETTY_EVENT_WINDOW_REFRESH,
     /* Shutdown - window close, propagates destroy */
     YETTY_EVENT_SHUTDOWN,
     /* Named zoom events (produced from raw SCROLL + modifier combinations by

@@ -24,6 +24,13 @@ struct yetty_app_gpu_context {
     WGPUSurface surface;
     uint32_t surface_width;
     uint32_t surface_height;
+
+    /* Optional X11 native handles. Populated by the platform layer on
+     * Linux/X11 (opaque here to keep Xlib out of this header); NULL / 0 on
+     * every other platform. yetty uses these only when the X11-tile render
+     * target is selected — see yetty_log_gpu_info / initWebGPU. */
+    void *x11_display;        /* Display * */
+    unsigned long x11_window; /* Window (XID) */
 };
 
 /* App context - passed from platform main to yetty_create */

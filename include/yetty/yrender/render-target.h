@@ -73,6 +73,14 @@ struct yetty_yrender_target_ops {
 	struct yetty_ycore_void_result (*set_visual_zoom)(
 		struct yetty_yrender_target *self,
 		float scale, float offset_x, float offset_y);
+
+	/* Hint that the next present() must produce a full-window repaint even
+	 * if the GPU content is unchanged. Called by the event loop on X11
+	 * Expose / window-refresh so damage-aware targets (X11-tile) re-ship
+	 * every tile — otherwise their delta would be empty and the window
+	 * stays broken after being uncovered. Optional — NULL means "the
+	 * target's present() already repaints everything unconditionally". */
+	void (*refresh_full)(struct yetty_yrender_target *self);
 };
 
 /* Render target base - embed as first member in subclasses */

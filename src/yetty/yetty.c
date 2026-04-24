@@ -9,6 +9,9 @@
 #include <yetty/ycore/event.h>
 #include <yetty/yrender/gpu-allocator.h>
 #include <yetty/yrender/render-target.h>
+#ifdef YETTY_HAS_X11_TILE
+#include <yetty/yrender/render-target-x11-tile.h>
+#endif
 #include <yetty/yterm/terminal.h>
 #include <yetty/webgpu/error.h>
 #include <yetty/ytrace.h>
@@ -19,6 +22,7 @@
 #include <yetty/yvnc/vnc-server.h>
 #include <yetty/platform/platform-input-pipe.h>
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -111,6 +115,18 @@ static struct yetty_ycore_int_result yetty_event_handler(
 {
     struct yetty_yetty *yetty =
         container_of(listener, struct yetty_yetty, listener);
+
+    /* X11 Expose / window-uncover: mark every tile dirty on damage-aware
+     * targets so the next render actually repaints the window. Fall through
+     * to the normal RENDER path below (no early return). */
+    if (event->type == YETTY_EVENT_WINDOW_REFRESH) {
+        if (yetty->render_target && yetty->render_target->ops->refresh_full)
+            yetty->render_target->ops->refresh_full(yetty->render_target);
+        /* Re-dispatch as a normal RENDER so the single render pipeline runs
+         * exactly once, via the same code path used by all other triggers. */
+        struct yetty_ycore_event re = { .type = YETTY_EVENT_RENDER };
+        return yetty_event_handler(listener, &re);
+    }
 
     /* Handle RENDER event directly - yetty owns the render cycle */
     if (event->type == YETTY_EVENT_RENDER) {
@@ -457,6 +473,8 @@ static struct yetty_ycore_void_result register_event_listeners(struct yetty_yett
     res = el->ops->register_listener(el, YETTY_EVENT_RESIZE, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
     res = el->ops->register_listener(el, YETTY_EVENT_RENDER, &yetty->listener, 0);
+    if (!YETTY_IS_OK(res)) return res;
+    res = el->ops->register_listener(el, YETTY_EVENT_WINDOW_REFRESH, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
     res = el->ops->register_listener(el, YETTY_EVENT_SHUTDOWN, &yetty->listener, 0);
     if (!YETTY_IS_OK(res)) return res;
@@ -908,6 +926,25 @@ static struct yetty_ycore_void_result init_webgpu(struct yetty_yetty *yetty)
     };
 
     struct yetty_yrender_target_ptr_result target_res;
+
+    /*
+     * When we're running on X11 — and the platform handed us native Display
+     * and Window handles (GLFW's X11 backend; Wayland/Cocoa/Win32 leave
+     * these NULL/0) — use the X11-tile target. It renders offscreen and
+     * XShmPutImage's only the dirty tiles into the X window, which keeps
+     * per-frame wire traffic tiny on remote displays (VNC+VGL) and stays
+     * competitive locally where XShm is a shared-memory memcpy.
+     *
+     * No opt-in flag: X11 means tile target, Wayland/other means the
+     * standard WebGPU surface path. VNC-server mode always wins above.
+     */
+    bool x11_tile_available = false;
+#ifdef YETTY_HAS_X11_TILE
+    x11_tile_available =
+        yetty->context.app_context.app_gpu_context.x11_display != NULL &&
+        yetty->context.app_context.app_gpu_context.x11_window != 0UL;
+#endif
+
     if (vnc_enabled) {
         /* VNC render target: sends frames to VNC, optionally presents to surface */
         target_res = yetty_yrender_target_vnc_create(
@@ -918,6 +955,26 @@ static struct yetty_ycore_void_result init_webgpu(struct yetty_yetty *yetty)
             surface,  /* NULL for headless, non-NULL for mirror */
             yetty->vnc_server,
             vp);
+#ifdef YETTY_HAS_X11_TILE
+    } else if (x11_tile_available) {
+        yinfo("render target: X11-tile (XShmPutImage per dirty tile)");
+        target_res = yetty_yrender_target_x11_tile_create(
+            yetty->device,
+            yetty->queue,
+            yetty->surface_format,
+            alloc_res.value,
+            yetty->wgpu,
+            yetty->context.app_context.app_gpu_context.x11_display,
+            yetty->context.app_context.app_gpu_context.x11_window,
+            vp);
+        if (!YETTY_IS_OK(target_res)) {
+            ywarn("X11-tile target failed (%s); falling back to texture target",
+                  target_res.error.msg);
+            target_res = yetty_yrender_target_texture_create(
+                yetty->device, yetty->queue, yetty->surface_format,
+                alloc_res.value, surface, vp);
+        }
+#endif
     } else {
         /* Standard texture render target */
         target_res = yetty_yrender_target_texture_create(
