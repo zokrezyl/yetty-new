@@ -139,6 +139,8 @@ static struct yetty_ycore_void_result encode_tile(struct yetty_vnc_server *serve
 						 uint16_t tx, uint16_t ty,
 						 uint8_t **out_data, size_t *out_size,
 						 uint8_t *out_encoding);
+static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
+	struct yetty_vnc_server *server, uint32_t width, uint32_t height);
 
 /*===========================================================================
  * TCP Server Callbacks
@@ -445,6 +447,20 @@ void yetty_vnc_server_force_full_frame(struct yetty_vnc_server *server)
 {
 	if (server)
 		server->force_full_frame = 1;
+}
+
+int yetty_vnc_server_is_busy(const struct yetty_vnc_server *server)
+{
+	if (!server || !server->diff_engine)
+		return 0;
+	return yetty_yrender_utils_tile_diff_engine_is_busy(server->diff_engine);
+}
+
+void yetty_vnc_server_mark_redraw_pending(struct yetty_vnc_server *server)
+{
+	if (!server || !server->diff_engine)
+		return;
+	yetty_yrender_utils_tile_diff_engine_mark_redraw_pending(server->diff_engine);
 }
 
 void yetty_vnc_server_set_merge_rectangles(struct yetty_vnc_server *server,
@@ -754,80 +770,196 @@ yetty_vnc_server_send_frame_cpu(struct yetty_vnc_server *server,
 	if (do_full)
 		server->force_full_frame = 0;
 
-	/* Mark all tiles dirty for full frame, or compute diff */
+	/* Mark all tiles dirty for a full frame; the CPU path doesn't run the
+	 * GPU diff, so it has to flag every tile explicitly. */
 	uint32_t num_tiles = server->tiles_x * server->tiles_y;
 	if (do_full) {
 		for (uint32_t i = 0; i < num_tiles; i++)
 			server->dirty_tiles[i] = 1;
 	}
 
-	/* Count dirty tiles */
-	uint16_t dirty_count = 0;
-	for (uint32_t i = 0; i < num_tiles; i++) {
-		if (server->dirty_tiles[i])
-			dirty_count++;
-	}
-
-	if (dirty_count == 0)
-		return YETTY_OK_VOID();
-
-	/* Build frame */
-	struct vnc_frame_header frame_hdr = {
-		.magic = VNC_FRAME_MAGIC,
-		.width = (uint16_t)width,
-		.height = (uint16_t)height,
-		.tile_size = VNC_TILE_SIZE,
-		.num_tiles = dirty_count
-	};
-
-	send_to_all_clients(server, &frame_hdr, sizeof(frame_hdr));
-
-	/* Send tiles */
-	for (uint16_t ty = 0; ty < server->tiles_y; ty++) {
-		for (uint16_t tx = 0; tx < server->tiles_x; tx++) {
-			uint32_t idx = ty * server->tiles_x + tx;
-			if (!server->dirty_tiles[idx])
-				continue;
-
-			uint8_t *tile_data;
-			size_t tile_size;
-			uint8_t encoding;
-
-			res = encode_tile(server, tx, ty, &tile_data, &tile_size, &encoding);
-			if (!YETTY_IS_OK(res))
-				continue;
-
-			struct vnc_tile_header tile_hdr = {
-				.tile_x = tx,
-				.tile_y = ty,
-				.encoding = encoding,
-				.data_size = (uint32_t)tile_size
-			};
-
-			send_to_all_clients(server, &tile_hdr, sizeof(tile_hdr));
-			send_to_all_clients(server, tile_data, tile_size);
-
-			server->dirty_tiles[idx] = 0;
-		}
-	}
-
-	server->awaiting_ack = 1;
-	server->current_stats.frames++;
-
-	return YETTY_OK_VOID();
+	/* Delegate to the shared encode+send path so both CPU and GPU flows
+	 * honour merge_rectangles, raw/JPEG selection, etc. */
+	return encode_and_send_dirty_tiles(server, width, height);
 }
 
 /* (flags_map_callback / pixels_map_callback removed — replaced by
  * yplatform_wgpu_buffer_map_await which yields the coroutine and resumes
  * it on the loop thread when the map completes.) */
 
-/* Encode and send dirty tiles */
+/*===========================================================================
+ * Rectangle-mode support (--vnc-merge-rects)
+ *===========================================================================*/
+
+struct merged_rect {
+	uint16_t x, y, w, h;   /* pixel coordinates */
+};
+
+/*
+ * Greedy maximal-rectangle merge of the dirty-tile bitmap. For each un-used
+ * dirty tile, extend right as long as the row is all-dirty, then extend down
+ * as long as every column stays all-dirty. Emit one rect covering the block
+ * and mark those tiles as consumed. Only strict solid rectangles are merged,
+ * so no wasted bandwidth on clean pixels.
+ *
+ * Ported from yetty-poc/src/yetty/vnc/vnc-server.cpp:mergeRectangles.
+ */
+static size_t merge_dirty_rects(struct yetty_vnc_server *server,
+                                struct merged_rect *out, size_t out_cap)
+{
+	uint16_t tx_count = server->tiles_x;
+	uint16_t ty_count = server->tiles_y;
+	uint32_t num_tiles = (uint32_t)tx_count * ty_count;
+
+	uint8_t *used = calloc(num_tiles, 1);
+	if (!used)
+		return 0;
+
+	size_t out_n = 0;
+
+	for (uint16_t ty = 0; ty < ty_count; ty++) {
+		for (uint16_t tx = 0; tx < tx_count; tx++) {
+			uint32_t idx = (uint32_t)ty * tx_count + tx;
+			if (!server->dirty_tiles[idx] || used[idx])
+				continue;
+
+			uint16_t max_w = 1;
+			uint16_t max_h = 1;
+
+			/* Extend width. */
+			while (tx + max_w < tx_count) {
+				uint32_t next = (uint32_t)ty * tx_count + tx + max_w;
+				if (!server->dirty_tiles[next] || used[next])
+					break;
+				max_w++;
+			}
+
+			/* Extend height — every column in the row must be dirty. */
+			while (ty + max_h < ty_count) {
+				bool row_ok = true;
+				for (uint16_t x = 0; x < max_w; x++) {
+					uint32_t check = (uint32_t)(ty + max_h) * tx_count + tx + x;
+					if (!server->dirty_tiles[check] || used[check]) {
+						row_ok = false;
+						break;
+					}
+				}
+				if (!row_ok)
+					break;
+				max_h++;
+			}
+
+			/* Consume the block. */
+			for (uint16_t dy = 0; dy < max_h; dy++)
+				for (uint16_t dx = 0; dx < max_w; dx++)
+					used[(uint32_t)(ty + dy) * tx_count + tx + dx] = 1;
+
+			if (out_n < out_cap) {
+				struct merged_rect r;
+				r.x = tx * VNC_TILE_SIZE;
+				r.y = ty * VNC_TILE_SIZE;
+				r.w = max_w * VNC_TILE_SIZE;
+				r.h = max_h * VNC_TILE_SIZE;
+
+				/* Clamp to frame bounds (right/bottom edge tiles
+				 * are often partial). */
+				if (r.x + r.w > server->last_width)
+					r.w = (uint16_t)(server->last_width - r.x);
+				if (r.y + r.h > server->last_height)
+					r.h = (uint16_t)(server->last_height - r.y);
+
+				out[out_n++] = r;
+			}
+		}
+	}
+
+	free(used);
+	return out_n;
+}
+
+/*
+ * Encode an arbitrary pixel rectangle from the active framebuffer into
+ * either raw BGRA or JPEG. The caller owns nothing; `*out_data` points
+ * either at a server-owned per-call malloc (caller must free) or at the
+ * turbojpeg-owned buffer (caller must tjFree). `out_free_with_tj` lets the
+ * caller pick the right deallocator.
+ */
+static struct yetty_ycore_void_result encode_rect(
+	struct yetty_vnc_server *server,
+	uint16_t px, uint16_t py, uint16_t rw, uint16_t rh,
+	uint8_t **out_data, size_t *out_size,
+	uint8_t *out_encoding, int *out_free_with_tj)
+{
+	const uint8_t *pixels = server->cpu_pixels
+	                        ? server->cpu_pixels
+	                        : server->gpu_readback_pixels;
+	if (!pixels)
+		return YETTY_ERR(yetty_ycore_void, "no pixels");
+
+	if (px + rw > server->last_width)
+		rw = (uint16_t)(server->last_width - px);
+	if (py + rh > server->last_height)
+		rh = (uint16_t)(server->last_height - py);
+
+	size_t raw_size = (size_t)rw * rh * 4;
+	uint32_t src_stride = server->last_width * 4;
+
+	uint8_t *rect_pixels = malloc(raw_size);
+	if (!rect_pixels)
+		return YETTY_ERR(yetty_ycore_void, "rect alloc failed");
+
+	for (uint16_t y = 0; y < rh; y++) {
+		const uint8_t *src = pixels + (py + y) * src_stride + px * 4;
+		memcpy(rect_pixels + (size_t)y * rw * 4, src, (size_t)rw * 4);
+	}
+
+	if (server->force_raw) {
+		*out_data = rect_pixels;
+		*out_size = raw_size;
+		*out_encoding = VNC_ENCODING_RECT_RAW;
+		*out_free_with_tj = 0;
+		return YETTY_OK_VOID();
+	}
+
+	unsigned char *jpeg_buf = NULL;
+	unsigned long jpeg_size = 0;
+	int result = tjCompress2(server->jpeg_compressor,
+	                         rect_pixels, rw, 0, rh,
+	                         TJPF_BGRA, &jpeg_buf, &jpeg_size,
+	                         TJSAMP_420, server->jpeg_quality,
+	                         TJFLAG_FASTDCT);
+
+	/* Only switch to JPEG if it saves meaningful bytes (matches poc: 0.8x
+	 * threshold avoids shipping JPEG headers for barely-compressible rects). */
+	if (result == 0 && jpeg_size < (unsigned long)(raw_size * 0.8)) {
+		free(rect_pixels);
+		*out_data = jpeg_buf;
+		*out_size = jpeg_size;
+		*out_encoding = VNC_ENCODING_RECT_JPEG;
+		*out_free_with_tj = 1;
+		return YETTY_OK_VOID();
+	}
+
+	if (jpeg_buf)
+		tjFree(jpeg_buf);
+	*out_data = rect_pixels;
+	*out_size = raw_size;
+	*out_encoding = VNC_ENCODING_RECT_RAW;
+	*out_free_with_tj = 0;
+	return YETTY_OK_VOID();
+}
+
+/*===========================================================================
+ * encode_and_send_dirty_tiles - ship the current frame to all clients.
+ * Selects tile mode or rectangle mode based on server->merge_rectangles.
+ *===========================================================================*/
+
 static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
 	struct yetty_vnc_server *server, uint32_t width, uint32_t height)
 {
 	uint32_t num_tiles = server->tiles_x * server->tiles_y;
 
-	/* Count dirty tiles */
+	/* Count dirty tiles. */
 	uint16_t dirty_count = 0;
 	for (uint32_t i = 0; i < num_tiles; i++) {
 		if (server->dirty_tiles[i])
@@ -837,18 +969,80 @@ static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
 	if (dirty_count == 0)
 		return YETTY_OK_VOID();
 
-	/* Build frame header */
+	/*-------------------------------------------------------------------
+	 * Rectangle mode — merge dirty tiles into solid rectangles, encode
+	 * and send one rect per region. Wire header uses tile_size=0 to flag
+	 * rect mode (matches yetty-poc convention).
+	 *-------------------------------------------------------------------*/
+	if (server->merge_rectangles) {
+		struct merged_rect *rects = malloc(num_tiles * sizeof(*rects));
+		if (!rects)
+			return YETTY_ERR(yetty_ycore_void, "rects alloc failed");
+
+		size_t rect_n = merge_dirty_rects(server, rects, num_tiles);
+
+		struct vnc_frame_header frame_hdr = {
+			.magic = VNC_FRAME_MAGIC,
+			.width = (uint16_t)width,
+			.height = (uint16_t)height,
+			.tile_size = 0,
+			.num_tiles = (uint16_t)rect_n,
+		};
+		send_to_all_clients(server, &frame_hdr, sizeof(frame_hdr));
+
+		for (size_t i = 0; i < rect_n; i++) {
+			struct merged_rect *r = &rects[i];
+
+			uint8_t *data;
+			size_t size;
+			uint8_t encoding;
+			int free_with_tj;
+
+			struct yetty_ycore_void_result res =
+				encode_rect(server, r->x, r->y, r->w, r->h,
+				            &data, &size, &encoding, &free_with_tj);
+			if (!YETTY_IS_OK(res))
+				continue;
+
+			struct vnc_rect_header rh = {
+				.px_x = r->x,
+				.px_y = r->y,
+				.width = r->w,
+				.height = r->h,
+				.encoding = encoding,
+				.reserved = 0,
+				.data_size = (uint32_t)size,
+			};
+
+			send_to_all_clients(server, &rh, sizeof(rh));
+			send_to_all_clients(server, data, size);
+
+			if (free_with_tj)
+				tjFree(data);
+			else
+				free(data);
+		}
+
+		free(rects);
+		memset(server->dirty_tiles, 0, num_tiles * sizeof(int));
+
+		server->awaiting_ack = 1;
+		server->current_stats.frames++;
+		return YETTY_OK_VOID();
+	}
+
+	/*-------------------------------------------------------------------
+	 * Tile mode (default) — one header+payload per dirty 64x64 tile.
+	 *-------------------------------------------------------------------*/
 	struct vnc_frame_header frame_hdr = {
 		.magic = VNC_FRAME_MAGIC,
 		.width = (uint16_t)width,
 		.height = (uint16_t)height,
 		.tile_size = VNC_TILE_SIZE,
-		.num_tiles = dirty_count
+		.num_tiles = dirty_count,
 	};
-
 	send_to_all_clients(server, &frame_hdr, sizeof(frame_hdr));
 
-	/* Send dirty tiles */
 	for (uint16_t ty = 0; ty < server->tiles_y; ty++) {
 		for (uint16_t tx = 0; tx < server->tiles_x; tx++) {
 			uint32_t idx = ty * server->tiles_x + tx;
@@ -868,7 +1062,7 @@ static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
 				.tile_x = tx,
 				.tile_y = ty,
 				.encoding = encoding,
-				.data_size = (uint32_t)tile_size
+				.data_size = (uint32_t)tile_size,
 			};
 
 			send_to_all_clients(server, &tile_hdr, sizeof(tile_hdr));

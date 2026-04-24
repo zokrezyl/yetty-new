@@ -79,6 +79,15 @@ int yetty_vnc_server_is_ready_for_frame(const struct yetty_vnc_server *server);
 /* Force full frame refresh */
 void yetty_vnc_server_force_full_frame(struct yetty_vnc_server *server);
 
+/* Tile-diff back-pressure hooks for callers implementing the render-target
+ * is_busy / notify_render_skipped ops. `is_busy` is true while the async
+ * readback coroutine is still in flight; `mark_redraw_pending` tells the
+ * engine it owes one catch-up render once the current submit lands. Both
+ * are safe to call before the first frame (when the engine is still NULL)
+ * — they return false / no-op in that case. */
+int  yetty_vnc_server_is_busy(const struct yetty_vnc_server *server);
+void yetty_vnc_server_mark_redraw_pending(struct yetty_vnc_server *server);
+
 /* Rectangle merging */
 void yetty_vnc_server_set_merge_rectangles(struct yetty_vnc_server *server,
 					   int enable);

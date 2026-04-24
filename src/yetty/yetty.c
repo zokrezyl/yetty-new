@@ -907,6 +907,21 @@ static struct yetty_ycore_void_result init_webgpu(struct yetty_yetty *yetty)
         yetty->vnc_server = vnc_res.value;
         ydebug("initWebGPU: VNC server created");
 
+        /* Apply per-flag compression / delta-tracking settings. Each config
+         * key comes from the matching --vnc-* CLI flag and tunes the VNC
+         * server's encode+send path. Setters are no-ops on NULL / unset. */
+        if (config->ops->get_bool(config, "vnc/raw", 0))
+            yetty_vnc_server_set_force_raw(yetty->vnc_server, 1);
+        int jpeg_q = config->ops->get_int(config, "vnc/compression-quality", 0);
+        if (jpeg_q > 0)
+            yetty_vnc_server_set_jpeg_quality(yetty->vnc_server, (uint8_t)jpeg_q);
+        if (config->ops->get_bool(config, "vnc/always-full", 0))
+            yetty_vnc_server_set_always_full_frame(yetty->vnc_server, 1);
+        if (config->ops->get_bool(config, "vnc/use-h264", 0))
+            yetty_vnc_server_set_use_h264(yetty->vnc_server, 1);
+        if (config->ops->get_bool(config, "vnc/merge-rects", 0))
+            yetty_vnc_server_set_merge_rectangles(yetty->vnc_server, 1);
+
         /* Start VNC server */
         int vnc_port = config->ops->get_int(config, "vnc/port", 5900);
         struct yetty_ycore_void_result start_res =
