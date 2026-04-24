@@ -83,6 +83,10 @@ enum {
     OPT_VNC_ALWAYS_FULL,
     OPT_VNC_USE_H264,
     OPT_VNC_MERGE_RECTS,
+    OPT_VNC_H264_BITRATE,
+    OPT_VNC_H264_FRAMERATE,
+    OPT_VNC_H264_IDR_INTERVAL,
+    OPT_VNC_H264_SCREEN_CONTENT,
 };
 
 /* Command line options */
@@ -98,6 +102,10 @@ static struct option long_options[] = {
     {"vnc-always-full",           no_argument,       0, OPT_VNC_ALWAYS_FULL},
     {"vnc-use-h264",              no_argument,       0, OPT_VNC_USE_H264},
     {"vnc-merge-rects",           no_argument,       0, OPT_VNC_MERGE_RECTS},
+    {"vnc-h264-bitrate",          required_argument, 0, OPT_VNC_H264_BITRATE},
+    {"vnc-h264-framerate",        required_argument, 0, OPT_VNC_H264_FRAMERATE},
+    {"vnc-h264-idr-interval",     required_argument, 0, OPT_VNC_H264_IDR_INTERVAL},
+    {"vnc-h264-screen-content",   required_argument, 0, OPT_VNC_H264_SCREEN_CONTENT},
     {"rpc-host",                  required_argument, 0,  0 },
     {"rpc-port",                  required_argument, 0, 'r'},
     {"temu",                      no_argument,       0,  0 },
@@ -122,6 +130,10 @@ static void print_usage(const char *prog)
     fprintf(stderr, "      --vnc-always-full          Disable delta, send full frame every time\n");
     fprintf(stderr, "      --vnc-use-h264             Use H.264 encoder instead of JPEG (requires openh264)\n");
     fprintf(stderr, "      --vnc-merge-rects          Merge adjacent dirty tiles into bigger rectangles\n");
+    fprintf(stderr, "      --vnc-h264-bitrate BPS     H.264 target bitrate in bps (default: auto-scales with resolution)\n");
+    fprintf(stderr, "      --vnc-h264-framerate FPS   H.264 encode framerate (default: 30)\n");
+    fprintf(stderr, "      --vnc-h264-idr-interval N  Frames between H.264 keyframes (default: 60 — 2s at 30 fps)\n");
+    fprintf(stderr, "      --vnc-h264-screen-content 0|1  H.264 screen-content optimisation (default: 1)\n");
     fprintf(stderr, "      --rpc-host=HOST    RPC server host\n");
     fprintf(stderr, "  -r, --rpc-port=PORT    RPC server port\n");
     fprintf(stderr, "      --temu             Run in-process TinyEMU RISC-V VM\n");
@@ -172,6 +184,18 @@ static void parse_cmdline(int argc, char **argv, struct yetty_yconfig *config)
             break;
         case OPT_VNC_MERGE_RECTS:
             config->ops->set_string(config, "vnc/merge-rects", "true");
+            break;
+        case OPT_VNC_H264_BITRATE:
+            config->ops->set_string(config, "vnc/h264/bitrate", optarg);
+            break;
+        case OPT_VNC_H264_FRAMERATE:
+            config->ops->set_string(config, "vnc/h264/framerate", optarg);
+            break;
+        case OPT_VNC_H264_IDR_INTERVAL:
+            config->ops->set_string(config, "vnc/h264/idr-interval", optarg);
+            break;
+        case OPT_VNC_H264_SCREEN_CONTENT:
+            config->ops->set_string(config, "vnc/h264/screen-content", optarg);
             break;
         case 'r':
             /* rpc-port already handled by yetty_yconfig_create */

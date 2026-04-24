@@ -88,6 +88,16 @@ void yetty_vnc_server_force_full_frame(struct yetty_vnc_server *server);
 int  yetty_vnc_server_is_busy(const struct yetty_vnc_server *server);
 void yetty_vnc_server_mark_redraw_pending(struct yetty_vnc_server *server);
 
+/*---------------------------------------------------------------------------
+ * H.264 tuning knobs. Applied at encoder creation time — calling a setter
+ * mid-session stages the value for the next encoder instance (size change,
+ * or an explicit reset). 0 (or <= 0 for floats) means "use default".
+ *-------------------------------------------------------------------------*/
+void yetty_vnc_server_set_h264_bitrate(struct yetty_vnc_server *server, uint32_t bps);
+void yetty_vnc_server_set_h264_framerate(struct yetty_vnc_server *server, float fps);
+void yetty_vnc_server_set_h264_idr_interval(struct yetty_vnc_server *server, uint32_t frames);
+void yetty_vnc_server_set_h264_screen_content(struct yetty_vnc_server *server, int on);
+
 /* Rectangle merging */
 void yetty_vnc_server_set_merge_rectangles(struct yetty_vnc_server *server,
 					   int enable);

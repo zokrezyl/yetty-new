@@ -69,7 +69,15 @@ void yetty_yvideo_encoder_config_defaults(
         return;
     cfg->width = width;
     cfg->height = height;
-    cfg->bitrate = 4000000u;     /* 4 Mbps — good for screen content */
+    /* Auto-scale bitrate with pixel count: ~0.1 bits/pixel/frame at 30 fps,
+     * clamped to [4, 40] Mbps. At 2696x1576 this lands around 12.7 Mbps —
+     * enough to keep text edges crisp. Callers can still override via
+     * --vnc-h264-bitrate / vnc/h264/bitrate before handing the cfg in. */
+    double px_per_frame = (double)width * (double)height;
+    uint32_t bps = (uint32_t)(px_per_frame * 0.1 * 30.0);
+    if (bps < 4000000u)  bps = 4000000u;
+    if (bps > 40000000u) bps = 40000000u;
+    cfg->bitrate = bps;
     cfg->frame_rate = 30.0f;
     cfg->idr_interval = 60;       /* keyframe every 2 s at 30 fps */
     cfg->screen_content = true;

@@ -922,6 +922,21 @@ static struct yetty_ycore_void_result init_webgpu(struct yetty_yetty *yetty)
         if (config->ops->get_bool(config, "vnc/merge-rects", 0))
             yetty_vnc_server_set_merge_rectangles(yetty->vnc_server, 1);
 
+        /* H.264 tuning knobs — read from vnc/h264/... config keys. Each is
+         * optional; the server treats zero / unset as "use encoder defaults". */
+        int h264_bps = config->ops->get_int(config, "vnc/h264/bitrate", 0);
+        if (h264_bps > 0)
+            yetty_vnc_server_set_h264_bitrate(yetty->vnc_server, (uint32_t)h264_bps);
+        int h264_fps = config->ops->get_int(config, "vnc/h264/framerate", 0);
+        if (h264_fps > 0)
+            yetty_vnc_server_set_h264_framerate(yetty->vnc_server, (float)h264_fps);
+        int h264_idr = config->ops->get_int(config, "vnc/h264/idr-interval", 0);
+        if (h264_idr > 0)
+            yetty_vnc_server_set_h264_idr_interval(yetty->vnc_server, (uint32_t)h264_idr);
+        if (config->ops->has(config, "vnc/h264/screen-content"))
+            yetty_vnc_server_set_h264_screen_content(yetty->vnc_server,
+                config->ops->get_bool(config, "vnc/h264/screen-content", 1));
+
         /* Start VNC server */
         int vnc_port = config->ops->get_int(config, "vnc/port", 5900);
         struct yetty_ycore_void_result start_res =

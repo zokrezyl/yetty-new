@@ -105,6 +105,14 @@ struct yetty_vnc_server {
 	uint32_t yuv_uv_stride;
 	uint32_t h264_enc_width;
 	uint32_t h264_enc_height;
+
+	/* User-facing H.264 tuning knobs. Applied at encoder creation time;
+	 * zero / negative = "leave defaults alone". Set from config/CLI via
+	 * yetty_vnc_server_set_h264_*. */
+	uint32_t h264_cfg_bitrate;       /* 0 = auto from resolution */
+	float    h264_cfg_framerate;      /* <= 0 = default (30 fps) */
+	uint32_t h264_cfg_idr_interval;   /* 0 = default (60 frames) */
+	int      h264_cfg_screen_content; /* -1 = default (1); 0/1 = explicit */
 #endif
 
 	/* Stats */
@@ -340,6 +348,11 @@ yetty_vnc_server_create(WGPUInstance instance, WGPUDevice device,
 	server->tcp_server_id = -1;
 	server->jpeg_quality = 80;
 	server->force_full_frame = 1;
+#ifdef YETTY_HAS_YVIDEO
+	/* -1 = "no override"; 0/1 = user set false/true. 0 would be
+	 * indistinguishable from "default true" if we left it as-is. */
+	server->h264_cfg_screen_content = -1;
+#endif
 
 	server->jpeg_compressor = tjInitCompress();
 	if (!server->jpeg_compressor) {
@@ -485,6 +498,40 @@ void yetty_vnc_server_mark_redraw_pending(struct yetty_vnc_server *server)
 		return;
 	yetty_yrender_utils_tile_diff_engine_mark_redraw_pending(server->diff_engine);
 }
+
+#ifdef YETTY_HAS_YVIDEO
+void yetty_vnc_server_set_h264_bitrate(struct yetty_vnc_server *server, uint32_t bps)
+{
+	if (server)
+		server->h264_cfg_bitrate = bps;
+}
+
+void yetty_vnc_server_set_h264_framerate(struct yetty_vnc_server *server, float fps)
+{
+	if (server)
+		server->h264_cfg_framerate = fps;
+}
+
+void yetty_vnc_server_set_h264_idr_interval(struct yetty_vnc_server *server, uint32_t frames)
+{
+	if (server)
+		server->h264_cfg_idr_interval = frames;
+}
+
+void yetty_vnc_server_set_h264_screen_content(struct yetty_vnc_server *server, int on)
+{
+	if (server)
+		server->h264_cfg_screen_content = on ? 1 : 0;
+}
+#else
+/* Symbols exist unconditionally in the public header so callers don't need
+ * to guard each call with #ifdef YETTY_HAS_YVIDEO. No-ops when yvideo is
+ * disabled at build time. */
+void yetty_vnc_server_set_h264_bitrate(struct yetty_vnc_server *s, uint32_t b) { (void)s; (void)b; }
+void yetty_vnc_server_set_h264_framerate(struct yetty_vnc_server *s, float f) { (void)s; (void)f; }
+void yetty_vnc_server_set_h264_idr_interval(struct yetty_vnc_server *s, uint32_t f) { (void)s; (void)f; }
+void yetty_vnc_server_set_h264_screen_content(struct yetty_vnc_server *s, int on) { (void)s; (void)on; }
+#endif
 
 void yetty_vnc_server_set_merge_rectangles(struct yetty_vnc_server *server,
 					   int enable)
@@ -1014,6 +1061,18 @@ static struct yetty_ycore_void_result h264_send_full_frame(
 
 		struct yetty_yvideo_encoder_config cfg;
 		yetty_yvideo_encoder_config_defaults(&cfg, enc_w, enc_h);
+
+		/* Apply user overrides from --vnc-h264-* flags or the vnc/h264/...
+		 * config keys. Each knob left at zero/-1 keeps the auto default. */
+		if (server->h264_cfg_bitrate > 0)
+			cfg.bitrate = server->h264_cfg_bitrate;
+		if (server->h264_cfg_framerate > 0.0f)
+			cfg.frame_rate = server->h264_cfg_framerate;
+		if (server->h264_cfg_idr_interval > 0)
+			cfg.idr_interval = server->h264_cfg_idr_interval;
+		if (server->h264_cfg_screen_content >= 0)
+			cfg.screen_content = server->h264_cfg_screen_content != 0;
+
 		struct yetty_yvideo_encoder_ptr_result eres =
 			yetty_yvideo_encoder_create(&cfg);
 		if (!YETTY_IS_OK(eres)) {
@@ -1126,21 +1185,23 @@ static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
 
 #ifdef YETTY_HAS_YVIDEO
 	/*-------------------------------------------------------------------
-	 * H.264 full-frame mode — streaming video encoder. Worthwhile only
-	 * when the delta is big enough that per-tile JPEG would waste more
-	 * bytes than a full inter-frame compressed H.264 payload. Rule of
-	 * thumb from yetty-poc: kick in when > half the tiles are dirty, and
-	 * never when force_raw is set. Falls through to JPEG on encoder
-	 * failure (use_h264 gets cleared inside h264_send_full_frame).
+	 * H.264 streaming mode — once enabled, EVERY frame goes through the
+	 * H.264 encoder. Mixing H.264 with JPEG per-tile mid-session would
+	 * desynchronise the encoder's reference frames (next P-frame would
+	 * reference a picture the decoder never saw) and force the client to
+	 * swap between two decode paths per packet. The codec's P-frames
+	 * already handle "nothing changed" cheaply — a static screen encodes
+	 * to ~100 bytes per frame. force_raw overrides H.264 since the
+	 * explicit intent is "no compression of any kind".
+	 *
+	 * On encoder failure h264_send_full_frame() clears use_h264, so this
+	 * falls back to JPEG *for the rest of the session*, not mid-stream.
 	 *-------------------------------------------------------------------*/
-	if (server->use_h264 && !server->force_raw &&
-	    dirty_count > (uint16_t)(num_tiles / 2u)) {
+	if (server->use_h264 && !server->force_raw) {
 		struct yetty_ycore_void_result res =
 			h264_send_full_frame(server, width, height);
 		if (YETTY_IS_OK(res))
 			return res;
-		/* H.264 failed mid-encode; use_h264 is already cleared. Fall
-		 * through to JPEG below with dirty_tiles still set. */
 	}
 #endif
 
