@@ -305,6 +305,72 @@ CROSS_EOF
         echo "==> patched $SRC_DIR/meson.build: rt library required:false for android"
     fi
 
+    # util/oslib-posix.c:qemu_shm_alloc() calls shm_open/shm_unlink which
+    # bionic doesn't declare for arm64/x86_64. Replace the whole body on
+    # Android — riscv64-softmmu with --without-default-features never
+    # exercises POSIX shm at runtime.
+    _OSLIB="$SRC_DIR/util/oslib-posix.c"
+    if grep -q "^    fd = shm_open(shm_name->str" "$_OSLIB"; then
+        sed -i '/^int qemu_shm_alloc(size_t size, Error \*\*errp)$/,/^}$/c\
+int qemu_shm_alloc(size_t size, Error **errp)\
+{\
+    /* Android stub: bionic lacks shm_open/shm_unlink for arm64/x86_64. */\
+    (void)size;\
+    error_setg_errno(errp, ENOSYS, "POSIX shm not supported on this platform");\
+    return -1;\
+}' "$_OSLIB"
+        echo "==> patched $_OSLIB: qemu_shm_alloc replaced with Android stub"
+    fi
+
+    # fsdev/9p-marshal.h declares `struct V9fsStatDotl` whose member names
+    # (st_atime, st_mtime, st_ctime, st_atime_nsec, ...) collide with
+    # bionic's <sys/stat.h> macros (e.g. st_atime -> st_atim.tv_sec).
+    # A bare #undef at the top of the header leaks into TUs like
+    # hw/9pfs/9p-synth.c that legitimately use st.st_atime on `struct stat`,
+    # breaking those. Use #pragma push_macro / pop_macro to scope the
+    # undefs to the struct only, preserving the macros for the rest of
+    # every TU that includes this header.
+    _P9H="$SRC_DIR/fsdev/9p-marshal.h"
+    if ! grep -q "ANDROID st_ macro push/pop" "$_P9H"; then
+        sed -i '/^typedef struct V9fsStatDotl {$/i\
+/* ANDROID st_ macro push/pop — bionic <sys/stat.h> defines these names\
+ * as access-path macros. Undef inside the struct only so the rest of\
+ * every TU that includes this header still sees the POSIX aliases. */\
+#ifdef __ANDROID__\
+# pragma push_macro("st_atime")\
+# pragma push_macro("st_mtime")\
+# pragma push_macro("st_ctime")\
+# pragma push_macro("st_atimensec")\
+# pragma push_macro("st_mtimensec")\
+# pragma push_macro("st_ctimensec")\
+# pragma push_macro("st_atime_nsec")\
+# pragma push_macro("st_mtime_nsec")\
+# pragma push_macro("st_ctime_nsec")\
+# undef st_atime\
+# undef st_mtime\
+# undef st_ctime\
+# undef st_atimensec\
+# undef st_mtimensec\
+# undef st_ctimensec\
+# undef st_atime_nsec\
+# undef st_mtime_nsec\
+# undef st_ctime_nsec\
+#endif' "$_P9H"
+        sed -i '/^} V9fsStatDotl;$/a\
+#ifdef __ANDROID__\
+# pragma pop_macro("st_ctime_nsec")\
+# pragma pop_macro("st_mtime_nsec")\
+# pragma pop_macro("st_atime_nsec")\
+# pragma pop_macro("st_ctimensec")\
+# pragma pop_macro("st_mtimensec")\
+# pragma pop_macro("st_atimensec")\
+# pragma pop_macro("st_ctime")\
+# pragma pop_macro("st_mtime")\
+# pragma pop_macro("st_atime")\
+#endif' "$_P9H"
+        echo "==> patched $_P9H: scoped st_ macro push/pop around V9fsStatDotl"
+    fi
+
     _EXTRA_CFLAGS="-Os -ffunction-sections -fdata-sections -I$SYSROOT/include"
     _EXTRA_CXXFLAGS="$_EXTRA_CFLAGS"
     _EXTRA_LDFLAGS="-Wl,--gc-sections -L$SYSROOT/lib"
@@ -314,11 +380,11 @@ CROSS_EOF
         --cc="$_CC"
         --cxx="$_CXX"
         --host-cc=gcc
+        # --without-default-features turns every auto feature off; virtfs
+        # needs attr, and bionic satisfies the attr test via in-libc
+        # getxattr/setxattr (QEMU's libattr_test links without -lattr).
+        --enable-attr
     )
-    # Bionic has getxattr/setxattr in libc with <sys/xattr.h> (no
-    # standalone libattr), so we don't pass --enable-attr — QEMU's
-    # meson.build:1190 tries `cc.links(libattr_test)` without -lattr
-    # first, which succeeds on Android.
     _STRIP_BIN="llvm-strip"
     ;;
 
