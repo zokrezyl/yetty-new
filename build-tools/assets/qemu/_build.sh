@@ -346,7 +346,12 @@ ios-arm64|ios-x86_64|tvos-arm64)
     # The shell also exports DEVELOPER_DIR=<nix apple-sdk> which /usr/bin/xcrun
     # honors and would search for iphoneos/appletvos SDKs there (not present);
     # unset so xcrun falls back to `xcode-select -p` (real Xcode.app).
-    unset DEVELOPER_DIR
+    # The nix apple-sdk shell also exports MACOSX_DEPLOYMENT_TARGET/SDKROOT and
+    # configures `clang` on PATH as a wrapper that hard-injects
+    # `-mmacos-version-min=<that target>`, which is incompatible with
+    # `-mios-version-min=...`. Use Apple's /usr/bin/clang directly and strip
+    # the env vars so xcrun + our -isysroot fully determine the target.
+    unset DEVELOPER_DIR MACOSX_DEPLOYMENT_TARGET SDKROOT NIX_APPLE_SDK_VERSION
     case "$TARGET_PLATFORM" in
         ios-arm64)
             _SDK_NAME="iphoneos";         _ARCH="arm64"
@@ -367,9 +372,9 @@ ios-arm64|ios-x86_64|tvos-arm64)
     _SDK="$(/usr/bin/xcrun --sdk "$_SDK_NAME" --show-sdk-path)"
     _DARWIN_CFLAGS="-isysroot $_SDK -arch $_ARCH $_MIN_FLAG"
     _CONFIGURE_ARGS+=(
-        --cc=clang
-        --cxx=clang++
-        --host-cc=clang
+        --cc=/usr/bin/clang
+        --cxx=/usr/bin/clang++
+        --host-cc=/usr/bin/clang
         "${_EXTRA_QCFG[@]}"
         --extra-cflags="$_DARWIN_CFLAGS"
         --extra-cxxflags="$_DARWIN_CFLAGS"
