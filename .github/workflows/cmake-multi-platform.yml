@@ -6,6 +6,7 @@ on:
   push:
     tags:
       - '*'
+      - '!assets-*'       # prebuilt-asset releases are handled by build-assets.yml
     branches:
       - '**'
 

@@ -3,10 +3,15 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # Separate pin for Android cross-builds: nixos-unstable shipped
+    # clang 21.1.8 whose compiler-rt fails to build for android
+    # (pthread.h missing in the libc setup stage). nixos-25.05 has an
+    # earlier clang and builds cleanly.
+    nixpkgs-android.url = "github:NixOS/nixpkgs/nixos-25.05";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, nixpkgs-android, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -14,6 +19,28 @@
           config = {
             allowUnfree = true;
             android_sdk.accept_license = true;
+          };
+        };
+
+        # Stable-pinned nixpkgs used only for Android cross-compiles.
+        pkgsAndroid = import nixpkgs-android {
+          inherit system;
+          config.allowUnfree = true;
+        };
+
+        # Custom pkgsCross for x86_64-android: nixpkgs only ships
+        # aarch64-android as a first-class crossSystem, but defining an
+        # x86_64 variant by the same shape gives us glib/pixman/zlib
+        # cross-built for the Android emulator ABI.
+        pkgsX86_64Android = import nixpkgs-android {
+          inherit system;
+          config.allowUnfree = true;
+          crossSystem = {
+            config = "x86_64-unknown-linux-android";
+            libc = "bionic";
+            useLLVM = true;
+            androidSdkVersion = "35";
+            androidNdkVersion = "27";
           };
         };
 
@@ -205,6 +232,207 @@
               echo "Run: make android"
               echo "Run ARM emulator: run-arm-emulator"
             '';
+          };
+
+          # Asset-build shell: RISC-V cross-toolchain for OpenSBI + Linux kernel.
+          # Used by build-tools/assets/{opensbi,linux}/build.sh.
+          # Override CROSS_COMPILE when invoking scripts outside nix if needed.
+          assets-riscv = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              # RISC-V cross-toolchain
+              pkgsCross.riscv64.buildPackages.gcc
+              pkgsCross.riscv64.buildPackages.binutils
+
+              # Build drivers + fetch tools
+              gnumake
+              bc
+              bison
+              flex
+              cpio
+              rsync
+              curl
+              gnutar
+              gzip
+
+              # Kernel deps (host-side, for scripts/)
+              openssl
+              elfutils
+              perl
+              python3
+              pkg-config
+            ];
+
+            shellHook = ''
+              export CROSS_COMPILE="riscv64-unknown-linux-gnu-"
+              echo "Yetty asset-build environment (RISC-V cross)"
+              echo "  CROSS_COMPILE=$CROSS_COMPILE"
+              echo "  gcc:    $(''${CROSS_COMPILE}gcc --version | head -1)"
+              echo ""
+              echo "Run: bash build-tools/assets/opensbi/build.sh"
+              echo "Run: bash build-tools/assets/linux/build.sh"
+            '';
+          };
+
+          # Asset-build shell: host toolchain for building yetty-ymsdf-gen
+          # and generating MSDF CDB font databases from TTFs.
+          # Used by build-tools/assets/cdb/build.sh.
+          assets-cdb = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              cmake
+              ninja
+              pkg-config
+              git
+              gcc
+              curl
+              gnutar
+              gzip
+              zlib
+              zlib.static
+              brotli
+            ];
+            shellHook = ''
+              echo "Yetty asset-build environment (cdb / host tools)"
+            '';
+          };
+
+          # Asset-build shells: one per QEMU target platform.
+          # Each carries the target-arch glib/pixman/pkg-config so QEMU's
+          # meson configure can find them via the cross pkg-config wrapper.
+
+          assets-qemu-linux-x86_64 = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              meson ninja pkg-config python3 bison flex gnumake perl
+              curl gnutar xz gzip
+              gcc glib glib.dev pixman zlib zlib.static
+            ];
+            shellHook = "echo 'Yetty asset-build (qemu linux-x86_64)'";
+          };
+
+          # Use pkgsCross.*.mkShell so nativeBuildInputs (host-side build
+          # tools) stay out of PKG_CONFIG_PATH_FOR_TARGET. Otherwise native
+          # zlib from curl/python leaks into the cross link and the
+          # aarch64 linker gets fed x86_64 libz.
+          assets-qemu-linux-aarch64 = pkgs.pkgsCross.aarch64-multiplatform.mkShell {
+            nativeBuildInputs = with pkgs; [
+              meson ninja python3 bison flex gnumake perl
+              curl gnutar xz gzip
+              pkgsCross.aarch64-multiplatform.buildPackages.pkg-config
+            ];
+            buildInputs = with pkgs.pkgsCross.aarch64-multiplatform; [
+              glib pixman zlib
+            ];
+            shellHook = ''
+              # QEMU configure defers pkg-config lookups to $PKG_CONFIG
+              # when set; make it the aarch64 cross wrapper.
+              export PKG_CONFIG=aarch64-unknown-linux-gnu-pkg-config
+              echo "Yetty asset-build (qemu linux-aarch64)"
+            '';
+          };
+
+          # windows-x86_64: glib is not available in nixpkgs' mingwW64 cross.
+          # Shell provides just the toolchain + zlib so the configure
+          # failure lands deterministically; CI can supply glib via a
+          # downloaded binary package when we're ready to support it.
+          assets-qemu-windows-x86_64 = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              meson ninja python3 bison flex gnumake perl
+              curl gnutar xz gzip
+              pkgsCross.mingwW64.buildPackages.gcc
+              pkgsCross.mingwW64.buildPackages.pkg-config
+              pkgsCross.mingwW64.zlib
+            ];
+            shellHook = "echo 'Yetty asset-build (qemu windows-x86_64)'";
+          };
+
+          # android-arm64-v8a: stable-pinned nixpkgs (pkgsAndroid) to
+          # dodge the unstable clang-21 compiler-rt regression.
+          assets-qemu-android-arm64-v8a = pkgsAndroid.pkgsCross.aarch64-android.mkShell {
+            nativeBuildInputs = with pkgsAndroid; [
+              meson ninja python3 bison flex gnumake perl
+              curl gnutar xz gzip
+              pkgsCross.aarch64-android.buildPackages.pkg-config
+            ];
+            buildInputs = with pkgsAndroid.pkgsCross.aarch64-android; [
+              glib pixman zlib
+            ];
+            shellHook = ''
+              export PKG_CONFIG=aarch64-unknown-linux-android-pkg-config
+              echo "Yetty asset-build (qemu android-arm64-v8a)"
+            '';
+          };
+
+          # android-x86_64: uses our custom pkgsX86_64Android crossSystem
+          # (defined above in the let binding) — same shape as nixpkgs'
+          # aarch64-android, but targeting x86_64 bionic for the emulator.
+          assets-qemu-android-x86_64 = pkgsX86_64Android.mkShell {
+            nativeBuildInputs = with pkgs; [
+              meson ninja python3 bison flex gnumake perl
+              curl gnutar xz gzip
+              pkgsX86_64Android.buildPackages.pkg-config
+            ];
+            buildInputs = with pkgsX86_64Android; [
+              glib pixman zlib
+            ];
+            shellHook = ''
+              export PKG_CONFIG=x86_64-unknown-linux-android-pkg-config
+              echo "Yetty asset-build (qemu android-x86_64)"
+            '';
+          };
+
+          # Darwin targets (macos/ios/tvos): run on a macOS host with nix
+          # installed. Build tools come from nix; the Xcode SDKs for
+          # iOS/tvOS still come from xcrun at script time.
+          # macos native uses the host's clang + nix-provided glib/pixman.
+          # iOS/tvOS use xcrun -sdk switches — they don't need glib/pixman
+          # cross-builds because the resulting binary is embedded (no
+          # dynamic glib dep) — but QEMU's configure still wants glib at
+          # build time. Supplying a native glib and pointing configure at
+          # it works because meson uses the same compiler for both host
+          # and target on darwin cross (the kludge path used in poc/qemu
+          # ios scripts).
+          assets-qemu-macos-x86_64 = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              meson ninja pkg-config python3 bison flex gnumake perl
+              curl gnutar xz gzip
+              glib pixman
+            ];
+            shellHook = "echo 'Yetty asset-build (qemu macos-x86_64)'";
+          };
+
+          assets-qemu-macos-arm64 = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              meson ninja pkg-config python3 bison flex gnumake perl
+              curl gnutar xz gzip
+              glib pixman
+            ];
+            shellHook = "echo 'Yetty asset-build (qemu macos-arm64)'";
+          };
+
+          assets-qemu-ios-arm64 = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              meson ninja pkg-config python3 bison flex gnumake perl
+              curl gnutar xz gzip
+              glib pixman
+            ];
+            shellHook = "echo 'Yetty asset-build (qemu ios-arm64)'";
+          };
+
+          assets-qemu-ios-x86_64 = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              meson ninja pkg-config python3 bison flex gnumake perl
+              curl gnutar xz gzip
+              glib pixman
+            ];
+            shellHook = "echo 'Yetty asset-build (qemu ios-x86_64 simulator)'";
+          };
+
+          assets-qemu-tvos-arm64 = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              meson ninja pkg-config python3 bison flex gnumake perl
+              curl gnutar xz gzip
+              glib pixman
+            ];
+            shellHook = "echo 'Yetty asset-build (qemu tvos-arm64)'";
           };
 
           # Web/Emscripten build shell
