@@ -16,4 +16,5 @@ target_link_libraries(yetty_vnc PUBLIC
     webgpu
     turbojpeg-static
     yetty_ycore
+    yetty_yrender_utils
 )

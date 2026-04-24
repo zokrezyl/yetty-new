@@ -7,6 +7,7 @@
 #include <yetty/webgpu/error.h>
 #include <yetty/yplatform/ycoroutine.h>
 #include <yetty/yplatform/ywebgpu.h>
+#include <yetty/yrender-utils/tile-diff.h>
 #include <yetty/ytrace.h>
 #include "protocol.h"
 
@@ -56,30 +57,21 @@ struct yetty_vnc_server {
 	uint32_t last_width;
 	uint32_t last_height;
 
-	/* GPU tile diff resources */
-	WGPUTexture prev_texture;
-	WGPUBuffer dirty_flags_buffer;
-	WGPUBuffer dirty_flags_readback;
-	WGPUBuffer tile_readback_buffer;
-	uint32_t tile_readback_buffer_size;
-	WGPUComputePipeline diff_pipeline;
-	WGPUBindGroup diff_bind_group;
-	WGPUBindGroupLayout diff_bind_group_layout;
+	/* Delta + readback pipeline. Owns the prev-frame texture, the diff
+	 * compute pipeline, and the readback buffers. See
+	 * include/yetty/yrender-utils/tile-diff.h. */
+	struct yetty_yrender_utils_tile_diff_engine *diff_engine;
 
-	/* CPU framebuffer */
+	/* CPU framebuffer path (send_frame_cpu). */
 	const uint8_t *cpu_pixels;
 	uint32_t cpu_pixels_size;
+
+	/* Packed (width*4 stride) copy of the most recent GPU readback, used
+	 * by encode_tile. The engine hands us a row-aligned mapped range; we
+	 * pack it here so encode_tile can keep using last_width*4 as the row
+	 * pitch. */
 	uint8_t *gpu_readback_pixels;
 	size_t gpu_readback_pixels_size;
-
-	/* Set when prev_texture holds valid last-frame content. First
-	 * capture after create/resize has to do a full frame. */
-	int prev_has_content;
-
-	/* Set by map callbacks; sync send_frame_gpu spins on these. */
-	volatile int flags_map_pending;
-	volatile int pixels_map_pending;
-	WGPUMapAsyncStatus map_status;
 
 	/* Dirty tile tracking */
 	int *dirty_tiles;
@@ -137,54 +129,12 @@ struct yetty_vnc_server {
 	void *on_input_received_userdata;
 };
 
-/* Compute shader for tile diff detection */
-static const char *DIFF_SHADER =
-"@group(0) @binding(0) var currTex: texture_2d<f32>;\n"
-"@group(0) @binding(1) var prevTex: texture_2d<f32>;\n"
-"@group(0) @binding(2) var<storage, read_write> dirtyFlags: array<u32>;\n"
-"\n"
-"const TILE_SIZE: u32 = 64;\n"
-"const PIXELS_PER_THREAD: u32 = 8;\n"
-"\n"
-"@compute @workgroup_size(8, 8)\n"
-"fn main(@builtin(local_invocation_id) lid: vec3<u32>,\n"
-"        @builtin(workgroup_id) wgid: vec3<u32>) {\n"
-"    let dims = textureDimensions(currTex);\n"
-"    let tilesX = (dims.x + TILE_SIZE - 1u) / TILE_SIZE;\n"
-"    let tileIdx = wgid.y * tilesX + wgid.x;\n"
-"    let tileStartX = wgid.x * TILE_SIZE;\n"
-"    let tileStartY = wgid.y * TILE_SIZE;\n"
-"\n"
-"    let regionStartX = tileStartX + lid.x * PIXELS_PER_THREAD;\n"
-"    let regionStartY = tileStartY + lid.y * PIXELS_PER_THREAD;\n"
-"\n"
-"    for (var dy: u32 = 0u; dy < PIXELS_PER_THREAD; dy++) {\n"
-"        for (var dx: u32 = 0u; dx < PIXELS_PER_THREAD; dx++) {\n"
-"            let px = regionStartX + dx;\n"
-"            let py = regionStartY + dy;\n"
-"\n"
-"            if (px >= dims.x || py >= dims.y) {\n"
-"                continue;\n"
-"            }\n"
-"\n"
-"            let curr = textureLoad(currTex, vec2<u32>(px, py), 0);\n"
-"            let prev = textureLoad(prevTex, vec2<u32>(px, py), 0);\n"
-"\n"
-"            if (any(curr != prev)) {\n"
-"                dirtyFlags[tileIdx] = 1u;\n"
-"                return;\n"
-"            }\n"
-"        }\n"
-"    }\n"
-"}\n";
-
 /* Forward declarations */
 static void dispatch_input(struct yetty_vnc_server *server,
 			   const struct vnc_input_header *hdr,
 			   const uint8_t *data);
-static struct yetty_ycore_void_result ensure_resources(struct yetty_vnc_server *server,
-						      uint32_t width, uint32_t height);
-static struct yetty_ycore_void_result create_diff_pipeline(struct yetty_vnc_server *server);
+static struct yetty_ycore_void_result ensure_cpu_state(struct yetty_vnc_server *server,
+						       uint32_t width, uint32_t height);
 static struct yetty_ycore_void_result encode_tile(struct yetty_vnc_server *server,
 						 uint16_t tx, uint16_t ty,
 						 uint8_t **out_data, size_t *out_size,
@@ -388,21 +338,8 @@ void yetty_vnc_server_destroy(struct yetty_vnc_server *server)
 
 	yetty_vnc_server_stop(server);
 
-	/* Release GPU resources */
-	if (server->prev_texture)
-		wgpuTextureRelease(server->prev_texture);
-	if (server->dirty_flags_buffer)
-		wgpuBufferRelease(server->dirty_flags_buffer);
-	if (server->dirty_flags_readback)
-		wgpuBufferRelease(server->dirty_flags_readback);
-	if (server->tile_readback_buffer)
-		wgpuBufferRelease(server->tile_readback_buffer);
-	if (server->diff_pipeline)
-		wgpuComputePipelineRelease(server->diff_pipeline);
-	if (server->diff_bind_group)
-		wgpuBindGroupRelease(server->diff_bind_group);
-	if (server->diff_bind_group_layout)
-		wgpuBindGroupLayoutRelease(server->diff_bind_group_layout);
+	if (server->diff_engine)
+		yetty_yrender_utils_tile_diff_engine_destroy(server->diff_engine);
 
 	if (server->jpeg_compressor)
 		tjDestroy(server->jpeg_compressor);
@@ -591,95 +528,27 @@ static struct yetty_ycore_void_result send_to_all_clients(
 }
 
 /*===========================================================================
- * GPU resources and tile encoding
+ * CPU-side per-frame state + tile encoding
+ *
+ * The GPU diff + readback pipeline lives in yrender-utils/tile-diff.c. What
+ * remains here is the CPU-side bookkeeping the wire encoder needs:
+ *   - last_width / last_height for encode_tile's per-row pointer math
+ *   - tiles_x / tiles_y for the dirty-tile iteration
+ *   - dirty_tiles[] tracking which tiles still need to be sent
+ * Both the CPU-input path (send_frame_cpu) and the GPU-readback sink reset
+ * these via ensure_cpu_state().
  *===========================================================================*/
 
-static struct yetty_ycore_void_result create_diff_pipeline(struct yetty_vnc_server *server)
+static struct yetty_ycore_void_result ensure_cpu_state(struct yetty_vnc_server *server,
+						       uint32_t width, uint32_t height)
 {
-	WGPUShaderSourceWGSL wgsl_desc = {0};
-	wgsl_desc.chain.sType = WGPUSType_ShaderSourceWGSL;
-	wgsl_desc.code = (WGPUStringView){.data = DIFF_SHADER, .length = strlen(DIFF_SHADER)};
-
-	WGPUShaderModuleDescriptor shader_desc = {0};
-	shader_desc.nextInChain = (WGPUChainedStruct *)&wgsl_desc;
-
-	WGPUShaderModule shader = wgpuDeviceCreateShaderModule(server->device, &shader_desc);
-	if (!shader)
-		return YETTY_ERR(yetty_ycore_void, "failed to create diff shader");
-
-	WGPUBindGroupLayoutEntry entries[3] = {0};
-	entries[0].binding = 0;
-	entries[0].visibility = WGPUShaderStage_Compute;
-	entries[0].texture.sampleType = WGPUTextureSampleType_Float;
-	entries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
-
-	entries[1].binding = 1;
-	entries[1].visibility = WGPUShaderStage_Compute;
-	entries[1].texture.sampleType = WGPUTextureSampleType_Float;
-	entries[1].texture.viewDimension = WGPUTextureViewDimension_2D;
-
-	entries[2].binding = 2;
-	entries[2].visibility = WGPUShaderStage_Compute;
-	entries[2].buffer.type = WGPUBufferBindingType_Storage;
-
-	WGPUBindGroupLayoutDescriptor bgl_desc = {0};
-	bgl_desc.entryCount = 3;
-	bgl_desc.entries = entries;
-	server->diff_bind_group_layout = wgpuDeviceCreateBindGroupLayout(server->device, &bgl_desc);
-
-	WGPUPipelineLayoutDescriptor pl_desc = {0};
-	pl_desc.bindGroupLayoutCount = 1;
-	pl_desc.bindGroupLayouts = &server->diff_bind_group_layout;
-	WGPUPipelineLayout layout = wgpuDeviceCreatePipelineLayout(server->device, &pl_desc);
-
-	WGPUComputePipelineDescriptor cp_desc = {0};
-	cp_desc.layout = layout;
-	cp_desc.compute.module = shader;
-	cp_desc.compute.entryPoint = (WGPUStringView){.data = "main", .length = 4};
-
-	server->diff_pipeline = wgpuDeviceCreateComputePipeline(server->device, &cp_desc);
-
-	wgpuShaderModuleRelease(shader);
-	wgpuPipelineLayoutRelease(layout);
-
-	if (!server->diff_pipeline)
-		return YETTY_ERR(yetty_ycore_void, "failed to create diff pipeline");
-
-	return YETTY_OK_VOID();
-}
-
-static struct yetty_ycore_void_result ensure_resources(struct yetty_vnc_server *server,
-						      uint32_t width, uint32_t height)
-{
-	if (server->last_width == width && server->last_height == height && server->prev_texture)
+	if (server->last_width == width && server->last_height == height &&
+	    server->dirty_tiles)
 		return YETTY_OK_VOID();
 
 	server->force_full_frame = 1;
-	server->prev_has_content = 0;
-
-	if (server->prev_texture) {
-		wgpuTextureRelease(server->prev_texture);
-		server->prev_texture = NULL;
-	}
-	if (server->dirty_flags_buffer) {
-		wgpuBufferRelease(server->dirty_flags_buffer);
-		server->dirty_flags_buffer = NULL;
-	}
-	if (server->dirty_flags_readback) {
-		wgpuBufferUnmap(server->dirty_flags_readback);
-		wgpuBufferRelease(server->dirty_flags_readback);
-		server->dirty_flags_readback = NULL;
-	}
-	if (server->diff_bind_group) {
-		wgpuBindGroupRelease(server->diff_bind_group);
-		server->diff_bind_group = NULL;
-	}
-	if (server->tile_readback_buffer) {
-		wgpuBufferUnmap(server->tile_readback_buffer);
-		wgpuBufferRelease(server->tile_readback_buffer);
-		server->tile_readback_buffer = NULL;
-		server->tile_readback_buffer_size = 0;
-	}
+	if (server->diff_engine)
+		yetty_yrender_utils_tile_diff_engine_force_full(server->diff_engine);
 
 	server->last_width = width;
 	server->last_height = height;
@@ -693,36 +562,7 @@ static struct yetty_ycore_void_result ensure_resources(struct yetty_vnc_server *
 	if (!server->dirty_tiles)
 		return YETTY_ERR(yetty_ycore_void, "failed to allocate dirty tiles");
 
-	WGPUTextureDescriptor tex_desc = {0};
-	tex_desc.size = (WGPUExtent3D){width, height, 1};
-	tex_desc.format = WGPUTextureFormat_BGRA8Unorm;
-	tex_desc.usage = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
-	tex_desc.mipLevelCount = 1;
-	tex_desc.sampleCount = 1;
-	tex_desc.dimension = WGPUTextureDimension_2D;
-	server->prev_texture = wgpuDeviceCreateTexture(server->device, &tex_desc);
-	if (!server->prev_texture)
-		return YETTY_ERR(yetty_ycore_void, "failed to create prev texture");
-
-	WGPUBufferDescriptor buf_desc = {0};
-	buf_desc.size = num_tiles * sizeof(uint32_t);
-	buf_desc.usage = WGPUBufferUsage_Storage | WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst;
-	server->dirty_flags_buffer = wgpuDeviceCreateBuffer(server->device, &buf_desc);
-	if (!server->dirty_flags_buffer)
-		return YETTY_ERR(yetty_ycore_void, "failed to create dirty flags buffer");
-
-	buf_desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
-	server->dirty_flags_readback = wgpuDeviceCreateBuffer(server->device, &buf_desc);
-	if (!server->dirty_flags_readback)
-		return YETTY_ERR(yetty_ycore_void, "failed to create readback buffer");
-
-	if (!server->diff_pipeline) {
-		struct yetty_ycore_void_result res = create_diff_pipeline(server);
-		if (!YETTY_IS_OK(res))
-			return res;
-	}
-
-	ydebug("VNC resources: %ux%u, %u tiles", width, height, num_tiles);
+	ydebug("VNC CPU state: %ux%u, %u tiles", width, height, num_tiles);
 	return YETTY_OK_VOID();
 }
 
@@ -906,7 +746,7 @@ yetty_vnc_server_send_frame_cpu(struct yetty_vnc_server *server,
 	server->cpu_pixels = pixels;
 	server->cpu_pixels_size = width * height * 4;
 
-	struct yetty_ycore_void_result res = ensure_resources(server, width, height);
+	struct yetty_ycore_void_result res = ensure_cpu_state(server, width, height);
 	if (!YETTY_IS_OK(res))
 		return res;
 
@@ -1044,194 +884,64 @@ static struct yetty_ycore_void_result encode_and_send_dirty_tiles(
 	return YETTY_OK_VOID();
 }
 
-/* Coroutine-driven capture + send.
- *
- * The public entry point spawns a coroutine that does the full readback and
- * returns immediately. The coroutine yields at each GPU map_async via
- * yplatform_wgpu_buffer_map_await; the libuv loop runs other work while the
- * GPU completes the maps. The poll thread translates the wgpu callback into
- * a resume request posted to the loop thread.
- *
- * The texture is consumed entirely during the encode + submit phase, before
- * the first yield, so no addref is needed — it stays valid because the coro's
- * first slice runs synchronously inside the spawner. */
-
-struct vnc_send_frame_args {
-	struct yetty_vnc_server *server;
-	WGPUTexture texture;
-	uint32_t width;
-	uint32_t height;
-};
-
-static void vnc_send_frame_gpu_coro_entry(void *arg)
+/*
+ * Sink callback invoked by the tile-diff engine once the GPU diff + readback
+ * have completed. `frame->pixels` is a row-aligned mapped range that's only
+ * valid until this function returns, so we pack it into gpu_readback_pixels
+ * (flat width*4 stride) and then defer to encode_and_send_dirty_tiles which
+ * uses the existing encode_tile machinery.
+ */
+static void vnc_tile_diff_sink(void *ctx,
+			       const struct yetty_yrender_utils_tile_diff_frame *frame)
 {
-	ydebug("vnc coro: entry, arg=%p", arg);
-	struct vnc_send_frame_args *args = arg;
-	struct yetty_vnc_server *server = args->server;
-	WGPUTexture texture = args->texture;
-	uint32_t width = args->width;
-	uint32_t height = args->height;
-	ydebug("vnc coro: copied args server=%p tex=%p %ux%u, freeing args",
-	       (void *)server, (void *)texture, width, height);
-	free(args);
-	ydebug("vnc coro: args freed, calling ensure_resources");
+	struct yetty_vnc_server *server = ctx;
 
-	struct yetty_ycore_void_result res = ensure_resources(server, width, height);
+	struct yetty_ycore_void_result res =
+		ensure_cpu_state(server, frame->width, frame->height);
 	if (!YETTY_IS_OK(res)) {
-		ywarn("vnc coro: ensure_resources failed: %s", res.error.msg);
+		ywarn("vnc sink: ensure_cpu_state failed: %s", res.error.msg);
 		return;
 	}
 
-	uint32_t num_tiles = server->tiles_x * server->tiles_y;
-
+	/* Use GPU-readback pixels for encode_tile (cpu_pixels is the other
+	 * input path; clear it so encode_tile picks the readback). */
 	server->cpu_pixels = NULL;
 
-	size_t pixel_size = (size_t)width * height * 4;
+	size_t pixel_size = (size_t)frame->width * frame->height * 4;
 	if (server->gpu_readback_pixels_size < pixel_size) {
 		free(server->gpu_readback_pixels);
 		server->gpu_readback_pixels = malloc(pixel_size);
 		if (!server->gpu_readback_pixels) {
-			ywarn("vnc coro: failed to allocate readback buffer");
+			ywarn("vnc sink: failed to allocate readback buffer");
 			return;
 		}
 		server->gpu_readback_pixels_size = pixel_size;
 	}
 
-	uint32_t aligned_bytes_per_row = (width * 4 + 255) & ~255;
-	uint32_t tile_buf_size = aligned_bytes_per_row * height;
-	if (!server->tile_readback_buffer ||
-	    server->tile_readback_buffer_size != tile_buf_size) {
-		if (server->tile_readback_buffer)
-			wgpuBufferRelease(server->tile_readback_buffer);
-		WGPUBufferDescriptor buf_desc = {0};
-		buf_desc.size = tile_buf_size;
-		buf_desc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_MapRead;
-		server->tile_readback_buffer =
-			wgpuDeviceCreateBuffer(server->device, &buf_desc);
-		server->tile_readback_buffer_size = tile_buf_size;
+	/* Pack the aligned mapped pixels into a width*4-stride buffer so
+	 * encode_tile can use last_width*4 as the row pitch. */
+	uint32_t packed_row = frame->width * 4;
+	for (uint32_t y = 0; y < frame->height; y++) {
+		memcpy(server->gpu_readback_pixels + y * packed_row,
+		       frame->pixels + y * frame->aligned_bytes_per_row,
+		       packed_row);
 	}
 
-	int do_full = (!server->prev_has_content || server->force_full_frame ||
-		       server->always_full_frame);
-	if (do_full) {
-		server->force_full_frame = 0;
-		for (uint32_t i = 0; i < num_tiles; i++)
-			server->dirty_tiles[i] = 1;
-	}
-
-	WGPUCommandEncoder encoder =
-		wgpuDeviceCreateCommandEncoder(server->device, NULL);
-
-	if (!do_full) {
-		if (server->diff_bind_group) {
-			wgpuBindGroupRelease(server->diff_bind_group);
-			server->diff_bind_group = NULL;
-		}
-		WGPUTextureViewDescriptor view_desc = {0};
-		view_desc.format = WGPUTextureFormat_BGRA8Unorm;
-		view_desc.dimension = WGPUTextureViewDimension_2D;
-		view_desc.mipLevelCount = 1;
-		view_desc.arrayLayerCount = 1;
-		WGPUTextureView curr_view = wgpuTextureCreateView(texture, &view_desc);
-		WGPUTextureView prev_view = wgpuTextureCreateView(server->prev_texture, &view_desc);
-		WGPUBindGroupEntry entries[3] = {0};
-		entries[0].binding = 0;
-		entries[0].textureView = curr_view;
-		entries[1].binding = 1;
-		entries[1].textureView = prev_view;
-		entries[2].binding = 2;
-		entries[2].buffer = server->dirty_flags_buffer;
-		entries[2].size = num_tiles * sizeof(uint32_t);
-		WGPUBindGroupDescriptor bg_desc = {0};
-		bg_desc.layout = server->diff_bind_group_layout;
-		bg_desc.entryCount = 3;
-		bg_desc.entries = entries;
-		server->diff_bind_group =
-			wgpuDeviceCreateBindGroup(server->device, &bg_desc);
-		wgpuTextureViewRelease(curr_view);
-		wgpuTextureViewRelease(prev_view);
-
-		wgpuCommandEncoderClearBuffer(encoder, server->dirty_flags_buffer,
-					      0, num_tiles * sizeof(uint32_t));
-		WGPUComputePassDescriptor cp_desc = {0};
-		WGPUComputePassEncoder cpass =
-			wgpuCommandEncoderBeginComputePass(encoder, &cp_desc);
-		wgpuComputePassEncoderSetPipeline(cpass, server->diff_pipeline);
-		wgpuComputePassEncoderSetBindGroup(cpass, 0, server->diff_bind_group, 0, NULL);
-		wgpuComputePassEncoderDispatchWorkgroups(cpass, server->tiles_x,
-							 server->tiles_y, 1);
-		wgpuComputePassEncoderEnd(cpass);
-		wgpuComputePassEncoderRelease(cpass);
-		wgpuCommandEncoderCopyBufferToBuffer(encoder, server->dirty_flags_buffer,
-						     0, server->dirty_flags_readback,
-						     0, num_tiles * sizeof(uint32_t));
-	}
-
-	{
-		WGPUTexelCopyTextureInfo src_tp = {0};
-		src_tp.texture = texture;
-		WGPUTexelCopyTextureInfo dst_tp = {0};
-		dst_tp.texture = server->prev_texture;
-		WGPUExtent3D extent = {width, height, 1};
-		wgpuCommandEncoderCopyTextureToTexture(encoder, &src_tp, &dst_tp, &extent);
-	}
-
-	{
-		WGPUTexelCopyTextureInfo src_tb = {0};
-		src_tb.texture = texture;
-		WGPUTexelCopyBufferInfo dst_tb = {0};
-		dst_tb.buffer = server->tile_readback_buffer;
-		dst_tb.layout.bytesPerRow = aligned_bytes_per_row;
-		dst_tb.layout.rowsPerImage = height;
-		WGPUExtent3D copy_size = {width, height, 1};
-		wgpuCommandEncoderCopyTextureToBuffer(encoder, &src_tb, &dst_tb, &copy_size);
-	}
-
-	WGPUCommandBuffer cmd_buf = wgpuCommandEncoderFinish(encoder, NULL);
-	wgpuQueueSubmit(server->queue, 1, &cmd_buf);
-	wgpuCommandBufferRelease(cmd_buf);
-	wgpuCommandEncoderRelease(encoder);
-
-	/* Below this point the texture is no longer touched. */
-
-	if (!do_full) {
-		res = yplatform_wgpu_buffer_map_await(server->wgpu,
-			server->dirty_flags_readback, WGPUMapMode_Read,
-			0, num_tiles * sizeof(uint32_t));
-		if (!YETTY_IS_OK(res)) {
-			ywarn("vnc coro: flags map failed: %s", res.error.msg);
-			return;
-		}
-		const uint32_t *flags = wgpuBufferGetConstMappedRange(
-			server->dirty_flags_readback,
-			0, num_tiles * sizeof(uint32_t));
-		for (uint32_t i = 0; i < num_tiles; i++)
-			server->dirty_tiles[i] = (flags[i] != 0);
-		wgpuBufferUnmap(server->dirty_flags_readback);
-	}
-
-	res = yplatform_wgpu_buffer_map_await(server->wgpu,
-		server->tile_readback_buffer, WGPUMapMode_Read,
-		0, tile_buf_size);
-	if (!YETTY_IS_OK(res)) {
-		ywarn("vnc coro: pixels map failed: %s", res.error.msg);
+	/* Translate the engine's dirty bitmap into the int-sized dirty_tiles
+	 * array the wire encoder expects. */
+	uint32_t num_tiles = server->tiles_x * server->tiles_y;
+	if ((uint32_t)(frame->tiles_x * frame->tiles_y) != num_tiles) {
+		ywarn("vnc sink: tile count mismatch engine=%ux%u server=%ux%u",
+		      frame->tiles_x, frame->tiles_y,
+		      server->tiles_x, server->tiles_y);
 		return;
 	}
+	for (uint32_t i = 0; i < num_tiles; i++)
+		server->dirty_tiles[i] = frame->dirty_bitmap[i] ? 1 : 0;
 
-	uint32_t unaligned_row = width * 4;
-	const uint8_t *mapped = wgpuBufferGetConstMappedRange(
-		server->tile_readback_buffer, 0, tile_buf_size);
-	for (uint32_t y = 0; y < height; y++) {
-		memcpy(server->gpu_readback_pixels + y * unaligned_row,
-		       mapped + y * aligned_bytes_per_row, unaligned_row);
-	}
-	wgpuBufferUnmap(server->tile_readback_buffer);
-
-	server->prev_has_content = 1;
-
-	res = encode_and_send_dirty_tiles(server, width, height);
+	res = encode_and_send_dirty_tiles(server, frame->width, frame->height);
 	if (!YETTY_IS_OK(res))
-		ywarn("vnc coro: encode_and_send failed: %s", res.error.msg);
+		ywarn("vnc sink: encode_and_send failed: %s", res.error.msg);
 }
 
 struct yetty_ycore_void_result
@@ -1242,28 +952,28 @@ yetty_vnc_server_send_frame_gpu(struct yetty_vnc_server *server,
 	if (!server || !server->running || server->client_count == 0)
 		return YETTY_OK_VOID();
 
-	struct vnc_send_frame_args *args = malloc(sizeof(*args));
-	if (!args)
-		return YETTY_ERR(yetty_ycore_void, "malloc failed");
-	args->server = server;
-	args->texture = texture;
-	args->width = width;
-	args->height = height;
-
-	struct yplatform_coro_ptr_result coro_res = yplatform_coro_spawn(
-		vnc_send_frame_gpu_coro_entry, args, 0, "vnc-send-frame");
-	if (!YETTY_IS_OK(coro_res)) {
-		free(args);
-		return YETTY_ERR(yetty_ycore_void, "vnc coro spawn failed");
+	if (!server->diff_engine) {
+		struct yetty_yrender_utils_tile_diff_engine_ptr_result eng_res =
+			yetty_yrender_utils_tile_diff_engine_create(
+				server->device, server->queue, server->wgpu,
+				VNC_TILE_SIZE);
+		if (!YETTY_IS_OK(eng_res))
+			return YETTY_ERR(yetty_ycore_void, eng_res.error.msg);
+		server->diff_engine = eng_res.value;
 	}
 
-	yplatform_coro_resume(coro_res.value);
-	if (yplatform_coro_is_finished(coro_res.value))
-		yplatform_coro_destroy(coro_res.value);
-	/* Otherwise the coro yielded into the GPU await; resume_coro_on_loop
-	 * (in ywebgpu.c) will destroy it once it finishes. */
+	/* Propagate VNC-level full-frame requests (e.g. new client) to the
+	 * engine so the next submit marks all tiles dirty. */
+	if (server->force_full_frame) {
+		server->force_full_frame = 0;
+		yetty_yrender_utils_tile_diff_engine_force_full(server->diff_engine);
+	}
+	yetty_yrender_utils_tile_diff_engine_set_always_full(
+		server->diff_engine, server->always_full_frame != 0);
 
-	return YETTY_OK_VOID();
+	return yetty_yrender_utils_tile_diff_engine_submit(
+		server->diff_engine, texture, width, height,
+		vnc_tile_diff_sink, server);
 }
 
 struct yetty_ycore_void_result
