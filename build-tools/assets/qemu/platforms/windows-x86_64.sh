@@ -15,6 +15,16 @@
 
 : "${VCPKG_INSTALLED:?VCPKG_INSTALLED is required (e.g. C:/Users/misi/vcpkg/installed/x64-windows)}"
 
+# QEMU's configure assumes a UNIX Python-venv layout (`pyvenv/bin/meson`),
+# but Windows Python venvs put the wrappers in `pyvenv/Scripts`. Rewrite
+# the one line that locates meson so all downstream `$meson` references
+# resolve correctly. Safe because `bin` only appears inside this single
+# `pyvenv/bin` path in configure.
+if grep -q 'pyvenv/bin' "$SRC_DIR/configure"; then
+    sed -i 's|pyvenv/bin|pyvenv/Scripts|g' "$SRC_DIR/configure"
+    echo "==> patched $SRC_DIR/configure: pyvenv/bin -> pyvenv/Scripts"
+fi
+
 # Point pkg-config at the vcpkg tree
 export PKG_CONFIG_PATH="$VCPKG_INSTALLED/lib/pkgconfig"
 : "${PKG_CONFIG:=pkgconf}"

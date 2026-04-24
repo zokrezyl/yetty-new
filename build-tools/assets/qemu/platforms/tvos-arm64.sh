@@ -1,6 +1,8 @@
 # QEMU platform: tvos-arm64 (Apple TV device; cross from macOS)
 
-TVOS_SDK="$(xcrun --sdk appletvos --show-sdk-path)"
+# Use Apple's xcrun directly — nix's assets-qemu-tvos-arm64 shell puts
+# xcbuild's stub `xcrun` on PATH, which doesn't know appletvos SDKs.
+TVOS_SDK="$(/usr/bin/xcrun --sdk appletvos --show-sdk-path)"
 TVOS_MIN_VERSION="${TVOS_MIN_VERSION:-17.0}"
 
 _TVOS_CFLAGS="-isysroot $TVOS_SDK -arch arm64 -mtvos-version-min=$TVOS_MIN_VERSION"

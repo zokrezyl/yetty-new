@@ -1,6 +1,8 @@
 # QEMU platform: ios-x86_64 (iOS Simulator on Intel macs; cross from macOS)
 
-IOS_SDK="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+# Use Apple's xcrun directly — nix's assets-qemu-ios-x86_64 shell puts
+# xcbuild's stub `xcrun` on PATH, which doesn't know iphonesimulator SDKs.
+IOS_SDK="$(/usr/bin/xcrun --sdk iphonesimulator --show-sdk-path)"
 IOS_MIN_VERSION="${IOS_MIN_VERSION:-15.0}"
 
 _IOS_CFLAGS="-isysroot $IOS_SDK -arch x86_64 -mios-simulator-version-min=$IOS_MIN_VERSION"

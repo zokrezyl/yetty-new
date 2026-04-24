@@ -4,10 +4,12 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     # Separate pin for Android cross-builds: nixos-unstable shipped
-    # clang 21.1.8 whose compiler-rt fails to build for android
-    # (pthread.h missing in the libc setup stage). nixos-25.05 has an
-    # earlier clang and builds cleanly.
-    nixpkgs-android.url = "github:NixOS/nixpkgs/nixos-25.05";
+    # clang 21.1.8 with a compiler-rt regression that can't find
+    # pthread.h while bootstrapping the android sysroot. nixos-25.05
+    # has the same bug (clang 19.1.7). nixos-24.11 ships clang 18.x,
+    # which predates the regression and builds the android cross
+    # toolchain cleanly.
+    nixpkgs-android.url = "github:NixOS/nixpkgs/nixos-24.11";
     flake-utils.url = "github:numtide/flake-utils";
   };
 

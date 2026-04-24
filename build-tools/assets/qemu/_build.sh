@@ -48,7 +48,14 @@ if [ ! -f "qemu-${QEMU_VERSION}.tar.xz" ]; then
 fi
 if [ ! -f "$SRC_DIR/configure" ]; then
     echo "==> extracting QEMU"
-    tar xf "qemu-${QEMU_VERSION}.tar.xz"
+    # Skip roms/ (firmware source trees: u-boot, edk2, skiboot — heavy
+    # symlink churn that breaks extraction on Windows without Developer
+    # Mode). The QEMU riscv64-softmmu build doesn't need them — it uses
+    # pre-built blobs from pc-bios/.
+    # Also skip tests/lcitool/ (CI tooling with prep-script symlinks).
+    tar xf "qemu-${QEMU_VERSION}.tar.xz" \
+        --exclude='qemu-*/roms' \
+        --exclude='qemu-*/tests/lcitool'
 fi
 
 # Pruned device config (shared with poc/qemu)

@@ -86,6 +86,11 @@ $env:PATH = ($ExtraPath -join ";") + ";" + $env:PATH
 
 #-----------------------------------------------------------------------------
 # Hand off to Git Bash running build.sh
+#
+# NOTE: git-bash prepends `/usr/bin` to PATH on startup, which contains a
+# GNU coreutils `link.exe` that shadows MSVC's linker. We therefore
+# invoke bash with --noprofile --norc and construct PATH ourselves in
+# POSIX form, putting the MSVC dirs before /usr/bin.
 #-----------------------------------------------------------------------------
 $GitBash = @(
     "C:\Program Files\Git\bin\bash.exe",
@@ -93,10 +98,24 @@ $GitBash = @(
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $GitBash) { throw "Git Bash not found" }
 
+function To-PosixPath([string]$p) {
+    # C:\Foo\Bar -> /c/Foo/Bar
+    $p = $p.TrimEnd('\').Replace('\', '/')
+    if ($p -match '^([A-Za-z]):(/.*)?$') { "/$($matches[1].ToLower())$($matches[2])" } else { $p }
+}
+
+# Convert the current Windows PATH to a POSIX-style colon-separated list
+# so bash picks up MSVC/meson/gnuwin32 in the order we set.
+$PosixPath = ($env:PATH.Split(';') | Where-Object { $_ } | ForEach-Object { To-PosixPath $_ }) -join ':'
+# Put /usr/bin AFTER the rest so MSVC link.exe wins over GNU coreutils link.
+$PosixPath = "$PosixPath`:/usr/bin:/bin"
+
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..\..")
+$RepoRootPosix = To-PosixPath $RepoRoot.Path
+
 Push-Location $RepoRoot
 try {
-    & $GitBash -lc "cd '$($RepoRoot.Path.Replace('\','/'))' && exec ./build-tools/assets/qemu/build.sh"
+    & $GitBash --noprofile --norc -c "export PATH='$PosixPath'; cd '$RepoRootPosix' && exec ./build-tools/assets/qemu/build.sh"
     if ($LASTEXITCODE -ne 0) { throw "build.sh failed with exit $LASTEXITCODE" }
 } finally {
     Pop-Location

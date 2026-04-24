@@ -3,7 +3,9 @@
 # Uses the iPhoneOS SDK from Xcode. Based on poc/qemu/build-tools/build-ios.sh.
 # Run this from a macOS runner; no nix involvement.
 
-IOS_SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+# Use Apple's xcrun directly — nix's assets-qemu-ios-arm64 shell puts
+# xcbuild's stub `xcrun` on PATH, which doesn't know iphoneos SDKs.
+IOS_SDK="$(/usr/bin/xcrun --sdk iphoneos --show-sdk-path)"
 IOS_MIN_VERSION="${IOS_MIN_VERSION:-15.0}"
 
 _IOS_CFLAGS="-isysroot $IOS_SDK -arch arm64 -mios-version-min=$IOS_MIN_VERSION"
