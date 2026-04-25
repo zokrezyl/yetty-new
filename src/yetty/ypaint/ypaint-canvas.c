@@ -1020,9 +1020,15 @@ yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
   ydebug("add_buffer: PASS1 max_row_needed=%u (cursor at row %u)",
          max_row_needed, original_cursor_row);
 
-  // SCROLL if content extends beyond visible area
+  // SCROLL if content extends beyond visible area (scrolling mode only).
+  // In overlay (non-scrolling) mode the cursor is driven externally by the
+  // text layer; the canvas neither scrolls itself nor asks others to scroll.
+  // Content that does not fit at the current cursor is left to be clipped
+  // by the shader (cells past grid_size.rows are never read) and by the
+  // complex-prim visibility loops (which cap at grid_size.rows).
   uint32_t target_cursor_row = max_row_needed + 1;
-  if (target_cursor_row >= canvas->grid_size.rows) {
+  if (canvas->scrolling_mode &&
+      target_cursor_row >= canvas->grid_size.rows) {
     lines_scrolled = (uint16_t)(target_cursor_row - canvas->grid_size.rows + 1);
 
     ydebug("add_buffer: SCROLL NEEDED target=%u >= grid_rows=%u, scroll %u",
@@ -1336,18 +1342,22 @@ next_glyph:
     free(fonts);
   }
 
-  // Set final cursor position = row after max primitive row
-  uint32_t final_cursor = max_row_seen + 1;
-  if (final_cursor >= canvas->grid_size.rows) {
-    // Shouldn't happen since we scrolled, but clamp just in case
-    final_cursor = canvas->grid_size.rows - 1;
-  }
-  canvas->cursor_row = (uint16_t)final_cursor;
+  // Set final cursor position = row after max primitive row.
+  // Only meaningful in scrolling mode — in overlay mode the cursor is driven
+  // by the text layer and the canvas must not push it around.
+  if (canvas->scrolling_mode) {
+    uint32_t final_cursor = max_row_seen + 1;
+    if (final_cursor >= canvas->grid_size.rows) {
+      // Shouldn't happen since we scrolled, but clamp just in case
+      final_cursor = canvas->grid_size.rows - 1;
+    }
+    canvas->cursor_row = (uint16_t)final_cursor;
 
-  // Notify text layer of final cursor position
-  if (canvas->cursor_set_callback) {
-    canvas->cursor_set_callback(canvas->cursor_set_callback_user_data,
-                                canvas->cursor_row);
+    // Notify text layer of final cursor position
+    if (canvas->cursor_set_callback) {
+      canvas->cursor_set_callback(canvas->cursor_set_callback_user_data,
+                                  canvas->cursor_row);
+    }
   }
 
   ydebug("add_buffer: END cursor_row=%u max_row_seen=%u rolling_row_0=%u",
