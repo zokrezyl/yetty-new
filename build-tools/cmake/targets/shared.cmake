@@ -384,6 +384,7 @@ function(yetty_embed_assets TARGET)
         set(YEMU_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets/yemu")
         set(INCBIN_YEMU_DIR "${CMAKE_BINARY_DIR}/incbin-yemu")
 
+        file(REMOVE_RECURSE "${INCBIN_YEMU_DIR}")
         file(MAKE_DIRECTORY "${INCBIN_YEMU_DIR}")
 
         if(EXISTS "${YEMU_ASSETS_DIR}/kernel-riscv64.bin")
@@ -396,12 +397,9 @@ function(yetty_embed_assets TARGET)
             file(COPY "${YEMU_ASSETS_DIR}/opensbi-fw_dynamic.bin" DESTINATION "${INCBIN_YEMU_DIR}")
         endif()
 
-        # Tar alpine-rootfs (preserves symlinks / permissions)
-        if(EXISTS "${YEMU_ASSETS_DIR}/alpine-rootfs")
-            execute_process(
-                COMMAND ${CMAKE_COMMAND} -E tar cf "${INCBIN_YEMU_DIR}/alpine-rootfs.tar" .
-                WORKING_DIRECTORY "${YEMU_ASSETS_DIR}/alpine-rootfs"
-            )
+        # Raw ext4 image — embedded as-is, mounted by the guest as virtio-blk.
+        if(EXISTS "${YEMU_ASSETS_DIR}/alpine-rootfs.img")
+            file(COPY "${YEMU_ASSETS_DIR}/alpine-rootfs.img" DESTINATION "${INCBIN_YEMU_DIR}")
         endif()
 
         incbin_add_directory(${TARGET} "yemu" "${INCBIN_YEMU_DIR}" "*" FALSE)

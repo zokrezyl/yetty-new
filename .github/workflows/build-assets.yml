@@ -91,6 +91,26 @@ jobs:
           files: out/linux-*.tar.gz
           fail_on_unmatched_files: true
 
+  alpine-disk:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+      - run: mkdir -p out
+      - run: |
+          VERSION="${{ needs.version.outputs.version }}" \
+          OUTPUT_DIR="$PWD/out" \
+          ./build-tools/assets/alpine-disk/build.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          files: out/alpine-disk-*.tar.gz
+          fail_on_unmatched_files: true
+
   cdb:
     needs: version
     runs-on: ubuntu-latest

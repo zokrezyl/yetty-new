@@ -1,0 +1,131 @@
+#!/bin/bash
+# Build a raw ext4 disk image from Alpine minirootfs for tinyemu virtio-blk.
+# Produces alpine-disk-${VERSION}.tar.gz containing alpine-rootfs.img.
+#
+# Image is sized at 2x the uncompressed rootfs (64 MiB floor) to leave
+# headroom for first-boot init and package state. -E resize=4G reserves
+# GDT slots so a later resize2fs up to 4 GB stays online (no offline
+# metadata rebuild). The actual grow-on-first-launch is a follow-up step.
+#
+# Env vars:
+#   VERSION         required — used in output filename
+#   OUTPUT_DIR      required — where to place the tarball
+#   WORK_DIR        optional — intermediate build tree (default: /tmp/yetty-asset-alpine-disk)
+#   ALPINE_VERSION  optional — alpine minor (default: 3.21)
+#   ALPINE_RELEASE  optional — alpine full  (default: 3.21.7)
+#   ALPINE_ARCH     optional — alpine arch  (default: riscv64)
+#
+# Needs: curl, tar, gzip, e2fsprogs, util-linux, and passwordless sudo
+# (for losetup/mount/umount). GitHub-hosted ubuntu-latest runners
+# satisfy this out of the box.
+
+set -euo pipefail
+
+: "${VERSION:?VERSION is required}"
+: "${OUTPUT_DIR:?OUTPUT_DIR is required}"
+
+WORK_DIR="${WORK_DIR:-/tmp/yetty-asset-alpine-disk}"
+ALPINE_VERSION="${ALPINE_VERSION:-3.21}"
+ALPINE_RELEASE="${ALPINE_RELEASE:-3.21.7}"
+ALPINE_ARCH="${ALPINE_ARCH:-riscv64}"
+
+ALPINE_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/${ALPINE_ARCH}/alpine-minirootfs-${ALPINE_RELEASE}-${ALPINE_ARCH}.tar.gz"
+
+mkdir -p "$WORK_DIR" "$OUTPUT_DIR"
+cd "$WORK_DIR"
+
+#-----------------------------------------------------------------------------
+# Download minirootfs
+#-----------------------------------------------------------------------------
+
+TARBALL="alpine-minirootfs-${ALPINE_RELEASE}-${ALPINE_ARCH}.tar.gz"
+if [ ! -f "$TARBALL" ]; then
+    echo "==> downloading Alpine ${ALPINE_RELEASE} minirootfs (${ALPINE_ARCH})"
+    curl -fL --retry 3 -o "$TARBALL" "$ALPINE_URL"
+fi
+
+#-----------------------------------------------------------------------------
+# Compute image size: 2x uncompressed rootfs, MiB-rounded, 64 MiB floor.
+# zcat | wc -c is unambiguous (avoids gzip -l header parsing) and the
+# minirootfs is small enough that the extra read costs nothing.
+#-----------------------------------------------------------------------------
+
+RAW_BYTES="$(zcat "$TARBALL" | wc -c)"
+IMG_MIB=$(( (RAW_BYTES * 2 + 1024 * 1024 - 1) / (1024 * 1024) ))
+[ "$IMG_MIB" -lt 64 ] && IMG_MIB=64
+
+echo "==> rootfs ~$((RAW_BYTES / 1024 / 1024)) MiB uncompressed, image ${IMG_MIB} MiB (2x, 64 floor)"
+
+#-----------------------------------------------------------------------------
+# Allocate, format, mount, populate, unmount
+#-----------------------------------------------------------------------------
+
+IMG="$WORK_DIR/alpine-rootfs.img"
+MNT="$WORK_DIR/mnt"
+LOOP_DEV=""
+
+cleanup() {
+    if mountpoint -q "$MNT" 2>/dev/null; then
+        sudo umount "$MNT" || true
+    fi
+    if [ -n "$LOOP_DEV" ] && [ -e "$LOOP_DEV" ]; then
+        sudo losetup -d "$LOOP_DEV" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+rm -f "$IMG"
+mkdir -p "$MNT"
+truncate -s "${IMG_MIB}M" "$IMG"
+
+echo "==> mkfs.ext4 -L yetty-root -E resize=4G $IMG"
+mkfs.ext4 -F -L yetty-root -E resize=4G "$IMG" >/dev/null
+
+LOOP_DEV="$(sudo losetup -f --show "$IMG")"
+echo "==> loop device: $LOOP_DEV"
+sudo mount "$LOOP_DEV" "$MNT"
+
+echo "==> extracting rootfs into image"
+sudo tar -C "$MNT" -xzpf "$TARBALL"
+
+# /init for tinyemu console boot — matches linux asset's slirp user-mode net.
+sudo tee "$MNT/init" >/dev/null << 'INIT_EOF'
+#!/bin/sh
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev 2>/dev/null || true
+hostname tinyemu
+
+ip link set lo up
+ip link set eth0 up 2>/dev/null
+ip addr add 10.0.2.15/24 dev eth0 2>/dev/null
+ip route add default via 10.0.2.2 2>/dev/null
+echo 'nameserver 10.0.2.3' > /etc/resolv.conf
+
+exec /bin/sh
+INIT_EOF
+sudo chmod 755 "$MNT/init"
+sudo chown 0:0 "$MNT/init"
+
+sync
+sudo umount "$MNT"
+sudo losetup -d "$LOOP_DEV"
+LOOP_DEV=""
+
+#-----------------------------------------------------------------------------
+# Stage + package
+#-----------------------------------------------------------------------------
+
+STAGE="$WORK_DIR/stage"
+rm -rf "$STAGE"
+mkdir -p "$STAGE"
+cp "$IMG" "$STAGE/alpine-rootfs.img"
+
+OUT_TARBALL="$OUTPUT_DIR/alpine-disk-${VERSION}.tar.gz"
+echo "==> packaging -> $OUT_TARBALL"
+tar -C "$STAGE" -czf "$OUT_TARBALL" .
+
+echo ""
+echo "Alpine disk asset ready:"
+ls -lh "$OUT_TARBALL"
+tar -tzf "$OUT_TARBALL"

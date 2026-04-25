@@ -621,8 +621,8 @@ struct yetty_yplatform_pty_result tinyemu_pty_create(struct yetty_yconfig *confi
                     "    memory_size: 256,\n"
                     "    bios: \"%s/yemu/opensbi-fw_jump.elf\",\n"
                     "    kernel: \"%s/yemu/kernel-riscv64.bin\",\n"
-                    "    cmdline: \"earlycon=sbi console=hvc0 root=/dev/root rootfstype=9p rootflags=trans=virtio,cache=mmap,msize=8192 rw init=/init\",\n"
-                    "    fs0: { file: \"%s/yemu/alpine-rootfs\", tag: \"/dev/root\" },\n"
+                    "    cmdline: \"earlycon=sbi console=hvc0 root=/dev/vda rootfstype=ext4 rw init=/init\",\n"
+                    "    drive0: { file: \"%s/yemu/alpine-rootfs.img\" },\n"
                     "    eth0: { driver: \"user\" }\n"
                     "}\n",
                     data_dir, data_dir, data_dir);
