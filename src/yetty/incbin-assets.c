@@ -352,12 +352,21 @@ int yetty_incbin_assets_extract_config_to(struct yetty_incbin_assets *assets,
 
 /* Extract a tarball to a directory */
 static int extract_tarball(const char *tar_path, const char *dest_dir) {
-  char cmd[MAX_PATH_LEN * 2 + 64];
+  char cmd[MAX_PATH_LEN * 2 + 128];
 
   if (mkdir_p(dest_dir) != 0)
     return 0;
 
-  snprintf(cmd, sizeof(cmd), "tar xf '%s' -C '%s'", tar_path, dest_dir);
+  /* --no-same-owner: don't try to chown to the UID/GID baked into the
+   *   archive (alpine-rootfs ships e.g. UID 1000, root, ...). On Android
+   *   untrusted_app can't chown anything; without this every chown
+   *   attempt fails and tar exits non-zero even though the files were
+   *   extracted fine.
+   * --no-same-permissions: same idea for setuid/sticky/etc. bits.
+   * Both flags are accepted by GNU tar and toybox tar. */
+  snprintf(cmd, sizeof(cmd),
+           "tar xf '%s' -C '%s' --no-same-owner --no-same-permissions",
+           tar_path, dest_dir);
   ydebug("extract_tarball: running: %s", cmd);
 
   int ret = system(cmd);

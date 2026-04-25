@@ -5,6 +5,14 @@ set(YETTY_ENABLE_LIB_GLFW OFF CACHE BOOL "" FORCE)
 
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
+# TinyEMU - in-process RISC-V emulator for --virtual flag. Not part of
+# src/yetty, so shared.cmake doesn't pull it in; include explicitly like
+# linux.cmake / macos.cmake do.
+if(YETTY_ENABLE_LIB_TINYEMU)
+    include(${YETTY_ROOT}/build-tools/cmake/tinyemu.cmake)
+    include(${YETTY_ROOT}/build-tools/cmake/tinyemu-runtime.cmake)
+endif()
+
 # native_app_glue from Android NDK
 add_library(native_app_glue STATIC
     ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c
@@ -23,12 +31,9 @@ endif()
 set(ANDROID_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets")
 file(MAKE_DIRECTORY ${ANDROID_ASSETS_DIR})
 
-# Note: src/yetty is already added by shared.cmake
-
-# VNC server/client support
-if(YETTY_ENABLE_FEATURE_YVNC)
-    add_subdirectory(${YETTY_ROOT}/src/yetty/yvnc ${CMAKE_BINARY_DIR}/src/yetty/yvnc)
-endif()
+# Note: src/yetty is already added by shared.cmake (which recursively
+# add_subdirectory's yvnc, yplot, etc. when their feature flags are ON —
+# no need to repeat them here).
 
 # Platform sources — Android-specific + shared Unix components (all C)
 set(YETTY_PLATFORM_SOURCES
@@ -36,12 +41,22 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/android/platform-paths.c
     ${YETTY_ROOT}/src/yetty/yplatform/android/surface.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/ycoroutine.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/ywebgpu.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/fork-pty.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pty-factory.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pipe.c
-    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pty.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
     ${YETTY_YPLATFORM_THREAD_SOURCES}
 )
+
+# TinyEMU PTY source (for --virtual flag)
+if(YETTY_ENABLE_LIB_TINYEMU)
+    list(APPEND YETTY_PLATFORM_SOURCES
+        ${YETTY_ROOT}/src/yetty/yplatform/shared/tinyemu-pty.c
+    )
+endif()
 
 # Create shared library with core sources + android platform
 add_library(yetty SHARED
@@ -67,6 +82,9 @@ target_compile_definitions(yetty PRIVATE
     YETTY_USE_PREBUILT_ATLAS=1
     YETTY_ASSETS_FROM_APK=1
     YETTY_HAS_VNC=1
+    $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:YETTY_HAS_TINYEMU=1>
+    $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:CONFIG_SLIRP>
+    $<$<BOOL:${YETTY_ENABLE_LIB_QEMU}>:YETTY_HAS_QEMU=1>
 )
 
 set_target_properties(yetty PROPERTIES LIBRARY_OUTPUT_NAME "yetty")
@@ -78,6 +96,10 @@ target_link_libraries(yetty PRIVATE
     -Wl,--no-whole-archive
     android
     log
+    $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:tinyemu>
+    $<$<BOOL:${YETTY_ENABLE_LIB_QEMU}>:yetty_qemu>
+    yetty_telnet
+    yetty_yco
 )
 
 # Generate demo outputs (pre-run demo scripts to capture output for Android)
@@ -109,6 +131,31 @@ if(YETTY_ENABLE_FEATURE_CDB_GEN)
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/assets/msdf-fonts ${ANDROID_ASSETS_DIR}/msdf-fonts
         COMMENT "Copying CDB fonts to Android assets"
     )
+endif()
+
+# Ship the QEMU binary as a JNI lib so it ends up in nativeLibraryDir at
+# install time. SELinux denies execute_no_trans on plain app_data files
+# on API 29+, so the binary in <data>/qemu/ can't be exec'd; the .so in
+# /data/app/.../lib/<abi>/ can. Same trick toybox uses (libtoybox.so).
+if(YETTY_ENABLE_LIB_QEMU)
+    if(NOT DEFINED ANDROID_BUILD_DIR)
+        if(DEFINED ENV{ANDROID_BUILD_DIR})
+            set(ANDROID_BUILD_DIR $ENV{ANDROID_BUILD_DIR})
+        endif()
+    endif()
+    if(ANDROID_BUILD_DIR AND ANDROID_ABI)
+        set(_QEMU_JNILIBS_DIR "${ANDROID_BUILD_DIR}/jniLibs/${ANDROID_ABI}")
+        set(_QEMU_SRC "${CMAKE_BINARY_DIR}/assets/qemu/qemu-system-riscv64")
+        set(_QEMU_DST "${_QEMU_JNILIBS_DIR}/libqemu-system-riscv64.so")
+        if(EXISTS "${_QEMU_SRC}")
+            file(MAKE_DIRECTORY "${_QEMU_JNILIBS_DIR}")
+            file(COPY "${_QEMU_SRC}" DESTINATION "${_QEMU_JNILIBS_DIR}")
+            file(RENAME "${_QEMU_JNILIBS_DIR}/qemu-system-riscv64" "${_QEMU_DST}")
+            message(STATUS "QEMU: shipped ${_QEMU_DST} for executable lib dir")
+        else()
+            message(WARNING "QEMU: ${_QEMU_SRC} not present; libqemu-system-riscv64.so not staged")
+        endif()
+    endif()
 endif()
 
 # Verify all required assets are present

@@ -322,33 +322,23 @@ int qemu_shm_alloc(size_t size, Error **errp)\
         echo "==> patched $_OSLIB: qemu_shm_alloc replaced with Android stub"
     fi
 
-    # fsdev/9p-marshal.h declares `struct V9fsStatDotl` whose member names
-    # (st_atime, st_mtime, st_ctime, st_atime_nsec, ...) collide with
-    # bionic's <sys/stat.h> macros (e.g. st_atime -> st_atim.tv_sec).
-    # A bare #undef at the top of the header leaks into TUs like
-    # hw/9pfs/9p-synth.c that legitimately use st.st_atime on `struct stat`,
-    # breaking those. Use #pragma push_macro / pop_macro to scope the
-    # undefs to the struct only, preserving the macros for the rest of
-    # every TU that includes this header.
+    # fsdev/9p-marshal.h declares `struct V9fsStatDotl` with members
+    # st_atime_nsec / st_mtime_nsec / st_ctime_nsec (plus st_atimensec
+    # variants) that collide with bionic's <sys/stat.h> macros
+    # (st_atime_nsec -> st_atim.tv_nsec etc.). Undef only the _nsec
+    # macros — keep st_atime/st_mtime/st_ctime defined because 9pfs code
+    # (hw/9pfs/9p.c, 9p-synth.c) reads those from `struct stat`, and
+    # bionic's struct stat has no st_atime member, only the macro alias.
+    # No code anywhere accesses struct stat via the *_nsec names, so a
+    # global undef of just those six is safe.
     _P9H="$SRC_DIR/fsdev/9p-marshal.h"
-    if ! grep -q "ANDROID st_ macro push/pop" "$_P9H"; then
-        sed -i '/^typedef struct V9fsStatDotl {$/i\
-/* ANDROID st_ macro push/pop — bionic <sys/stat.h> defines these names\
- * as access-path macros. Undef inside the struct only so the rest of\
- * every TU that includes this header still sees the POSIX aliases. */\
+    if ! grep -q "ANDROID st_ _nsec macro undefs" "$_P9H"; then
+        sed -i '/^#include "p9array.h"$/a\
+\
+/* ANDROID st_ _nsec macro undefs — bionic <sys/stat.h> defines these as\
+ * struct-stat access-path macros, and they collide with V9fsStatDotl\
+ * member names. st_atime/st_mtime/st_ctime stay defined. */\
 #ifdef __ANDROID__\
-# pragma push_macro("st_atime")\
-# pragma push_macro("st_mtime")\
-# pragma push_macro("st_ctime")\
-# pragma push_macro("st_atimensec")\
-# pragma push_macro("st_mtimensec")\
-# pragma push_macro("st_ctimensec")\
-# pragma push_macro("st_atime_nsec")\
-# pragma push_macro("st_mtime_nsec")\
-# pragma push_macro("st_ctime_nsec")\
-# undef st_atime\
-# undef st_mtime\
-# undef st_ctime\
 # undef st_atimensec\
 # undef st_mtimensec\
 # undef st_ctimensec\
@@ -356,19 +346,7 @@ int qemu_shm_alloc(size_t size, Error **errp)\
 # undef st_mtime_nsec\
 # undef st_ctime_nsec\
 #endif' "$_P9H"
-        sed -i '/^} V9fsStatDotl;$/a\
-#ifdef __ANDROID__\
-# pragma pop_macro("st_ctime_nsec")\
-# pragma pop_macro("st_mtime_nsec")\
-# pragma pop_macro("st_atime_nsec")\
-# pragma pop_macro("st_ctimensec")\
-# pragma pop_macro("st_mtimensec")\
-# pragma pop_macro("st_atimensec")\
-# pragma pop_macro("st_ctime")\
-# pragma pop_macro("st_mtime")\
-# pragma pop_macro("st_atime")\
-#endif' "$_P9H"
-        echo "==> patched $_P9H: scoped st_ macro push/pop around V9fsStatDotl"
+        echo "==> patched $_P9H: undef bionic st_*_nsec macros"
     fi
 
     _EXTRA_CFLAGS="-Os -ffunction-sections -fdata-sections -I$SYSROOT/include"

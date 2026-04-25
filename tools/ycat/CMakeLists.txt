@@ -19,9 +19,12 @@ target_include_directories(ycat PRIVATE
     ${YETTY_ROOT}/src
 )
 
+# Use Threads::Threads so we get the right thing per platform:
+# -lpthread on linux/macos, nothing on android (bionic has pthread in libc).
+find_package(Threads REQUIRED)
 target_link_libraries(ycat PRIVATE
     yetty_ycat
-    pthread
+    Threads::Threads
 )
 
 target_compile_options(ycat PRIVATE -Wall -Wextra)

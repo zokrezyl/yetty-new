@@ -111,6 +111,20 @@ typedef struct {
     uint64_t path;
 } FSQID;
 
+/* Android bionic's <sys/stat.h> defines st_{a,m,c}time_nsec as macros
+ * (e.g. st_atime_nsec -> st_atim.tv_nsec) that collide with the struct
+ * member names below. Undef them; no code in this project reads those
+ * names off `struct stat` (only off FSStat), so the global undef is
+ * safe. st_atime/st_mtime/st_ctime remain defined. */
+#ifdef __ANDROID__
+# undef st_atime_nsec
+# undef st_mtime_nsec
+# undef st_ctime_nsec
+# undef st_atimensec
+# undef st_mtimensec
+# undef st_ctimensec
+#endif
+
 typedef struct {
     FSQID qid;
     uint32_t st_mode;
