@@ -411,6 +411,14 @@ static size_t parse_osc(const char* buf, size_t len)
         while (i < end && buf[i] != ';') i++;
     };
 
+    /* All input goes via the ImGuiIO event queue (AddMouse*Event), not by
+     * clobbering MousePos/MouseDown directly — otherwise a press+release
+     * landing in the same PollInput collapses to "no click", because
+     * ImGui only ever sees the final state of the frame. The queue
+     * preserves transitions even when multiple events arrive between
+     * NewFrames. */
+    ImGuiIO& io = ImGui::GetIO();
+
     if (code == 777777) {
         /* card; btn; press; x; y; [scroll-dy] */
         skip_field(); if (!eat_sep()) return end + 2;
@@ -424,16 +432,14 @@ static size_t parse_osc(const char* buf, size_t len)
             i++;
             (void)parse_float(&dy);
         }
-        g_state.cursor_x = x;
-        g_state.cursor_y = y;
+        fprintf(stderr,
+                "[ymgui-frontend] OSC 777777 btn=%d press=%d xy=(%.1f,%.1f) dy=%.1f\n",
+                btn, press, x, y, dy);
+        io.AddMousePosEvent(x, y);
         if (dy != 0.0f) {
-            /* Scroll event encoded with btn==0,press==1,scroll-dy!=0. */
-            g_state.wheel_dy += dy;
-        } else if (btn >= 0 && btn < (int)(sizeof(g_state.buttons_down) /
-                                           sizeof(g_state.buttons_down[0]))) {
-            g_state.buttons_down[btn] = (press != 0);
-            if (press) g_state.buttons_held |=  (1 << btn);
-            else       g_state.buttons_held &= ~(1 << btn);
+            io.AddMouseWheelEvent(0.0f, dy);
+        } else if (btn >= 0 && btn < 5) {
+            io.AddMouseButtonEvent(btn, press != 0);
         }
     } else if (code == 777778) {
         skip_field(); if (!eat_sep()) return end + 2;
@@ -442,9 +448,8 @@ static size_t parse_osc(const char* buf, size_t len)
         if (!parse_int(&held)) return end + 2; if (!eat_sep()) return end + 2;
         if (!parse_float(&x))  return end + 2; if (!eat_sep()) return end + 2;
         if (!parse_float(&y))  return end + 2;
-        g_state.cursor_x = x;
-        g_state.cursor_y = y;
-        g_state.buttons_held = held;
+        io.AddMousePosEvent(x, y);
+        (void)held;  /* ImGui derives drag state from the per-button events */
     } else if (code == 777780) {
         float w = 0, h = 0;
         if (!parse_float(&w)) return end + 2; if (!eat_sep()) return end + 2;
@@ -501,19 +506,11 @@ void ImGui_ImplYetty_PollInput(void)
         g_state.parse_len = 0;
     }
 
-    /* Push state into ImGuiIO. */
+    /* Mouse pos/button/wheel are fed via Add*Event in the parser. The only
+     * thing we still set here is DisplaySize — it's a config value, not
+     * an event. */
     ImGuiIO& io = ImGui::GetIO();
-    if (g_state.display_known) {
+    if (g_state.display_known)
         io.DisplaySize = ImVec2(g_state.display_w, g_state.display_h);
-    }
-    io.MousePos = ImVec2(g_state.cursor_x, g_state.cursor_y);
-    /* Map yetty buttons 0/1/2 = Left/Right/Middle (matches GLFW order). */
-    io.MouseDown[0] = g_state.buttons_down[0];
-    io.MouseDown[1] = g_state.buttons_down[1];
-    io.MouseDown[2] = g_state.buttons_down[2];
-    if (g_state.wheel_dy != 0.0f) {
-        io.MouseWheel += g_state.wheel_dy;
-        g_state.wheel_dy = 0.0f;
-    }
 #endif
 }

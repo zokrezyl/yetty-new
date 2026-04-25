@@ -150,23 +150,29 @@ static void terminal_emit_pixel_size(struct yetty_yterm_terminal *terminal) {
 }
 
 /* OSC 777777 (click/scroll) and OSC 777778 (move) — pixel-precise mouse
- * events relative to the terminal's view origin. Format matches yetty-poc
- * exactly so existing parsers work unchanged.
+ * events relative to the terminal's view origin.
  *
- *   \e]777777;<empty>;<button-mask>;<press>;<x>;<y>;<scroll-dy>\e\\
- *   \e]777778;<empty>;<buttons-held>;<x>;<y>\e\\
+ *   \e]777777;<empty>;<button-index>;<press>;<x>;<y>;<scroll-dy>\e\\
+ *   \e]777778;<empty>;<buttons-held-mask>;<x>;<y>\e\\
  *
- * Card-name field is left empty — yetty has no card concept, just one
- * terminal per view. The leading semicolon is preserved so existing
- * parsers (which split on ';') see the same field count. */
+ * 777777 carries the SINGLE button index (0=left, 1=right, 2=middle —
+ * matches GLFW + ImGui ordering) so release events still identify the
+ * button (a mask after-clearing-the-bit would lose that). 777778 carries
+ * the held-button mask so the client can drive drag state.
+ *
+ * Card-name field is left empty — yetty has no card concept, one
+ * terminal per view. Empty leading field keeps field count compatible
+ * with parsers that split on ';'. */
 static void terminal_emit_mouse_click(struct yetty_yterm_terminal *terminal,
-                                      int button_mask, int press,
+                                      int button, int press,
                                       float x, float y, float scroll_dy) {
   char buf[128];
   int n = snprintf(buf, sizeof(buf),
                    "\033]777777;;%d;%d;%.2f;%.2f;%.2f\033\\",
-                   button_mask, press, x, y, scroll_dy);
+                   button, press, x, y, scroll_dy);
   if (n > 0) terminal_pty_write_raw(terminal, buf, (size_t)n);
+  ydebug("terminal_emit_mouse_click: btn=%d press=%d (%.1f,%.1f) dy=%.1f",
+         button, press, x, y, scroll_dy);
 }
 
 static void terminal_emit_mouse_move(struct yetty_yterm_terminal *terminal,
@@ -903,6 +909,12 @@ terminal_view_on_event(struct yetty_yui_view *view,
    *-----------------------------------------------------------------------*/
   case YETTY_EVENT_MOUSE_DOWN:
   case YETTY_EVENT_MOUSE_UP: {
+    ydebug("terminal: MOUSE_%s win=(%.1f,%.1f) bounds=(%.0fx%.0f@%.0f,%.0f) "
+           "click_sub=%d",
+           event->type == YETTY_EVENT_MOUSE_DOWN ? "DOWN" : "UP",
+           event->mouse.x, event->mouse.y,
+           view->bounds.w, view->bounds.h, view->bounds.x, view->bounds.y,
+           terminal->mouse_click_subscribed);
     if (!terminal->mouse_click_subscribed)
       return YETTY_OK(yetty_ycore_int, 0);
     float lx = event->mouse.x - view->bounds.x;
@@ -916,13 +928,15 @@ terminal_view_on_event(struct yetty_yui_view *view,
       terminal->mouse_buttons_held |= (1 << btn);
     else
       terminal->mouse_buttons_held &= ~(1 << btn);
-    terminal_emit_mouse_click(terminal, terminal->mouse_buttons_held,
-                              press, lx, ly, 0.0f);
+    /* Send button INDEX so release events still identify which button. */
+    terminal_emit_mouse_click(terminal, btn, press, lx, ly, 0.0f);
     return YETTY_OK(yetty_ycore_int, 1);
   }
 
   case YETTY_EVENT_MOUSE_MOVE:
   case YETTY_EVENT_MOUSE_DRAG: {
+    ydebug("terminal: MOUSE_MOVE win=(%.1f,%.1f) move_sub=%d",
+           event->mouse.x, event->mouse.y, terminal->mouse_move_subscribed);
     if (!terminal->mouse_move_subscribed)
       return YETTY_OK(yetty_ycore_int, 0);
     float lx = event->mouse.x - view->bounds.x;
