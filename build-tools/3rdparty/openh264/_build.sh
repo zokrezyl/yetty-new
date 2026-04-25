@@ -63,7 +63,10 @@ if [ ! -f "$OPENH264_TARBALL" ]; then
         fi
         if [ ! -f "$OPENH264_TARBALL" ]; then
             echo "==> downloading openh264 ${VERSION}"
-            curl -fL --retry 3 -o "$_part" "$OPENH264_URL"
+            # github.com sporadically returns 502 — bump retries + delay
+            # and use --retry-all-errors so any 5xx counts as retryable.
+            curl -fL --retry 8 --retry-delay 5 --retry-all-errors \
+                -o "$_part" "$OPENH264_URL"
             mv "$_part" "$OPENH264_TARBALL"
         fi
     ) 9>"$CACHE_DIR/.openh264-download.lock"
