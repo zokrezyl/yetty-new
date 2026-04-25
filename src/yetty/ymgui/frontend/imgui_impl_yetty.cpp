@@ -11,6 +11,8 @@
 #include "ymgui_encode.h"
 
 #include <yetty/ymgui/wire.h>
+#include <yetty/yface/yface.h>
+#include <yetty/ycore/types.h>
 
 #include <float.h>
 #include <stdio.h>
@@ -36,9 +38,9 @@
 #endif
 
 struct ymgui_impl_state {
-    int               out_fd;
-    struct ymgui_buf  scratch;       /* reused every frame */
-    int               atlas_uploaded;
+    int                  out_fd;
+    struct yetty_yface  *yface;       /* OSC envelope + LZ4F + b64 streamer */
+    int                  atlas_uploaded;
 
     /* Platform / input state */
     int               in_fd;
@@ -64,7 +66,7 @@ struct ymgui_impl_state {
 };
 
 static struct ymgui_impl_state g_state = {
-    YMGUI_STDOUT_FD, { 0, 0, 0 }, 0,
+    YMGUI_STDOUT_FD, NULL, 0,
     YMGUI_STDIN_FD, 0,
 #ifndef _WIN32
     {},
@@ -73,6 +75,22 @@ static struct ymgui_impl_state g_state = {
     -1.0f, -1.0f, 0, {false, false, false, false, false}, 0.0f,
     0.0f, 0.0f, 0,
 };
+
+/* Push everything yface accumulated in out_buf to the wire via the
+ * non-blocking pending-write helper, then reset out_buf so the next
+ * emit starts fresh. Returns the same tri-state as ymgui_pending_write
+ * (0 = ok, 1 = dropped, -1 = error). */
+static int flush_yface_to_fd(void)
+{
+    if (!g_state.yface) return -1;
+    struct yetty_ycore_buffer *out = yetty_yface_out_buf(g_state.yface);
+    if (!out || out->size == 0) return 0;
+    int rc = ymgui_pending_write(g_state.out_fd, out->data, out->size);
+    /* Whether sent, queued or dropped, we're done with these bytes; the
+     * pending-queue copies any unsent tail into its own storage. */
+    yetty_ycore_buffer_clear(out);
+    return rc;
+}
 
 /*===========================================================================
  * Public API
@@ -85,40 +103,37 @@ void ImGui_ImplYetty_SetOutputFd(int fd)
 
 bool ImGui_ImplYetty_UploadFontAtlas(void)
 {
+    if (!g_state.yface) return false;
+
     ImGuiIO& io = ImGui::GetIO();
     unsigned char* pixels = NULL;
     int w = 0, h = 0;
-    /* Alpha8 is compact on the wire and enough for the default font. */
+    /* Alpha8 — small on the wire, enough for the default font. */
     io.Fonts->GetTexDataAsAlpha8(&pixels, &w, &h);
-    if (!pixels || w <= 0 || h <= 0)
-        return false;
+    if (!pixels || w <= 0 || h <= 0) return false;
 
     size_t pixel_bytes = (size_t)w * (size_t)h; /* R8 */
     size_t payload_sz  = sizeof(struct ymgui_wire_tex) + pixel_bytes;
 
-    struct ymgui_buf buf;
-    ymgui_buf_init(&buf);
-    if (ymgui_buf_reserve(&buf, payload_sz) != 0)
+    struct ymgui_wire_tex hdr = {0};
+    hdr.magic      = YMGUI_WIRE_MAGIC_TEX;
+    hdr.version    = YMGUI_WIRE_VERSION;
+    hdr.tex_id     = YMGUI_TEX_ID_FONT_ATLAS;
+    hdr.format     = YMGUI_TEX_FMT_R8;
+    hdr.width      = (uint32_t)w;
+    hdr.height     = (uint32_t)h;
+    hdr.total_size = (uint32_t)payload_sz;
+
+    /* Stream straight through yface — header + pixels feed into LZ4F →
+     * b64 → out_buf. No intermediate scratch buffer. */
+    if (!yetty_yface_start_write(g_state.yface,
+                                 YMGUI_OSC_VENDOR_INT, "--tex").ok)
         return false;
+    if (!yetty_yface_write(g_state.yface, &hdr, sizeof(hdr)).ok) return false;
+    if (!yetty_yface_write(g_state.yface, pixels, pixel_bytes).ok) return false;
+    if (!yetty_yface_finish_write(g_state.yface).ok) return false;
 
-    struct ymgui_wire_tex* hdr = (struct ymgui_wire_tex*)
-        ymgui_buf_alloc(&buf, sizeof(*hdr));
-    hdr->magic      = YMGUI_WIRE_MAGIC_TEX;
-    hdr->version    = YMGUI_WIRE_VERSION;
-    hdr->tex_id     = YMGUI_TEX_ID_FONT_ATLAS;
-    hdr->format     = YMGUI_TEX_FMT_R8;
-    hdr->width      = (uint32_t)w;
-    hdr->height     = (uint32_t)h;
-    hdr->total_size = (uint32_t)payload_sz;
-    hdr->_pad0      = 0;
-
-    ymgui_buf_write(&buf, pixels, pixel_bytes);
-
-    int rc = ymgui_osc_write(g_state.out_fd, "--tex", buf.data, buf.size);
-    ymgui_buf_free(&buf);
-
-    if (rc != 0)
-        return false;
+    if (flush_yface_to_fd() < 0) return false;
 
     io.Fonts->SetTexID((ImTextureID)(intptr_t)YMGUI_TEX_ID_FONT_ATLAS);
     g_state.atlas_uploaded = 1;
@@ -130,18 +145,24 @@ bool ImGui_ImplYetty_Init(void)
     ImGuiIO& io = ImGui::GetIO();
     io.BackendRendererName     = "imgui_impl_yetty";
     io.BackendRendererUserData = &g_state;
-    /* We do not need VtxOffset because we pack per-cmd-list anyway, but it
-     * doesn't hurt and lets ImGui avoid splitting draw lists. */
     io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
 
-    ymgui_buf_init(&g_state.scratch);
+    /* yface owns the LZ4F + b64 streaming state; one instance lives for
+     * the whole session (its out_buf is reused across emits, growing
+     * to the steady-state high-water mark). */
+    struct yetty_yface_ptr_result yr = yetty_yface_create();
+    if (!yr.ok) return false;
+    g_state.yface = yr.value;
 
     return ImGui_ImplYetty_UploadFontAtlas();
 }
 
 void ImGui_ImplYetty_Shutdown(void)
 {
-    ymgui_buf_free(&g_state.scratch);
+    if (g_state.yface) {
+        yetty_yface_destroy(g_state.yface);
+        g_state.yface = NULL;
+    }
     ImGuiIO& io = ImGui::GetIO();
     io.BackendRendererName     = NULL;
     io.BackendRendererUserData = NULL;
@@ -156,7 +177,12 @@ void ImGui_ImplYetty_NewFrame(void)
 
 void ImGui_ImplYetty_Clear(void)
 {
-    ymgui_osc_write(g_state.out_fd, "--clear", NULL, 0);
+    if (!g_state.yface) return;
+    /* Empty body — just an OSC envelope around an empty LZ4 frame. */
+    if (!yetty_yface_start_write(g_state.yface,
+                                 YMGUI_OSC_VENDOR_INT, "--clear").ok) return;
+    if (!yetty_yface_finish_write(g_state.yface).ok) return;
+    flush_yface_to_fd();
 }
 
 /*===========================================================================
@@ -165,75 +191,75 @@ void ImGui_ImplYetty_Clear(void)
 
 void ImGui_ImplYetty_RenderDrawData(ImDrawData* draw_data)
 {
-    if (!draw_data || draw_data->CmdListsCount <= 0)
-        return;
-
+    if (!draw_data || draw_data->CmdListsCount <= 0) return;
+    if (!g_state.yface) return;
     /* Static-size sanity — we memcpy ImDrawVert straight onto the wire. */
-    if (sizeof(ImDrawVert) != sizeof(struct ymgui_wire_vertex))
-        return;
+    if (sizeof(ImDrawVert) != sizeof(struct ymgui_wire_vertex)) return;
 
-    struct ymgui_buf* buf = &g_state.scratch;
-    ymgui_buf_reset(buf);
+    /* Compute total payload size up-front so the frame header carries
+     * an accurate total_size (used for validation on the receiver). The
+     * walk-twice cost is negligible vs the actual encode + write. */
+    size_t total_size = sizeof(struct ymgui_wire_frame);
+    for (int n = 0; n < draw_data->CmdListsCount; ++n) {
+        const ImDrawList* cl = draw_data->CmdLists[n];
+        size_t idx_bytes = (size_t)cl->IdxBuffer.Size * sizeof(ImDrawIdx);
+        if (idx_bytes & 3u) idx_bytes += 4u - (idx_bytes & 3u);
+        total_size += sizeof(struct ymgui_wire_cmd_list)
+                    + (size_t)cl->VtxBuffer.Size * sizeof(ImDrawVert)
+                    + idx_bytes
+                    + (size_t)cl->CmdBuffer.Size * sizeof(struct ymgui_wire_cmd);
+    }
 
-    /* Frame header — total_size patched at the end. */
-    struct ymgui_wire_frame* fh = (struct ymgui_wire_frame*)
-        ymgui_buf_alloc(buf, sizeof(*fh));
-    if (!fh) return;
+    struct ymgui_wire_frame fh = {0};
+    fh.magic          = YMGUI_WIRE_MAGIC_FRAME;
+    fh.version        = YMGUI_WIRE_VERSION;
+    fh.flags          = (sizeof(ImDrawIdx) == 4) ? YMGUI_FRAME_FLAG_IDX32 : 0;
+    fh.total_size     = (uint32_t)total_size;
+    fh.display_pos_x  = draw_data->DisplayPos.x;
+    fh.display_pos_y  = draw_data->DisplayPos.y;
+    fh.display_size_x = draw_data->DisplaySize.x;
+    fh.display_size_y = draw_data->DisplaySize.y;
+    fh.fb_scale_x     = draw_data->FramebufferScale.x;
+    fh.fb_scale_y     = draw_data->FramebufferScale.y;
+    fh.cmd_list_count = (uint32_t)draw_data->CmdListsCount;
 
-    fh->magic          = YMGUI_WIRE_MAGIC_FRAME;
-    fh->version        = YMGUI_WIRE_VERSION;
-    fh->flags          = (sizeof(ImDrawIdx) == 4) ? YMGUI_FRAME_FLAG_IDX32 : 0;
-    fh->total_size     = 0; /* patched at end */
-    fh->display_pos_x  = draw_data->DisplayPos.x;
-    fh->display_pos_y  = draw_data->DisplayPos.y;
-    fh->display_size_x = draw_data->DisplaySize.x;
-    fh->display_size_y = draw_data->DisplaySize.y;
-    fh->fb_scale_x     = draw_data->FramebufferScale.x;
-    fh->fb_scale_y     = draw_data->FramebufferScale.y;
-    fh->cmd_list_count = (uint32_t)draw_data->CmdListsCount;
-    fh->_pad0          = 0;
+    /* Stream straight through yface. No intermediate buffer. */
+    if (!yetty_yface_start_write(g_state.yface,
+                                 YMGUI_OSC_VENDOR_INT, "--frame").ok) return;
+    if (!yetty_yface_write(g_state.yface, &fh, sizeof(fh)).ok) return;
 
-    /* Walking the cmd lists can realloc the buffer, so grab the header
-     * offset instead of holding the pointer across calls. */
-    size_t frame_header_off = 0;
+    static const uint8_t pad[4] = {0, 0, 0, 0};
 
     for (int n = 0; n < draw_data->CmdListsCount; ++n) {
         const ImDrawList* cl = draw_data->CmdLists[n];
 
-        struct ymgui_wire_cmd_list cl_hdr;
+        struct ymgui_wire_cmd_list cl_hdr = {0};
         cl_hdr.vtx_count = (uint32_t)cl->VtxBuffer.Size;
         cl_hdr.idx_count = (uint32_t)cl->IdxBuffer.Size;
         cl_hdr.cmd_count = (uint32_t)cl->CmdBuffer.Size;
-        cl_hdr._pad0     = 0;
+        if (!yetty_yface_write(g_state.yface, &cl_hdr, sizeof(cl_hdr)).ok) return;
 
-        if (ymgui_buf_write(buf, &cl_hdr, sizeof(cl_hdr)) != 0)
-            return;
-
-        /* Vertices — layout-compatible memcpy. */
         if (cl_hdr.vtx_count) {
             size_t nbytes = (size_t)cl_hdr.vtx_count * sizeof(ImDrawVert);
-            if (ymgui_buf_write(buf, cl->VtxBuffer.Data, nbytes) != 0)
+            if (!yetty_yface_write(g_state.yface, cl->VtxBuffer.Data, nbytes).ok)
                 return;
         }
-
-        /* Indices. */
         if (cl_hdr.idx_count) {
             size_t nbytes = (size_t)cl_hdr.idx_count * sizeof(ImDrawIdx);
-            if (ymgui_buf_write(buf, cl->IdxBuffer.Data, nbytes) != 0)
+            if (!yetty_yface_write(g_state.yface, cl->IdxBuffer.Data, nbytes).ok)
                 return;
-            /* Pad to 4-byte alignment so the cmd array is aligned. */
-            if (ymgui_buf_align(buf, 4) != 0)
-                return;
+            /* Pad to 4 bytes so the cmd array starts aligned. */
+            size_t rem = nbytes & 3u;
+            if (rem) {
+                if (!yetty_yface_write(g_state.yface, pad, 4u - rem).ok)
+                    return;
+            }
         }
 
-        /* Cmds — re-emit into wire struct (ImDrawCmd has callbacks/padding we
-         * don't want to send). */
         for (int c = 0; c < cl->CmdBuffer.Size; ++c) {
             const ImDrawCmd* dc = &cl->CmdBuffer[c];
-            if (dc->UserCallback)
-                continue; /* TODO: support ImDrawCallback_ResetRenderState */
-
-            struct ymgui_wire_cmd wc;
+            if (dc->UserCallback) continue; /* TODO: ImDrawCallback_ResetRenderState */
+            struct ymgui_wire_cmd wc = {0};
             wc.clip_min_x = dc->ClipRect.x;
             wc.clip_min_y = dc->ClipRect.y;
             wc.clip_max_x = dc->ClipRect.z;
@@ -242,18 +268,12 @@ void ImGui_ImplYetty_RenderDrawData(ImDrawData* draw_data)
             wc.vtx_offset = dc->VtxOffset;
             wc.idx_offset = dc->IdxOffset;
             wc.elem_count = dc->ElemCount;
-
-            if (ymgui_buf_write(buf, &wc, sizeof(wc)) != 0)
-                return;
+            if (!yetty_yface_write(g_state.yface, &wc, sizeof(wc)).ok) return;
         }
     }
 
-    /* Patch total_size now that the buffer is finalised. */
-    struct ymgui_wire_frame* fh_final =
-        (struct ymgui_wire_frame*)(buf->data + frame_header_off);
-    fh_final->total_size = (uint32_t)buf->size;
-
-    ymgui_osc_write(g_state.out_fd, "--frame", buf->data, buf->size);
+    if (!yetty_yface_finish_write(g_state.yface).ok) return;
+    flush_yface_to_fd();
 }
 
 /*===========================================================================
@@ -561,7 +581,7 @@ bool ImGui_ImplYetty_WaitInput(int timeout_ms)
     pfd[0].fd      = g_state.in_fd;
     pfd[0].events  = POLLIN;
     pfd[0].revents = 0;
-    if (ymgui_osc_pending()) {
+    if (ymgui_pending_active()) {
         pfd[1].fd      = g_state.out_fd;
         pfd[1].events  = POLLOUT;
         pfd[1].revents = 0;
@@ -574,7 +594,7 @@ bool ImGui_ImplYetty_WaitInput(int timeout_ms)
      * (not in PollInput) so a tail-only wakeup doesn't get treated as
      * a UI event by the demo loop. */
     if (nfds == 2 && (pfd[1].revents & POLLOUT))
-        ymgui_osc_flush(g_state.out_fd);
+        ymgui_pending_flush(g_state.out_fd);
 
     return (pfd[0].revents & POLLIN) != 0;
 #endif

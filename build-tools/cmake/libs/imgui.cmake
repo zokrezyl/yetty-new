@@ -69,4 +69,24 @@ if(imgui_ADDED)
     endif()
 
     set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+    # ──────────────────────────────────────────────────────────────────
+    # Lean core-only target for consumers that bring their own renderer
+    # and platform backends (e.g. ymgui_frontend, which IS a renderer
+    # backend that ships frames as OSC). No GLFW, no WebGPU, no platform
+    # defines — just the five core .cpp files + headers.
+    # ──────────────────────────────────────────────────────────────────
+    add_library(imgui_core STATIC
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_demo.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    )
+    target_include_directories(imgui_core SYSTEM PUBLIC ${imgui_SOURCE_DIR})
+    set_target_properties(imgui_core PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+    )
 endif()

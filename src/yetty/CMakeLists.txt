@@ -95,6 +95,10 @@ if(YETTY_ENABLE_FEATURE_YCORE)
     add_subdirectory(ycore)
 endif()
 
+if(YETTY_ENABLE_FEATURE_YFACE)
+    add_subdirectory(yface)
+endif()
+
 if(YETTY_ENABLE_FEATURE_YCDB)
     add_subdirectory(ycdb)
 endif()

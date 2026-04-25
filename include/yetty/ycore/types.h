@@ -46,6 +46,14 @@ void yetty_ycore_buffer_clear(struct yetty_ycore_buffer *buf);
 struct yetty_ycore_void_result yetty_ycore_buffer_append(
     struct yetty_ycore_buffer *buf, const struct yetty_ycore_buffer *src);
 
+/* Append raw bytes to a buffer, growing capacity (doubling) if needed.
+ * Same growth semantics as yetty_ycore_buffer_append; this is the
+ * (void*, size_t) sibling for callers that don't have a yetty_ycore_buffer
+ * wrapper around their bytes. Used heavily by yetty_yface's streaming
+ * pipeline (LZ4 chunks, base64 chars). */
+struct yetty_ycore_void_result yetty_ycore_buffer_write(
+    struct yetty_ycore_buffer *buf, const void *src, size_t len);
+
 struct yetty_ycore_named_buffer {
   struct yetty_ycore_buffer buf;
   char name[YETTY_YCORE_NAMED_BUFFER_MAX_NAME_LENGTH];

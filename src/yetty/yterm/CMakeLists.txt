@@ -18,6 +18,7 @@ target_link_libraries(yetty_yterm
     yetty_ypaint_yaml
     yetty_yfont
     yetty_yui
+    yetty_yface
 )
 
 # Embed shaders via incbin (or stubs on Emscripten)

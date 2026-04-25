@@ -186,9 +186,6 @@ if(YETTY_ENABLE_FEATURE_TESTS)
     if(YETTY_ENABLE_FEATURE_YPDF)
         add_subdirectory(${YETTY_ROOT}/test/ut/ypdf ${CMAKE_BINARY_DIR}/test/ut/ypdf)
     endif()
-    if(YETTY_ENABLE_FEATURE_YMGUI)
-        add_subdirectory(${YETTY_ROOT}/test/ut/ymgui ${CMAKE_BINARY_DIR}/test/ut/ymgui)
-    endif()
 endif()
 
 # Common include directories
