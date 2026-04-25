@@ -130,12 +130,14 @@ pid_t qemu_start(uint16_t port)
     char qemu_bin[512];
     char bios_path[512];
     char kernel_path[512];
-    char rootfs_path[512];
+    char blk_path[512];
+    char share_path[512];
     char qemu_cfg_dir[512];
     char qemu_cfg_path[512];
     char chardev_arg[128];
     char append_arg[384];
-    char fsdev_arg[256];
+    char drive_arg[640];
+    char fsdev_arg[640];
     char memory_arg[32];
     char smp_arg[16];
     struct qemu_settings settings;
@@ -175,12 +177,16 @@ pid_t qemu_start(uint16_t port)
 #endif
     snprintf(bios_path, sizeof(bios_path), "%s/yemu/opensbi-fw_dynamic.bin", data_dir);
     snprintf(kernel_path, sizeof(kernel_path), "%s/yemu/kernel-riscv64.bin", data_dir);
-    snprintf(rootfs_path, sizeof(rootfs_path), "%s/yemu/alpine-rootfs", data_dir);
+    snprintf(blk_path, sizeof(blk_path), "%s/yemu/alpine-rootfs.img", data_dir);
 
-    /* User-tunable qemu settings live under <config_dir>/qemu/. */
+    /* User-tunable qemu settings live under <config_dir>/qemu/.
+     * <config_dir>/qemu/share/ is exposed to the guest over 9p as
+     * mount_tag=hostshare for host<->guest file exchange. */
     snprintf(qemu_cfg_dir, sizeof(qemu_cfg_dir), "%s/qemu", config_dir);
     snprintf(qemu_cfg_path, sizeof(qemu_cfg_path), "%s/qemu.cfg", qemu_cfg_dir);
+    snprintf(share_path, sizeof(share_path), "%s/share", qemu_cfg_dir);
     qemu_mkdir_p(qemu_cfg_dir);
+    qemu_mkdir_p(share_path);
     qemu_settings_ensure_default(qemu_cfg_path);
     qemu_settings_defaults(&settings);
     qemu_settings_load(&settings, qemu_cfg_path);
@@ -197,21 +203,27 @@ pid_t qemu_start(uint16_t port)
         yerror("Kernel not found: %s", kernel_path);
         return -1;
     }
+    if (access(blk_path, R_OK) != 0) {
+        yerror("Block image not found: %s", blk_path);
+        return -1;
+    }
 
     snprintf(chardev_arg, sizeof(chardev_arg),
         "socket,id=char0,host=127.0.0.1,port=%u,server=on,wait=off,telnet=on", port);
 
     if (settings.extra_append[0]) {
         snprintf(append_arg, sizeof(append_arg),
-            "earlycon=sbi console=hvc0 root=/dev/root rootfstype=9p rootflags=trans=virtio rw init=/init %s",
+            "earlycon=sbi console=hvc0 root=/dev/vda rw init=/init %s",
             settings.extra_append);
     } else {
         snprintf(append_arg, sizeof(append_arg),
-            "earlycon=sbi console=hvc0 root=/dev/root rootfstype=9p rootflags=trans=virtio rw init=/init");
+            "earlycon=sbi console=hvc0 root=/dev/vda rw init=/init");
     }
 
+    snprintf(drive_arg, sizeof(drive_arg),
+        "file=%s,if=none,format=raw,id=hd0", blk_path);
     snprintf(fsdev_arg, sizeof(fsdev_arg),
-        "local,id=fsdev0,path=%s,security_model=none", rootfs_path);
+        "local,id=fsdev0,path=%s,security_model=none", share_path);
     snprintf(memory_arg, sizeof(memory_arg), "%u", settings.memory_mb);
     snprintf(smp_arg, sizeof(smp_arg), "%u", settings.smp);
 
@@ -242,8 +254,10 @@ pid_t qemu_start(uint16_t port)
             "-machine", "virt", "-smp", smp_arg, "-m", memory_arg,
             "-bios", bios_path, "-kernel", kernel_path,
             "-append", append_arg,
+            "-drive", drive_arg,
+            "-device", "virtio-blk-device,drive=hd0",
             "-fsdev", fsdev_arg,
-            "-device", "virtio-9p-device,fsdev=fsdev0,mount_tag=/dev/root",
+            "-device", "virtio-9p-device,fsdev=fsdev0,mount_tag=hostshare",
             "-netdev", "user,id=net0",
             "-device", "virtio-net-device,netdev=net0",
             "-device", "virtio-serial-device",
