@@ -164,8 +164,9 @@ target_compile_options(tinyemu PRIVATE
 )
 
 # Link libraries
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT APPLE)
-    # Linux needs -lrt for clock functions
+# Linux glibc splits clock/shm functions into librt. Android bionic,
+# macOS, iOS all keep them in libc — no separate librt.
+if(NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT ANDROID)
     target_link_libraries(tinyemu PRIVATE rt)
 endif()
 

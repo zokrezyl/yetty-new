@@ -7,6 +7,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
+#ifdef __ANDROID__
+#include <dlfcn.h>
+#endif
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -138,8 +141,38 @@ pid_t qemu_start(uint16_t port)
     struct qemu_settings settings;
     pid_t pid;
 
-    /* qemu binary is program-specific; shared runtime lives under yemu/. */
+    /* qemu binary is program-specific; shared runtime lives under yemu/.
+     *
+     * Android caveat: SELinux denies execute_no_trans on files under the
+     * app's writable data dir (untrusted_app context). The only place an
+     * app can exec is its nativeLibraryDir. For Android we therefore ship
+     * the QEMU binary as libqemu-system-riscv64.so (see android.cmake).
+     * Resolve that dir at runtime via dladdr() on a known libyetty.so
+     * symbol. */
+#ifdef __ANDROID__
+    {
+        Dl_info info;
+        if (dladdr((void *)qemu_start, &info) && info.dli_fname) {
+            char native_dir[512];
+            const char *slash;
+            snprintf(native_dir, sizeof(native_dir), "%s", info.dli_fname);
+            slash = strrchr(native_dir, '/');
+            if (slash) {
+                native_dir[slash - native_dir] = '\0';
+                snprintf(qemu_bin, sizeof(qemu_bin),
+                         "%s/libqemu-system-riscv64.so", native_dir);
+            } else {
+                snprintf(qemu_bin, sizeof(qemu_bin),
+                         "%s/qemu/qemu-system-riscv64", data_dir);
+            }
+        } else {
+            snprintf(qemu_bin, sizeof(qemu_bin),
+                     "%s/qemu/qemu-system-riscv64", data_dir);
+        }
+    }
+#else
     snprintf(qemu_bin, sizeof(qemu_bin), "%s/qemu/qemu-system-riscv64", data_dir);
+#endif
     snprintf(bios_path, sizeof(bios_path), "%s/yemu/opensbi-fw_dynamic.bin", data_dir);
     snprintf(kernel_path, sizeof(kernel_path), "%s/yemu/kernel-riscv64.bin", data_dir);
     snprintf(rootfs_path, sizeof(rootfs_path), "%s/yemu/alpine-rootfs", data_dir);

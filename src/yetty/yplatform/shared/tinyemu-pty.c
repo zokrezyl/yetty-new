@@ -327,11 +327,40 @@ static void vm_run_once(struct tinyemu_pty *pty)
 static void *vm_thread_func(void *arg)
 {
     struct tinyemu_pty *pty = arg;
+    struct timespec start_ts;
+    int redrive_done = 0;
 
     yinfo("vm_thread_func: VM thread started");
 
+    clock_gettime(CLOCK_MONOTONIC, &start_ts);
+
     while (pty->running && pty->vm) {
         vm_run_once(pty);
+
+        /* The first virtio_console_resize_event we issue from
+         * tinyemu_pty_resize can race with the kernel's virtio_console
+         * probe — kernel reads cols/rows from config_space on probe,
+         * and may not always re-read on a config_change interrupt. So
+         * after the kernel has had time to probe the device (~3s on
+         * most boards), we re-fire the resize event. By then the
+         * kernel's config_changed handler is registered and will pick
+         * up the new size, propagate it to the tty, and SIGWINCH the
+         * shell — which resizes vi/htop/etc. correctly. */
+        if (!redrive_done && pty->cols > 0 && pty->rows > 0 &&
+            pty->vm && ((VirtMachine *)pty->vm)->console_dev) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            long elapsed_ms =
+                (now.tv_sec - start_ts.tv_sec) * 1000 +
+                (now.tv_nsec - start_ts.tv_nsec) / 1000000;
+            if (elapsed_ms >= 3000) {
+                virtio_console_resize_event(((VirtMachine *)pty->vm)->console_dev,
+                                            (int)pty->cols, (int)pty->rows);
+                yinfo("tinyemu: re-fired resize %ux%u %ldms after VM start",
+                      pty->cols, pty->rows, elapsed_ms);
+                redrive_done = 1;
+            }
+        }
     }
 
     yinfo("vm_thread_func: VM thread exiting");
@@ -400,6 +429,13 @@ static int init_vm(struct tinyemu_pty *pty)
         pty->vm->net->device_set_carrier(pty->vm->net, TRUE);
     }
 
+    /* If a resize was already requested before the VM came up, push the
+     * stored cols/rows now so the kernel boots with the right size. */
+    if (pty->cols > 0 && pty->rows > 0 && pty->vm->console_dev) {
+        virtio_console_resize_event(pty->vm->console_dev,
+                                    (int)pty->cols, (int)pty->rows);
+    }
+
     return 0;
 }
 
@@ -456,7 +492,22 @@ static struct yetty_ycore_void_result tinyemu_pty_resize(struct yetty_yplatform_
     struct tinyemu_pty *pty = container_of(self, struct tinyemu_pty, base);
     pty->cols = cols;
     pty->rows = rows;
-    /* TODO: Send resize to VM via virtio-console if supported */
+    /* Push the new size into the guest via virtio-console.
+     * virtio_console_resize_event() updates the device's config space
+     * and notifies the guest; the kernel's hvc driver picks this up and
+     * issues SIGWINCH on the controlling tty so vi/htop/etc. redraw at
+     * the right size.
+     *
+     * If the VM hasn't been created yet, the latest pty->cols/rows we
+     * just stored will be applied at vm_thread_func startup (initial
+     * push from there). */
+    if (pty->vm && ((VirtMachine *)pty->vm)->console_dev) {
+        virtio_console_resize_event(((VirtMachine *)pty->vm)->console_dev,
+                                    (int)cols, (int)rows);
+        yinfo("tinyemu: resized console to %ux%u (live)", cols, rows);
+    } else {
+        yinfo("tinyemu: deferred resize to %ux%u (vm not ready)", cols, rows);
+    }
     return YETTY_OK_VOID();
 }
 

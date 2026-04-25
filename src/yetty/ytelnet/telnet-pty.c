@@ -72,6 +72,13 @@ struct telnet_pty {
     int naws_enabled;
     int binary_enabled;
     int sga_enabled;
+
+    /* QEMU's telnet chardev doesn't speak NAWS. Fallback: inject a
+     * `stty cols X rows Y\r` to the guest shell. We wait 3s after
+     * connect to give the kernel time to boot and the shell prompt to
+     * appear, then send. Subsequent resizes inject immediately. */
+    int stty_initial_sent;
+    struct timespec connect_ts;
 };
 
 /* Forward declarations */
@@ -116,6 +123,21 @@ static void telnet_send_cmd(struct telnet_pty *pty, uint8_t cmd, uint8_t opt)
     telnet_send_raw(pty, buf, 3);
 }
 
+/* Inject a `stty cols X rows Y\r` command into the guest shell. Used
+ * when the server doesn't support NAWS (QEMU's telnet chardev). */
+static void telnet_inject_stty(struct telnet_pty *pty)
+{
+    if (pty->cols == 0 || pty->rows == 0)
+        return;
+    char cmd[80];
+    int n = snprintf(cmd, sizeof(cmd),
+                     "\rstty cols %u rows %u\r", pty->cols, pty->rows);
+    if (n > 0 && (size_t)n < sizeof(cmd))
+        telnet_send_raw(pty, (const uint8_t *)cmd, (size_t)n);
+    yinfo("telnet: injected stty cols %u rows %u (NAWS fallback)",
+          pty->cols, pty->rows);
+}
+
 /* Send NAWS (window size) subnegotiation */
 static void telnet_send_naws(struct telnet_pty *pty)
 {
@@ -140,6 +162,7 @@ static void telnet_send_naws(struct telnet_pty *pty)
 /* Handle WILL option */
 static void telnet_handle_will(struct telnet_pty *pty, uint8_t opt)
 {
+    yinfo("telnet: received WILL %u", (unsigned)opt);
     switch (opt) {
     case TELOPT_ECHO:
         telnet_send_cmd(pty, TELNET_DO, opt);
@@ -161,6 +184,7 @@ static void telnet_handle_will(struct telnet_pty *pty, uint8_t opt)
 /* Handle DO option */
 static void telnet_handle_do(struct telnet_pty *pty, uint8_t opt)
 {
+    yinfo("telnet: received DO %u", (unsigned)opt);
     switch (opt) {
     case TELOPT_NAWS:
         telnet_send_cmd(pty, TELNET_WILL, opt);
@@ -310,6 +334,37 @@ static void *telnet_reader_thread(void *arg)
     yinfo("telnet_reader: started");
 
     while (pty->running) {
+        /* Use select with 1s timeout so we can periodically check whether
+         * to fire the one-shot stty injection (NAWS fallback for QEMU
+         * which doesn't negotiate NAWS). */
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(pty->socket, &rfds);
+        struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
+        int sret = select(pty->socket + 1, &rfds, NULL, NULL, &tv);
+
+        if (!pty->stty_initial_sent && !pty->naws_enabled &&
+            pty->cols > 0 && pty->rows > 0) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            long elapsed_ms =
+                (now.tv_sec - pty->connect_ts.tv_sec) * 1000 +
+                (now.tv_nsec - pty->connect_ts.tv_nsec) / 1000000;
+            if (elapsed_ms >= 3000) {
+                telnet_inject_stty(pty);
+                pty->stty_initial_sent = 1;
+            }
+        }
+
+        if (sret < 0) {
+            if (errno == EINTR)
+                continue;
+            yinfo("telnet_reader: select error: %s", strerror(errno));
+            break;
+        }
+        if (sret == 0)
+            continue;   /* timeout, just loop */
+
         ssize_t n = recv(pty->socket, buf, sizeof(buf), 0);
         if (n <= 0) {
             if (n < 0 && errno == EINTR)
@@ -436,8 +491,17 @@ static struct yetty_ycore_void_result telnet_pty_resize(struct yetty_yplatform_p
     pty->cols = cols;
     pty->rows = rows;
 
-    if (pty->running && pty->naws_enabled)
+    if (!pty->running)
+        return YETTY_OK_VOID();
+
+    if (pty->naws_enabled) {
         telnet_send_naws(pty);
+    } else if (pty->stty_initial_sent) {
+        /* Subsequent resizes after the initial inject — send right away. */
+        telnet_inject_stty(pty);
+    }
+    /* If !stty_initial_sent, the reader thread will handle the first
+     * inject once the boot grace period elapses. */
 
     return YETTY_OK_VOID();
 }
@@ -517,6 +581,14 @@ struct yetty_yplatform_pty_result telnet_pty_create(const char *host, uint16_t p
         free(pty);
         return YETTY_ERR(yetty_yplatform_pty, "failed to connect");
     }
+
+    /* Proactively offer WILL NAWS. Real telnet servers (BSD telnetd, etc.)
+     * reply DO NAWS and we then send proper window-size subnegotiations.
+     * QEMU's telnet chardev does NOT respond — naws_enabled stays 0,
+     * and the reader thread falls back to injecting a `stty cols X rows Y`
+     * 3 seconds after connect. */
+    telnet_send_cmd(pty, TELNET_WILL, TELOPT_NAWS);
+    clock_gettime(CLOCK_MONOTONIC, &pty->connect_ts);
 
     /* Start reader thread */
     pty->running = 1;
