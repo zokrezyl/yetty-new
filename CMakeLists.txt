@@ -47,6 +47,12 @@ endif()
 # Tools
 add_subdirectory(${YETTY_ROOT}/tools ${CMAKE_BINARY_DIR}/tools)
 
+# Custom QA / static-analysis tools (Clang LibTooling-based)
+if(YETTY_ENABLE_TOOL_QA)
+    add_subdirectory(${YETTY_ROOT}/qa-tools/custom/result-checker
+                     ${CMAKE_BINARY_DIR}/qa-tools/custom/result-checker)
+endif()
+
 # Demos
 if(YETTY_ENABLE_FEATURE_DEMO)
     add_subdirectory(${YETTY_ROOT}/demo ${CMAKE_BINARY_DIR}/demo)

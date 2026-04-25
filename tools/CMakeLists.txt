@@ -66,10 +66,6 @@ if(YETTY_ENABLE_TOOL_YSLIDES)
     add_subdirectory(yslides)
 endif()
 
-if(YETTY_ENABLE_TOOL_QA)
-    add_subdirectory(qa)
-endif()
-
 if(YETTY_ENABLE_TOOL_YTHORVG AND YETTY_ENABLE_FEATURE_YTHORVG AND YETTY_ENABLE_LIB_THORVG)
     add_subdirectory(ythorvg)
 endif()
