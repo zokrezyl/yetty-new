@@ -136,11 +136,17 @@ android-arm64-v8a|android-x86_64)
 ios-arm64|ios-x86_64)
     # The 3rdparty-ios-* nix shell on macOS pulls xcbuild's stub xcrun
     # via stdenv-darwin. That stub doesn't know about real iOS SDKs and
-    # fails with `error: unable to find sdk: 'iphoneos'`. Use Apple's
-    # /usr/bin/xcrun directly, and unset DEVELOPER_DIR / SDKROOT etc. so
-    # xcrun falls back to `xcode-select -p` (real Xcode.app on the runner).
-    # Same workaround as build-tools/assets/qemu/_build.sh for ios/tvos.
+    # fails with `error: unable to find sdk: 'iphoneos'`.
+    #
+    # Two things must be done:
+    #   1. Unset DEVELOPER_DIR / SDKROOT / NIX_APPLE_SDK_VERSION so even
+    #      the real /usr/bin/xcrun isn't redirected to the nix SDK.
+    #   2. Prepend /usr/bin to PATH so *bare* `xcrun` (used by openh264's
+    #      build/platform-ios.mk via $(shell xcrun --show-sdk-path) — a
+    #      shell-out we can't override via CC/CXX) resolves to Apple's
+    #      xcrun, not nix's stub.
     unset DEVELOPER_DIR MACOSX_DEPLOYMENT_TARGET SDKROOT NIX_APPLE_SDK_VERSION
+    export PATH="/usr/bin:$PATH"
 
     : "${IOS_MIN:=15.0}"
     case "$TARGET_PLATFORM" in
