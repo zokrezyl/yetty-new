@@ -76,7 +76,7 @@ option(YETTY_ENABLE_FEATURE_YDRAW     "ydraw — 2D vector drawing"            O
 option(YETTY_ENABLE_FEATURE_YDRAW_ZOO "ydraw-zoo — ydraw demo shapes"        OFF)
 option(YETTY_ENABLE_FEATURE_YDRAW_MAZE "ydraw-maze — ydraw maze demo"        OFF)
 option(YETTY_ENABLE_FEATURE_YPAINT    "ypaint — painting"                    ON)
-option(YETTY_ENABLE_FEATURE_YRICH     "yrich — rich text"                    OFF)
+option(YETTY_ENABLE_FEATURE_YRICH     "yrich — rich text"                    ON)
 option(YETTY_ENABLE_FEATURE_DIAGRAM   "diagram — diagram rendering"          OFF)
 option(YETTY_ENABLE_FEATURE_YPLOT     "yplot — plotting"                     ON)
 
@@ -130,9 +130,9 @@ option(YETTY_ENABLE_TOOL_HTML2YDRAW      "html2ydraw tool"                   OFF
 option(YETTY_ENABLE_TOOL_YHTML_MACHINE   "yhtml-machine tool"                OFF)
 option(YETTY_ENABLE_TOOL_YBROWSER        "ybrowser tool"                     OFF)
 option(YETTY_ENABLE_TOOL_VNC_RECORDER    "vnc-recorder tool"                 OFF)
-option(YETTY_ENABLE_TOOL_YDOC            "ydoc tool"                         OFF)
-option(YETTY_ENABLE_TOOL_YSPREADSHEET    "yspreadsheet tool"                 OFF)
-option(YETTY_ENABLE_TOOL_YSLIDES         "yslides tool"                      OFF)
+option(YETTY_ENABLE_TOOL_YDOC            "ydoc tool"                         ON)
+option(YETTY_ENABLE_TOOL_YSHEET          "ysheet tool"                       ON)
+option(YETTY_ENABLE_TOOL_YSLIDE          "yslide tool"                       ON)
 option(YETTY_ENABLE_TOOL_QA              "qa static analysis tools"          ON)
 option(YETTY_ENABLE_TOOL_YTHORVG         "yetty-ythorvg CLI (SVG/Lottie -> OSC)" ON)
 

@@ -54,16 +54,20 @@ if(YETTY_ENABLE_TOOL_VNC_RECORDER AND NOT WIN32)
     add_subdirectory(vnc-recorder)
 endif()
 
+if(YETTY_ENABLE_TOOL_YDOC OR YETTY_ENABLE_TOOL_YSHEET OR YETTY_ENABLE_TOOL_YSLIDE)
+    add_subdirectory(yrich-runner)
+endif()
+
 if(YETTY_ENABLE_TOOL_YDOC)
     add_subdirectory(ydoc)
 endif()
 
-if(YETTY_ENABLE_TOOL_YSPREADSHEET)
-    add_subdirectory(yspreadsheet)
+if(YETTY_ENABLE_TOOL_YSHEET)
+    add_subdirectory(ysheet)
 endif()
 
-if(YETTY_ENABLE_TOOL_YSLIDES)
-    add_subdirectory(yslides)
+if(YETTY_ENABLE_TOOL_YSLIDE)
+    add_subdirectory(yslide)
 endif()
 
 if(YETTY_ENABLE_TOOL_QA)

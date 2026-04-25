@@ -1,5 +1,5 @@
-# ydoc — interactive rich-text editor (pure C).
-add_executable(ydoc
+# yslide — interactive presentation editor (pure C, was yslides in poc).
+add_executable(yslide
     main.c
     ${YETTY_ROOT}/src/yetty/ytrace.c
     ${YETTY_ROOT}/src/yetty/yplatform/getopt.c
@@ -9,12 +9,12 @@ add_executable(ydoc
 
 find_package(Threads REQUIRED)
 
-target_include_directories(ydoc PRIVATE
+target_include_directories(yslide PRIVATE
     ${YETTY_ROOT}/include
     ${YETTY_ROOT}/src
 )
 
-target_link_libraries(ydoc PRIVATE
+target_link_libraries(yslide PRIVATE
     yrich_runner
     yetty_yrich
     yetty_ypaint_core
@@ -22,4 +22,4 @@ target_link_libraries(ydoc PRIVATE
     Threads::Threads
 )
 
-target_compile_options(ydoc PRIVATE -Wall -Wextra)
+target_compile_options(yslide PRIVATE -Wall -Wextra)
