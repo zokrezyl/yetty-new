@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _common import (  # noqa: E402
     TMP_DIR,
     CheckResult,
@@ -106,7 +106,7 @@ def check_format(paths: list[str] | None = None) -> CheckResult:
     if bad:
         warn(summary)
         warn(f"diff: {rel(diff_file)}")
-        warn("fix:  qa-tools/apply-format.py")
+        warn("fix:  qa-tools/refactoring/code-format/apply-format.py")
         return CheckResult(
             name="clang-format", status="issues",
             summary=summary,

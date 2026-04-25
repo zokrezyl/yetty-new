@@ -30,9 +30,10 @@ from _common import (  # noqa: E402
 )
 
 
-def _load(stem: str, attr: str):
-    """Load a sibling hyphenated script as a module and return one of its attrs."""
-    path = _here / f"{stem}.py"
+def _load(rel_path: str, attr: str):
+    """Load a hyphenated script under qa-tools/ as a module and return an attr."""
+    path = _here / rel_path
+    stem = path.stem
     spec = importlib.util.spec_from_file_location(stem.replace("-", "_"), path)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -40,10 +41,13 @@ def _load(stem: str, attr: str):
     return getattr(mod, attr)
 
 
-check_format = _load("check-format", "check_format")
-check_cppcheck = _load("check-cppcheck", "check_cppcheck")
-check_clang_tidy = _load("check-clang-tidy", "check_clang_tidy")
-check_scan_build = _load("check-scan-build", "check_scan_build")
+check_format = _load("analysis/check-format.py", "check_format")
+check_cppcheck = _load("analysis/check-cppcheck.py", "check_cppcheck")
+check_clang_tidy = _load("analysis/check-clang-tidy.py", "check_clang_tidy")
+check_scan_build = _load("analysis/check-scan-build.py", "check_scan_build")
+check_osv_scanner = _load("analysis/check-osv-scanner.py", "check_osv_scanner")
+check_trivy = _load("analysis/check-trivy.py", "check_trivy")
+check_grype = _load("analysis/check-grype.py", "check_grype")
 
 RULE = "=" * 72
 
@@ -105,7 +109,7 @@ def dump_format(res: CheckResult) -> None:
         for mod, n in sorted(modules.items(), key=lambda kv: -kv[1])[:8]:
             print(f"    {n:6d}  {mod}")
     print()
-    print("  Fix:  qa-tools/apply-format.py")
+    print("  Fix:  qa-tools/refactoring/code-format/apply-format.py")
     print(f"  Full diff:  tmp/qa/check-format.diff")
 
 
@@ -176,11 +180,48 @@ def dump_scan_build(res: CheckResult) -> None:
         print(f"  {d}")
 
 
+# ---------------------------------------------------------------- vuln scanners
+def _dump_vuln(res: CheckResult, summary_file: str, findings_file: str,
+               log_basename: str) -> None:
+    if res.status == "fail":
+        for d in res.details:
+            print(f"  {d}")
+        return
+    summary = TMP_DIR / summary_file
+    if summary.exists() and summary.stat().st_size > 0:
+        print()
+        print("  By severity:")
+        for ln in summary.read_text().splitlines():
+            print(f"    {ln}")
+    findings = TMP_DIR / findings_file
+    if findings.exists() and findings.stat().st_size > 0:
+        print()
+        print("  Top findings:")
+        dump_top(findings, 10, indent="    ")
+    print()
+    print(f"  Full list:  tmp/qa/{findings_file}")
+    print(f"  Raw output: tmp/qa/{log_basename}")
+
+
+def dump_osv_scanner(res: CheckResult) -> None:
+    _dump_vuln(res, "osv-scanner.summary.txt", "osv-scanner.findings.txt",
+               "osv-scanner.json")
+
+
+def dump_trivy(res: CheckResult) -> None:
+    _dump_vuln(res, "trivy.summary.txt", "trivy.findings.txt", "trivy.json")
+
+
+def dump_grype(res: CheckResult) -> None:
+    _dump_vuln(res, "grype.summary.txt", "grype.findings.txt", "grype.json")
+
+
 # ---------------------------------------------------------------- main
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--skip", action="append", default=[],
-                    help="Skip a check by name: format, tidy, cppcheck, scan-build.")
+                    help="Skip a check by name: format, tidy, cppcheck, scan-build, "
+                         "osv-scanner, trivy, grype.")
     args = ap.parse_args()
     skip = set(args.skip) | set(
         s for s in os.environ.get("QA_SKIP", "").split() if s
@@ -197,18 +238,28 @@ def main() -> int:
 
     results: list[tuple[CheckResult, callable]] = []
 
-    def run_one(name: str, fn, detail_fn):
+    def run_one(name: str, label: str, fn, detail_fn):
         if name in skip:
             res = CheckResult(name=name, status="skip", summary="skipped")
         else:
-            info(f"running {name}...")
+            info(f"running {label}...")
             res = fn()
         results.append((res, detail_fn))
 
-    run_one("format",     lambda: check_format(paths),     dump_format)
-    run_one("tidy",       lambda: check_clang_tidy(paths), dump_clang_tidy)
-    run_one("cppcheck",   lambda: check_cppcheck(paths),   dump_cppcheck)
-    run_one("scan-build", lambda: check_scan_build(),      dump_scan_build)
+    run_one("format",      "source code formatting check (read-only)",
+            lambda: check_format(paths),     dump_format)
+    run_one("tidy",        "clang-tidy static analysis",
+            lambda: check_clang_tidy(paths), dump_clang_tidy)
+    run_one("cppcheck",    "cppcheck static analysis",
+            lambda: check_cppcheck(paths),   dump_cppcheck)
+    run_one("scan-build",  "Clang Static Analyzer (scan-build)",
+            lambda: check_scan_build(),      dump_scan_build)
+    run_one("osv-scanner", "osv-scanner CVE scan",
+            lambda: check_osv_scanner(),     dump_osv_scanner)
+    run_one("trivy",       "trivy vulnerability scan",
+            lambda: check_trivy(),           dump_trivy)
+    run_one("grype",       "grype vulnerability scan",
+            lambda: check_grype(),           dump_grype)
 
     for res, detail_fn in results:
         section(res)

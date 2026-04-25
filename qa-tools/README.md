@@ -1,59 +1,82 @@
 # qa-tools
 
-Small, focused shell wrappers around C static-analysis and formatting tools.
-Each script does one thing; `qa-overview.sh` runs them all and prints a
-single-screen summary.
+Small, focused Python wrappers around C static-analysis, vulnerability
+scanning, and formatting tools. Each script does one thing; the
+orchestrator (`qa-overview.py`) runs them all and prints a per-section
+report.
 
-All logs and reports go under `tmp/qa/` at the repo root.
+All logs and reports go under `tmp/qa/` at the repo root. All scripts
+have a PEP 723 `uv run --script` shebang — run them directly.
 
-## Scripts
+## Layout
 
-| Script                  | What it does                                                | Tool               |
-|-------------------------|-------------------------------------------------------------|--------------------|
-| `check-format.sh`       | Reports files that don't match `.clang-format`              | `clang-format`     |
-| `apply-format.sh`       | Rewrites files in place to match `.clang-format`            | `clang-format`     |
-| `check-clang-tidy.sh`   | Runs `clang-tidy` across sources using a compile database   | `clang-tidy`       |
-| `check-cppcheck.sh`     | Runs `cppcheck` with a useful default check set             | `cppcheck`         |
-| `check-scan-build.sh`   | Builds under `scan-build` (Clang Static Analyzer)           | `scan-build`, `cmake` |
-| `qa-overview.sh`        | Runs each check, prints a pass/issues/fail table            | (orchestrator)     |
+```
+qa-tools/
+├── _common.py                shared helpers (file discovery, logging)
+├── qa-overview.py            orchestrator + report
+├── analysis/                 read-only checks (never mutate source)
+│   ├── check-format.py             clang-format dry run
+│   ├── check-clang-tidy.py         clang-tidy
+│   ├── check-cppcheck.py           cppcheck
+│   ├── check-scan-build.py         Clang Static Analyzer
+│   ├── check-osv-scanner.py        OSV / lockfile CVE scan
+│   ├── check-trivy.py              Aqua Trivy fs scan
+│   └── check-grype.py              Anchore Grype dir scan
+├── refactoring/              tools that *modify* the codebase
+│   ├── code-format/
+│   │   └── apply-format.py         clang-format -i (in place)
+│   └── replace                     existing search-replace helper
+└── custom/                   project-specific clang LibTooling tools
+    └── result-checker/             enforces Result-type return rule
+```
 
 ## Scope
 
-By default the scripts only look at our own code:
+By default the source-level checks (format, tidy, cppcheck) only look at
+our own code:
 
 - `src/yetty/`
 - `src/yrender-utils/`
 - `include/yetty/`
 
 Third-party directories (`src/libvterm-0.3.3/`, `src/tinyemu/`) are always
-excluded.
-
-Limit the scope for a single run with `QA_PATHS`:
+excluded. Limit the scope for a single run with `QA_PATHS`:
 
 ```sh
-QA_PATHS="src/yetty/ygui" qa-tools/check-format.sh
+QA_PATHS="src/yetty/ygui" qa-tools/analysis/check-format.py
 ```
+
+The vulnerability scanners (osv-scanner, trivy, grype) run over the whole
+repo with `build-*/`, `tmp/`, and vendored deps excluded.
 
 ## Requirements
 
-- `clang-format` — any recent version (`clang-format-9` works).
-- `clang-tidy` — version 14+ recommended; needs a `compile_commands.json`.
-  Build once (e.g. `make build-desktop-ytrace-release`), then the script
-  auto-discovers the DB in `build-*/`. Override with `QA_BUILD_DIR=<dir>`.
-- `scan-build` — from `clang-tools-<ver>`; the script drives its own cmake
-  build under `tmp/qa/scan-build-build/`.
-- `cppcheck` — any recent version.
+| Check         | Tool needed                                               |
+|---------------|------------------------------------------------------------|
+| format        | `clang-format` (v9 works; v14+ recommended)                |
+| clang-tidy    | `clang-tidy` v14+, plus a `compile_commands.json` from a build |
+| cppcheck      | `cppcheck`                                                 |
+| scan-build    | `scan-build` (clang-tools-<ver>) + `cmake`                 |
+| osv-scanner   | `osv-scanner` (Go binary; see install instructions in script) |
+| trivy         | `trivy`                                                    |
+| grype         | `grype`                                                    |
+
+`uv` runs the scripts; install once with your package manager of choice.
 
 ## Typical workflow
 
 ```sh
-# First-time: normalize whitespace across the tree.
-qa-tools/check-format.sh       # see what would change
-qa-tools/apply-format.sh       # rewrite in place (refuses on a dirty tree)
+# Normalize whitespace across the tree (one-shot).
+qa-tools/analysis/check-format.py             # report only
+qa-tools/refactoring/code-format/apply-format.py   # rewrite in place
 
-# Ongoing: run the full overview after changes.
-make build-desktop-ytrace-release   # produces compile_commands.json
-qa-tools/qa-overview.sh
+# Build once so clang-tidy / scan-build have a compile DB.
+make build-desktop-ytrace-release
+
+# Full report.
+qa-tools/qa-overview.py
+qa-tools/qa-overview.py --skip scan-build      # skip slow checks
+QA_PATHS="src/yetty/ygui" qa-tools/qa-overview.py  # narrow scope
 ```
 
 Exit codes are consistent across scripts:
@@ -64,8 +87,10 @@ Exit codes are consistent across scripts:
 
 ## Adding a new check
 
-1. Drop a new `check-<thing>.sh` into this directory.
-2. `source lib/common.sh` for paths, logging, and the shared file discovery.
-3. Write detailed output under `${QA_TMP_DIR}` and a short human summary to
-   stdout, using the same exit-code convention.
-4. Add a row to the `checks` array in `qa-overview.sh`.
+1. Drop a new `check-<thing>.py` into `qa-tools/analysis/` with the same
+   PEP 723 shebang the others use.
+2. `from _common import ...` for paths, logging, file discovery.
+3. Write detailed output under `_common.TMP_DIR`; return a `CheckResult`
+   from a top-level `check_<thing>()` function.
+4. Wire it into `qa-overview.py`: add a `_load(...)` line and a `run_one`
+   call alongside the others.
