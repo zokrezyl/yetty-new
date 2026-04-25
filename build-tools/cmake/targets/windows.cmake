@@ -1,14 +1,23 @@
 # Windows desktop build target
 
-# Disable RISC-V emulator integrations on Windows — no toolchain wired up.
-set(YETTY_ENABLE_LIB_TINYEMU OFF CACHE BOOL "" FORCE)
-set(YETTY_ENABLE_LIB_QEMU OFF CACHE BOOL "" FORCE)
+# RISC-V emulator integrations on Windows. Both enabled.
+# - qemu:    uses the locally-built binary from build-windows-minimal/
+#            (see assets-fetch.cmake::assets_fetch_qemu's WIN32 branch).
+# - tinyemu: ported to Win32. SLIRP user-mode networking is left out for now
+#            (16 files of POSIX socket code) — see tinyemu.cmake's WIN32 branch.
+set(YETTY_ENABLE_LIB_TINYEMU ON CACHE BOOL "" FORCE)
+set(YETTY_ENABLE_LIB_QEMU    ON CACHE BOOL "" FORCE)
 
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
 # Windows-specific libraries (guarded by variables.cmake)
 if(YETTY_ENABLE_LIB_GLFW)
     include(${YETTY_ROOT}/build-tools/cmake/libs/glfw.cmake)
+endif()
+
+# tinyemu static library (RISC-V emulator) for --temu.
+if(YETTY_ENABLE_LIB_TINYEMU)
+    include(${YETTY_ROOT}/build-tools/cmake/tinyemu.cmake)
 endif()
 
 # Desktop-specific subdirectories
@@ -28,8 +37,12 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-window.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/glfw-clipboard-manager.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/ywebgpu.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/ycoroutine.c
     ${YETTY_ROOT}/src/yetty/yplatform/windows/conpty.c
     ${YETTY_ROOT}/src/yetty/yplatform/windows/pipe.c
+    ${YETTY_ROOT}/src/yetty/yplatform/windows/socket.c
+    ${YETTY_ROOT}/src/yetty/yplatform/windows/process.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
     ${YETTY_ROOT}/src/yetty/yplatform/windows/platform-paths.c
@@ -38,6 +51,22 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/windows/fs.c
     ${YETTY_ROOT}/src/yetty/yplatform/windows/time.c
 )
+
+# tinyemu PTY bridge (yetty <-> tinyemu lib) — only when LIB_TINYEMU is on.
+# We use the Windows-specific port at yplatform/windows/tinyemu-pty.c (it
+# differs from the POSIX one in the VM-thread main loop: select() doesn't
+# work on Win32 CRT pipe fds, so the Windows version uses Sleep() for the
+# timer pump and PeekNamedPipe for non-blocking input). Both still need the
+# tinyemu win32-compat shim force-included.
+if(YETTY_ENABLE_LIB_TINYEMU)
+    set(_TINYEMU_PTY_SRC ${YETTY_ROOT}/src/yetty/yplatform/windows/tinyemu-pty.c)
+    list(APPEND YETTY_PLATFORM_SOURCES ${_TINYEMU_PTY_SRC})
+    if(MSVC)
+        set_source_files_properties(${_TINYEMU_PTY_SRC} PROPERTIES
+            COMPILE_OPTIONS "/FI${YETTY_ROOT}/src/tinyemu/win32-compat.h"
+            INCLUDE_DIRECTORIES "${CMAKE_BINARY_DIR}/tinyemu-win32-stubs")
+    endif()
+endif()
 
 # Create executable with core sources + platform
 add_executable(yetty
@@ -70,8 +99,19 @@ target_compile_definitions(yetty PRIVATE
 
 set_target_properties(yetty PROPERTIES ENABLE_EXPORTS TRUE)
 
+# shared/ycoroutine.c uses <stdatomic.h>. MSVC sets __STDC_NO_ATOMICS__ by
+# default and only clears it when both /std:clatest (or /std:c11) and
+# /experimental:c11atomics are passed.
+target_compile_options(yetty PRIVATE
+    $<$<COMPILE_LANGUAGE:C>:/std:clatest>
+    $<$<COMPILE_LANGUAGE:C>:/experimental:c11atomics>)
+
 target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
+    yetty_yco
+    yetty_telnet
+    $<$<BOOL:${YETTY_ENABLE_LIB_QEMU}>:yetty_qemu>
+    $<$<BOOL:${YETTY_ENABLE_LIB_TINYEMU}>:tinyemu>
     dwrite
     ws2_32
 )

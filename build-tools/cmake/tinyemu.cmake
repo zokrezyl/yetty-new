@@ -30,28 +30,36 @@ set(TINYEMU_SOURCES
     ${TINYEMU_DIR}/smp.c
 )
 
-# SLIRP user-space networking (always enabled)
-set(TINYEMU_SLIRP_SOURCES
-    ${TINYEMU_DIR}/slirp/bootp.c
-    ${TINYEMU_DIR}/slirp/ip_icmp.c
-    ${TINYEMU_DIR}/slirp/mbuf.c
-    ${TINYEMU_DIR}/slirp/slirp.c
-    ${TINYEMU_DIR}/slirp/tcp_output.c
-    ${TINYEMU_DIR}/slirp/cksum.c
-    ${TINYEMU_DIR}/slirp/ip_input.c
-    ${TINYEMU_DIR}/slirp/misc.c
-    ${TINYEMU_DIR}/slirp/socket.c
-    ${TINYEMU_DIR}/slirp/tcp_subr.c
-    ${TINYEMU_DIR}/slirp/udp.c
-    ${TINYEMU_DIR}/slirp/if.c
-    ${TINYEMU_DIR}/slirp/ip_output.c
-    ${TINYEMU_DIR}/slirp/sbuf.c
-    ${TINYEMU_DIR}/slirp/tcp_input.c
-    ${TINYEMU_DIR}/slirp/tcp_timer.c
-)
+# SLIRP user-space networking. POSIX sockets only — disabled on Windows
+# until somebody Winsock-ports the 16 source files.
+if(NOT WIN32)
+    set(TINYEMU_SLIRP_SOURCES
+        ${TINYEMU_DIR}/slirp/bootp.c
+        ${TINYEMU_DIR}/slirp/ip_icmp.c
+        ${TINYEMU_DIR}/slirp/mbuf.c
+        ${TINYEMU_DIR}/slirp/slirp.c
+        ${TINYEMU_DIR}/slirp/tcp_output.c
+        ${TINYEMU_DIR}/slirp/cksum.c
+        ${TINYEMU_DIR}/slirp/ip_input.c
+        ${TINYEMU_DIR}/slirp/misc.c
+        ${TINYEMU_DIR}/slirp/socket.c
+        ${TINYEMU_DIR}/slirp/tcp_subr.c
+        ${TINYEMU_DIR}/slirp/udp.c
+        ${TINYEMU_DIR}/slirp/if.c
+        ${TINYEMU_DIR}/slirp/ip_output.c
+        ${TINYEMU_DIR}/slirp/sbuf.c
+        ${TINYEMU_DIR}/slirp/tcp_input.c
+        ${TINYEMU_DIR}/slirp/tcp_timer.c
+    )
+else()
+    set(TINYEMU_SLIRP_SOURCES "")
+endif()
 
-# Linux needs fs_disk.c for disk access
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+# fs_disk: Linux/macOS use fs_disk.c (POSIX); Windows uses fs_disk_win32.c.
+# iOS skips it entirely (no host-FS access).
+if(WIN32)
+    list(APPEND TINYEMU_SOURCES ${TINYEMU_DIR}/fs_disk_win32.c)
+elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     list(APPEND TINYEMU_SOURCES ${TINYEMU_DIR}/fs_disk.c)
 endif()
 
@@ -82,8 +90,12 @@ file(WRITE ${RISCV_CPU128_WRAPPER} "#define MAX_XLEN 128\n#include \"${RISCV_CPU
 target_sources(tinyemu PRIVATE
     ${RISCV_CPU32_WRAPPER}
     ${RISCV_CPU64_WRAPPER}
-    ${RISCV_CPU128_WRAPPER}
 )
+# RV128 needs __int128, which MSVC lacks. Only build it on toolchains that
+# support it. Alpine boot is RV64; RV128 is a research-only profile.
+if(NOT MSVC)
+    target_sources(tinyemu PRIVATE ${RISCV_CPU128_WRAPPER})
+endif()
 
 # Include directories - set up so <tinyemu/...> works
 # Create a wrapper include directory structure
@@ -129,14 +141,52 @@ target_include_directories(tinyemu PRIVATE
     ${TINYEMU_DIR}/slirp
 )
 
-# Compile definitions
+# Compile definitions. Windows skips the 128-bit RISC-V variant (needs
+# __int128); the dispatcher is emitted by the wrapper whose MAX_XLEN equals
+# CONFIG_RISCV_MAX_XLEN, so cap at 64 there.
 target_compile_definitions(tinyemu PRIVATE
     _FILE_OFFSET_BITS=64
     _LARGEFILE_SOURCE
     CONFIG_VERSION="${TINYEMU_VERSION}"
-    CONFIG_SLIRP
-    CONFIG_RISCV_MAX_XLEN=128
+    $<$<NOT:$<BOOL:${WIN32}>>:CONFIG_SLIRP>
+    $<IF:$<BOOL:${MSVC}>,CONFIG_RISCV_MAX_XLEN=64,CONFIG_RISCV_MAX_XLEN=128>
 )
+
+# Force-include the Win32 compat shim so we don't have to edit every .c file
+# to swap pthread_mutex / gettimeofday / sleep / read-write-close.
+# Also drop satisfying-but-empty stubs for the POSIX headers tinyemu's
+# sources reach for (<unistd.h>, <pthread.h>, <sys/time.h>, <sys/select.h>,
+# <dirent.h>): they all funnel into win32-compat.h, which is force-included
+# above so the symbols are already in scope.
+if(WIN32)
+    if(MSVC)
+        target_compile_options(tinyemu PRIVATE /FI${TINYEMU_DIR}/win32-compat.h)
+    else()
+        target_compile_options(tinyemu PRIVATE -include ${TINYEMU_DIR}/win32-compat.h)
+    endif()
+
+    set(_TE_WIN32_STUBS ${CMAKE_CURRENT_BINARY_DIR}/tinyemu-win32-stubs)
+    file(MAKE_DIRECTORY ${_TE_WIN32_STUBS}/sys)
+    foreach(_h unistd.h pthread.h dirent.h sys/param.h sys/time.h sys/select.h sys/uio.h)
+        set(_path ${_TE_WIN32_STUBS}/${_h})
+        if(NOT EXISTS ${_path})
+            file(WRITE ${_path}
+                 "/* Stub: tinyemu's win32-compat.h is force-included. */\n")
+        endif()
+    endforeach()
+    target_include_directories(tinyemu BEFORE PRIVATE ${_TE_WIN32_STUBS})
+
+    # riscv_cpu.c uses <stdatomic.h>. Same MSVC gating as yetty.exe needs.
+    # /Zi gives CodeView debug info so stack traces from temu-test show
+    # tinyemu function names; /Od disables optimization so line numbers
+    # line up with source.
+    if(MSVC)
+        target_compile_options(tinyemu PRIVATE
+            $<$<COMPILE_LANGUAGE:C>:/std:clatest>
+            $<$<COMPILE_LANGUAGE:C>:/experimental:c11atomics>
+            /Zi /Od)
+    endif()
+endif()
 
 # Platform-specific definitions
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -154,33 +204,61 @@ else()
     )
 endif()
 
-# Suppress warnings in third-party code
-target_compile_options(tinyemu PRIVATE
-    -Wno-deprecated-declarations
-    -Wno-unused-function
-    -Wno-unused-variable
-    -Wno-unused-but-set-variable
-    -Wno-sign-compare
-)
+# Suppress warnings in third-party code (GCC/Clang flags; ignored on MSVC).
+if(NOT MSVC)
+    target_compile_options(tinyemu PRIVATE
+        -Wno-deprecated-declarations
+        -Wno-unused-function
+        -Wno-unused-variable
+        -Wno-unused-but-set-variable
+        -Wno-sign-compare
+    )
+endif()
 
 # Link libraries
 # Linux glibc splits clock/shm functions into librt. Android bionic,
-# macOS, iOS all keep them in libc — no separate librt.
-if(NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT ANDROID)
+# macOS, iOS, Windows all keep them in libc/kernel32 — no separate librt.
+if(NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT ANDROID AND NOT WIN32)
     target_link_libraries(tinyemu PRIVATE rt)
 endif()
 
 message(STATUS "TinyEMU: RISC-V emulator v${TINYEMU_VERSION}")
 
-# Standalone temu executable for testing
-add_executable(temu ${TINYEMU_DIR}/temu.c)
-target_link_libraries(temu PRIVATE tinyemu)
-target_include_directories(temu PRIVATE ${TINYEMU_DIR} ${TINYEMU_DIR}/slirp)
-target_compile_definitions(temu PRIVATE
-    _FILE_OFFSET_BITS=64
-    _LARGEFILE_SOURCE
-    CONFIG_VERSION="${TINYEMU_VERSION}"
-    CONFIG_SLIRP
-    CONFIG_RISCV_MAX_XLEN=128
-    _GNU_SOURCE
-)
+# Standalone temu executable for testing — POSIX-only main loop on Linux/macOS.
+if(NOT WIN32)
+    add_executable(temu ${TINYEMU_DIR}/temu.c)
+    target_link_libraries(temu PRIVATE tinyemu)
+    target_include_directories(temu PRIVATE ${TINYEMU_DIR} ${TINYEMU_DIR}/slirp)
+    target_compile_definitions(temu PRIVATE
+        _FILE_OFFSET_BITS=64
+        _LARGEFILE_SOURCE
+        CONFIG_VERSION="${TINYEMU_VERSION}"
+        CONFIG_SLIRP
+        CONFIG_RISCV_MAX_XLEN=128
+        _GNU_SOURCE
+    )
+else()
+    # Windows: build a minimal driver instead. temu.c is termios+TUN+select-
+    # based and would need a substantial port; temu-test.c is just enough to
+    # exercise the tinyemu library headlessly so we can isolate VM init bugs.
+    add_executable(temu-test ${TINYEMU_DIR}/temu-test.c)
+    target_link_libraries(temu-test PRIVATE tinyemu)
+    target_include_directories(temu-test PRIVATE ${TINYEMU_DIR})
+    target_compile_definitions(temu-test PRIVATE
+        _FILE_OFFSET_BITS=64
+        _LARGEFILE_SOURCE
+        CONFIG_VERSION="${TINYEMU_VERSION}"
+        CONFIG_RISCV_MAX_XLEN=64
+    )
+    if(MSVC)
+        target_compile_options(temu-test PRIVATE
+            /FI${TINYEMU_DIR}/win32-compat.h
+            $<$<COMPILE_LANGUAGE:C>:/std:clatest>
+            $<$<COMPILE_LANGUAGE:C>:/experimental:c11atomics>
+            /Zi      # CodeView debug info regardless of build type
+            /Od)     # disable opt so the stack trace lines up with source
+        target_link_options(temu-test PRIVATE /DEBUG)
+        target_include_directories(temu-test BEFORE PRIVATE
+            ${CMAKE_CURRENT_BINARY_DIR}/tinyemu-win32-stubs)
+    endif()
+endif()

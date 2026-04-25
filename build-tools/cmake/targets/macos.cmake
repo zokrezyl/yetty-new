@@ -42,6 +42,7 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pipe.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-socket.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-process.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/term.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/fs.c

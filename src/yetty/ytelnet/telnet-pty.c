@@ -8,27 +8,27 @@
  * - RFC 856  - Binary transmission
  * - RFC 858  - Suppress Go Ahead
  * - RFC 1073 - NAWS (window size)
+ *
+ * Networking, threading, and pipe I/O all go through yetty platform
+ * abstractions (yetty/platform/socket.h, yetty/platform/platform-input-pipe.h,
+ * yetty/yplatform/thread.h) so this file builds on Windows as well as Unix.
  */
 
 #include <yetty/platform/pty.h>
 #include <yetty/platform/pty-factory.h>
+#include <yetty/platform/socket.h>
+#include <yetty/platform/platform-input-pipe.h>
+#include <yetty/yplatform/thread.h>
+#include <yetty/yplatform/time.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/types.h>
 #include <yetty/ytrace.h>
 
 #include "telnet-protocol.h"
 
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 /* Telnet protocol state machine */
 enum telnet_state {
@@ -48,15 +48,15 @@ struct telnet_pty {
     struct yetty_yplatform_pty_pipe_source pipe_source;
 
     /* Network */
-    int socket;
+    yetty_socket_fd sock;
     char *host;
     uint16_t port;
 
-    /* Pipe for event loop integration: reader thread writes, terminal polls */
-    int output_pipe[2];
+    /* Decoded-output pipe: reader thread writes, terminal polls. */
+    struct yetty_yplatform_input_pipe *output_pipe;
 
     /* Reader thread */
-    pthread_t reader_thread;
+    ythread_t *reader_thread;
     int running;
 
     /* Terminal size */
@@ -78,7 +78,7 @@ struct telnet_pty {
      * connect to give the kernel time to boot and the shell prompt to
      * appear, then send. Subsequent resizes inject immediately. */
     int stty_initial_sent;
-    struct timespec connect_ts;
+    double connect_ts;
 };
 
 /* Forward declarations */
@@ -99,19 +99,22 @@ static const struct yetty_yplatform_pty_ops telnet_pty_ops = {
     .pipe_source = telnet_pty_pipe_source,
 };
 
-/* Send raw bytes to socket */
+/* Send raw bytes to socket. Loops past short writes; returns 0 on success. */
 static int telnet_send_raw(struct telnet_pty *pty, const uint8_t *data, size_t len)
 {
     size_t sent = 0;
 
     while (sent < len) {
-        ssize_t n = send(pty->socket, data + sent, len - sent, 0);
-        if (n < 0) {
-            if (errno == EINTR)
-                continue;
+        struct yetty_ycore_size_result r = yetty_yplatform_socket_send(
+            pty->sock, data + sent, len - sent);
+        if (!r.ok)
             return -1;
+        if (r.value == 0) {
+            /* Would block under non-blocking mode; we use blocking sockets,
+             * so treat zero-length as a soft retry. */
+            continue;
         }
-        sent += n;
+        sent += r.value;
     }
     return 0;
 }
@@ -237,24 +240,29 @@ static void telnet_handle_subneg(struct telnet_pty *pty)
     }
 }
 
+/* Append a single decoded byte to the output pipe. */
+static void telnet_emit_byte(struct telnet_pty *pty, uint8_t byte)
+{
+    pty->output_pipe->ops->write(pty->output_pipe, &byte, 1);
+}
+
 /* Process received byte through telnet state machine */
-static void telnet_process_byte(struct telnet_pty *pty, uint8_t byte, int *out_pipe)
+static void telnet_process_byte(struct telnet_pty *pty, uint8_t byte)
 {
     switch (pty->state) {
     case STATE_DATA:
         if (byte == TELNET_IAC) {
             pty->state = STATE_IAC;
         } else {
-            /* Write data byte to output pipe */
-            write(*out_pipe, &byte, 1);
+            telnet_emit_byte(pty, byte);
         }
         break;
 
     case STATE_IAC:
         switch (byte) {
         case TELNET_IAC:
-            /* Escaped IAC - write literal 255 */
-            write(*out_pipe, &byte, 1);
+            /* Escaped IAC - emit literal 255 */
+            telnet_emit_byte(pty, byte);
             pty->state = STATE_DATA;
             break;
         case TELNET_WILL:
@@ -326,106 +334,81 @@ static void telnet_process_byte(struct telnet_pty *pty, uint8_t byte, int *out_p
 }
 
 /* Reader thread - reads from socket, processes telnet, writes to pipe */
-static void *telnet_reader_thread(void *arg)
+static int telnet_reader_thread(void *arg)
 {
     struct telnet_pty *pty = arg;
     uint8_t buf[4096];
 
     yinfo("telnet_reader: started");
 
-    while (pty->running) {
-        /* Use select with 1s timeout so we can periodically check whether
-         * to fire the one-shot stty injection (NAWS fallback for QEMU
-         * which doesn't negotiate NAWS). */
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(pty->socket, &rfds);
-        struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
-        int sret = select(pty->socket + 1, &rfds, NULL, NULL, &tv);
+    /* Non-blocking + 100ms sleep so we can periodically check whether to
+     * fire the one-shot stty injection (NAWS fallback for QEMU which
+     * doesn't negotiate NAWS). */
+    yetty_yplatform_socket_set_nonblocking(pty->sock);
 
+    while (pty->running) {
         if (!pty->stty_initial_sent && !pty->naws_enabled &&
             pty->cols > 0 && pty->rows > 0) {
-            struct timespec now;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            long elapsed_ms =
-                (now.tv_sec - pty->connect_ts.tv_sec) * 1000 +
-                (now.tv_nsec - pty->connect_ts.tv_nsec) / 1000000;
-            if (elapsed_ms >= 3000) {
+            double elapsed = ytime_monotonic_sec() - pty->connect_ts;
+            if (elapsed >= 3.0) {
                 telnet_inject_stty(pty);
                 pty->stty_initial_sent = 1;
             }
         }
 
-        if (sret < 0) {
-            if (errno == EINTR)
-                continue;
-            yinfo("telnet_reader: select error: %s", strerror(errno));
+        struct yetty_ycore_size_result r = yetty_yplatform_socket_recv(
+            pty->sock, buf, sizeof(buf));
+        if (!r.ok) {
+            yinfo("telnet_reader: recv error, exiting");
             break;
         }
-        if (sret == 0)
-            continue;   /* timeout, just loop */
-
-        ssize_t n = recv(pty->socket, buf, sizeof(buf), 0);
-        if (n <= 0) {
-            if (n < 0 && errno == EINTR)
+        if (r.value == 0) {
+            /* Could be EOF or would-block on the non-blocking socket. */
+            if (yetty_yplatform_socket_would_block()) {
+                ytime_sleep_ms(100);
                 continue;
+            }
             yinfo("telnet_reader: connection closed");
             break;
         }
-
-        for (ssize_t i = 0; i < n; i++) {
-            telnet_process_byte(pty, buf[i], &pty->output_pipe[1]);
-        }
+        for (size_t i = 0; i < r.value; i++)
+            telnet_process_byte(pty, buf[i]);
     }
 
     yinfo("telnet_reader: exiting");
-    return NULL;
+    return 0;
 }
 
 /* Connect to telnet server */
-static int telnet_connect(struct telnet_pty *pty)
+static yetty_socket_fd telnet_connect(struct telnet_pty *pty)
 {
-    struct addrinfo hints, *res, *rp;
-    char port_str[16];
-    int sock = -1;
-
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-
-    snprintf(port_str, sizeof(port_str), "%u", pty->port);
-
-    int err = getaddrinfo(pty->host, port_str, &hints, &res);
-    if (err != 0) {
-        yerror("telnet: getaddrinfo failed: %s", gai_strerror(err));
-        return -1;
+    /* Idempotent — wraps WSAStartup on Windows, no-op elsewhere. */
+    if (!yetty_yplatform_socket_init()) {
+        yerror("telnet: socket subsystem init failed");
+        return YETTY_SOCKET_INVALID;
     }
 
-    for (rp = res; rp != NULL; rp = rp->ai_next) {
-        sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (sock < 0)
-            continue;
-
-        if (connect(sock, rp->ai_addr, rp->ai_addrlen) == 0)
-            break;
-
-        close(sock);
-        sock = -1;
+    struct yetty_socket_fd_result fd_r = yetty_yplatform_socket_create_tcp();
+    if (!fd_r.ok) {
+        yerror("telnet: socket create failed");
+        return YETTY_SOCKET_INVALID;
     }
 
-    freeaddrinfo(res);
-
-    if (sock < 0) {
+    /* Blocking connect — sock is left in blocking mode for the dedicated
+     * reader thread. */
+    struct yetty_ycore_void_result cr = yetty_yplatform_socket_connect(
+        fd_r.value, pty->host, pty->port);
+    if (!cr.ok) {
         yerror("telnet: failed to connect to %s:%u", pty->host, pty->port);
-        return -1;
+        yetty_yplatform_socket_close(fd_r.value);
+        return YETTY_SOCKET_INVALID;
     }
 
-    /* Set TCP_NODELAY for low latency */
-    int flag = 1;
-    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+    /* Best-effort TCP_NODELAY for low latency. */
+    yetty_yplatform_socket_set_nodelay(fd_r.value, 1);
 
     yinfo("telnet: connected to %s:%u", pty->host, pty->port);
-    return sock;
+    return fd_r.value;
 }
 
 /* PTY implementation */
@@ -436,8 +419,10 @@ static void telnet_pty_destroy(struct yetty_yplatform_pty *self)
 
     telnet_pty_stop(self);
 
-    if (pty->output_pipe[0] >= 0) close(pty->output_pipe[0]);
-    if (pty->output_pipe[1] >= 0) close(pty->output_pipe[1]);
+    if (pty->output_pipe) {
+        pty->output_pipe->ops->destroy(pty->output_pipe);
+        pty->output_pipe = NULL;
+    }
 
     free(pty->host);
     free(pty);
@@ -450,11 +435,7 @@ static struct yetty_ycore_size_result telnet_pty_read(struct yetty_yplatform_pty
     if (!pty->running || max_len == 0)
         return YETTY_OK(yetty_ycore_size, 0);
 
-    ssize_t n = read(pty->output_pipe[0], buf, max_len);
-    if (n < 0)
-        n = 0;
-
-    return YETTY_OK(yetty_ycore_size, (size_t)n);
+    return pty->output_pipe->ops->read(pty->output_pipe, buf, max_len);
 }
 
 static struct yetty_ycore_size_result telnet_pty_write(struct yetty_yplatform_pty *self, const char *data, size_t len)
@@ -515,15 +496,15 @@ static struct yetty_ycore_void_result telnet_pty_stop(struct yetty_yplatform_pty
 
     pty->running = 0;
 
-    if (pty->socket >= 0) {
-        shutdown(pty->socket, SHUT_RDWR);
-        close(pty->socket);
-        pty->socket = -1;
+    if (pty->sock != YETTY_SOCKET_INVALID) {
+        /* Closing the socket will unblock the reader thread's recv. */
+        yetty_yplatform_socket_close(pty->sock);
+        pty->sock = YETTY_SOCKET_INVALID;
     }
 
     if (pty->reader_thread) {
-        pthread_join(pty->reader_thread, NULL);
-        pty->reader_thread = 0;
+        ythread_join(pty->reader_thread);
+        pty->reader_thread = NULL;
     }
 
     return YETTY_OK_VOID();
@@ -545,9 +526,7 @@ struct yetty_yplatform_pty_result telnet_pty_create(const char *host, uint16_t p
         return YETTY_ERR(yetty_yplatform_pty, "failed to allocate telnet pty");
 
     pty->base.ops = &telnet_pty_ops;
-    pty->socket = -1;
-    pty->output_pipe[0] = -1;
-    pty->output_pipe[1] = -1;
+    pty->sock = YETTY_SOCKET_INVALID;
     pty->cols = 80;
     pty->rows = 24;
     pty->state = STATE_DATA;
@@ -560,23 +539,28 @@ struct yetty_yplatform_pty_result telnet_pty_create(const char *host, uint16_t p
         return YETTY_ERR(yetty_yplatform_pty, "failed to allocate host string");
     }
 
-    /* Create output pipe */
-    if (pipe(pty->output_pipe) < 0) {
+    /* Decoded-output pipe (read end exposed to event loop). */
+    struct yetty_yplatform_input_pipe_result pr = yetty_yplatform_input_pipe_create();
+    if (!pr.ok) {
         free(pty->host);
         free(pty);
         return YETTY_ERR(yetty_yplatform_pty, "failed to create output pipe");
     }
+    pty->output_pipe = pr.value;
 
-    fcntl(pty->output_pipe[0], F_SETFL, O_NONBLOCK);
-    fcntl(pty->output_pipe[1], F_SETFL, O_NONBLOCK);
-
-    pty->pipe_source.abstract = pty->output_pipe[0];
+    struct yetty_ycore_int_result fdr = pty->output_pipe->ops->read_fd(pty->output_pipe);
+    if (!fdr.ok) {
+        pty->output_pipe->ops->destroy(pty->output_pipe);
+        free(pty->host);
+        free(pty);
+        return YETTY_ERR(yetty_yplatform_pty, "failed to obtain pipe read fd");
+    }
+    pty->pipe_source.abstract = (uintptr_t)fdr.value;
 
     /* Connect */
-    pty->socket = telnet_connect(pty);
-    if (pty->socket < 0) {
-        close(pty->output_pipe[0]);
-        close(pty->output_pipe[1]);
+    pty->sock = telnet_connect(pty);
+    if (pty->sock == YETTY_SOCKET_INVALID) {
+        pty->output_pipe->ops->destroy(pty->output_pipe);
         free(pty->host);
         free(pty);
         return YETTY_ERR(yetty_yplatform_pty, "failed to connect");
@@ -588,14 +572,14 @@ struct yetty_yplatform_pty_result telnet_pty_create(const char *host, uint16_t p
      * and the reader thread falls back to injecting a `stty cols X rows Y`
      * 3 seconds after connect. */
     telnet_send_cmd(pty, TELNET_WILL, TELOPT_NAWS);
-    clock_gettime(CLOCK_MONOTONIC, &pty->connect_ts);
+    pty->connect_ts = ytime_monotonic_sec();
 
     /* Start reader thread */
     pty->running = 1;
-    if (pthread_create(&pty->reader_thread, NULL, telnet_reader_thread, pty) != 0) {
-        close(pty->socket);
-        close(pty->output_pipe[0]);
-        close(pty->output_pipe[1]);
+    pty->reader_thread = ythread_create(telnet_reader_thread, pty);
+    if (!pty->reader_thread) {
+        yetty_yplatform_socket_close(pty->sock);
+        pty->output_pipe->ops->destroy(pty->output_pipe);
         free(pty->host);
         free(pty);
         return YETTY_ERR(yetty_yplatform_pty, "failed to create reader thread");

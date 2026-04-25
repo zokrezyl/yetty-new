@@ -5,6 +5,12 @@
 #include <yetty/yconfig.h>
 #include <yetty/ycore/types.h>
 #include <yetty/ytrace.h>
+#include <yetty/yqemu/qemu.h>
+#include <yetty/ytelnet/telnet-pty.h>
+/* unix-pty.h is the common header that declares tinyemu_pty_create /
+ * telnet_pty_create / fork_pty_create. Despite the name, the declarations
+ * are platform-neutral. */
+#include "../shared/unix-pty.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -55,6 +61,7 @@ static const struct yetty_yplatform_pty_ops win_conpty_ops = {
 struct win_pty_factory {
     struct yetty_yplatform_pty_factory base;
     struct yetty_yconfig *config;
+    yprocess_t *qemu_proc;   /* spawned by qemu_start when --qemu is set */
 };
 
 /* Forward declarations for factory */
@@ -357,6 +364,10 @@ static struct yetty_yplatform_pty_result win_conpty_create(struct yetty_yconfig 
 static void win_pty_factory_destroy(struct yetty_yplatform_pty_factory *self)
 {
     struct win_pty_factory *factory = container_of(self, struct win_pty_factory, base);
+    if (factory->qemu_proc) {
+        qemu_stop(factory->qemu_proc);
+        factory->qemu_proc = NULL;
+    }
     free(factory);
 }
 
@@ -364,6 +375,28 @@ static struct yetty_yplatform_pty_result win_pty_factory_create_pty(
     struct yetty_yplatform_pty_factory *self)
 {
     struct win_pty_factory *factory = container_of(self, struct win_pty_factory, base);
+    struct yetty_yconfig *config = factory->config;
+
+    /* --temu: in-process tinyemu RISC-V VM */
+    if (config && config->ops->get_bool(config, YETTY_YCONFIG_KEY_TEMU, 0))
+        return tinyemu_pty_create(config);
+
+    /* --qemu: spawn qemu, then connect to its telnet console. */
+    if (config && config->ops->get_bool(config, YETTY_YCONFIG_KEY_QEMU, 0)) {
+        if (!factory->qemu_proc) {
+            factory->qemu_proc = qemu_start(QEMU_TELNET_PORT);
+            if (!factory->qemu_proc)
+                return YETTY_ERR(yetty_yplatform_pty, "failed to start QEMU");
+            if (!qemu_wait_ready(QEMU_TELNET_PORT, 5000)) {
+                qemu_stop(factory->qemu_proc);
+                factory->qemu_proc = NULL;
+                return YETTY_ERR(yetty_yplatform_pty, "QEMU telnet not ready");
+            }
+        }
+        return telnet_pty_create("127.0.0.1", QEMU_TELNET_PORT);
+    }
+
+    /* Default: native ConPTY (cmd.exe / pwsh) */
     return win_conpty_create(factory->config);
 }
 
@@ -377,7 +410,7 @@ struct yetty_yplatform_pty_factory_result yetty_yplatform_pty_factory_create(
 
     (void)os_specific;
 
-    factory = malloc(sizeof(struct win_pty_factory));
+    factory = calloc(1, sizeof(struct win_pty_factory));
     if (!factory)
         return YETTY_ERR(yetty_yplatform_pty_factory, "failed to allocate pty factory");
 

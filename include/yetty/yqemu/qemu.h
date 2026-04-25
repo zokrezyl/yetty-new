@@ -4,7 +4,8 @@
 #define YETTY_QEMU_H
 
 #include <stdint.h>
-#include <sys/types.h>
+
+#include <yetty/yplatform/process.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -13,22 +14,20 @@ extern "C" {
 #define QEMU_TELNET_PORT 23000
 
 /**
- * Start QEMU process with telnet serial on specified port
+ * Start QEMU process with telnet serial on specified port.
  *
  * @param port Telnet port for serial console
- * @return QEMU process ID, or -1 on error
+ * @return Opaque process handle, or YPROCESS_INVALID on error.
  */
-pid_t qemu_start(uint16_t port);
+yprocess_t *qemu_start(uint16_t port);
 
 /**
- * Stop QEMU process
- *
- * @param pid QEMU process ID
+ * Stop QEMU process. Frees the handle.
  */
-void qemu_stop(pid_t pid);
+void qemu_stop(yprocess_t *proc);
 
 /**
- * Wait for QEMU telnet to be ready
+ * Wait for QEMU telnet to be ready.
  *
  * @param port Telnet port
  * @param timeout_ms Timeout in milliseconds
