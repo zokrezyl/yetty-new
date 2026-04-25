@@ -43,6 +43,15 @@ struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
     const struct yetty_ycore_buffer *base64_buf);
 
+/* Build a ypaint buffer directly from already-decoded raw bytes (bare
+ * primitive stream OR magic-tagged framed payload — same shape that
+ * _create_from_base64 sees after base64 decoding). Used by callers that
+ * have done their own decompression / decoding (e.g. the ypaint-layer's
+ * yface-driven path: base64 + LZ4F decompression happens upstream, the
+ * decompressed bytes land here). */
+struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_bytes(
+    const uint8_t *data, size_t len);
+
 /* Base64-encode the buffer's raw primitive bytes. Allocates the output —
  * caller owns result.value.data and must free() it. Symmetric inverse of
  * yetty_ypaint_core_buffer_create_from_base64. */

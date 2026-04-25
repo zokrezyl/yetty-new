@@ -21,6 +21,7 @@ target_link_libraries(ygui PUBLIC
     yetty_ypaint_core
     yetty_ysdf
     yetty_ycore
+    yetty_yface     # OSC envelope + LZ4F + base64 streamer
     yetty_yfont     # raster-font-from-file for text measurement
     yetty_yrender   # transitive: raster-font's shader_code_set
 )

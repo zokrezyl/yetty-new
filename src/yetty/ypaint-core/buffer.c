@@ -106,34 +106,28 @@ static int parse_framed_payload(struct yetty_ypaint_core_buffer *buf,
   return 1;
 }
 
-struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
-    const struct yetty_ycore_buffer *base64_buf) {
-  if (!base64_buf || !base64_buf->data || base64_buf->size == 0)
-    return YETTY_ERR(yetty_ypaint_core_buffer, "null or empty base64 buffer");
-
-  // Decoded size is at most 3/4 of input
-  size_t decoded_cap = (base64_buf->size * 3) / 4 + 4;
+/* Construct from already-decoded bytes. Owns a private copy. */
+struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_bytes(
+    const uint8_t *data, size_t len) {
+  if (!data || len == 0)
+    return YETTY_ERR(yetty_ypaint_core_buffer, "null or empty bytes");
 
   struct yetty_ypaint_core_buffer *buf =
       calloc(1, sizeof(struct yetty_ypaint_core_buffer));
   if (!buf)
     return YETTY_ERR(yetty_ypaint_core_buffer, "calloc failed");
 
-  uint8_t *decoded = calloc(1, decoded_cap);
+  uint8_t *decoded = malloc(len);
   if (!decoded) {
     free(buf);
-    return YETTY_ERR(yetty_ypaint_core_buffer, "calloc for data failed");
+    return YETTY_ERR(yetty_ypaint_core_buffer, "malloc failed");
   }
-  size_t decoded_len = yetty_ycore_base64_decode(
-      (const char *)base64_buf->data, base64_buf->size,
-      (char *)decoded, decoded_cap);
+  memcpy(decoded, data, len);
 
   /* Framed (magic-tagged) payload = prims + text_spans + scene_bounds.
-   * Otherwise the decoded bytes are treated as a bare prim stream (the
-   * legacy path: caller only had primitive data to send). */
-  if (decoded_len >= 4 &&
-      *(uint32_t *)decoded == YPAINT_SERIAL_MAGIC) {
-    if (!parse_framed_payload(buf, decoded, decoded_len)) {
+   * Otherwise the bytes are a bare primitive stream (legacy path). */
+  if (len >= 4 && *(uint32_t *)decoded == YPAINT_SERIAL_MAGIC) {
+    if (!parse_framed_payload(buf, decoded, len)) {
       free(decoded);
       yetty_ypaint_core_buffer_destroy(buf);
       return YETTY_ERR(yetty_ypaint_core_buffer, "framed payload parse failed");
@@ -141,13 +135,31 @@ struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base
     free(decoded);
   } else {
     buf->primitives.buf.data = decoded;
-    buf->primitives.buf.capacity = decoded_cap;
-    buf->primitives.buf.size = decoded_len;
+    buf->primitives.buf.capacity = len;
+    buf->primitives.buf.size = len;
   }
   strncpy(buf->primitives.name, "prims",
           YETTY_YCORE_NAMED_BUFFER_MAX_NAME_LENGTH - 1);
-
   return YETTY_OK(yetty_ypaint_core_buffer, buf);
+}
+
+struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create_from_base64(
+    const struct yetty_ycore_buffer *base64_buf) {
+  if (!base64_buf || !base64_buf->data || base64_buf->size == 0)
+    return YETTY_ERR(yetty_ypaint_core_buffer, "null or empty base64 buffer");
+
+  size_t decoded_cap = (base64_buf->size * 3) / 4 + 4;
+  uint8_t *decoded = malloc(decoded_cap);
+  if (!decoded)
+    return YETTY_ERR(yetty_ypaint_core_buffer, "malloc failed");
+  size_t decoded_len = yetty_ycore_base64_decode(
+      (const char *)base64_buf->data, base64_buf->size,
+      (char *)decoded, decoded_cap);
+
+  struct yetty_ypaint_core_buffer_result r =
+      yetty_ypaint_core_buffer_create_from_bytes(decoded, decoded_len);
+  free(decoded);
+  return r;
 }
 
 struct yetty_ypaint_core_buffer_result yetty_ypaint_core_buffer_create(
