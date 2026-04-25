@@ -45,4 +45,25 @@ IMGUI_IMPL_API bool ImGui_ImplYetty_UploadFontAtlas(void);
 /* Optional — emit --clear to wipe the receiver canvas. */
 IMGUI_IMPL_API void ImGui_ImplYetty_Clear(void);
 
+/*=============================================================================
+ * Platform side — input/raw-mode wiring (Unix only for v1).
+ *
+ * PlatformInit:
+ *   - puts stdin in raw (cbreak) mode
+ *   - subscribes to yetty's pixel-precise mouse events: \e[?1500h \e[?1501h
+ *   - stashes the previous termios for shutdown
+ *
+ * PollInput: drain stdin, parse OSC 777777 / 777778 / 777780 from yetty,
+ * feed io.MousePos / MouseDown / MouseWheel / DisplaySize. Call once per
+ * frame *before* ImGui::NewFrame().
+ *
+ * PlatformShutdown: \e[?1500l \e[?1501l, restore termios.
+ *
+ * Input fd defaults to STDIN_FILENO; override before PlatformInit.
+ *===========================================================================*/
+IMGUI_IMPL_API bool ImGui_ImplYetty_PlatformInit(void);
+IMGUI_IMPL_API void ImGui_ImplYetty_PlatformShutdown(void);
+IMGUI_IMPL_API void ImGui_ImplYetty_PollInput(void);
+IMGUI_IMPL_API void ImGui_ImplYetty_SetInputFd(int fd);
+
 #endif /* YETTY_YMGUI_IMGUI_IMPL_YETTY_H */

@@ -54,6 +54,13 @@ typedef void (*yetty_yterm_cursor_fn)(struct yetty_yterm_terminal_layer *source,
                                      struct grid_cursor_pos cursor_pos,
                                      void *userdata);
 
+/* Mouse-subscription callback - fired when libvterm flips DEC mode 1500
+ * (card click, click_enabled) or 1501 (card move, move_enabled). The two
+ * args carry the *current* subscription state for both modes; the layer
+ * fires this whenever either changes. */
+typedef void (*yetty_yterm_mouse_sub_fn)(int click_enabled, int move_enabled,
+                                         void *userdata);
+
 /* Layer ops */
 struct yetty_yterm_terminal_layer_ops {
   void (*destroy)(struct yetty_yterm_terminal_layer *self);
@@ -112,6 +119,9 @@ struct yetty_yterm_terminal_layer {
   /* Cursor callback - set by creator */
   yetty_yterm_cursor_fn cursor_fn;
   void *cursor_userdata;
+  /* Mouse-subscription callback - set by creator. Optional. */
+  yetty_yterm_mouse_sub_fn mouse_sub_fn;
+  void *mouse_sub_userdata;
 };
 
 /* Terminal context - contains yetty context plus terminal-owned objects */

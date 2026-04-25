@@ -51,6 +51,14 @@ struct yetty_yterm_terminal {
   struct yetty_yrender_target *layer_targets[YETTY_YTERM_TERMINAL_MAX_LAYERS];
   int shutting_down;
   struct yetty_yterm_pty_reader *pty_reader;
+
+  /* Pixel-precise mouse forwarding (DEC ?1500/?1501; OSC 777777/777778).
+   * The text-layer's libvterm settermprop hook flips these and reports
+   * via terminal_mouse_sub_callback, which also emits OSC 777780 with
+   * the current pixel size on the rising edge so the client can layout. */
+  int mouse_click_subscribed;
+  int mouse_move_subscribed;
+  int mouse_buttons_held;     /* OR of (1 << button) for currently-down buttons */
 };
 
 /* Forward declarations */
@@ -113,6 +121,75 @@ static void terminal_pty_write_callback(const char *data, size_t len,
     terminal->context.pty->ops->write(terminal->context.pty, data, len);
     ydebug("terminal_pty_write: wrote %zu bytes to PTY", len);
   }
+}
+
+/* Direct PTY write — used by the mouse-OSC emitter. Bypasses the layer
+ * callback path because mouse events come from the GLFW input pipe, not
+ * from a layer. */
+static void terminal_pty_write_raw(struct yetty_yterm_terminal *terminal,
+                                   const char *data, size_t len) {
+  if (terminal->context.pty && terminal->context.pty->ops &&
+      terminal->context.pty->ops->write)
+    terminal->context.pty->ops->write(terminal->context.pty, data, len);
+}
+
+/* Emit OSC 777780;<w>;<h>\e\\ — pixel size of the terminal's view. The
+ * client uses it as ImGui's DisplaySize. Re-sent every time the size
+ * changes or the subscription rises. */
+static void terminal_emit_pixel_size(struct yetty_yterm_terminal *terminal) {
+  float w = terminal->view.bounds.w;
+  float h = terminal->view.bounds.h;
+  if (w <= 0.0f || h <= 0.0f) {
+    ydebug("terminal_emit_pixel_size: skipped (bounds=%.0fx%.0f)", w, h);
+    return;
+  }
+  char buf[64];
+  int n = snprintf(buf, sizeof(buf), "\033]777780;%.0f;%.0f\033\\", w, h);
+  if (n > 0) terminal_pty_write_raw(terminal, buf, (size_t)n);
+  ydebug("terminal_emit_pixel_size: wrote OSC 777780;%.0f;%.0f", w, h);
+}
+
+/* OSC 777777 (click/scroll) and OSC 777778 (move) — pixel-precise mouse
+ * events relative to the terminal's view origin. Format matches yetty-poc
+ * exactly so existing parsers work unchanged.
+ *
+ *   \e]777777;<empty>;<button-mask>;<press>;<x>;<y>;<scroll-dy>\e\\
+ *   \e]777778;<empty>;<buttons-held>;<x>;<y>\e\\
+ *
+ * Card-name field is left empty — yetty has no card concept, just one
+ * terminal per view. The leading semicolon is preserved so existing
+ * parsers (which split on ';') see the same field count. */
+static void terminal_emit_mouse_click(struct yetty_yterm_terminal *terminal,
+                                      int button_mask, int press,
+                                      float x, float y, float scroll_dy) {
+  char buf[128];
+  int n = snprintf(buf, sizeof(buf),
+                   "\033]777777;;%d;%d;%.2f;%.2f;%.2f\033\\",
+                   button_mask, press, x, y, scroll_dy);
+  if (n > 0) terminal_pty_write_raw(terminal, buf, (size_t)n);
+}
+
+static void terminal_emit_mouse_move(struct yetty_yterm_terminal *terminal,
+                                     int buttons_held, float x, float y) {
+  char buf[128];
+  int n = snprintf(buf, sizeof(buf),
+                   "\033]777778;;%d;%.2f;%.2f\033\\",
+                   buttons_held, x, y);
+  if (n > 0) terminal_pty_write_raw(terminal, buf, (size_t)n);
+}
+
+/* Mouse-subscription callback fired by the text-layer when libvterm flips
+ * DEC mode 1500/1501. Latch state on the terminal; emit pixel-size once
+ * on the rising edge so the client can lay out before the first event. */
+static void terminal_mouse_sub_callback(int click_enabled, int move_enabled,
+                                        void *userdata) {
+  struct yetty_yterm_terminal *terminal = userdata;
+  int rising = (!terminal->mouse_click_subscribed && click_enabled) ||
+               (!terminal->mouse_move_subscribed && move_enabled);
+  terminal->mouse_click_subscribed = click_enabled;
+  terminal->mouse_move_subscribed  = move_enabled;
+  ydebug("terminal: mouse_sub click=%d move=%d", click_enabled, move_enabled);
+  if (rising) terminal_emit_pixel_size(terminal);
 }
 
 /* Request render callback for layers */
@@ -366,6 +443,12 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
           cols, rows, yetty_context, terminal_pty_write_callback, terminal,
           terminal_request_render_callback, terminal, terminal_scroll_callback,
           terminal, terminal_cursor_callback, terminal);
+  if (YETTY_IS_OK(text_layer_res)) {
+    /* Mouse-subscription callback — text-layer's libvterm settermprop hook
+     * forwards DEC ?1500 / ?1501 changes here. */
+    text_layer_res.value->mouse_sub_fn       = terminal_mouse_sub_callback;
+    text_layer_res.value->mouse_sub_userdata = terminal;
+  }
   if (!YETTY_IS_OK(text_layer_res)) {
     yerror("terminal_create: failed to create text layer: %s",
            text_layer_res.error.msg);
@@ -715,6 +798,9 @@ terminal_view_on_event(struct yetty_yui_view *view,
         }
       }
     }
+    /* Tell subscribed clients about the new viewport so they can re-layout. */
+    if (terminal->mouse_click_subscribed || terminal->mouse_move_subscribed)
+      terminal_emit_pixel_size(terminal);
     return YETTY_OK(yetty_ycore_int, 1);
   }
 
@@ -806,6 +892,61 @@ terminal_view_on_event(struct yetty_yui_view *view,
     ydebug("terminal: POLL_READABLE");
     terminal_read_pty(terminal);
     return YETTY_OK(yetty_ycore_int, 1);
+
+  /*-------------------------------------------------------------------------
+   * Mouse forwarding — only emit when the client has subscribed via DEC
+   * ?1500/?1501. Coordinates are converted from window-absolute (the GLFW
+   * pipe gives us this) to terminal-local pixels by subtracting the view
+   * origin, so a split layout still gives each terminal coords starting
+   * at (0,0). Skip events fully outside the view — they belong to a
+   * different pane.
+   *-----------------------------------------------------------------------*/
+  case YETTY_EVENT_MOUSE_DOWN:
+  case YETTY_EVENT_MOUSE_UP: {
+    if (!terminal->mouse_click_subscribed)
+      return YETTY_OK(yetty_ycore_int, 0);
+    float lx = event->mouse.x - view->bounds.x;
+    float ly = event->mouse.y - view->bounds.y;
+    if (lx < 0.0f || ly < 0.0f ||
+        lx >= view->bounds.w || ly >= view->bounds.h)
+      return YETTY_OK(yetty_ycore_int, 0);
+    int btn = event->mouse.button;
+    int press = (event->type == YETTY_EVENT_MOUSE_DOWN) ? 1 : 0;
+    if (press)
+      terminal->mouse_buttons_held |= (1 << btn);
+    else
+      terminal->mouse_buttons_held &= ~(1 << btn);
+    terminal_emit_mouse_click(terminal, terminal->mouse_buttons_held,
+                              press, lx, ly, 0.0f);
+    return YETTY_OK(yetty_ycore_int, 1);
+  }
+
+  case YETTY_EVENT_MOUSE_MOVE:
+  case YETTY_EVENT_MOUSE_DRAG: {
+    if (!terminal->mouse_move_subscribed)
+      return YETTY_OK(yetty_ycore_int, 0);
+    float lx = event->mouse.x - view->bounds.x;
+    float ly = event->mouse.y - view->bounds.y;
+    if (lx < 0.0f || ly < 0.0f ||
+        lx >= view->bounds.w || ly >= view->bounds.h)
+      return YETTY_OK(yetty_ycore_int, 0);
+    terminal_emit_mouse_move(terminal, terminal->mouse_buttons_held, lx, ly);
+    return YETTY_OK(yetty_ycore_int, 1);
+  }
+
+  case YETTY_EVENT_SCROLL: {
+    if (!terminal->mouse_click_subscribed)
+      return YETTY_OK(yetty_ycore_int, 0);
+    float lx = event->scroll.x - view->bounds.x;
+    float ly = event->scroll.y - view->bounds.y;
+    if (lx < 0.0f || ly < 0.0f ||
+        lx >= view->bounds.w || ly >= view->bounds.h)
+      return YETTY_OK(yetty_ycore_int, 0);
+    /* Encode wheel as a synthetic press on a virtual button. The client
+     * reads the scroll-dy field from the trailing position. */
+    terminal_emit_mouse_click(terminal, 0, 1, lx, ly, event->scroll.dy);
+    return YETTY_OK(yetty_ycore_int, 1);
+  }
 
   default:
     return YETTY_OK(yetty_ycore_int, 0);

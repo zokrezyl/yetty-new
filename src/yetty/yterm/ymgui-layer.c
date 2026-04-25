@@ -614,6 +614,26 @@ ymgui_resize_grid(struct yetty_yterm_terminal_layer *self,
     layer->rs.uniforms[U_GRID_SIZE].vec2[1] = (float)gs.rows;
     layer->rs.pixel_size.width  = (float)gs.cols * self->cell_size.width;
     layer->rs.pixel_size.height = (float)gs.rows * self->cell_size.height;
+
+    /* Grow raster to match the new grid pixel area. The binder detects
+     * texture-dimension changes in update() and re-finalizes the pipeline
+     * — that re-bakes the atlas region const for our new raster size,
+     * which the shader reads via U_RASTER_SIZE. */
+    uint32_t rw = (uint32_t)((float)gs.cols * self->cell_size.width);
+    uint32_t rh = (uint32_t)((float)gs.rows * self->cell_size.height);
+    if (rw == 0) rw = 1;
+    if (rh == 0) rh = 1;
+    if (rw != layer->raster_w || rh != layer->raster_h) {
+        ymgui_raster_ensure(layer, rw, rh);
+        if (layer->has_frame)
+            ymgui_raster_frame(layer);
+        else
+            ymgui_raster_clear(layer);
+        layer->rs.uniforms[U_RASTER_SIZE].vec2[0] = (float)rw;
+        layer->rs.uniforms[U_RASTER_SIZE].vec2[1] = (float)rh;
+        layer->raster_dirty = 1;
+    }
+
     self->dirty = 1;
     return YETTY_OK_VOID();
 }
@@ -632,6 +652,23 @@ ymgui_set_cell_size(struct yetty_yterm_terminal_layer *self,
     layer->rs.uniforms[U_CELL_SIZE].vec2[1] = cs.height;
     layer->rs.pixel_size.width  = (float)self->grid_size.cols * cs.width;
     layer->rs.pixel_size.height = (float)self->grid_size.rows * cs.height;
+
+    /* Same raster-resize handling as resize_grid — see comment there. */
+    uint32_t rw = (uint32_t)((float)self->grid_size.cols * cs.width);
+    uint32_t rh = (uint32_t)((float)self->grid_size.rows * cs.height);
+    if (rw == 0) rw = 1;
+    if (rh == 0) rh = 1;
+    if (rw != layer->raster_w || rh != layer->raster_h) {
+        ymgui_raster_ensure(layer, rw, rh);
+        if (layer->has_frame)
+            ymgui_raster_frame(layer);
+        else
+            ymgui_raster_clear(layer);
+        layer->rs.uniforms[U_RASTER_SIZE].vec2[0] = (float)rw;
+        layer->rs.uniforms[U_RASTER_SIZE].vec2[1] = (float)rh;
+        layer->raster_dirty = 1;
+    }
+
     self->dirty = 1;
     return YETTY_OK_VOID();
 }

@@ -28,7 +28,7 @@ static void msleep(unsigned ms) {
 }
 
 int main(int argc, char **argv) {
-    int frames = 300;       /* ~10 s at 30 fps */
+    int frames = 18000;     /* ~10 min at 30 fps — interactive runs */
     int fps    = 30;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
@@ -50,19 +50,25 @@ int main(int argc, char **argv) {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = NULL;                  /* don't write imgui.ini */
+    /* DisplaySize is overridden by the platform backend as soon as yetty
+     * sends OSC 777780. The placeholder is just so the very first frame
+     * (before any input arrives) doesn't blow up. */
     io.DisplaySize = ImVec2(800.0f, 600.0f);
     io.DeltaTime   = (float)dt_ms / 1000.0f;
-    io.MousePos    = ImVec2(-1.0f, -1.0f);  /* no hover */
-    /* ImGui asserts on missing platform/backend names in some paths. */
-    io.BackendPlatformName = "imgui_yetty_test_platform";
 
     if (!ImGui_ImplYetty_Init()) {
         fprintf(stderr, "ymgui: init failed\n");
         return 1;
     }
+    if (!ImGui_ImplYetty_PlatformInit()) {
+        fprintf(stderr, "ymgui: platform init failed\n");
+        ImGui_ImplYetty_Shutdown();
+        return 1;
+    }
 
     for (int n = 0; n < frames; n++) {
         io.DeltaTime = (float)dt_ms / 1000.0f;
+        ImGui_ImplYetty_PollInput();
         ImGui_ImplYetty_NewFrame();
         ImGui::NewFrame();
 
@@ -82,6 +88,7 @@ int main(int argc, char **argv) {
     }
 
     ImGui_ImplYetty_Clear();
+    ImGui_ImplYetty_PlatformShutdown();
     ImGui_ImplYetty_Shutdown();
     ImGui::DestroyContext();
     return 0;
