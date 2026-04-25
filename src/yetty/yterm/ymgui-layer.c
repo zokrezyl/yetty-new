@@ -79,13 +79,18 @@ struct ymgui_tex_slot {
 
 #define U_GRID_SIZE        0   /* vec2(cols, rows) */
 #define U_CELL_SIZE        1   /* vec2(cell_w, cell_h) */
-#define U_ROW_ORIGIN       2   /* u32, rolling row of top visible line */
-#define U_FRAME_ROLLING    3   /* u32, rolling row where frame is anchored */
-#define U_FRAME_SIZE       4   /* vec2(display_size_x, display_size_y) in px */
-#define U_FRAME_PRESENT    5   /* u32, 1 if a raster exists and anchor visible */
-#define U_VZ_SCALE         6   /* f32, visual zoom scale */
-#define U_VZ_OFF           7   /* vec2, visual zoom offset */
-#define U_COUNT            8
+#define U_RASTER_SIZE      2   /* vec2 — pixel size the raster was allocated
+                                * with at create-time. The binder bakes the
+                                * atlas region into the shader at that size,
+                                * so the shader MUST divide by THIS, not by
+                                * grid*cell (the grid may resize later). */
+#define U_ROW_ORIGIN       3   /* u32, rolling row of top visible line */
+#define U_FRAME_ROLLING    4   /* u32, rolling row where frame is anchored */
+#define U_FRAME_SIZE       5   /* vec2(display_size_x, display_size_y) in px */
+#define U_FRAME_PRESENT    6   /* u32, 1 if a raster exists and anchor visible */
+#define U_VZ_SCALE         7   /* f32, visual zoom scale */
+#define U_VZ_OFF           8   /* vec2, visual zoom offset */
+#define U_COUNT            9
 
 /*===========================================================================
  * Layer object
@@ -143,6 +148,8 @@ static void init_uniforms(struct yetty_yrender_gpu_resource_set *rs)
         "ymgui_grid_size",     YETTY_YRENDER_UNIFORM_VEC2};
     rs->uniforms[U_CELL_SIZE]     = (struct yetty_yrender_uniform){
         "ymgui_cell_size",     YETTY_YRENDER_UNIFORM_VEC2};
+    rs->uniforms[U_RASTER_SIZE]   = (struct yetty_yrender_uniform){
+        "ymgui_raster_size",   YETTY_YRENDER_UNIFORM_VEC2};
     rs->uniforms[U_ROW_ORIGIN]    = (struct yetty_yrender_uniform){
         "ymgui_row_origin",    YETTY_YRENDER_UNIFORM_U32};
     rs->uniforms[U_FRAME_ROLLING] = (struct yetty_yrender_uniform){
@@ -421,19 +428,32 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_ymgui_layer_create(
     layer->rs.uniforms[U_GRID_SIZE].vec2[1] = (float)rows;
     layer->rs.uniforms[U_CELL_SIZE].vec2[0] = cell_w;
     layer->rs.uniforms[U_CELL_SIZE].vec2[1] = cell_h;
+    /* RASTER_SIZE is locked to the value the raster was allocated with —
+     * see ymgui_raster_ensure() below. The binder bakes the atlas region
+     * for this size at first compile; changing it later is a no-op for
+     * sampling. Resize is a v2 problem (would need a re-pack of the atlas
+     * by the binder, which it doesn't currently support). */
 
     yetty_yrender_shader_code_set(&layer->rs.shader,
                                   (const char *)layer->shader_code.data,
                                   layer->shader_code.size);
 
-    /* Raster is allocated lazily on first --frame (sized to display_size).
-     * Until then, bind a 1x1 transparent pixel so the WGPU pipeline has a
-     * valid texture. */
-    ymgui_raster_ensure(layer, 1, 1);
+    /* Raster sized to the grid pixel area NOW, before the pipeline is ever
+     * compiled. The binder bakes this texture's atlas region as a `const
+     * vec4` into the shader at first compile, so resizing later would
+     * silently shrink the sampled area. Frames smaller than the grid leave
+     * the rest of the raster transparent — see ymgui_raster_frame. */
+    uint32_t raster_w = (uint32_t)((float)cols * cell_w);
+    uint32_t raster_h = (uint32_t)((float)rows * cell_h);
+    if (raster_w == 0) raster_w = 1;
+    if (raster_h == 0) raster_h = 1;
+    ymgui_raster_ensure(layer, raster_w, raster_h);
     ymgui_raster_clear(layer);
+    layer->rs.uniforms[U_RASTER_SIZE].vec2[0] = (float)raster_w;
+    layer->rs.uniforms[U_RASTER_SIZE].vec2[1] = (float)raster_h;
 
-    ydebug("ymgui_layer_create: %ux%u grid, %.1fx%.1f cell",
-           cols, rows, cell_w, cell_h);
+    ydebug("ymgui_layer_create: %ux%u grid, %.1fx%.1f cell, raster=%ux%u",
+           cols, rows, cell_w, cell_h, raster_w, raster_h);
 
     return YETTY_OK(yetty_yterm_terminal_layer, &layer->base);
 }
@@ -908,12 +928,11 @@ static void ymgui_raster_frame(struct yetty_yterm_ymgui_layer *layer)
     const uint8_t *end = layer->frame_bytes + layer->frame_size;
     int idx32 = (fh->flags & YMGUI_FRAME_FLAG_IDX32) ? 1 : 0;
 
-    /* Size raster exactly to the frame. Positions in ImDrawVert are in the
-     * frame's own coordinate system — DisplayPos subtracted upfront so (0,0)
-     * is the frame's top-left. */
-    uint32_t fw = (uint32_t)f_max(1.0f, fh->display_size_x);
-    uint32_t fh_px = (uint32_t)f_max(1.0f, fh->display_size_y);
-    ymgui_raster_ensure(layer, fw, fh_px);
+    /* Raster size is fixed at create-time (grid pixel area) — see comment
+     * there. We paint the frame at top-left; the rest stays transparent.
+     * Pixels of the frame that fall outside the grid pixel area are
+     * silently clipped — that matches what would happen on screen anyway
+     * once the layer is composited. */
     ymgui_raster_clear(layer);
 
     int raster_w = (int)layer->raster_w;
@@ -981,4 +1000,5 @@ static void ymgui_raster_frame(struct yetty_yterm_ymgui_layer *layer)
             }
         }
     }
+
 }
