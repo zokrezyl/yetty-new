@@ -3,6 +3,8 @@
  */
 
 #include "ygui_internal.h"
+#include <yetty/yface/yface.h>
+#include <yetty/ycore/types.h>
 #include <stdio.h>
 
 #ifdef _WIN32
@@ -62,23 +64,15 @@ static void write_clear_and_bin(const uint8_t* data, uint32_t size) {
 
     if (size == 0 || !data) return;
 
-    /* 2) Append base64(primitive bytes) as --bin. */
-    size_t b64_size = ((size + 2) / 3) * 4 + 1;
-    size_t buf_size = 64 + b64_size;
-    char* buf = (char*)malloc(buf_size);
-    if (!buf) return;
-
-    int header_len = snprintf(buf, 64, "\033]" VENDOR_ID ";--bin;");
-
-    char* b64_start = buf + header_len;
-    size_t b64_len = base64_encode(data, size, b64_start,
-                                   buf_size - header_len - 3);
-
-    b64_start[b64_len] = '\033';
-    b64_start[b64_len + 1] = '\\';
-
-    write_osc(buf, header_len + b64_len + 2);
-    free(buf);
+    /* 2) "--bin;<base64(LZ4F(prims))>" via yetty_yface. The yface emit
+     * helper builds the full envelope into out_buf; we then push it via
+     * the existing blocking write helper. */
+    struct yetty_ycore_buffer out = {0};
+    struct yetty_ycore_void_result r = yetty_yface_emit(
+        666674, "--bin", data, size, &out);
+    if (YETTY_IS_OK(r) && out.size > 0)
+        write_osc((const char *)out.data, out.size);
+    yetty_ycore_buffer_destroy(&out);
 }
 
 void ygui_osc_create_card(const char* name, int x, int y, int w, int h,

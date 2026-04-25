@@ -4,6 +4,7 @@
 #include <yetty/ycore/result.h>
 #include <yetty/ycore/util.h>
 #include <yetty/yfont/font.h>
+#include <yetty/yface/yface.h>
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/ypaint-core/complex-prim-types.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
@@ -112,6 +113,10 @@ struct yetty_yterm_ypaint_layer {
   size_t grid_staging_size;
   uint8_t *prim_staging;
   size_t prim_staging_size;
+
+  /* Streaming OSC decoder (b64 → LZ4F → in_buf) — one per layer, lives
+   * for the layer's lifetime. Same pattern as ymgui-layer. */
+  struct yetty_yface *yface;
 };
 
 /* Forward declarations */
@@ -378,6 +383,20 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_ypaint_layer_create(
                                (const char *)layer->shader_code.data,
                                layer->shader_code.size);
 
+  /* Long-lived streaming decoder for incoming --bin OSC bodies. Reused
+   * across every emit, so we don't pay LZ4F_createDecompressionContext
+   * per OSC. Same pattern as ymgui-layer. */
+  {
+    struct yetty_yface_ptr_result yr = yetty_yface_create();
+    if (YETTY_IS_ERR(yr)) {
+      free(layer->shader_code.data);
+      free(layer->sdf_lib_code.data);
+      free(layer);
+      return YETTY_ERR(yetty_yterm_terminal_layer, yr.error.msg);
+    }
+    layer->yface = yr.value;
+  }
+
   ydebug("ypaint_layer_create: %s mode, %ux%u grid, %.1fx%.1f cells",
          scrolling_mode ? "scrolling" : "overlay", cols, rows, cell_width,
          cell_height);
@@ -390,6 +409,8 @@ static void ypaint_layer_destroy(struct yetty_yterm_terminal_layer *self) {
   struct yetty_yterm_ypaint_layer *layer =
       (struct yetty_yterm_ypaint_layer *)self;
 
+  if (layer->yface)
+    yetty_yface_destroy(layer->yface);
   if (layer->canvas)
     yetty_ypaint_canvas_destroy(layer->canvas);
 
@@ -470,8 +491,12 @@ ypaint_layer_write(struct yetty_yterm_terminal_layer *self,
       return add_res;
     }
   } else if (yetty_yterm_osc_args_has(&args, "bin")) {
-    /* Binary format: pass base64 payload directly to create_from_base64 */
-    struct yetty_ycore_buffer_result payload = yetty_yterm_osc_args_get_payload_buffer(&args);
+    /* Binary format: stream the OSC body through the LAYER'S yface
+     * (b64 → LZ4F decompress) and hand the decompressed bytes — held in
+     * yface->in_buf — straight to ypaint-core. No transient yface, no
+     * intermediate copy of the decompressed payload. */
+    struct yetty_ycore_buffer_result payload =
+        yetty_yterm_osc_args_get_payload_buffer(&args);
     if (YETTY_IS_ERR(payload)) {
       yetty_yterm_osc_args_free(&args);
       return YETTY_ERR(yetty_ycore_void, payload.error.msg);
@@ -479,8 +504,31 @@ ypaint_layer_write(struct yetty_yterm_terminal_layer *self,
 
     ydebug("ypaint_layer_write: bin payload_len=%zu", payload.value.size);
 
+    {
+      struct yetty_ycore_void_result r = yetty_yface_start_read(layer->yface);
+      if (YETTY_IS_ERR(r)) {
+        yetty_yterm_osc_args_free(&args);
+        return r;
+      }
+      r = yetty_yface_feed(layer->yface,
+                           (const char *)payload.value.data,
+                           payload.value.size);
+      if (YETTY_IS_ERR(r)) {
+        yetty_yface_finish_read(layer->yface);
+        yetty_yterm_osc_args_free(&args);
+        return r;
+      }
+      r = yetty_yface_finish_read(layer->yface);
+      if (YETTY_IS_ERR(r)) {
+        yetty_yterm_osc_args_free(&args);
+        return r;
+      }
+    }
+
+    struct yetty_ycore_buffer *in = yetty_yface_in_buf(layer->yface);
+
     struct yetty_ypaint_core_buffer_result res =
-        yetty_ypaint_core_buffer_create_from_base64(&payload.value);
+        yetty_ypaint_core_buffer_create_from_bytes(in->data, in->size);
     if (YETTY_IS_ERR(res)) {
       yetty_yterm_osc_args_free(&args);
       return YETTY_ERR(yetty_ycore_void, res.error.msg);

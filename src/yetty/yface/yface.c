@@ -514,3 +514,93 @@ struct yetty_ycore_buffer *yetty_yface_out_buf(struct yetty_yface *y)
 {
     return y ? &y->out_buf : NULL;
 }
+
+/*===========================================================================
+ * One-shot helpers — see yface.h. Internal pattern: spin a transient
+ * yface for the call, do the streaming op once, copy result, free.
+ *=========================================================================*/
+
+#include <unistd.h>
+#include <errno.h>
+
+struct yetty_ycore_void_result
+yetty_yface_emit(int osc_code, const char *prefix,
+                 const void *body, size_t body_len,
+                 struct yetty_ycore_buffer *out_buf)
+{
+    if (!out_buf) return YETTY_ERR(yetty_ycore_void, "out_buf is NULL");
+
+    struct yetty_yface_ptr_result yr = yetty_yface_create();
+    if (YETTY_IS_ERR(yr))
+        return YETTY_ERR(yetty_ycore_void, yr.error.msg);
+    struct yetty_yface *y = yr.value;
+
+    struct yetty_ycore_void_result r;
+    r = yetty_yface_start_write(y, osc_code, prefix);
+    if (YETTY_IS_ERR(r)) goto out;
+    if (body && body_len) {
+        r = yetty_yface_write(y, body, body_len);
+        if (YETTY_IS_ERR(r)) goto out;
+    }
+    r = yetty_yface_finish_write(y);
+    if (YETTY_IS_ERR(r)) goto out;
+
+    /* Append the assembled OSC sequence to the caller's buffer. */
+    r = yetty_ycore_buffer_write(out_buf, y->out_buf.data, y->out_buf.size);
+
+out:
+    yetty_yface_destroy(y);
+    return r;
+}
+
+struct yetty_ycore_void_result
+yetty_yface_emit_to_fd(int fd, int osc_code, const char *prefix,
+                       const void *body, size_t body_len)
+{
+    struct yetty_ycore_buffer buf = {0};
+    struct yetty_ycore_void_result r =
+        yetty_yface_emit(osc_code, prefix, body, body_len, &buf);
+    if (YETTY_IS_ERR(r)) {
+        yetty_ycore_buffer_destroy(&buf);
+        return r;
+    }
+    /* Blocking write_all — caller asked for the convenience function. */
+    size_t off = 0;
+    while (off < buf.size) {
+        ssize_t w = write(fd, buf.data + off, buf.size - off);
+        if (w < 0) {
+            if (errno == EINTR) continue;
+            yetty_ycore_buffer_destroy(&buf);
+            return YETTY_ERR(yetty_ycore_void, "write failed");
+        }
+        off += (size_t)w;
+    }
+    yetty_ycore_buffer_destroy(&buf);
+    return YETTY_OK_VOID();
+}
+
+struct yetty_ycore_void_result
+yetty_yface_decode(const char *b64, size_t n,
+                   struct yetty_ycore_buffer *out_buf)
+{
+    if (!out_buf) return YETTY_ERR(yetty_ycore_void, "out_buf is NULL");
+
+    struct yetty_yface_ptr_result yr = yetty_yface_create();
+    if (YETTY_IS_ERR(yr))
+        return YETTY_ERR(yetty_ycore_void, yr.error.msg);
+    struct yetty_yface *y = yr.value;
+
+    struct yetty_ycore_void_result r;
+    r = yetty_yface_start_read(y);
+    if (YETTY_IS_ERR(r)) goto out;
+    r = yetty_yface_feed(y, b64, n);
+    if (YETTY_IS_ERR(r)) goto out;
+    r = yetty_yface_finish_read(y);
+    if (YETTY_IS_ERR(r)) goto out;
+
+    r = yetty_ycore_buffer_write(out_buf, y->in_buf.data, y->in_buf.size);
+
+out:
+    yetty_yface_destroy(y);
+    return r;
+}

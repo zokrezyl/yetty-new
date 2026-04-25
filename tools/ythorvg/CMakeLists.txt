@@ -18,5 +18,6 @@ target_include_directories(yetty-ythorvg PRIVATE
 target_link_libraries(yetty-ythorvg PRIVATE
     yetty_ythorvg
     yetty_ypaint_core
+    yetty_yface
     yetty_ycore
 )

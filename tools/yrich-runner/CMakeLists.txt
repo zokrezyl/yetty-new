@@ -11,6 +11,7 @@ target_include_directories(yrich_runner PUBLIC
 target_link_libraries(yrich_runner PUBLIC
     yetty_yrich
     yetty_ypaint_core
+    yetty_yface
     yetty_ycore
     m
 )

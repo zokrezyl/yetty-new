@@ -11,6 +11,7 @@
 
 #include <yetty/yplatform/getopt.h>
 #include <yetty/ycore/util.h>
+#include <yetty/yface/yface.h>
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/yterm/pty-reader.h>   /* YETTY_OSC_YPAINT_SCROLL */
 #include <yetty/ythorvg/ythorvg.h>
@@ -147,21 +148,22 @@ int main(int argc, char **argv) {
 		printf("\033]%u;--clear\033\\", YETTY_OSC_YPAINT_SCROLL);
 	}
 
-	struct yetty_ycore_buffer_result b64 =
-	    yetty_ypaint_core_buffer_to_base64(buf);
-	if (YETTY_IS_ERR(b64)) {
-		fprintf(stderr, "%s: to_base64: %s\n", argv[0], b64.error.msg);
+	const uint8_t *raw = NULL;
+	size_t raw_size = yetty_ypaint_core_buffer_serialize(buf, &raw);
+	if (raw_size == 0 || !raw) {
+		fprintf(stderr, "%s: serialize failed\n", argv[0]);
 		yetty_ythorvg_renderer_destroy(renderer);
 		yetty_ypaint_core_buffer_destroy(buf);
 		return 1;
 	}
 
-	/* OSC: ESC ] 666674 ; --bin ; <base64> ESC \ */
-	printf("\033]%u;--bin;%s\033\\", YETTY_OSC_YPAINT_SCROLL,
-	       (const char *)b64.value.data);
+	/* OSC: ESC ] 666674 ; --bin ; <base64(LZ4F(framed))> ESC \ */
+	struct yetty_ycore_void_result emit_r = yetty_yface_emit_to_fd(
+	    fileno(stdout), YETTY_OSC_YPAINT_SCROLL, "--bin", raw, raw_size);
+	if (YETTY_IS_ERR(emit_r))
+		fprintf(stderr, "%s: yface_emit: %s\n", argv[0], emit_r.error.msg);
 	fflush(stdout);
 
-	free(b64.value.data);
 	yetty_ythorvg_renderer_destroy(renderer);
 	yetty_ypaint_core_buffer_destroy(buf);
 	return 0;

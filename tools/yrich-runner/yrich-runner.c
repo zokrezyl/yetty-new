@@ -11,6 +11,7 @@
 
 #include <yetty/ycore/result.h>
 #include <yetty/ycore/types.h>
+#include <yetty/yface/yface.h>
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/yrich/yrich-document.h>
 #include <yetty/yrich/yrich-element.h>
@@ -91,17 +92,17 @@ static void emit_clear(void)
 
 static void emit_bin(const struct yetty_ypaint_core_buffer *buf)
 {
-	struct yetty_ycore_buffer_result br =
-		yetty_ypaint_core_buffer_to_base64(buf);
-	if (YETTY_IS_ERR(br))
-		return;
+	const uint8_t *raw = NULL;
+	size_t raw_size = yetty_ypaint_core_buffer_serialize(
+		(struct yetty_ypaint_core_buffer *)buf, &raw);
+	if (raw_size == 0 || !raw) return;
 
-	static const char header[] = "\033]" OSC_CANVAS_VENDOR ";--bin;";
-	write_all(header, sizeof(header) - 1);
-	if (br.value.size > 0)
-		write_all((const char *)br.value.data, br.value.size);
-	write_all("\033\\", 2);
-	free(br.value.data);
+	struct yetty_ycore_buffer envelope = {0};
+	struct yetty_ycore_void_result r = yetty_yface_emit(
+		666674, "--bin", raw, raw_size, &envelope);
+	if (YETTY_IS_OK(r) && envelope.size > 0)
+		write_all((const char *)envelope.data, envelope.size);
+	yetty_ycore_buffer_destroy(&envelope);
 }
 
 void yrich_runner_emit(struct yrich_runner *r)

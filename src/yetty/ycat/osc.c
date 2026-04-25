@@ -1,25 +1,23 @@
 /*
  * osc.c - OSC 666674 envelope writer.
  *
- * Format consumed by yterm/ypaint-layer.c is
- *   ESC ] 666674 ; --bin ; <base64> ESC \
- * where <base64> is yetty_ypaint_core_buffer_to_base64() of the buffer —
- * i.e. the framed wire payload (magic + scene_bounds + prims + text_spans)
- * already base64-encoded in a single pass. The receiver's
- * create_from_base64 detects the magic and restores every section,
- * including text spans, so coloured text from tree-sitter / ymarkdown /
- * ypdf actually crosses the wire.
+ * Wire format (consumed by yterm/ypaint-layer.c):
+ *   ESC ] 666674 ; --bin ; <base64(LZ4F(framed payload))> ESC \
+ *
+ * The framed payload is the magic-tagged blob produced by
+ * yetty_ypaint_core_buffer_serialize() — prims + text_spans + scene_bounds.
+ * yetty_yface owns the LZ4F + base64 + envelope construction.
  */
 
 #include <yetty/ycat/ycat.h>
 
+#include <yetty/yface/yface.h>
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/ycore/types.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 
-/* OSC 666674 — ypaint scrolling layer sink (see include/yetty/yterm/pty-reader.h). */
 #define YCAT_OSC_VENDOR_ID 666674
 
 size_t yetty_ycat_osc_bin_emit(const struct yetty_ypaint_core_buffer *buffer,
@@ -28,29 +26,23 @@ size_t yetty_ycat_osc_bin_emit(const struct yetty_ypaint_core_buffer *buffer,
 	if (!buffer || !out)
 		return 0;
 
-	struct yetty_ycore_buffer_result br =
-		yetty_ypaint_core_buffer_to_base64(buffer);
-	if (YETTY_IS_ERR(br))
+	const uint8_t *raw_bytes = NULL;
+	size_t raw_size = yetty_ypaint_core_buffer_serialize(
+		(struct yetty_ypaint_core_buffer *)buffer, &raw_bytes);
+	if (raw_size == 0 || !raw_bytes)
 		return 0;
 
-	int header = fprintf(out, "\x1b]%d;--bin;", YCAT_OSC_VENDOR_ID);
-	if (header < 0) {
-		free(br.value.data);
-		return 0;
-	}
-
-	size_t payload = br.value.size;
-	if (payload > 0 &&
-	    fwrite(br.value.data, 1, payload, out) != payload) {
-		free(br.value.data);
+	struct yetty_ycore_buffer envelope = {0};
+	struct yetty_ycore_void_result r = yetty_yface_emit(
+		YCAT_OSC_VENDOR_ID, "--bin", raw_bytes, raw_size, &envelope);
+	if (YETTY_IS_ERR(r)) {
+		yetty_ycore_buffer_destroy(&envelope);
 		return 0;
 	}
 
-	if (fwrite("\x1b\\", 1, 2, out) != 2) {
-		free(br.value.data);
-		return 0;
-	}
-
-	free(br.value.data);
-	return (size_t)header + payload + 2;
+	size_t written = 0;
+	if (envelope.size > 0)
+		written = fwrite(envelope.data, 1, envelope.size, out);
+	yetty_ycore_buffer_destroy(&envelope);
+	return written;
 }

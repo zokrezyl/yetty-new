@@ -7,6 +7,8 @@
 #include <string.h>
 #include <time.h>
 
+#include <yetty/yface/yface.h>
+
 // Complex primitive type for yplot
 #define YETTY_YPAINT_TYPE_YPLOT 0x80000003u
 
@@ -389,23 +391,14 @@ int main(int argc, char **argv) {
             raw_bytes = total_words * sizeof(float);
         }
 
-        // Base64 encode
-        size_t b64_cap = (raw_bytes + 2) / 3 * 4 + 1;
-        char *b64 = malloc(b64_cap);
-        if (!b64) {
-            fprintf(stderr, "malloc failed\n");
+        // OSC sequence via yface: ESC ] 666674 ; --bin ; <b64(LZ4F(bytes))> ST
+        struct yetty_ycore_void_result rr = yetty_yface_emit_to_fd(
+            fileno(stdout), 666674, "--bin", g_buffer, raw_bytes);
+        if (YETTY_IS_ERR(rr)) {
+            fprintf(stderr, "yface_emit: %s\n", rr.error.msg);
             return 1;
         }
-
-        size_t b64_len =
-            base64_encode((uint8_t *)g_buffer, raw_bytes, b64, b64_cap);
-        b64[b64_len] = '\0';
-
-        // Output OSC sequence: ESC ] 666674 ; args ; payload ST
-        printf("\033]666674;--bin;%s\033\\", b64);
         fflush(stdout);
-
-        free(b64);
 
         if (loop_count != 1) {
             struct timespec ts = {.tv_sec = delay_ms / 1000,

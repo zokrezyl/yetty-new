@@ -99,6 +99,37 @@ struct yetty_ycore_void_result yetty_yface_feed        (struct yetty_yface *yfac
                                                         const char *b64, size_t n);
 struct yetty_ycore_void_result yetty_yface_finish_read (struct yetty_yface *yface);
 
+/*-----------------------------------------------------------------------------
+ * One-shot helpers for callers that emit / consume a single OSC at a time
+ * (ygui, ycat, ymarkdown, yrich, …). They internally spin up a transient
+ * yface, do the encode/decode, tear it down. For high-rate emitters that
+ * stream many OSCs back-to-back (the ymgui RenderDrawData path) keep a
+ * long-lived yetty_yface around instead — saves the LZ4 context alloc.
+ *---------------------------------------------------------------------------*/
+
+/* Encode `body` and append the full OSC sequence
+ *   "\e]<osc_code>;<prefix>;<base64(LZ4F(body))>\e\\"
+ * to `out_buf`. `prefix` may be NULL/empty (no verb). `body` may be
+ * NULL/0 (envelope around an empty payload — useful for `--clear`-style
+ * verbs). */
+struct yetty_ycore_void_result yetty_yface_emit(
+    int osc_code, const char *prefix,
+    const void *body, size_t body_len,
+    struct yetty_ycore_buffer *out_buf);
+
+/* Same, but write the full envelope straight to `fd` (blocking write).
+ * Convenience for low-rate emitters that don't have their own queueing. */
+struct yetty_ycore_void_result yetty_yface_emit_to_fd(
+    int fd, int osc_code, const char *prefix,
+    const void *body, size_t body_len);
+
+/* Decode an OSC body (the bytes between `<osc_code>;<prefix>;` and the
+ * trailing ESC\) into `out_buf`. The caller has already split the
+ * envelope and isolated the base64 payload. */
+struct yetty_ycore_void_result yetty_yface_decode(
+    const char *b64, size_t n,
+    struct yetty_ycore_buffer *out_buf);
+
 #ifdef __cplusplus
 }
 #endif
