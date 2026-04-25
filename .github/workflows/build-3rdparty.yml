@@ -1,0 +1,142 @@
+name: Build prebuilt 3rdparty libraries
+
+# Triggered on `3rdparty-X.Y.Z` tags. Each job runs one library's build.sh
+# wrapper, which re-execs itself under `nix develop .#<shell>` — so every
+# runner (Linux + macOS) needs nix installed. iOS SDKs still come from
+# Xcode on the macOS runner, outside of nix.
+#
+# Produces tarballs named <lib>-<platform>-<version>.tar.gz attached to
+# the release at the tag. Bumping /3rdparty.version and pushing the
+# matching tag rebuilds the WHOLE matrix (every library × every target).
+
+on:
+  push:
+    tags:
+      - '3rdparty-*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version string (X.Y.Z); release tag will be 3rdparty-<version>'
+        required: true
+        default: '0.0.1'
+
+permissions:
+  contents: write  # needed to publish release assets
+
+jobs:
+  #===========================================================================
+  # Version derivation — every job reuses it
+  #===========================================================================
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.derive.outputs.version }}
+      tag:     ${{ steps.derive.outputs.tag }}
+    steps:
+      - id: derive
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            REF="${GITHUB_REF#refs/tags/}"
+            case "$REF" in
+              3rdparty-*) V="${REF#3rdparty-}" ;;
+              *) echo "unexpected ref $GITHUB_REF" >&2; exit 1 ;;
+            esac
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=3rdparty-$V" >> "$GITHUB_OUTPUT"
+
+  #===========================================================================
+  # openh264 — Cisco's H.264 codec.
+  # Linux/Android/webasm cross on Ubuntu; macOS/iOS on macOS runners.
+  # Every shell is a nix devShell defined in flake.nix.
+  # (windows-x86_64 omitted — needs MSVC; add when we have a self-hosted
+  # Windows runner, same reason qemu skips it.)
+  #===========================================================================
+  openh264-linux-cross:
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - linux-x86_64
+          - linux-aarch64
+          - android-arm64-v8a
+          - android-x86_64
+          - webasm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+      - run: mkdir -p out
+      - run: |
+          TARGET_PLATFORM="${{ matrix.target }}" \
+          VERSION="${{ needs.version.outputs.version }}" \
+          OUTPUT_DIR="$PWD/out" \
+          ./build-tools/3rdparty/openh264/build.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          files: out/openh264-${{ matrix.target }}-*.tar.gz
+          fail_on_unmatched_files: true
+
+  # arm64 targets: Apple Silicon runner (macos-latest is M-series)
+  openh264-darwin-arm64:
+    needs: version
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - macos-arm64
+          - ios-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+      - run: mkdir -p out
+      - run: |
+          TARGET_PLATFORM="${{ matrix.target }}" \
+          VERSION="${{ needs.version.outputs.version }}" \
+          OUTPUT_DIR="$PWD/out" \
+          ./build-tools/3rdparty/openh264/build.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          files: out/openh264-${{ matrix.target }}-*.tar.gz
+          fail_on_unmatched_files: true
+
+  # x86_64 targets: Intel Mac runner
+  openh264-darwin-x86_64:
+    needs: version
+    runs-on: macos-15-intel
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - macos-x86_64
+          - ios-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+      - run: mkdir -p out
+      - run: |
+          TARGET_PLATFORM="${{ matrix.target }}" \
+          VERSION="${{ needs.version.outputs.version }}" \
+          OUTPUT_DIR="$PWD/out" \
+          ./build-tools/3rdparty/openh264/build.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          files: out/openh264-${{ matrix.target }}-*.tar.gz
+          fail_on_unmatched_files: true
