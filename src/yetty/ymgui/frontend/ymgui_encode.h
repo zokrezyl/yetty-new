@@ -48,13 +48,35 @@ size_t ymgui_b64_encoded_len(size_t raw_size);
 size_t ymgui_b64_encode(const uint8_t *src, size_t size, char *out);
 
 /*---------------------------------------------------------------------------
- * OSC transport. Writes `\e]<vendor>;<verb>[;<base64(payload)>]\e\\` to the
- * given fd. Returns 0 on success, -1 on error.
+ * OSC transport. Non-blocking: tries to write the full envelope
+ * `\e]<vendor>;<verb>[;<base64(payload)>]\e\\` to `fd`. Caller is
+ * expected to have set `fd` to O_NONBLOCK already.
  *
- * `payload`/`payload_size` may be NULL/0 for verbs without a body (--clear).
+ * Return values:
+ *    0  full message accepted (either flushed straight to fd, or queued
+ *       in a small in-flight buffer for later draining).
+ *    1  message dropped because a previous OSC's tail is still pending
+ *       — the wire would be corrupted by two interleaved OSC bodies.
+ *       Callers should treat this as "frame skipped, ImGui re-renders
+ *       next iter".
+ *   -1  hard error (write returned non-EAGAIN errno).
+ *
+ * The drain happens opportunistically: each call first tries to push
+ * any leftover bytes from a previous call. To wake on stdout-ready,
+ * pair with `ymgui_osc_pending()` + poll(POLLOUT) externally.
  *-------------------------------------------------------------------------*/
 int ymgui_osc_write(int fd, const char *verb,
                     const uint8_t *payload, size_t payload_size);
+
+/* Try to push any queued bytes from a previous ymgui_osc_write. Used by
+ * the platform's WaitInput when stdout becomes write-ready, to drain the
+ * tail without needing a fresh emit to trigger it. Returns the same
+ * tri-state as ymgui_osc_write (0 = drained or nothing to do, 1 =
+ * still pending, -1 = error). */
+int ymgui_osc_flush(int fd);
+
+/* True if a previous osc_write left bytes queued for the next flush. */
+int ymgui_osc_pending(void);
 
 #ifdef __cplusplus
 }

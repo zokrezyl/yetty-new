@@ -125,48 +125,80 @@ size_t ymgui_b64_encode(const uint8_t *src, size_t size, char *out)
 }
 
 /*===========================================================================
- * OSC write
+ * OSC write — non-blocking with single-message in-flight queue
+ *
+ * The model: at most ONE partially-sent OSC may be in flight at a time
+ * (the tail of the previous message, holding however many bytes the
+ * kernel refused with EAGAIN). Subsequent emits while that tail is
+ * unflushed are dropped — interleaving a fresh OSC's bytes into the
+ * middle of an unfinished one would corrupt yetty's parser. Callers
+ * (the demo loop) treat a drop as "frame skipped, re-render next".
  *=========================================================================*/
 
 #include <yetty/ymgui/wire.h>
 #include <errno.h>
 
-static int write_all(int fd, const char *data, size_t len)
+struct pending {
+    uint8_t *data;     /* owned; freed when fully written */
+    size_t   size;
+    size_t   off;
+};
+static struct pending g_pending = { NULL, 0, 0 };
+
+static int try_drain_pending(int fd)
 {
-    size_t off = 0;
-    while (off < len) {
-        ssize_t w = YMGUI_WRITE(fd, data + off, (unsigned)(len - off));
+    while (g_pending.off < g_pending.size) {
+        ssize_t w = YMGUI_WRITE(fd,
+                                (const char *)g_pending.data + g_pending.off,
+                                (unsigned)(g_pending.size - g_pending.off));
         if (w < 0) {
-            if (errno == EINTR)
-                continue;
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return 1; /* still pending */
             return -1;
         }
-        off += (size_t)w;
+        g_pending.off += (size_t)w;
     }
+    free(g_pending.data);
+    g_pending.data = NULL;
+    g_pending.size = g_pending.off = 0;
     return 0;
+}
+
+int ymgui_osc_flush(int fd)
+{
+    if (!g_pending.data) return 0;
+    return try_drain_pending(fd);
+}
+
+int ymgui_osc_pending(void)
+{
+    return g_pending.data != NULL;
 }
 
 int ymgui_osc_write(int fd, const char *verb,
                     const uint8_t *payload, size_t payload_size)
 {
+    /* If an earlier message is still draining, attempt one more push;
+     * if it still won't fit, drop this new emit. We don't ever have
+     * two concurrent partial messages — one corrupts the wire. */
+    if (g_pending.data) {
+        int r = try_drain_pending(fd);
+        if (r < 0) return -1;
+        if (r > 0) return 1; /* dropped */
+    }
+
     /* Build: "\e]<vendor>;<verb>" [ ";<base64>" ] "\e\\"  */
     size_t verb_len = strlen(verb);
     size_t b64_len  = payload_size ? ymgui_b64_encoded_len(payload_size) : 0;
-
-    /* Prefix: ESC ']' vendor ';' verb  →  2 + 6 + 1 + verb_len */
     size_t prefix_len = 2 + (sizeof(YMGUI_OSC_VENDOR) - 1) + 1 + verb_len;
-    /* Middle (if payload): ';' + base64 bytes */
     size_t middle_len = payload_size ? (1 + b64_len) : 0;
-    /* Terminator: ESC '\\'  */
     size_t tail_len   = 2;
-
     size_t total = prefix_len + middle_len + tail_len;
 
-    char *buf = (char *)malloc(total);
-    if (!buf)
-        return -1;
+    uint8_t *buf = (uint8_t *)malloc(total);
+    if (!buf) return -1;
 
-    char *p = buf;
+    uint8_t *p = buf;
     *p++ = '\033';
     *p++ = ']';
     memcpy(p, YMGUI_OSC_VENDOR, sizeof(YMGUI_OSC_VENDOR) - 1);
@@ -174,17 +206,45 @@ int ymgui_osc_write(int fd, const char *verb,
     *p++ = ';';
     memcpy(p, verb, verb_len);
     p += verb_len;
-
     if (payload_size) {
         *p++ = ';';
-        size_t n = ymgui_b64_encode(payload, payload_size, p);
+        size_t n = ymgui_b64_encode(payload, payload_size, (char *)p);
         p += n;
     }
-
     *p++ = '\033';
     *p++ = '\\';
 
-    int rc = write_all(fd, buf, total);
+    /* Try to write straight through. */
+    size_t off = 0;
+    while (off < total) {
+        ssize_t w = YMGUI_WRITE(fd, (const char *)(buf + off),
+                                (unsigned)(total - off));
+        if (w < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                /* Park the unsent tail. The malloc'd buffer becomes
+                 * the queue — no extra copy. */
+                if (off == 0) {
+                    g_pending.data = buf;
+                    g_pending.size = total;
+                    g_pending.off  = 0;
+                    return 0;
+                }
+                size_t left = total - off;
+                uint8_t *tail = (uint8_t *)malloc(left);
+                if (!tail) { free(buf); return -1; }
+                memcpy(tail, buf + off, left);
+                free(buf);
+                g_pending.data = tail;
+                g_pending.size = left;
+                g_pending.off  = 0;
+                return 0;
+            }
+            free(buf);
+            return -1;
+        }
+        off += (size_t)w;
+    }
     free(buf);
-    return rc;
+    return 0;
 }

@@ -25,6 +25,7 @@
 #ifndef YETTY_YMGUI_IMGUI_IMPL_YETTY_H
 #define YETTY_YMGUI_IMGUI_IMPL_YETTY_H
 
+#include <stdint.h>
 #include "imgui.h"
 
 #ifndef IMGUI_IMPL_API
@@ -65,5 +66,12 @@ IMGUI_IMPL_API bool ImGui_ImplYetty_PlatformInit(void);
 IMGUI_IMPL_API void ImGui_ImplYetty_PlatformShutdown(void);
 IMGUI_IMPL_API void ImGui_ImplYetty_PollInput(void);
 IMGUI_IMPL_API void ImGui_ImplYetty_SetInputFd(int fd);
+
+/* Block on stdin until yetty pushes data OR `timeout_ms` elapses.
+ * Drives an event-driven loop: 0 CPU at idle, wakes immediately on any
+ * mouse / resize event from yetty. Returns true if input is available
+ * (caller should follow with PollInput). timeout_ms < 0 → wait
+ * indefinitely. */
+IMGUI_IMPL_API bool ImGui_ImplYetty_WaitInput(int timeout_ms);
 
 #endif /* YETTY_YMGUI_IMGUI_IMPL_YETTY_H */

@@ -12,6 +12,7 @@
  */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -66,9 +67,28 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* Pure event-driven loop. Block on stdin (WaitInput) until yetty
+     * pushes anything (mouse move, click, resize). When woken, drain
+     * the events into ImGui, run one frame, emit unconditionally. No
+     * msleep, no fps cap, no diff/hash — if we got woken, ImGui's
+     * state changed (or could have), and an emit is the right answer.
+     * Idle = poll() blocked on stdin = literally 0 CPU. */
+    auto now_ns = []() {
+        struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+        return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+    };
+    uint64_t poll_total = 0, ui_total = 0, render_total = 0;
+    int sample_n = 0;
+
     for (int n = 0; n < frames; n++) {
+        /* Block until yetty sends something. -1 = wait forever. */
+        ImGui_ImplYetty_WaitInput(-1);
+
         io.DeltaTime = (float)dt_ms / 1000.0f;
+
+        uint64_t t0 = now_ns();
         ImGui_ImplYetty_PollInput();
+        uint64_t t1 = now_ns();
         ImGui_ImplYetty_NewFrame();
         ImGui::NewFrame();
 
@@ -82,9 +102,24 @@ int main(int argc, char **argv) {
         bool show = true;
         ImGui::ShowDemoWindow(&show);
 
+        uint64_t t2 = now_ns();
         ImGui::Render();
         ImGui_ImplYetty_RenderDrawData(ImGui::GetDrawData());
-        msleep(dt_ms);
+        uint64_t t3 = now_ns();
+
+        poll_total   += (t1 - t0);
+        ui_total     += (t2 - t1);
+        render_total += (t3 - t2);
+        sample_n++;
+        if (sample_n >= 30) {
+            fprintf(stderr,
+                    "[demo] avg/iter: poll=%.2fms  ui=%.2fms  render=%.2fms\n",
+                    (double)poll_total   / sample_n / 1e6,
+                    (double)ui_total     / sample_n / 1e6,
+                    (double)render_total / sample_n / 1e6);
+            poll_total = ui_total = render_total = 0;
+            sample_n = 0;
+        }
     }
 
     ImGui_ImplYetty_Clear();

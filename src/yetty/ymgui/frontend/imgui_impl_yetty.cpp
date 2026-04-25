@@ -23,6 +23,7 @@
 #define YMGUI_STDIN_FD  0
 #else
 #include <fcntl.h>
+#include <poll.h>
 #include <termios.h>
 #include <unistd.h>
 #define YMGUI_STDOUT_FD STDOUT_FILENO
@@ -301,6 +302,18 @@ bool ImGui_ImplYetty_PlatformInit(void)
         return false;
     g_state.raw_mode_active = 1;
 
+    /* Stdout non-blocking too — ymgui_osc_write parks any unsent tail in a
+     * pending queue on EAGAIN instead of blocking the loop. The CHILD pty
+     * end (/dev/pts/N) is shared between all of stdin/stdout/stderr in the
+     * default fork-pty model, so flipping O_NONBLOCK on stdout flips it
+     * for all three. That's actually what we want — both sides of our io
+     * are non-blocking. The kernel-level termios is still raw from above. */
+    {
+        int flags = fcntl(g_state.out_fd, F_GETFL, 0);
+        if (flags >= 0)
+            fcntl(g_state.out_fd, F_SETFL, flags | O_NONBLOCK);
+    }
+
     /* Subscribe: \e[?1500h \e[?1501h. ymgui-layer's text-layer settermprop
      * hook flips the per-terminal subscription latch; rising edge also
      * triggers a OSC 777780 pixel-size emission so we get DisplaySize
@@ -448,6 +461,11 @@ static size_t parse_osc(const char* buf, size_t len)
         if (!parse_int(&held)) return end + 2; if (!eat_sep()) return end + 2;
         if (!parse_float(&x))  return end + 2; if (!eat_sep()) return end + 2;
         if (!parse_float(&y))  return end + 2;
+        static int s_move_count = 0;
+        if (++s_move_count % 30 == 1) {
+            fprintf(stderr, "[ymgui-frontend] OSC 777778 mv #%d xy=(%.1f,%.1f)\n",
+                    s_move_count, x, y);
+        }
         io.AddMousePosEvent(x, y);
         (void)held;  /* ImGui derives drag state from the per-button events */
     } else if (code == 777780) {
@@ -514,3 +532,51 @@ void ImGui_ImplYetty_PollInput(void)
         io.DisplaySize = ImVec2(g_state.display_w, g_state.display_h);
 #endif
 }
+
+/*===========================================================================
+ * Idle-mode helpers: WaitInput + DrawDataHash
+ *=========================================================================*/
+
+bool ImGui_ImplYetty_WaitInput(int timeout_ms)
+{
+#ifdef _WIN32
+    /* Windows: PollInput is a no-op anyway. Sleep the timeout. */
+    if (timeout_ms > 0) {
+        struct timespec ts;
+        ts.tv_sec  = timeout_ms / 1000;
+        ts.tv_nsec = (long)(timeout_ms % 1000) * 1000000L;
+        nanosleep(&ts, NULL);
+    }
+    return false;
+#else
+    /* Already-buffered input from a previous PollInput counts — return
+     * true immediately so the caller drains it without blocking. */
+    if (g_state.parse_len > 0) return true;
+
+    /* If we have an OSC tail queued for stdout, also wake on POLLOUT so
+     * we can drain it as soon as the kernel buffer has space — even if
+     * no new input arrives. */
+    struct pollfd pfd[2];
+    int nfds = 1;
+    pfd[0].fd      = g_state.in_fd;
+    pfd[0].events  = POLLIN;
+    pfd[0].revents = 0;
+    if (ymgui_osc_pending()) {
+        pfd[1].fd      = g_state.out_fd;
+        pfd[1].events  = POLLOUT;
+        pfd[1].revents = 0;
+        nfds = 2;
+    }
+    int n = poll(pfd, (nfds_t)nfds, timeout_ms);
+    if (n <= 0) return false;
+
+    /* Drain the OSC tail if stdout is now write-ready. We do this here
+     * (not in PollInput) so a tail-only wakeup doesn't get treated as
+     * a UI event by the demo loop. */
+    if (nfds == 2 && (pfd[1].revents & POLLOUT))
+        ymgui_osc_flush(g_state.out_fd);
+
+    return (pfd[0].revents & POLLIN) != 0;
+#endif
+}
+
