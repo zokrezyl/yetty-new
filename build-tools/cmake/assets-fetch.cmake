@@ -10,7 +10,8 @@
 #       kernel-riscv64.bin
 #       opensbi-fw_jump.elf
 #       opensbi-fw_dynamic.bin
-#       alpine-rootfs/...
+#       alpine-rootfs.img       (raw ext4, virtio-blk root for tinyemu)
+#       alpine-rootfs/...       (still bundled in the linux asset, used by --qemu 9p)
 #   ${CMAKE_BINARY_DIR}/assets/qemu/
 #       qemu-system-riscv64[.exe]
 #   ${CMAKE_BINARY_DIR}/assets/msdf-fonts/
@@ -210,6 +211,8 @@ function(assets_fetch_yemu)
     _yetty_assets_fetch_one("opensbi" "yemu" ".fetched-opensbi")
     message(STATUS "assets-fetch: linux-${YETTY_ASSETS_VERSION}")
     _yetty_assets_fetch_one("linux"   "yemu" ".fetched-linux")
+    message(STATUS "assets-fetch: alpine-disk-${YETTY_ASSETS_VERSION}")
+    _yetty_assets_fetch_one("alpine-disk" "yemu" ".fetched-alpine-disk")
 
     set(TINYEMU_OPENSBI_PATH
         "${YETTY_ASSETS_OUTPUT_DIR}/yemu/opensbi-fw_jump.elf"
@@ -220,9 +223,9 @@ function(assets_fetch_yemu)
     set(TINYEMU_KERNEL_PATH
         "${YETTY_ASSETS_OUTPUT_DIR}/yemu/kernel-riscv64.bin"
         CACHE FILEPATH "" FORCE)
-    set(TINYEMU_ROOTFS_DIR
-        "${YETTY_ASSETS_OUTPUT_DIR}/yemu/alpine-rootfs"
-        CACHE PATH "" FORCE)
+    set(TINYEMU_ROOTFS_IMG
+        "${YETTY_ASSETS_OUTPUT_DIR}/yemu/alpine-rootfs.img"
+        CACHE FILEPATH "" FORCE)
 endfunction()
 
 function(assets_fetch_qemu)

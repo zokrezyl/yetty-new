@@ -350,40 +350,10 @@ int yetty_incbin_assets_extract_config_to(struct yetty_incbin_assets *assets,
   return 1;
 }
 
-/* Extract a tarball to a directory */
-static int extract_tarball(const char *tar_path, const char *dest_dir) {
-  char cmd[MAX_PATH_LEN * 2 + 128];
-
-  if (mkdir_p(dest_dir) != 0)
-    return 0;
-
-  /* --no-same-owner: don't try to chown to the UID/GID baked into the
-   *   archive (alpine-rootfs ships e.g. UID 1000, root, ...). On Android
-   *   untrusted_app can't chown anything; without this every chown
-   *   attempt fails and tar exits non-zero even though the files were
-   *   extracted fine.
-   * --no-same-permissions: same idea for setuid/sticky/etc. bits.
-   * Both flags are accepted by GNU tar and toybox tar. */
-  snprintf(cmd, sizeof(cmd),
-           "tar xf '%s' -C '%s' --no-same-owner --no-same-permissions",
-           tar_path, dest_dir);
-  ydebug("extract_tarball: running: %s", cmd);
-
-  int ret = system(cmd);
-  if (ret != 0) {
-    ydebug("extract_tarball: tar command failed with %d", ret);
-    return 0;
-  }
-
-  return 1;
-}
-
-/* Extract shared RISC-V runtime (kernel, opensbi, rootfs) to <data_dir>/yemu */
+/* Extract shared RISC-V runtime (kernel, opensbi, rootfs.img) to <data_dir>/yemu */
 int yetty_incbin_assets_extract_yemu_to(struct yetty_incbin_assets *assets,
                                         const char *data_dir) {
   char yemu_dir[MAX_PATH_LEN];
-  char rootfs_tar[MAX_PATH_LEN];
-  char rootfs_dir[MAX_PATH_LEN];
 
   snprintf(yemu_dir, sizeof(yemu_dir), "%s/yemu", data_dir);
   ydebug("extract_yemu_to: starting extraction to %s", yemu_dir);
@@ -395,20 +365,6 @@ int yetty_incbin_assets_extract_yemu_to(struct yetty_incbin_assets *assets,
 
   if (!extract_with_prefix(assets, "yemu/", yemu_dir))
     return 0;
-
-  /* Extract alpine-rootfs.tar if present */
-  snprintf(rootfs_tar, sizeof(rootfs_tar), "%s/alpine-rootfs.tar", yemu_dir);
-  snprintf(rootfs_dir, sizeof(rootfs_dir), "%s/alpine-rootfs", yemu_dir);
-
-  if (yplatform_file_exists(rootfs_tar)) {
-    ydebug("extract_yemu_to: extracting rootfs tarball");
-    if (!extract_tarball(rootfs_tar, rootfs_dir)) {
-      ydebug("Failed to extract rootfs tarball");
-      return 0;
-    }
-    /* Remove tarball after extraction */
-    yplatform_unlink(rootfs_tar);
-  }
 
   ydebug("yemu asset extraction complete");
   return 1;
