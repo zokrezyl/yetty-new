@@ -42,6 +42,7 @@
 #include <yetty/ycore/util.h>
 #include <yetty/yconfig.h>
 #include <yetty/yetty.h>
+#include <yetty/yface/yface.h>
 #include <yetty/ymgui/wire.h>
 #include <yetty/yrender/render-target.h>
 #include <yetty/yterm/osc-args.h>
@@ -97,6 +98,10 @@ struct yetty_yterm_ymgui_layer {
     uint8_t           *frame_bytes;
     size_t             frame_size;
     int                has_frame;
+
+    /* Streaming OSC decoder — feeds base64 → LZ4F → in_buf. Reused
+     * across emits, so we don't re-malloc the LZ4 dictionary each call. */
+    struct yetty_yface *yface;
 
     /* Scrolling anchor (same model as yetty_ypaint_canvas). */
     uint32_t           frame_rolling_row;
@@ -410,17 +415,9 @@ static int upload_atlas(struct yetty_yterm_ymgui_layer *l,
 
 /*===========================================================================
  * Wire decoding
+ * (b64 + LZ4F decompression now handled by yetty_yface; this section is
+ *  just struct validators for the post-decompression payload bytes.)
  *=========================================================================*/
-
-static size_t decode_b64_alloc(const char *in, size_t in_len, uint8_t **out)
-{
-    size_t cap = ((in_len + 3) / 4) * 3;
-    uint8_t *buf = (uint8_t *)malloc(cap ? cap : 1);
-    if (!buf) { *out = NULL; return (size_t)-1; }
-    size_t n = yetty_ycore_base64_decode(in, in_len, (char *)buf, cap);
-    *out = buf;
-    return n;
-}
 
 static int validate_frame(const uint8_t *data, size_t size,
                           const struct ymgui_wire_frame **out_hdr)
@@ -534,6 +531,19 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_ymgui_layer_create(
     l->queue         = context->gpu_context.queue;
     l->target_format = context->gpu_context.surface_format;
 
+    /* yface holds the streaming b64 decoder + LZ4F decompression context.
+     * Reused across all incoming --frame / --tex emits — never destroyed
+     * until the layer goes away. */
+    {
+        struct yetty_yface_ptr_result yr = yetty_yface_create();
+        if (YETTY_IS_ERR(yr)) {
+            free(l->shader_code.data);
+            free(l);
+            return YETTY_ERR(yetty_yterm_terminal_layer, yr.error.msg);
+        }
+        l->yface = yr.value;
+    }
+
     ydebug("ymgui_layer_create: %ux%u grid, %.1fx%.1f cell, format=%u",
            cols, rows, cell_w, cell_h, (unsigned)l->target_format);
 
@@ -548,6 +558,7 @@ static void ymgui_destroy(struct yetty_yterm_terminal_layer *self)
     release_pipeline(l);
     if (l->vtx_buf) wgpuBufferRelease(l->vtx_buf);
     if (l->idx_buf) wgpuBufferRelease(l->idx_buf);
+    if (l->yface) yetty_yface_destroy(l->yface);
     free(l->shader_code.data);
     free(l->frame_bytes);
     free(l);
@@ -629,23 +640,30 @@ ymgui_write(struct yetty_yterm_terminal_layer *self,
         goto out;
     }
 
-    uint8_t *raw = NULL;
-    size_t raw_size = decode_b64_alloc((const char *)payload.value.data,
-                                       payload.value.size, &raw);
-    if (raw_size == (size_t)-1) {
-        res = YETTY_ERR(yetty_ycore_void, "ymgui: base64 decode oom");
-        goto out;
+    /* Stream the base64 payload through yface: b64 decode → LZ4F
+     * decompress → in_buf. No intermediate malloc/copy of the b64 raw
+     * bytes; in_buf grows as decompression emits. */
+    {
+        struct yetty_ycore_void_result r = yetty_yface_start_read(l->yface);
+        if (YETTY_IS_ERR(r)) { res = r; goto out; }
+        r = yetty_yface_feed(l->yface,
+                             (const char *)payload.value.data,
+                             payload.value.size);
+        if (YETTY_IS_ERR(r)) { yetty_yface_finish_read(l->yface); res = r; goto out; }
+        r = yetty_yface_finish_read(l->yface);
+        if (YETTY_IS_ERR(r)) { res = r; goto out; }
     }
 
-    if (yetty_yterm_osc_args_has(&args, "frame"))
-        res = handle_frame(l, raw, raw_size);
-    else if (yetty_yterm_osc_args_has(&args, "tex"))
-        res = handle_tex(l, raw, raw_size);
-    else
-        res = YETTY_ERR(yetty_ycore_void,
-                        "ymgui: expected --frame, --tex, or --clear");
-
-    free(raw);
+    {
+        struct yetty_ycore_buffer *in = yetty_yface_in_buf(l->yface);
+        if (yetty_yterm_osc_args_has(&args, "frame"))
+            res = handle_frame(l, in->data, in->size);
+        else if (yetty_yterm_osc_args_has(&args, "tex"))
+            res = handle_tex(l, in->data, in->size);
+        else
+            res = YETTY_ERR(yetty_ycore_void,
+                            "ymgui: expected --frame, --tex, or --clear");
+    }
 
 out:
     yetty_yterm_osc_args_free(&args);

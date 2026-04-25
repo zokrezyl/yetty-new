@@ -15,7 +15,7 @@
 # Core / always needed
 option(YETTY_ENABLE_LIB_INCBIN      "incbin — binary embedding"             ON)
 option(YETTY_ENABLE_LIB_ARGS        "args — command line parser"             ON)
-option(YETTY_ENABLE_LIB_LZ4         "lz4 — compression"                     OFF)
+option(YETTY_ENABLE_LIB_LZ4         "lz4 — compression"                      ON)
 option(YETTY_ENABLE_LIB_LIBUV       "libuv — event loop"                    ON)
 option(YETTY_ENABLE_LIB_LIBCO       "libco — stackful coroutines"           ON)
 option(YETTY_ENABLE_LIB_GLM         "glm — math"                            OFF)
@@ -61,7 +61,8 @@ option(YETTY_ENABLE_LIB_QEMU        "qemu — QEMU RISC-V emulator (via telnet)"
 #-----------------------------------------------------------------------------
 
 # Core modules
-option(YETTY_ENABLE_FEATURE_YCORE      "yetty_core — core utilities"          ON)
+option(YETTY_ENABLE_FEATURE_YCORE      "yetty_ycore — core utilities"         ON)
+option(YETTY_ENABLE_FEATURE_YFACE      "yetty_yface — streaming OSC pipe"     ON)
 option(YETTY_ENABLE_FEATURE_YFONT      "yetty_yfont — font subsystem"          ON)
 option(YETTY_ENABLE_FEATURE_YSHADERS   "shaders — WGSL shader sources"        ON)
 option(YETTY_ENABLE_FEATURE_MSDF_WGSL "ymsdf-wgsl — MSDF shader lib"         OFF)

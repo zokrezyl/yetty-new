@@ -1,4 +1,10 @@
 #include <yetty/ycore/types.h>
+
+/* Forward declaration so buffer_append below can call buffer_write before
+ * it's defined in source order. */
+struct yetty_ycore_void_result yetty_ycore_buffer_write(
+    struct yetty_ycore_buffer *buf, const void *src, size_t len);
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -33,12 +39,21 @@ void yetty_ycore_buffer_clear(struct yetty_ycore_buffer *buf)
 struct yetty_ycore_void_result yetty_ycore_buffer_append(
     struct yetty_ycore_buffer *buf, const struct yetty_ycore_buffer *src)
 {
+	if (!src) return YETTY_OK_VOID();
+	return yetty_ycore_buffer_write(buf, src->data, src->size);
+}
+
+struct yetty_ycore_void_result yetty_ycore_buffer_write(
+    struct yetty_ycore_buffer *buf, const void *src, size_t len)
+{
 	if (!buf)
 		return YETTY_ERR(yetty_ycore_void, "buf is NULL");
-	if (!src || src->size == 0)
+	if (len == 0)
 		return YETTY_OK_VOID();
+	if (!src)
+		return YETTY_ERR(yetty_ycore_void, "src is NULL");
 
-	size_t needed = buf->size + src->size;
+	size_t needed = buf->size + len;
 	if (needed > buf->capacity) {
 		size_t new_cap = buf->capacity ? buf->capacity : 64;
 		while (new_cap < needed)
@@ -50,7 +65,7 @@ struct yetty_ycore_void_result yetty_ycore_buffer_append(
 		buf->capacity = new_cap;
 	}
 
-	memcpy(buf->data + buf->size, src->data, src->size);
-	buf->size += src->size;
+	memcpy(buf->data + buf->size, src, len);
+	buf->size += len;
 	return YETTY_OK_VOID();
 }
