@@ -1,5 +1,5 @@
 # Minimal configuration for riscv64-softmmu - only virt machine
-# Target: virtio-9p + virtio-net + qcow2, no graphics
+# Target: virtio-9p + virtio-blk + virtio-net + qcow2, no graphics
 
 # Disable all machines except virt
 CONFIG_SPIKE=n
@@ -19,7 +19,6 @@ CONFIG_TEST_DEVICES=n
 # Disable unused virtio devices
 CONFIG_VIRTIO_GPU=n
 CONFIG_VIRTIO_VGA=n
-CONFIG_VIRTIO_BLK=n
 CONFIG_VIRTIO_BALLOON=n
 CONFIG_VIRTIO_CRYPTO=n
 CONFIG_VIRTIO_IOMMU=n
