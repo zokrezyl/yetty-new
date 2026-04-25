@@ -2,51 +2,22 @@
 
 #include <yetty/yqemu/qemu.h>
 
+#include <yetty/platform/socket.h>
+#include <yetty/yplatform/fs.h>
+#include <yetty/yplatform/process.h>
+#include <yetty/yplatform/time.h>
 #include <yetty/ytrace.h>
 
-#include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
 #ifdef __ANDROID__
 #include <dlfcn.h>
 #endif
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <time.h>
-#include <unistd.h>
 
 /* Platform paths */
 extern const char *yetty_yplatform_get_data_dir(void);
 extern const char *yetty_yplatform_get_config_dir(void);
-
-/* mkdir -p helper (local; we don't want to pull a bigger dep here) */
-static int qemu_mkdir_p(const char *path)
-{
-    char tmp[512];
-    size_t len;
-
-    snprintf(tmp, sizeof(tmp), "%s", path);
-    len = strlen(tmp);
-    if (len > 0 && tmp[len - 1] == '/')
-        tmp[len - 1] = 0;
-
-    for (char *p = tmp + 1; *p; p++) {
-        if (*p == '/') {
-            *p = 0;
-            if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
-                return -1;
-            *p = '/';
-        }
-    }
-    if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
-        return -1;
-    return 0;
-}
 
 /* QEMU tunables, read from <config_dir>/qemu/qemu.cfg if present. */
 struct qemu_settings {
@@ -107,7 +78,7 @@ static void qemu_settings_load(struct qemu_settings *s, const char *path)
 /* Ensure a default qemu.cfg exists so users can discover/tune settings. */
 static void qemu_settings_ensure_default(const char *path)
 {
-    if (access(path, F_OK) == 0)
+    if (yplatform_file_exists(path))
         return;
 
     FILE *f = fopen(path, "w");
@@ -123,7 +94,7 @@ static void qemu_settings_ensure_default(const char *path)
     fclose(f);
 }
 
-pid_t qemu_start(uint16_t port)
+yprocess_t *qemu_start(uint16_t port)
 {
     const char *data_dir = yetty_yplatform_get_data_dir();
     const char *config_dir = yetty_yplatform_get_config_dir();
@@ -141,7 +112,6 @@ pid_t qemu_start(uint16_t port)
     char memory_arg[32];
     char smp_arg[16];
     struct qemu_settings settings;
-    pid_t pid;
 
     /* qemu binary is program-specific; shared runtime lives under yemu/.
      *
@@ -150,7 +120,9 @@ pid_t qemu_start(uint16_t port)
      * app can exec is its nativeLibraryDir. For Android we therefore ship
      * the QEMU binary as libqemu-system-riscv64.so (see android.cmake).
      * Resolve that dir at runtime via dladdr() on a known libyetty.so
-     * symbol. */
+     * symbol.
+     *
+     * On Windows the binary has a .exe suffix. */
 #ifdef __ANDROID__
     {
         Dl_info info;
@@ -172,6 +144,8 @@ pid_t qemu_start(uint16_t port)
                      "%s/qemu/qemu-system-riscv64", data_dir);
         }
     }
+#elif defined(_WIN32)
+    snprintf(qemu_bin, sizeof(qemu_bin), "%s/qemu/qemu-system-riscv64.exe", data_dir);
 #else
     snprintf(qemu_bin, sizeof(qemu_bin), "%s/qemu/qemu-system-riscv64", data_dir);
 #endif
@@ -185,27 +159,27 @@ pid_t qemu_start(uint16_t port)
     snprintf(qemu_cfg_dir, sizeof(qemu_cfg_dir), "%s/qemu", config_dir);
     snprintf(qemu_cfg_path, sizeof(qemu_cfg_path), "%s/qemu.cfg", qemu_cfg_dir);
     snprintf(share_path, sizeof(share_path), "%s/share", qemu_cfg_dir);
-    qemu_mkdir_p(qemu_cfg_dir);
-    qemu_mkdir_p(share_path);
+    yplatform_mkdir_p(qemu_cfg_dir);
+    yplatform_mkdir_p(share_path);
     qemu_settings_ensure_default(qemu_cfg_path);
     qemu_settings_defaults(&settings);
     qemu_settings_load(&settings, qemu_cfg_path);
 
-    if (access(qemu_bin, X_OK) != 0) {
+    if (!yplatform_file_exists(qemu_bin)) {
         yerror("QEMU binary not found: %s", qemu_bin);
-        return -1;
+        return YPROCESS_INVALID;
     }
-    if (access(bios_path, R_OK) != 0) {
+    if (!yplatform_file_exists(bios_path)) {
         yerror("OpenSBI not found: %s", bios_path);
-        return -1;
+        return YPROCESS_INVALID;
     }
-    if (access(kernel_path, R_OK) != 0) {
+    if (!yplatform_file_exists(kernel_path)) {
         yerror("Kernel not found: %s", kernel_path);
-        return -1;
+        return YPROCESS_INVALID;
     }
-    if (access(blk_path, R_OK) != 0) {
+    if (!yplatform_file_exists(blk_path)) {
         yerror("Block image not found: %s", blk_path);
-        return -1;
+        return YPROCESS_INVALID;
     }
 
     snprintf(chardev_arg, sizeof(chardev_arg),
@@ -230,96 +204,73 @@ pid_t qemu_start(uint16_t port)
     yinfo("Starting QEMU on port %u (mem=%uMB smp=%u)", port,
           settings.memory_mb, settings.smp);
 
-    pid = fork();
-    if (pid < 0) {
-        yerror("fork failed: %s", strerror(errno));
-        return -1;
+    const char *argv[] = {
+        qemu_bin,
+        "-machine", "virt",
+        "-smp", smp_arg,
+        "-m", memory_arg,
+        "-bios", bios_path,
+        "-kernel", kernel_path,
+        "-append", append_arg,
+        "-drive", drive_arg,
+        "-device", "virtio-blk-device,drive=hd0",
+        "-fsdev", fsdev_arg,
+        "-device", "virtio-9p-device,fsdev=fsdev0,mount_tag=hostshare",
+        "-netdev", "user,id=net0",
+        "-device", "virtio-net-device,netdev=net0",
+        "-device", "virtio-serial-device",
+        "-device", "virtconsole,chardev=char0",
+        "-chardev", chardev_arg,
+        "-serial", "none",
+        "-display", "none",
+        NULL,
+    };
+
+    yprocess_t *proc = yprocess_spawn(argv, /*detached=*/1, /*stdio_to_null=*/1);
+    if (!proc) {
+        yerror("Failed to spawn QEMU");
+        return YPROCESS_INVALID;
     }
 
-    if (pid == 0) {
-        /* Child - redirect stdio to /dev/null */
-        close(STDIN_FILENO);
-        close(STDOUT_FILENO);
-        close(STDERR_FILENO);
-        int devnull = open("/dev/null", O_RDWR);
-        if (devnull >= 0) {
-            dup2(devnull, STDIN_FILENO);
-            dup2(devnull, STDOUT_FILENO);
-            dup2(devnull, STDERR_FILENO);
-            if (devnull > 2) close(devnull);
-        }
-        setsid();
-
-        execlp(qemu_bin, "qemu-system-riscv64",
-            "-machine", "virt", "-smp", smp_arg, "-m", memory_arg,
-            "-bios", bios_path, "-kernel", kernel_path,
-            "-append", append_arg,
-            "-drive", drive_arg,
-            "-device", "virtio-blk-device,drive=hd0",
-            "-fsdev", fsdev_arg,
-            "-device", "virtio-9p-device,fsdev=fsdev0,mount_tag=hostshare",
-            "-netdev", "user,id=net0",
-            "-device", "virtio-net-device,netdev=net0",
-            "-device", "virtio-serial-device",
-            "-device", "virtconsole,chardev=char0",
-            "-chardev", chardev_arg,
-            "-serial", "none", "-display", "none",
-            NULL);
-        _exit(127);
-    }
-
-    yinfo("QEMU started with PID %d", pid);
-    return pid;
+    yinfo("QEMU spawned");
+    return proc;
 }
 
-void qemu_stop(pid_t pid)
+void qemu_stop(yprocess_t *proc)
 {
-    if (pid <= 0)
+    if (!proc)
         return;
-
-    kill(pid, SIGTERM);
-    usleep(100000);
-    kill(pid, SIGKILL);
-    waitpid(pid, NULL, 0);
+    yprocess_terminate(proc, /*grace_ms=*/100);
 }
 
 int qemu_wait_ready(uint16_t port, int timeout_ms)
 {
-    struct timespec start, now;
-    char port_str[16];
-    struct addrinfo hints, *res;
-    int sock;
+    /* Idempotent — wraps WSAStartup on Windows, no-op on POSIX. */
+    if (!yetty_yplatform_socket_init()) {
+        yerror("qemu_wait_ready: socket subsystem init failed");
+        return 0;
+    }
 
-    clock_gettime(CLOCK_MONOTONIC, &start);
-    snprintf(port_str, sizeof(port_str), "%u", port);
-
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
+    double start = ytime_monotonic_sec();
 
     while (1) {
-        if (getaddrinfo("127.0.0.1", port_str, &hints, &res) == 0) {
-            sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-            if (sock >= 0) {
-                if (connect(sock, res->ai_addr, res->ai_addrlen) == 0) {
-                    close(sock);
-                    freeaddrinfo(res);
-                    yinfo("QEMU telnet ready on port %u", port);
-                    return 1;
-                }
-                close(sock);
+        struct yetty_socket_fd_result fd_r = yetty_yplatform_socket_create_tcp();
+        if (fd_r.ok) {
+            struct yetty_ycore_void_result cr =
+                yetty_yplatform_socket_connect(fd_r.value, "127.0.0.1", port);
+            yetty_yplatform_socket_close(fd_r.value);
+            if (cr.ok) {
+                yinfo("QEMU telnet ready on port %u", port);
+                return 1;
             }
-            freeaddrinfo(res);
         }
 
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        int elapsed = (now.tv_sec - start.tv_sec) * 1000 +
-                      (now.tv_nsec - start.tv_nsec) / 1000000;
-        if (elapsed >= timeout_ms) {
+        double elapsed_ms = (ytime_monotonic_sec() - start) * 1000.0;
+        if (elapsed_ms >= (double)timeout_ms) {
             yerror("Timeout waiting for QEMU on port %u", port);
             return 0;
         }
 
-        usleep(100000);
+        ytime_sleep_ms(100);
     }
 }

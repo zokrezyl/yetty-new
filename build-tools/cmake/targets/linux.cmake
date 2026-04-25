@@ -54,6 +54,7 @@ set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pipe.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-socket.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-process.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
     ${YETTY_ROOT}/src/yetty/yplatform/linux/platform-paths.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c

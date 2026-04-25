@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <yetty/yplatform/compat.h>
 #include <yetty/ycore/result.h>
 #include <yetty/ycore/types.h>
 #include <yetty/ypaint-core/buffer.h>

@@ -11,13 +11,12 @@
 #include <yetty/yssh/ssh-pty.h>
 
 #include <stdlib.h>
-#include <sys/types.h>
 
 /* Unix PTY factory */
 struct unix_pty_factory {
     struct yetty_yplatform_pty_factory base;
     struct yetty_yconfig *config;
-    pid_t qemu_pid;
+    yprocess_t *qemu_proc;
 };
 
 /* Forward declarations */
@@ -35,8 +34,10 @@ static void unix_pty_factory_destroy(struct yetty_yplatform_pty_factory *self)
 {
     struct unix_pty_factory *factory = (struct unix_pty_factory *)self;
 
-    if (factory->qemu_pid > 0)
-        qemu_stop(factory->qemu_pid);
+    if (factory->qemu_proc) {
+        qemu_stop(factory->qemu_proc);
+        factory->qemu_proc = NULL;
+    }
 
     free(factory);
 }
@@ -59,14 +60,14 @@ static struct yetty_yplatform_pty_result unix_pty_factory_create_pty(
 
     /* --qemu: QEMU via telnet */
     if (config && config->ops->get_bool(config, YETTY_YCONFIG_KEY_QEMU, 0)) {
-        if (factory->qemu_pid <= 0) {
-            factory->qemu_pid = qemu_start(QEMU_TELNET_PORT);
-            if (factory->qemu_pid < 0)
+        if (!factory->qemu_proc) {
+            factory->qemu_proc = qemu_start(QEMU_TELNET_PORT);
+            if (!factory->qemu_proc)
                 return YETTY_ERR(yetty_yplatform_pty, "failed to start QEMU");
 
             if (!qemu_wait_ready(QEMU_TELNET_PORT, 5000)) {
-                qemu_stop(factory->qemu_pid);
-                factory->qemu_pid = 0;
+                qemu_stop(factory->qemu_proc);
+                factory->qemu_proc = NULL;
                 return YETTY_ERR(yetty_yplatform_pty, "QEMU telnet not ready");
             }
         }

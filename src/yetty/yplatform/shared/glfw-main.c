@@ -2,6 +2,7 @@
 
 #include <GLFW/glfw3.h>
 #include <webgpu/webgpu.h>
+#include <yetty/yplatform/compat.h>
 #include <yetty/yplatform/thread.h>
 #include <yetty/yplatform/fs.h>
 #include <yetty/yplatform/getopt.h>

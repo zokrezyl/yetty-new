@@ -139,13 +139,35 @@ option(YETTY_ENABLE_TOOL_QA              "qa static analysis tools"          ON)
 option(YETTY_ENABLE_TOOL_YTHORVG         "yetty-ythorvg CLI (SVG/Lottie -> OSC)" ON)
 
 # Auto-disable QA tools for cross-compilation (requires host LLVM/Clang libs)
-# Also disabled on macOS for now — qa-tools/custom/result-checker/CMakeLists.txt
+# Also disabled on macOS and Windows — qa-tools/custom/result-checker/CMakeLists.txt
 # hardcodes Linux LLVM paths.
 if(YETTY_ENABLE_TOOL_QA)
-    if(YETTY_ANDROID OR YETTY_IOS OR EMSCRIPTEN OR CMAKE_CROSSCOMPILING OR APPLE)
-        message(STATUS "Disabling QA tools (cross-compilation or macOS)")
+    if(YETTY_ANDROID OR YETTY_IOS OR EMSCRIPTEN OR CMAKE_CROSSCOMPILING OR APPLE OR WIN32)
+        message(STATUS "Disabling QA tools (cross-compilation, macOS, or Windows)")
         set(YETTY_ENABLE_TOOL_QA OFF CACHE BOOL "" FORCE)
     endif()
+endif()
+
+# Auto-disable features whose source still uses POSIX networking / pipe APIs
+# directly and hasn't been ported to the yetty/platform/* abstractions.
+# Remove a feature from this list once its sources are ported.
+if(WIN32)
+    foreach(_f
+        YETTY_ENABLE_FEATURE_SSH    # src/yetty/yssh: <netdb.h>, <pthread.h>, <poll.h>
+        YETTY_ENABLE_LIB_LIBSSH2    # libssh2 itself supports Windows but yssh wrapper doesn't
+        YETTY_ENABLE_FEATURE_YCAT   # src/yetty/ycat: <strings.h>, <unistd.h>
+        YETTY_ENABLE_TOOL_YCAT      # tool depends on FEATURE_YCAT
+        YETTY_ENABLE_FEATURE_YTHORVG # src/yetty/ythorvg/ythorvg.cpp: C99 compound literals (MSVC C++ rejects)
+        YETTY_ENABLE_LIB_THORVG     # only consumer is FEATURE_YTHORVG
+        YETTY_ENABLE_TOOL_YTHORVG   # tool depends on LIB_THORVG / FEATURE_YTHORVG
+        YETTY_ENABLE_TOOL_YPAINT_BENCH # tools/ypaint-bench: passes -Wextra unconditionally (MSVC: D8021)
+        YETTY_ENABLE_FEATURE_DEMO      # demo/ygui/CMakeLists.txt hardcodes shared/{thread,term}.c (POSIX)
+    )
+        if(${_f})
+            message(STATUS "Disabling ${_f} on Windows (sources not ported)")
+            set(${_f} OFF CACHE BOOL "" FORCE)
+        endif()
+    endforeach()
 endif()
 
 option(YETTY_ENABLE_FEATURE_JSLINUX   "jslinux — JSLinux integration"        ON)

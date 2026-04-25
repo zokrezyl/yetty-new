@@ -234,10 +234,32 @@ function(assets_fetch_qemu)
         return()   # webasm — no qemu asset
     endif()
 
-    message(STATUS "assets-fetch: qemu-${_P}-${YETTY_ASSETS_VERSION}")
-    _yetty_assets_fetch_one("qemu-${_P}" "qemu" ".fetched-${_P}")
-
     set(_QEMU_DIR "${YETTY_ASSETS_OUTPUT_DIR}/qemu")
+
+    if(WIN32)
+        # TEMPORARY: Windows uses the locally-built qemu from
+        # poc/qemu/build-tools/build-windows-minimal.ps1 instead of the
+        # published asset tarball, until we add a Windows qemu build to the
+        # release pipeline. The .ps1 must have been run before configure.
+        set(_LOCAL_DIR "${YETTY_ROOT}/build-windows-minimal")
+        set(_LOCAL_EXE "${_LOCAL_DIR}/qemu-system-riscv64.exe")
+        if(NOT EXISTS "${_LOCAL_EXE}")
+            message(FATAL_ERROR
+                "assets-fetch: ${_LOCAL_EXE} not found. "
+                "Run poc/qemu/build-tools/build-windows-minimal.ps1 first.")
+        endif()
+        message(STATUS "assets-fetch: using local qemu at ${_LOCAL_EXE}")
+        file(MAKE_DIRECTORY "${_QEMU_DIR}")
+        file(COPY "${_LOCAL_EXE}" DESTINATION "${_QEMU_DIR}")
+        file(GLOB _DLLS "${_LOCAL_DIR}/*.dll")
+        foreach(_D ${_DLLS})
+            file(COPY "${_D}" DESTINATION "${_QEMU_DIR}")
+        endforeach()
+    else()
+        message(STATUS "assets-fetch: qemu-${_P}-${YETTY_ASSETS_VERSION}")
+        _yetty_assets_fetch_one("qemu-${_P}" "qemu" ".fetched-${_P}")
+    endif()
+
     if(EXISTS "${_QEMU_DIR}/qemu-system-riscv64.exe")
         set(YETTY_QEMU_BINARY "${_QEMU_DIR}/qemu-system-riscv64.exe"
             CACHE FILEPATH "" FORCE)
