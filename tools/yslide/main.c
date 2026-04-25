@@ -5,8 +5,9 @@
  * shared runner. PageUp / PageDown switch slides; Esc exits presentation.
  *
  * Usage:
- *   yslide           # demo deck
- *   yslide --dump    # render once and exit
+ *   yslide                              # built-in demo deck
+ *   yslide -f path/to/sample.yslide.yaml
+ *   yslide -f path/to/sample.yslide.yaml --dump
  */
 
 #include <yrich-runner.h>
@@ -14,6 +15,7 @@
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/yplatform/getopt.h>
 #include <yetty/yrich/yrich-document.h>
+#include <yetty/yrich/yrich-yaml.h>
 #include <yetty/yrich/yslides.h>
 
 #include <stdbool.h>
@@ -27,8 +29,9 @@ static void usage(FILE *out, const char *prog)
 		"Usage: %s [options]\n"
 		"\n"
 		"Options:\n"
-		"  --dump      render once and exit (no interactive loop)\n"
-		"  -h, --help  show this help\n",
+		"  -f, --file PATH  load presentation from YAML file\n"
+		"  --dump           render once and exit (no interactive loop)\n"
+		"  -h, --help       show this help\n",
 		prog);
 }
 
@@ -76,29 +79,45 @@ static void seed_demo(struct yetty_yrich_slides *s)
 int main(int argc, char **argv)
 {
 	bool dump = false;
+	const char *file_path = NULL;
 
 	static const struct option long_opts[] = {
-		{ "dump", no_argument, NULL, 'D' },
-		{ "help", no_argument, NULL, 'h' },
-		{ NULL,   0,           NULL, 0   },
+		{ "file", required_argument, NULL, 'f' },
+		{ "dump", no_argument,       NULL, 'D' },
+		{ "help", no_argument,       NULL, 'h' },
+		{ NULL,   0,                 NULL, 0   },
 	};
 
 	int c;
-	while ((c = getopt_long(argc, argv, "h", long_opts, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "f:h", long_opts, NULL)) != -1) {
 		switch (c) {
+		case 'f': file_path = optarg; break;
 		case 'D': dump = true; break;
 		case 'h': usage(stdout, argv[0]); return 0;
 		default:  usage(stderr, argv[0]); return 2;
 		}
 	}
 
-	struct yetty_yrich_slides_ptr_result sr = yetty_yrich_slides_create();
-	if (YETTY_IS_ERR(sr)) {
-		fprintf(stderr, "yslide: %s\n", sr.error.msg);
-		return 1;
+	struct yetty_yrich_slides *deck = NULL;
+	if (file_path) {
+		struct yetty_yrich_slides_ptr_result lr =
+			yetty_yrich_slides_load_yaml_file(file_path);
+		if (YETTY_IS_ERR(lr)) {
+			fprintf(stderr, "yslide: load %s: %s\n", file_path,
+				lr.error.msg);
+			return 1;
+		}
+		deck = lr.value;
+	} else {
+		struct yetty_yrich_slides_ptr_result sr =
+			yetty_yrich_slides_create();
+		if (YETTY_IS_ERR(sr)) {
+			fprintf(stderr, "yslide: %s\n", sr.error.msg);
+			return 1;
+		}
+		deck = sr.value;
+		seed_demo(deck);
 	}
-	struct yetty_yrich_slides *deck = sr.value;
-	seed_demo(deck);
 
 	struct yetty_ypaint_core_buffer_config bcfg = {
 		.scene_max_x = deck->slide_width,

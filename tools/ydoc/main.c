@@ -6,8 +6,9 @@
  * canvas via OSC 666674.
  *
  * Usage:
- *   ydoc                # demo content
- *   ydoc --dump         # render once and exit
+ *   ydoc                       # built-in demo content
+ *   ydoc -f path/to/sample.ydoc.yaml
+ *   ydoc -f path/to/sample.ydoc.yaml --dump
  */
 
 #include <yrich-runner.h>
@@ -16,6 +17,7 @@
 #include <yetty/yplatform/getopt.h>
 #include <yetty/yrich/ydoc.h>
 #include <yetty/yrich/yrich-document.h>
+#include <yetty/yrich/yrich-yaml.h>
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -28,8 +30,9 @@ static void usage(FILE *out, const char *prog)
 		"Usage: %s [options]\n"
 		"\n"
 		"Options:\n"
-		"  --dump      render once and exit (no interactive loop)\n"
-		"  -h, --help  show this help\n",
+		"  -f, --file PATH  load document from YAML file\n"
+		"  --dump           render once and exit (no interactive loop)\n"
+		"  -h, --help       show this help\n",
 		prog);
 }
 
@@ -54,29 +57,45 @@ static void seed_demo(struct yetty_yrich_ydoc *d)
 int main(int argc, char **argv)
 {
 	bool dump = false;
+	const char *file_path = NULL;
 
 	static const struct option long_opts[] = {
-		{ "dump", no_argument, NULL, 'D' },
-		{ "help", no_argument, NULL, 'h' },
-		{ NULL,   0,           NULL, 0   },
+		{ "file", required_argument, NULL, 'f' },
+		{ "dump", no_argument,       NULL, 'D' },
+		{ "help", no_argument,       NULL, 'h' },
+		{ NULL,   0,                 NULL, 0   },
 	};
 
 	int c;
-	while ((c = getopt_long(argc, argv, "h", long_opts, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "f:h", long_opts, NULL)) != -1) {
 		switch (c) {
+		case 'f': file_path = optarg; break;
 		case 'D': dump = true; break;
 		case 'h': usage(stdout, argv[0]); return 0;
 		default:  usage(stderr, argv[0]); return 2;
 		}
 	}
 
-	struct yetty_yrich_ydoc_ptr_result dr = yetty_yrich_ydoc_create();
-	if (YETTY_IS_ERR(dr)) {
-		fprintf(stderr, "ydoc: %s\n", dr.error.msg);
-		return 1;
+	struct yetty_yrich_ydoc *doc = NULL;
+	if (file_path) {
+		struct yetty_yrich_ydoc_ptr_result lr =
+			yetty_yrich_ydoc_load_yaml_file(file_path);
+		if (YETTY_IS_ERR(lr)) {
+			fprintf(stderr, "ydoc: load %s: %s\n", file_path,
+				lr.error.msg);
+			return 1;
+		}
+		doc = lr.value;
+	} else {
+		struct yetty_yrich_ydoc_ptr_result dr =
+			yetty_yrich_ydoc_create();
+		if (YETTY_IS_ERR(dr)) {
+			fprintf(stderr, "ydoc: %s\n", dr.error.msg);
+			return 1;
+		}
+		doc = dr.value;
+		seed_demo(doc);
 	}
-	struct yetty_yrich_ydoc *doc = dr.value;
-	seed_demo(doc);
 
 	struct yetty_ypaint_core_buffer_config bcfg = {0};
 	bcfg.scene_max_x = yetty_yrich_document_content_width(&doc->base);

@@ -6,8 +6,9 @@
  * document via the shared runner.
  *
  * Usage:
- *   ysheet           # demo grid
- *   ysheet --dump    # render once and exit
+ *   ysheet                              # built-in demo grid
+ *   ysheet -f path/to/sample.ysheet.yaml
+ *   ysheet -f path/to/sample.ysheet.yaml --dump
  */
 
 #include <yrich-runner.h>
@@ -15,6 +16,7 @@
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/yplatform/getopt.h>
 #include <yetty/yrich/yrich-document.h>
+#include <yetty/yrich/yrich-yaml.h>
 #include <yetty/yrich/yspreadsheet.h>
 
 #include <stdbool.h>
@@ -28,8 +30,9 @@ static void usage(FILE *out, const char *prog)
 		"Usage: %s [options]\n"
 		"\n"
 		"Options:\n"
-		"  --dump      render once and exit (no interactive loop)\n"
-		"  -h, --help  show this help\n",
+		"  -f, --file PATH  load spreadsheet from YAML file\n"
+		"  --dump           render once and exit (no interactive loop)\n"
+		"  -h, --help       show this help\n",
 		prog);
 }
 
@@ -55,30 +58,45 @@ static void seed_demo(struct yetty_yrich_spreadsheet *s)
 int main(int argc, char **argv)
 {
 	bool dump = false;
+	const char *file_path = NULL;
 
 	static const struct option long_opts[] = {
-		{ "dump", no_argument, NULL, 'D' },
-		{ "help", no_argument, NULL, 'h' },
-		{ NULL,   0,           NULL, 0   },
+		{ "file", required_argument, NULL, 'f' },
+		{ "dump", no_argument,       NULL, 'D' },
+		{ "help", no_argument,       NULL, 'h' },
+		{ NULL,   0,                 NULL, 0   },
 	};
 
 	int c;
-	while ((c = getopt_long(argc, argv, "h", long_opts, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "f:h", long_opts, NULL)) != -1) {
 		switch (c) {
+		case 'f': file_path = optarg; break;
 		case 'D': dump = true; break;
 		case 'h': usage(stdout, argv[0]); return 0;
 		default:  usage(stderr, argv[0]); return 2;
 		}
 	}
 
-	struct yetty_yrich_spreadsheet_ptr_result sr =
-		yetty_yrich_spreadsheet_create();
-	if (YETTY_IS_ERR(sr)) {
-		fprintf(stderr, "ysheet: %s\n", sr.error.msg);
-		return 1;
+	struct yetty_yrich_spreadsheet *sheet = NULL;
+	if (file_path) {
+		struct yetty_yrich_spreadsheet_ptr_result lr =
+			yetty_yrich_spreadsheet_load_yaml_file(file_path);
+		if (YETTY_IS_ERR(lr)) {
+			fprintf(stderr, "ysheet: load %s: %s\n", file_path,
+				lr.error.msg);
+			return 1;
+		}
+		sheet = lr.value;
+	} else {
+		struct yetty_yrich_spreadsheet_ptr_result sr =
+			yetty_yrich_spreadsheet_create();
+		if (YETTY_IS_ERR(sr)) {
+			fprintf(stderr, "ysheet: %s\n", sr.error.msg);
+			return 1;
+		}
+		sheet = sr.value;
+		seed_demo(sheet);
 	}
-	struct yetty_yrich_spreadsheet *sheet = sr.value;
-	seed_demo(sheet);
 
 	struct yetty_ypaint_core_buffer_config bcfg = {0};
 	bcfg.scene_max_x = yetty_yrich_document_content_width(&sheet->base);

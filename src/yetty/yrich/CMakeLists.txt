@@ -5,6 +5,7 @@ add_library(yetty_yrich STATIC
     yrich-operation.c
     yrich-command.c
     yrich-document.c
+    yrich-yaml.c
     yspreadsheet.c
     yslides.c
     ydoc.c
@@ -19,4 +20,5 @@ target_link_libraries(yetty_yrich PUBLIC
     yetty_ycore
     yetty_ypaint_core
     yetty_ysdf
+    yaml
 )
