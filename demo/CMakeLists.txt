@@ -5,3 +5,6 @@ if(YETTY_ENABLE_FEATURE_YGUI)
     add_subdirectory(ygui)
 endif()
 
+if(YETTY_ENABLE_FEATURE_YMGUI)
+    add_subdirectory(ymgui)
+endif()

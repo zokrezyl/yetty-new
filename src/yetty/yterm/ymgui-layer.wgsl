@@ -2,25 +2,26 @@
 // ymgui Layer Shader — draw a CPU-rasterised ImGui frame at the cursor
 // anchor, synced with terminal scroll via the rolling-row model.
 // =============================================================================
-// The layer's resource set contains:
-//   texture: ymgui_raster (RGBA8, sized exactly to DisplaySize)
-//   uniforms:
-//     ymgui_grid_size      vec2(cols, rows)
-//     ymgui_cell_size      vec2(cell_w, cell_h)
-//     ymgui_row_origin     u32   rolling row of top visible line
-//     ymgui_frame_rolling  u32   rolling row where frame is anchored
-//     ymgui_frame_size     vec2  DisplaySize in pixels
-//     ymgui_frame_present  u32   1 if a frame is visible, 0 → discard-all
-//     ymgui_vz_scale       f32   visual zoom
-//     ymgui_vz_off         vec2  visual zoom offset
+// Textures go through the shared per-format atlas (yrender's resource
+// binder packs them there). We bind one RGBA8 texture named "ymgui_raster"
+// in namespace "ymgui"; the binder injects:
+//   @group(0) @binding(...) var atlas_rgba8_texture: texture_2d<f32>;
+//   @group(0) @binding(...) var atlas_rgba8_sampler: sampler;
+//   const ymgui_raster_region: vec4<f32> = vec4(u0,v0,u1,v1);
 //
-// Positioning: the frame's top-left sits at
+// Uniforms (all ns=ymgui → prefix ymgui_ymgui_):
+//   ymgui_grid_size      vec2  cols,rows
+//   ymgui_cell_size      vec2  cell_w,cell_h
+//   ymgui_row_origin     u32   rolling row of top visible line
+//   ymgui_frame_rolling  u32   rolling row where frame is anchored
+//   ymgui_frame_size     vec2  DisplaySize in pixels
+//   ymgui_frame_present  u32   1 if a frame is visible
+//   ymgui_vz_scale       f32   visual zoom
+//   ymgui_vz_off         vec2  visual zoom offset
+//
+// Positioning: frame top-left sits at
 //     (0,  (frame_rolling_row - row_origin) * cell_height)
-// in grid pixel space. Horizontal placement is column 0 for v1.
-//
-// RENDER_LAYER_BINDINGS_PLACEHOLDER is replaced by the binder at compile
-// time with the concrete @group/@binding declarations — same mechanism the
-// other layers use.
+// in grid pixel space.
 // =============================================================================
 
 // RENDER_LAYER_BINDINGS_PLACEHOLDER
@@ -42,38 +43,31 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(@builtin(position) frag_pos: vec4<f32>) -> @location(0) vec4<f32> {
-    // Grid pixel size.
-    let grid = uniforms.ymgui_ymgui_grid_size;
-    let cell = uniforms.ymgui_ymgui_cell_size;
-    let grid_px = grid * cell;
-
-    // Early-out if no frame present.
     if (uniforms.ymgui_ymgui_frame_present == 0u) {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
 
-    // Apply visual zoom (same mechanism as ypaint-layer).
+    let cell = uniforms.ymgui_ymgui_cell_size;
     let vz_scale = uniforms.ymgui_ymgui_vz_scale;
     let vz_off   = uniforms.ymgui_ymgui_vz_off;
     let px = (frag_pos.xy - vz_off) / max(vz_scale, 1e-6);
 
-    // Where does the frame sit in grid pixels?
     let row_diff = i32(uniforms.ymgui_ymgui_frame_rolling) -
                    i32(uniforms.ymgui_ymgui_row_origin);
-    let frame_top_x = 0.0;
-    let frame_top_y = f32(row_diff) * cell.y;
-    let frame_size  = uniforms.ymgui_ymgui_frame_size;
+    let frame_top = vec2<f32>(0.0, f32(row_diff) * cell.y);
+    let frame_size = uniforms.ymgui_ymgui_frame_size;
 
-    // Sample UV within the frame's raster.
-    let uv = vec2<f32>(
-        (px.x - frame_top_x) / max(frame_size.x, 1.0),
-        (px.y - frame_top_y) / max(frame_size.y, 1.0),
-    );
+    // Local UV inside the frame's raster (0..1 if inside). Sample
+    // unconditionally (WGSL forbids `textureSample` behind non-uniform
+    // control flow — implicit derivatives need every lane in the quad).
+    // Out-of-bounds pixels are zeroed *after* the sample.
+    let local_uv = (px - frame_top) / max(frame_size, vec2<f32>(1.0, 1.0));
+    let clamped_uv = clamp(local_uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    let region = ymgui_raster_region;
+    let atlas_uv = mix(region.xy, region.zw, clamped_uv);
+    let c = textureSample(atlas_rgba8_texture, atlas_rgba8_sampler, atlas_uv);
 
-    // Outside the frame rectangle → transparent.
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    }
-
-    return textureSample(ymgui_raster, ymgui_sampler, uv);
+    let inside = f32(local_uv.x >= 0.0 && local_uv.x <= 1.0 &&
+                     local_uv.y >= 0.0 && local_uv.y <= 1.0);
+    return c * inside;
 }

@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <webgpu/webgpu.h>
 #include <yetty/ycore/result.h>
 #include <yetty/ycore/util.h>
 #include <yetty/yconfig.h>
@@ -399,18 +400,19 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_ymgui_layer_create(
 
     strncpy(layer->rs.namespace, "ymgui", YETTY_YRENDER_NAME_MAX - 1);
 
-    /* One texture binding: the rasterised frame. Additional IMGUI textures
+    /* One texture: the CPU-rasterised frame. Additional IMGUI textures
      * (font atlas, user images) are consumed on the CPU by the rasterizer,
-     * so the GPU only ever sees a single pre-composited RGBA8. */
+     * so the GPU only ever sees a single pre-composited RGBA8 allocated
+     * inside the shared RGBA8 atlas by the resource binder. */
     layer->rs.texture_count = 1;
-    strncpy(layer->rs.textures[0].name, "ymgui_raster",
+    strncpy(layer->rs.textures[0].name, "raster",
             YETTY_YRENDER_NAME_MAX - 1);
     strncpy(layer->rs.textures[0].wgsl_type, "texture_2d<f32>",
             YETTY_YRENDER_WGSL_TYPE_MAX - 1);
-    strncpy(layer->rs.textures[0].sampler_name, "ymgui_sampler",
+    strncpy(layer->rs.textures[0].sampler_name, "atlas_rgba8_sampler",
             YETTY_YRENDER_NAME_MAX - 1);
-    layer->rs.textures[0].format = 0; /* RGBA8 — actual WGPU enum picked by
-                                       * the binder from wgsl_type + bpp */
+    layer->rs.textures[0].format = WGPUTextureFormat_RGBA8Unorm;
+    layer->rs.textures[0].sampler_filter = WGPUFilterMode_Linear;
 
     init_uniforms(&layer->rs);
     layer->rs.pixel_size.width  = (float)cols * cell_w;
