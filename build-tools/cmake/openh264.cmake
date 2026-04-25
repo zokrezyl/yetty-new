@@ -1,184 +1,61 @@
-# openh264 - H.264 video decoder
-# BSD 2-Clause license, Cisco
-# Used in Firefox, WebRTC - battle-tested
+# openh264 - H.264 video decoder (Cisco, BSD 2-Clause).
+#
+# Consumes a prebuilt static lib + headers from the 3rdparty release tarball
+# published by build-3rdparty.yml. The from-source build for every yetty
+# target (5 platform-specific Make invocations: linux/macos/android/ios/wasm)
+# now lives in build-tools/3rdparty/openh264/_build.sh — see that script and
+# build-tools/3rdparty/README.md for how to add platforms or bump versions.
 
-CPMAddPackage(
-    NAME openh264
-    GITHUB_REPOSITORY cisco/openh264
-    VERSION 2.4.1
-    DOWNLOAD_ONLY YES
+include_guard(GLOBAL)
+include(${YETTY_ROOT}/build-tools/cmake/3rdparty-fetch.cmake)
+
+if(TARGET openh264)
+    return()
+endif()
+
+yetty_3rdparty_fetch(openh264 _OPENH264_DIR)
+
+# Tarball layout: lib/libopenh264.a + include/wels/codec_api.h
+if(WIN32)
+    set(_OPENH264_LIB_NAME "openh264.lib")
+else()
+    set(_OPENH264_LIB_NAME "libopenh264.a")
+endif()
+
+set(_OPENH264_LIB_PATH "${_OPENH264_DIR}/lib/${_OPENH264_LIB_NAME}")
+set(_OPENH264_INCLUDE_DIR "${_OPENH264_DIR}/include")
+
+if(NOT EXISTS "${_OPENH264_LIB_PATH}")
+    message(FATAL_ERROR
+        "openh264: library not found at ${_OPENH264_LIB_PATH} — \
+tarball layout changed? (check build-tools/3rdparty/openh264/_build.sh)")
+endif()
+if(NOT EXISTS "${_OPENH264_INCLUDE_DIR}/wels/codec_api.h")
+    message(FATAL_ERROR
+        "openh264: codec_api.h not found in ${_OPENH264_INCLUDE_DIR}/wels/ — \
+tarball layout changed?")
+endif()
+
+add_library(openh264 STATIC IMPORTED GLOBAL)
+set_target_properties(openh264 PROPERTIES
+    IMPORTED_LOCATION "${_OPENH264_LIB_PATH}"
+    INTERFACE_INCLUDE_DIRECTORIES "${_OPENH264_INCLUDE_DIR}"
 )
 
-if(openh264_ADDED)
-    include(ExternalProject)
-    include(ProcessorCount)
-
-    ProcessorCount(NPROC)
-    if(NPROC EQUAL 0)
-        set(NPROC 4)
-    endif()
-
-    set(OPENH264_INSTALL_DIR "${CMAKE_BINARY_DIR}/_deps/openh264-install")
-
-    # Platform-specific library name
-    if(WIN32)
-        set(OPENH264_LIB_NAME "openh264.lib")
-    else()
-        set(OPENH264_LIB_NAME "libopenh264.a")
-    endif()
-
-    # Platform-specific build setup
-    if(ANDROID)
-        # Map Android ABI to openh264 ARCH
-        if(ANDROID_ABI STREQUAL "arm64-v8a")
-            set(OPENH264_ARCH "arm64")
-        elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
-            set(OPENH264_ARCH "arm")
-        elseif(ANDROID_ABI STREQUAL "x86_64")
-            set(OPENH264_ARCH "x86_64")
-        elseif(ANDROID_ABI STREQUAL "x86")
-            set(OPENH264_ARCH "x86")
-        endif()
-
-        set(OPENH264_BUILD_ARGS "OS=android ARCH=${OPENH264_ARCH} NDKROOT=${ANDROID_NDK} TARGET=android-${ANDROID_NATIVE_API_LEVEL} NDKLEVEL=${ANDROID_NATIVE_API_LEVEL}")
-
-        # Build openh264 using make (Android)
-        ExternalProject_Add(openh264_ext
-            SOURCE_DIR ${openh264_SOURCE_DIR}
-            BUILD_IN_SOURCE TRUE
-            INSTALL_DIR ${OPENH264_INSTALL_DIR}
-
-            UPDATE_DISCONNECTED TRUE
-
-            CONFIGURE_COMMAND ""
-
-            BUILD_COMMAND sh -c "make MAKEFLAGS= -j${NPROC} libraries BUILDTYPE=Release ENABLE_SHARED=No PREFIX=${OPENH264_INSTALL_DIR} ${OPENH264_BUILD_ARGS}"
-
-            INSTALL_COMMAND sh -c "make MAKEFLAGS= install-static BUILDTYPE=Release ENABLE_SHARED=No PREFIX=${OPENH264_INSTALL_DIR} ${OPENH264_BUILD_ARGS}"
-
-            BUILD_BYPRODUCTS
-                ${OPENH264_INSTALL_DIR}/lib/${OPENH264_LIB_NAME}
-        )
-    elseif(WIN32)
-        # Windows: Use make with OS=msvc (requires make installed via chocolatey)
-        # Determine architecture
-        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-            set(OPENH264_ARCH "x86_64")
-        else()
-            set(OPENH264_ARCH "i386")
-        endif()
-
-        ExternalProject_Add(openh264_ext
-            SOURCE_DIR ${openh264_SOURCE_DIR}
-            BUILD_IN_SOURCE TRUE
-            INSTALL_DIR ${OPENH264_INSTALL_DIR}
-
-            UPDATE_DISCONNECTED TRUE
-
-            CONFIGURE_COMMAND ""
-
-            BUILD_COMMAND make MAKEFLAGS= -j${NPROC} OS=msvc ARCH=${OPENH264_ARCH} libraries BUILDTYPE=Release ENABLE_SHARED=No PREFIX=${OPENH264_INSTALL_DIR}
-
-            INSTALL_COMMAND make MAKEFLAGS= OS=msvc ARCH=${OPENH264_ARCH} install-static BUILDTYPE=Release ENABLE_SHARED=No PREFIX=${OPENH264_INSTALL_DIR}
-
-            BUILD_BYPRODUCTS
-                ${OPENH264_INSTALL_DIR}/lib/${OPENH264_LIB_NAME}
-        )
-    elseif(EMSCRIPTEN)
-        # Emscripten/WebAssembly: Use emmake with ARCH= to prevent -m64 flags
-        # Add -pthread for threading support
-        # Define __APPLE__ to use pthread_cond_t instead of sem_t (sem_timedwait not available in emscripten)
-        ExternalProject_Add(openh264_ext
-            SOURCE_DIR ${openh264_SOURCE_DIR}
-            BUILD_IN_SOURCE TRUE
-            INSTALL_DIR ${OPENH264_INSTALL_DIR}
-
-            UPDATE_DISCONNECTED TRUE
-
-            CONFIGURE_COMMAND ""
-
-            BUILD_COMMAND sh -c "emmake make MAKEFLAGS= -j${NPROC} libraries BUILDTYPE=Release ENABLE_SHARED=No USE_ASM=No ARCH= 'CFLAGS=-pthread -D__APPLE__' 'CXXFLAGS=-pthread -D__APPLE__' 'LDFLAGS=-pthread' PREFIX=${OPENH264_INSTALL_DIR}"
-
-            INSTALL_COMMAND sh -c "emmake make MAKEFLAGS= install-static BUILDTYPE=Release ENABLE_SHARED=No USE_ASM=No ARCH= PREFIX=${OPENH264_INSTALL_DIR}"
-
-            BUILD_BYPRODUCTS
-                ${OPENH264_INSTALL_DIR}/lib/${OPENH264_LIB_NAME}
-        )
-    elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-        # iOS cross-compilation
-        if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
-            set(OPENH264_ARCH "arm64")
-        elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
-            set(OPENH264_ARCH "x86_64")
-        endif()
-
-        # Determine if simulator or device
-        if(CMAKE_OSX_SYSROOT MATCHES "iphonesimulator" OR CMAKE_OSX_SYSROOT MATCHES "Simulator")
-            set(IOS_SDK_TYPE "iphonesimulator")
-        else()
-            set(IOS_SDK_TYPE "iphoneos")
-        endif()
-
-        ExternalProject_Add(openh264_ext
-            SOURCE_DIR ${openh264_SOURCE_DIR}
-            BUILD_IN_SOURCE TRUE
-            INSTALL_DIR ${OPENH264_INSTALL_DIR}
-
-            UPDATE_DISCONNECTED TRUE
-
-            CONFIGURE_COMMAND ""
-
-            BUILD_COMMAND sh -c "make MAKEFLAGS= -j${NPROC} libraries BUILDTYPE=Release ENABLE_SHARED=No OS=ios ARCH=${OPENH264_ARCH} SDK_MIN=${CMAKE_OSX_DEPLOYMENT_TARGET} 'CC=xcrun -sdk ${IOS_SDK_TYPE} clang' 'CXX=xcrun -sdk ${IOS_SDK_TYPE} clang++' 'AR=xcrun -sdk ${IOS_SDK_TYPE} ar' PREFIX=${OPENH264_INSTALL_DIR}"
-
-            INSTALL_COMMAND sh -c "make MAKEFLAGS= install-static BUILDTYPE=Release ENABLE_SHARED=No OS=ios ARCH=${OPENH264_ARCH} SDK_MIN=${CMAKE_OSX_DEPLOYMENT_TARGET} PREFIX=${OPENH264_INSTALL_DIR}"
-
-            BUILD_BYPRODUCTS
-                ${OPENH264_INSTALL_DIR}/lib/${OPENH264_LIB_NAME}
-        )
-    else()
-        # Unix/Linux/macOS: Use make
-        ExternalProject_Add(openh264_ext
-            SOURCE_DIR ${openh264_SOURCE_DIR}
-            BUILD_IN_SOURCE TRUE
-            INSTALL_DIR ${OPENH264_INSTALL_DIR}
-
-            UPDATE_DISCONNECTED TRUE
-
-            CONFIGURE_COMMAND ""
-
-            BUILD_COMMAND sh -c "make MAKEFLAGS= -j${NPROC} libraries BUILDTYPE=Release ENABLE_SHARED=No PREFIX=${OPENH264_INSTALL_DIR}"
-
-            INSTALL_COMMAND sh -c "make MAKEFLAGS= install-static BUILDTYPE=Release ENABLE_SHARED=No PREFIX=${OPENH264_INSTALL_DIR}"
-
-            BUILD_BYPRODUCTS
-                ${OPENH264_INSTALL_DIR}/lib/${OPENH264_LIB_NAME}
-        )
-    endif()
-
-    # Pre-create include dir for CMake validation
-    file(MAKE_DIRECTORY ${OPENH264_INSTALL_DIR}/include)
-
-    # Create imported static library target
-    add_library(openh264 STATIC IMPORTED GLOBAL)
+# Match the link-deps the from-source build set up:
+#   - Unix non-Android: pthread + libstdc++
+#   - Android: pthread (libc++ comes from ANDROID_STL=c++_static)
+#   - Apple/Windows/wasm: nothing extra needed (toolchain handles libc++/pthread)
+if(UNIX AND NOT ANDROID AND NOT APPLE AND NOT EMSCRIPTEN)
+    find_package(Threads REQUIRED)
     set_target_properties(openh264 PROPERTIES
-        IMPORTED_LOCATION ${OPENH264_INSTALL_DIR}/lib/${OPENH264_LIB_NAME}
-        INTERFACE_INCLUDE_DIRECTORIES ${OPENH264_INSTALL_DIR}/include
+        INTERFACE_LINK_LIBRARIES "Threads::Threads;stdc++"
     )
-    add_dependencies(openh264 openh264_ext)
-
-    # On Unix (non-Android), openh264 needs pthread and stdc++
-    # Android uses static C++ runtime via ANDROID_STL=c++_static
-    if(UNIX AND NOT ANDROID)
-        find_package(Threads REQUIRED)
-        set_target_properties(openh264 PROPERTIES
-            INTERFACE_LINK_LIBRARIES "Threads::Threads;stdc++"
-        )
-    elseif(ANDROID)
-        find_package(Threads REQUIRED)
-        set_target_properties(openh264 PROPERTIES
-            INTERFACE_LINK_LIBRARIES "Threads::Threads"
-        )
-    endif()
-
-    message(STATUS "openh264: Built from source v2.4.1")
+elseif(ANDROID)
+    find_package(Threads REQUIRED)
+    set_target_properties(openh264 PROPERTIES
+        INTERFACE_LINK_LIBRARIES "Threads::Threads"
+    )
 endif()
+
+message(STATUS "openh264: prebuilt v${YETTY_3RDPARTY_openh264_VERSION} (${_OPENH264_LIB_PATH})")

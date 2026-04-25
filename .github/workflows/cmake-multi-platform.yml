@@ -7,6 +7,7 @@ on:
     tags:
       - '*'
       - '!assets-*'       # prebuilt-asset releases are handled by build-assets.yml
+      - '!lib-*'          # per-lib 3rdparty releases handled by build-3rdparty-<lib>.yml
     branches:
       - '**'
 
