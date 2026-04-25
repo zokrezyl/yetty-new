@@ -186,6 +186,9 @@ if(YETTY_ENABLE_FEATURE_TESTS)
     if(YETTY_ENABLE_FEATURE_YPDF)
         add_subdirectory(${YETTY_ROOT}/test/ut/ypdf ${CMAKE_BINARY_DIR}/test/ut/ypdf)
     endif()
+    if(YETTY_ENABLE_FEATURE_YMGUI)
+        add_subdirectory(${YETTY_ROOT}/test/ut/ymgui ${CMAKE_BINARY_DIR}/test/ut/ymgui)
+    endif()
 endif()
 
 # Common include directories
@@ -335,6 +338,7 @@ function(yetty_embed_assets TARGET)
     # Collect shaders from module locations
     file(COPY "${YETTY_ROOT}/src/yetty/yterm/text-layer.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
     file(COPY "${YETTY_ROOT}/src/yetty/yterm/ypaint-layer.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
+    file(COPY "${YETTY_ROOT}/src/yetty/yterm/ymgui-layer.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
     # Generated SDF dispatcher + sdf_* functions — attached at runtime as a
     # child resource set of ypaint-layer; see src/yetty/ysdf/gen-sdf-code.py.
     file(COPY "${YETTY_ROOT}/src/yetty/ysdf/ysdf.gen.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")

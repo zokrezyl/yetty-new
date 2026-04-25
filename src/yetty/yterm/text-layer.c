@@ -100,6 +100,11 @@ struct yetty_yterm_terminal_text_layer {
     struct yetty_ycore_buffer shader_code;
     struct yetty_yrender_gpu_resource_set rs;
     struct yetty_ycore_void_result pending_error; /* Error from vterm callbacks */
+    /* DEC mode 1500/1501 — mirrored from libvterm via settermprop. The
+     * terminal reads these (via base.mouse_sub_fn) to decide whether to
+     * forward GLFW mouse events as OSC 777777/777778. */
+    int mouse_click_subscribed;
+    int mouse_move_subscribed;
 };
 
 /* Forward declarations */
@@ -121,6 +126,7 @@ static struct yetty_ycore_void_result text_layer_render(
 static int on_damage(VTermRect rect, void *user);
 static int on_move_cursor(VTermPos pos, VTermPos oldpos, int visible, void *user);
 static int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user);
+static int on_settermprop(VTermProp prop, VTermValue *val, void *user);
 
 /* Glyph resolver — called by vterm for every codepoint */
 static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
@@ -266,13 +272,45 @@ static VTermScreenCallbacks screen_callbacks = {
     .damage = on_damage,
     .moverect = NULL,
     .movecursor = on_move_cursor,
-    .settermprop = NULL,
+    .settermprop = on_settermprop,
     .bell = NULL,
     .resize = NULL,
     .sb_pushline = on_sb_pushline,
     .sb_popline = NULL,
     .sb_clear = NULL,
 };
+
+/* libvterm settermprop callback — only the props we care about are
+ * forwarded; everything else is ignored. CARDCLICK / CARDMOVE come from
+ * DEC modes ?1500 / ?1501 and gate whether the terminal emits OSC
+ * 777777 / 777778 mouse events. */
+static int on_settermprop(VTermProp prop, VTermValue *val, void *user)
+{
+    struct yetty_yterm_terminal_text_layer *layer = user;
+    if (!layer || !val) return 1;
+
+    int changed = 0;
+    if (prop == VTERM_PROP_CARDCLICK) {
+        int v = val->boolean ? 1 : 0;
+        if (v != layer->mouse_click_subscribed) {
+            layer->mouse_click_subscribed = v;
+            changed = 1;
+        }
+    } else if (prop == VTERM_PROP_CARDMOVE) {
+        int v = val->boolean ? 1 : 0;
+        if (v != layer->mouse_move_subscribed) {
+            layer->mouse_move_subscribed = v;
+            changed = 1;
+        }
+    }
+
+    if (changed && layer->base.mouse_sub_fn) {
+        layer->base.mouse_sub_fn(layer->mouse_click_subscribed,
+                                 layer->mouse_move_subscribed,
+                                 layer->base.mouse_sub_userdata);
+    }
+    return 1;
+}
 
 /* Create */
 

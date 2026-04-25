@@ -2,6 +2,7 @@ add_library(yetty_yterm
     terminal.c
     text-layer.c
     ypaint-layer.c
+    ymgui-layer.c
     pty-reader.c
     osc-args.c
 )
@@ -23,4 +24,5 @@ target_link_libraries(yetty_yterm
 incbin_add_resources(yetty_yterm
     text_layer_shader "${CMAKE_CURRENT_SOURCE_DIR}/text-layer.wgsl"
     ypaint_layer_shader "${CMAKE_CURRENT_SOURCE_DIR}/ypaint-layer.wgsl"
+    ymgui_layer_shader "${CMAKE_CURRENT_SOURCE_DIR}/ymgui-layer.wgsl"
 )
