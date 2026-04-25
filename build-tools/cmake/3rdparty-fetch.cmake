@@ -1,17 +1,17 @@
 # 3rdparty-fetch.cmake
 #
-# Downloads the prebuilt 3rdparty-library tarballs published by
-# build-3rdparty.yml (GitHub release tag `3rdparty-${YETTY_3RDPARTY_VERSION}`)
-# and extracts them into the build tree so the rest of the build can consume
-# them as imported static targets.
+# Downloads a per-library prebuilt tarball published by
+# .github/workflows/build-3rdparty-<lib>.yml, attached to the
+# `lib-<lib>-<libver>` GitHub release. Extracts into the build tree as an
+# imported-static-target consumer-side stub.
+#
+# Per-lib version is read from build-tools/3rdparty/<lib>/version — the
+# single source of truth used for both upstream fetch (in _build.sh) and
+# tarball naming. There is no global 3rdparty version pin.
 #
 # Output layout (one subdir per library):
 #   ${CMAKE_BINARY_DIR}/3rdparty/<lib>/lib/...
 #   ${CMAKE_BINARY_DIR}/3rdparty/<lib>/include/...
-#
-# Pinning: version is read from ${YETTY_ROOT}/3rdparty.version (bumped when
-# you cut a new 3rdparty-X.Y.Z release). Override via cmake/env var
-# YETTY_3RDPARTY_VERSION.
 #
 # URL override: YETTY_3RDPARTY_URL_BASE (default: GitHub releases for the
 # upstream repo).
@@ -19,23 +19,8 @@
 include_guard(GLOBAL)
 
 #-----------------------------------------------------------------------------
-# Resolve version + url base
+# Resolve URL base + cache dir (lib-agnostic)
 #-----------------------------------------------------------------------------
-if(NOT DEFINED YETTY_3RDPARTY_VERSION)
-    if(DEFINED ENV{YETTY_3RDPARTY_VERSION})
-        set(YETTY_3RDPARTY_VERSION "$ENV{YETTY_3RDPARTY_VERSION}")
-    else()
-        set(_VER_FILE "${YETTY_ROOT}/3rdparty.version")
-        if(NOT EXISTS "${_VER_FILE}")
-            message(FATAL_ERROR "3rdparty-fetch: ${_VER_FILE} not found")
-        endif()
-        file(READ "${_VER_FILE}" YETTY_3RDPARTY_VERSION)
-        string(STRIP "${YETTY_3RDPARTY_VERSION}" YETTY_3RDPARTY_VERSION)
-    endif()
-endif()
-set(YETTY_3RDPARTY_VERSION "${YETTY_3RDPARTY_VERSION}"
-    CACHE STRING "Pinned 3rdparty release version")
-
 if(NOT DEFINED YETTY_3RDPARTY_URL_BASE)
     if(DEFINED ENV{YETTY_3RDPARTY_URL_BASE})
         set(YETTY_3RDPARTY_URL_BASE "$ENV{YETTY_3RDPARTY_URL_BASE}")
@@ -50,14 +35,11 @@ if(NOT DEFINED YETTY_3RDPARTY_CACHE_DIR)
     if(DEFINED ENV{YETTY_3RDPARTY_CACHE_DIR})
         set(YETTY_3RDPARTY_CACHE_DIR "$ENV{YETTY_3RDPARTY_CACHE_DIR}")
     else()
-        # Cache across builds (not wiped when build dir is cleaned)
         set(YETTY_3RDPARTY_CACHE_DIR "$ENV{HOME}/.cache/yetty/3rdparty")
     endif()
 endif()
 
-set(YETTY_3RDPARTY_TAG "3rdparty-${YETTY_3RDPARTY_VERSION}")
 set(YETTY_3RDPARTY_OUTPUT_DIR "${CMAKE_BINARY_DIR}/3rdparty")
-
 file(MAKE_DIRECTORY "${YETTY_3RDPARTY_CACHE_DIR}")
 file(MAKE_DIRECTORY "${YETTY_3RDPARTY_OUTPUT_DIR}")
 
@@ -109,12 +91,24 @@ endfunction()
 #-----------------------------------------------------------------------------
 # yetty_3rdparty_fetch(LIB_NAME [DEST_VAR])
 #
-# Downloads ${URL_BASE}/${TAG}/<lib>-<platform>-<ver>.tar.gz into the cache,
-# extracts into ${OUTPUT_DIR}/<lib>/. Sets DEST_VAR (if provided) to that
-# directory in the caller's scope. Stamp-guarded: re-extracts only if the
-# version changed.
+# Reads build-tools/3rdparty/<LIB_NAME>/version, downloads
+#   ${URL_BASE}/lib-<LIB_NAME>-<libver>/<LIB_NAME>-<platform>-<libver>.tar.gz
+# into the cache, extracts into ${OUTPUT_DIR}/<LIB_NAME>/. Sets DEST_VAR
+# (if provided) to that directory in the caller's scope. Stamp-guarded:
+# re-extracts only if the version changed.
 #-----------------------------------------------------------------------------
 function(yetty_3rdparty_fetch LIB_NAME)
+    set(_VER_FILE "${YETTY_ROOT}/build-tools/3rdparty/${LIB_NAME}/version")
+    if(NOT EXISTS "${_VER_FILE}")
+        message(FATAL_ERROR
+            "3rdparty-fetch(${LIB_NAME}): version file not found: ${_VER_FILE}")
+    endif()
+    file(READ "${_VER_FILE}" _LIBVER)
+    string(STRIP "${_LIBVER}" _LIBVER)
+    if(NOT _LIBVER)
+        message(FATAL_ERROR "3rdparty-fetch(${LIB_NAME}): ${_VER_FILE} is empty")
+    endif()
+
     yetty_3rdparty_target_platform(_PLATFORM)
     if(NOT _PLATFORM)
         message(FATAL_ERROR
@@ -122,11 +116,12 @@ function(yetty_3rdparty_fetch LIB_NAME)
 unsupported build configuration?")
     endif()
 
-    set(_FILENAME "${LIB_NAME}-${_PLATFORM}-${YETTY_3RDPARTY_VERSION}.tar.gz")
+    set(_FILENAME "${LIB_NAME}-${_PLATFORM}-${_LIBVER}.tar.gz")
     set(_TARBALL "${YETTY_3RDPARTY_CACHE_DIR}/${_FILENAME}")
-    set(_URL "${YETTY_3RDPARTY_URL_BASE}/${YETTY_3RDPARTY_TAG}/${_FILENAME}")
+    set(_TAG "lib-${LIB_NAME}-${_LIBVER}")
+    set(_URL "${YETTY_3RDPARTY_URL_BASE}/${_TAG}/${_FILENAME}")
     set(_DEST "${YETTY_3RDPARTY_OUTPUT_DIR}/${LIB_NAME}")
-    set(_STAMP "${_DEST}/.fetched-${YETTY_3RDPARTY_VERSION}")
+    set(_STAMP "${_DEST}/.fetched-${_LIBVER}")
 
     if(NOT EXISTS "${_STAMP}")
         if(NOT EXISTS "${_TARBALL}")
@@ -144,7 +139,7 @@ unsupported build configuration?")
             endif()
         endif()
 
-        # Wipe stale extraction if version stamp is missing (re-extract clean)
+        # Wipe any stale extraction (different version) before re-extracting.
         if(EXISTS "${_DEST}")
             file(REMOVE_RECURSE "${_DEST}")
         endif()
@@ -158,12 +153,13 @@ unsupported build configuration?")
             message(FATAL_ERROR
                 "3rdparty-fetch: failed to extract ${_TARBALL} into ${_DEST}")
         endif()
-        file(WRITE "${_STAMP}" "${YETTY_3RDPARTY_VERSION}\n")
-        message(STATUS "3rdparty-fetch: ${LIB_NAME} ${YETTY_3RDPARTY_VERSION} ready (${_PLATFORM})")
+        file(WRITE "${_STAMP}" "${_LIBVER}\n")
+        message(STATUS "3rdparty-fetch: ${LIB_NAME} ${_LIBVER} ready (${_PLATFORM})")
     endif()
 
     if(ARGC GREATER 1)
         set(${ARGV1} "${_DEST}" PARENT_SCOPE)
     endif()
-    set(YETTY_3RDPARTY_${LIB_NAME}_DIR "${_DEST}" CACHE INTERNAL "")
+    set(YETTY_3RDPARTY_${LIB_NAME}_VERSION "${_LIBVER}" CACHE INTERNAL "")
+    set(YETTY_3RDPARTY_${LIB_NAME}_DIR     "${_DEST}"   CACHE INTERNAL "")
 endfunction()

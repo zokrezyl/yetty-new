@@ -9,11 +9,12 @@
 #     android-arm64-v8a | android-x86_64 |
 #     ios-arm64 | ios-x86_64 |
 #     webasm | windows-x86_64
-#   VERSION, OUTPUT_DIR  see _build.sh
+#   OUTPUT_DIR        where the tarball is written
 #
-# Note: the .#3rdparty-<target> nix devShells are added in a follow-up
-# step. Until they exist, set USE_NIX=0 to dispatch _build.sh directly
-# under the caller's shell (CI / a manual nix-shell -p ...).
+# Version is read from this directory's `version` file — single source of
+# truth for both upstream fetch and tarball naming. CI tag pattern:
+# `lib-openh264-<version>` → tarball `openh264-<target>-<version>.tar.gz`.
+# Set USE_NIX=0 to dispatch _build.sh without nix develop (CI / manual env).
 
 set -euo pipefail
 

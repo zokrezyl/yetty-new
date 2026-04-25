@@ -1,46 +1,65 @@
 #!/usr/bin/env bash
-# Create the `3rdparty-<version>` tag (version read from 3rdparty.version) and
-# push it to origin. Pushing the tag triggers .github/workflows/build-3rdparty.yml,
-# which builds every 3rd-party library across every target platform and
-# attaches the tarballs to the matching GitHub release.
+# Push a `lib-<libname>-<version>` tag for one 3rdparty library, where
+# <version> is read from build-tools/3rdparty/<libname>/version.
+#
+# Pushing the tag triggers .github/workflows/build-3rdparty-<libname>.yml,
+# which builds <libname> across every target platform and attaches the
+# tarballs to a release of the same name.
 #
 # Usage:
-#   build-tools/push-3rdparty-tag.sh            # normal run
-#   build-tools/push-3rdparty-tag.sh -f         # force-move an existing tag
-#   build-tools/push-3rdparty-tag.sh --remote upstream   # push to non-default remote
+#   build-tools/push-lib-tag.sh <libname>          # normal run
+#   build-tools/push-lib-tag.sh <libname> -f       # force-move existing tag
+#   build-tools/push-lib-tag.sh <libname> --remote upstream
 
 set -euo pipefail
 
+usage() {
+    awk 'NR==1{next} /^[^#]/{exit} {sub(/^# ?/,""); print}' "$0"
+}
+
+LIBNAME=""
 FORCE=0
 REMOTE="origin"
 while [ $# -gt 0 ]; do
     case "$1" in
         -f|--force) FORCE=1 ;;
         --remote)   shift; REMOTE="$1" ;;
-        -h|--help)
-            awk 'NR==1{next} /^[^#]/{exit} {sub(/^# ?/,""); print}' "$0"
-            exit 0
+        -h|--help)  usage; exit 0 ;;
+        -*)         echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+        *)
+            if [ -n "$LIBNAME" ]; then
+                echo "extra positional arg: $1 (libname already=$LIBNAME)" >&2
+                exit 2
+            fi
+            LIBNAME="$1"
             ;;
-        *)  echo "unknown arg: $1" >&2; exit 2 ;;
     esac
     shift
 done
 
+[ -n "$LIBNAME" ] || { echo "error: <libname> required" >&2; usage >&2; exit 2; }
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-VERSION_FILE="$REPO_ROOT/3rdparty.version"
+LIB_DIR="$REPO_ROOT/build-tools/3rdparty/$LIBNAME"
+VERSION_FILE="$LIB_DIR/version"
+WORKFLOW_FILE="$REPO_ROOT/.github/workflows/build-3rdparty-${LIBNAME}.yml"
+
+[ -d "$LIB_DIR" ] || { echo "no such lib dir: $LIB_DIR" >&2; exit 1; }
 [ -f "$VERSION_FILE" ] || { echo "missing $VERSION_FILE" >&2; exit 1; }
+[ -f "$WORKFLOW_FILE" ] || {
+    echo "warning: $WORKFLOW_FILE not found — pushing the tag will not trigger any build" >&2
+}
+
 VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
 [ -n "$VERSION" ] || { echo "$VERSION_FILE is empty" >&2; exit 1; }
 
-TAG="3rdparty-$VERSION"
+TAG="lib-${LIBNAME}-${VERSION}"
 
-# Refuse to create the tag if the target remote isn't configured —
-# otherwise we'd cut a local tag we can't push and the caller would
-# have to clean it up manually.
+# Refuse to create the tag if the target remote isn't configured.
 if ! REMOTE_URL="$(git remote get-url "$REMOTE" 2>/dev/null)"; then
-    echo "error: git remote '$REMOTE' is not configured in this repo." >&2
+    echo "error: git remote '$REMOTE' is not configured." >&2
     echo "       set it with:  git remote add $REMOTE <url>" >&2
     echo "       or pass --remote <name> to use a different one." >&2
     echo "       configured remotes: $(git remote | paste -sd, -)" >&2
@@ -65,10 +84,10 @@ if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
     fi
 else
     echo "creating tag $TAG"
-    git tag -a "$TAG" -m "3rdparty release $VERSION"
+    git tag -a "$TAG" -m "${LIBNAME} ${VERSION}"
 fi
 
-# Remote tag check (informational only)
+# Remote tag check
 if git ls-remote --tags --exit-code "$REMOTE" "refs/tags/$TAG" >/dev/null 2>&1; then
     if [ "$FORCE" -eq 1 ]; then
         echo "force-pushing $TAG to $REMOTE"
@@ -83,6 +102,6 @@ else
 fi
 
 echo ""
-echo "Done. The build-3rdparty workflow should now be running:"
+echo "Done. The build-3rdparty-${LIBNAME} workflow should now be running:"
 echo "  https://github.com/$(git remote get-url "$REMOTE" \
         | sed -E 's#.*[:/]([^/]+/[^/]+?)(\.git)?$#\1#')/actions"

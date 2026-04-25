@@ -58,4 +58,4 @@ elseif(ANDROID)
     )
 endif()
 
-message(STATUS "openh264: prebuilt v${YETTY_3RDPARTY_VERSION} (${_OPENH264_LIB_PATH})")
+message(STATUS "openh264: prebuilt v${YETTY_3RDPARTY_openh264_VERSION} (${_OPENH264_LIB_PATH})")

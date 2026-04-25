@@ -10,15 +10,16 @@
 #                     android-arm64-v8a | android-x86_64 |
 #                     ios-arm64 | ios-x86_64 |
 #                     webasm | windows-x86_64
-#   VERSION           e.g. 0.0.1 — release tarball version (NOT openh264 ver)
 #   OUTPUT_DIR        where the tarball is written
+#
+# Version is read from this directory's `version` file — single source of
+# truth for both upstream tag fetch (v<VER>) and tarball naming.
 #
 # Optional env:
 #   WORK_DIR          default /tmp/yetty-3rdparty-openh264-$TARGET_PLATFORM
 #   CACHE_DIR         default $HOME/.cache/yetty-3rdparty
 #                     holds the openh264 source tarball so multi-target
 #                     builds share a single download
-#   OPENH264_VERSION  default 2.4.1 (must match versions.txt)
 #   ANDROID_API       default 26 (matches yetty Android build)
 #   IOS_MIN           default 15.0
 #   CROSS_PREFIX      default aarch64-unknown-linux-gnu- (linux-aarch64)
@@ -27,19 +28,23 @@ set -Eeuo pipefail
 trap 'rc=$?; echo "FAILED: rc=$rc line=$LINENO source=${BASH_SOURCE[0]} cmd: $BASH_COMMAND" >&2' ERR
 
 : "${TARGET_PLATFORM:?TARGET_PLATFORM is required}"
-: "${VERSION:?VERSION is required}"
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+VERSION_FILE="$SCRIPT_DIR/version"
+[ -f "$VERSION_FILE" ] || { echo "missing $VERSION_FILE" >&2; exit 1; }
+VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+[ -n "$VERSION" ] || { echo "$VERSION_FILE is empty" >&2; exit 1; }
+
 WORK_DIR="${WORK_DIR:-/tmp/yetty-3rdparty-openh264-$TARGET_PLATFORM}"
 CACHE_DIR="${CACHE_DIR:-$HOME/.cache/yetty-3rdparty}"
-OPENH264_VERSION="${OPENH264_VERSION:-2.4.1}"
 NCPU="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
-OPENH264_URL="https://github.com/cisco/openh264/archive/refs/tags/v${OPENH264_VERSION}.tar.gz"
-OPENH264_TARBALL="$CACHE_DIR/openh264-${OPENH264_VERSION}.tar.gz"
-SRC_DIR="$WORK_DIR/openh264-${OPENH264_VERSION}-${TARGET_PLATFORM}"
+# Cisco tags upstream releases as `vX.Y.Z` — version file holds the bare X.Y.Z.
+OPENH264_URL="https://github.com/cisco/openh264/archive/refs/tags/v${VERSION}.tar.gz"
+OPENH264_TARBALL="$CACHE_DIR/openh264-${VERSION}.tar.gz"
+SRC_DIR="$WORK_DIR/openh264-${VERSION}-${TARGET_PLATFORM}"
 INSTALL_DIR="$WORK_DIR/install-${TARGET_PLATFORM}"
 STAGE="$WORK_DIR/stage-${TARGET_PLATFORM}"
 TARBALL="$OUTPUT_DIR/openh264-${TARGET_PLATFORM}-${VERSION}.tar.gz"
@@ -57,7 +62,7 @@ if [ ! -f "$OPENH264_TARBALL" ]; then
             flock -x 9
         fi
         if [ ! -f "$OPENH264_TARBALL" ]; then
-            echo "==> downloading openh264 ${OPENH264_VERSION}"
+            echo "==> downloading openh264 ${VERSION}"
             curl -fL --retry 3 -o "$_part" "$OPENH264_URL"
             mv "$_part" "$OPENH264_TARBALL"
         fi
@@ -76,7 +81,7 @@ mkdir -p "$INSTALL_DIR" "$STAGE"
 echo "==> extracting -> $SRC_DIR"
 mkdir -p "$WORK_DIR/.extract-${TARGET_PLATFORM}"
 tar -C "$WORK_DIR/.extract-${TARGET_PLATFORM}" -xzf "$OPENH264_TARBALL"
-mv "$WORK_DIR/.extract-${TARGET_PLATFORM}/openh264-${OPENH264_VERSION}" "$SRC_DIR"
+mv "$WORK_DIR/.extract-${TARGET_PLATFORM}/openh264-${VERSION}" "$SRC_DIR"
 rmdir "$WORK_DIR/.extract-${TARGET_PLATFORM}"
 
 #-----------------------------------------------------------------------------
@@ -241,7 +246,7 @@ echo "==> packaging -> $TARBALL"
 tar -C "$STAGE" -czf "$TARBALL" .
 
 echo ""
-echo "openh264 $OPENH264_VERSION ($TARGET_PLATFORM) ready:"
+echo "openh264 $VERSION ($TARGET_PLATFORM) ready:"
 ls -lh "$TARBALL"
 ENTRIES="$(tar -tzf "$TARBALL" | wc -l)"
 echo "contents (first 20 of $ENTRIES):"
