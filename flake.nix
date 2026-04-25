@@ -447,6 +447,122 @@
             shellHook = "echo 'Yetty asset-build (qemu tvos-arm64)'";
           };
 
+          # 3rdparty library build shells — one per target platform.
+          # Used by build-tools/3rdparty/<lib>/build.sh wrappers, which
+          # invoke nix develop .#3rdparty-<target> before re-execing into
+          # the per-lib _build.sh. Lean intentionally — gnumake/perl/nasm
+          # plus the per-target compiler/SDK. Add deps here as new libs land.
+
+          "3rdparty-linux-x86_64" = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              gnumake perl nasm
+              gcc binutils
+              curl gnutar xz gzip
+              pkg-config
+            ];
+            shellHook = "echo 'Yetty 3rdparty-build (linux-x86_64)'";
+          };
+
+          # Cross to aarch64 Linux — same model as assets-qemu-linux-aarch64:
+          # use pkgsCross.*.mkShell so nativeBuildInputs (host-side build
+          # tools) stay out of the cross link path.
+          "3rdparty-linux-aarch64" = pkgs.pkgsCross.aarch64-multiplatform.mkShell {
+            nativeBuildInputs = with pkgs; [
+              gnumake perl nasm
+              curl gnutar xz gzip
+              pkgsCross.aarch64-multiplatform.buildPackages.gcc
+              pkgsCross.aarch64-multiplatform.buildPackages.binutils
+              pkgsCross.aarch64-multiplatform.buildPackages.pkg-config
+            ];
+            shellHook = ''
+              export CROSS_PREFIX="aarch64-unknown-linux-gnu-"
+              echo "Yetty 3rdparty-build (linux-aarch64) — CROSS_PREFIX=$CROSS_PREFIX"
+            '';
+          };
+
+          # macOS native — clang comes from Xcode on the host runner.
+          "3rdparty-macos-x86_64" = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              gnumake perl nasm
+              curl gnutar xz gzip
+              pkg-config
+            ];
+            shellHook = "echo 'Yetty 3rdparty-build (macos-x86_64)'";
+          };
+
+          "3rdparty-macos-arm64" = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              gnumake perl nasm
+              curl gnutar xz gzip
+              pkg-config
+            ];
+            shellHook = "echo 'Yetty 3rdparty-build (macos-arm64)'";
+          };
+
+          # iOS — compilation goes through `xcrun -sdk <iphoneos|iphonesimulator>`
+          # at build time; no nasm needed (arm64 asm is via clang).
+          "3rdparty-ios-arm64" = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              gnumake perl
+              curl gnutar xz gzip
+              pkg-config
+            ];
+            shellHook = "echo 'Yetty 3rdparty-build (ios-arm64)'";
+          };
+
+          "3rdparty-ios-x86_64" = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              gnumake perl nasm
+              curl gnutar xz gzip
+              pkg-config
+            ];
+            shellHook = "echo 'Yetty 3rdparty-build (ios-x86_64 simulator)'";
+          };
+
+          # Android — NDK-direct cross. Same shape as assets-qemu-android-*:
+          # the nix shell just supplies build-side tooling; the NDK comes in
+          # via $ANDROID_NDK_HOME and PATH additions below.
+          "3rdparty-android-arm64-v8a" = pkgs.mkShell {
+            buildInputs = commonDeps ++ androidDeps ++ (with pkgs; [
+              gnumake perl
+              curl gnutar xz gzip
+              pkg-config
+            ]);
+            ANDROID_NDK_HOME = androidNdk;
+            ANDROID_API = "26";
+            shellHook = ''
+              export PATH="${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+              echo "Yetty 3rdparty-build (android-arm64-v8a) — NDK direct"
+            '';
+          };
+
+          "3rdparty-android-x86_64" = pkgs.mkShell {
+            buildInputs = commonDeps ++ androidDeps ++ (with pkgs; [
+              gnumake perl nasm
+              curl gnutar xz gzip
+              pkg-config
+            ]);
+            ANDROID_NDK_HOME = androidNdk;
+            ANDROID_API = "26";
+            shellHook = ''
+              export PATH="${androidNdk}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+              echo "Yetty 3rdparty-build (android-x86_64) — NDK direct"
+            '';
+          };
+
+          # WebAssembly via emscripten. emmake wraps make to inject emcc/em++.
+          "3rdparty-webasm" = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              emscripten gnumake perl python3 nodejs
+              curl gnutar xz gzip
+              pkg-config
+            ];
+            EMSDK = "${pkgs.emscripten}/share/emscripten";
+            EM_CONFIG = "${pkgs.emscripten}/share/emscripten/.emscripten";
+            EM_CACHE = "/tmp/emscripten-cache";
+            shellHook = "echo 'Yetty 3rdparty-build (webasm)'";
+          };
+
           # Web/Emscripten build shell
           web = pkgs.mkShell {
             buildInputs = commonDeps ++ [

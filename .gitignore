@@ -1,7 +1,8 @@
-# Build directories
-build-*
-!build-tools
-!build-tools/**
+# Build directories — anchor to repo root so we don't accidentally swallow
+# files named `build-*` deeper in the tree (e.g. .github/workflows/build-*.yml,
+# build-tools/web/build-toybox.sh, build-tools/3rdparty/<lib>/build.sh, …).
+/build-*
+!/build-tools
 tmp/
 
 # IDE/editor
