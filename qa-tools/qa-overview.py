@@ -30,9 +30,10 @@ from _common import (  # noqa: E402
 )
 
 
-def _load(stem: str, attr: str):
-    """Load a sibling hyphenated script as a module and return one of its attrs."""
-    path = _here / f"{stem}.py"
+def _load(rel_path: str, attr: str):
+    """Load a hyphenated script under qa-tools/ as a module and return an attr."""
+    path = _here / rel_path
+    stem = path.stem
     spec = importlib.util.spec_from_file_location(stem.replace("-", "_"), path)
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -40,13 +41,13 @@ def _load(stem: str, attr: str):
     return getattr(mod, attr)
 
 
-check_format = _load("check-format", "check_format")
-check_cppcheck = _load("check-cppcheck", "check_cppcheck")
-check_clang_tidy = _load("check-clang-tidy", "check_clang_tidy")
-check_scan_build = _load("check-scan-build", "check_scan_build")
-check_osv_scanner = _load("check-osv-scanner", "check_osv_scanner")
-check_trivy = _load("check-trivy", "check_trivy")
-check_grype = _load("check-grype", "check_grype")
+check_format = _load("analysis/check-format.py", "check_format")
+check_cppcheck = _load("analysis/check-cppcheck.py", "check_cppcheck")
+check_clang_tidy = _load("analysis/check-clang-tidy.py", "check_clang_tidy")
+check_scan_build = _load("analysis/check-scan-build.py", "check_scan_build")
+check_osv_scanner = _load("analysis/check-osv-scanner.py", "check_osv_scanner")
+check_trivy = _load("analysis/check-trivy.py", "check_trivy")
+check_grype = _load("analysis/check-grype.py", "check_grype")
 
 RULE = "=" * 72
 
@@ -108,7 +109,7 @@ def dump_format(res: CheckResult) -> None:
         for mod, n in sorted(modules.items(), key=lambda kv: -kv[1])[:8]:
             print(f"    {n:6d}  {mod}")
     print()
-    print("  Fix:  qa-tools/apply-format.py")
+    print("  Fix:  qa-tools/refactoring/code-format/apply-format.py")
     print(f"  Full diff:  tmp/qa/check-format.diff")
 
 
