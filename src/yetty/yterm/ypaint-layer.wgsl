@@ -5,12 +5,12 @@
 // This layer is rendered separately, then composited with text-layer.
 //
 // Generated constants (prepended by binder):
-//   uniforms.ypaint_scroll_ypaint_grid_size
-//   uniforms.ypaint_scroll_ypaint_cell_size
-//   uniforms.ypaint_scroll_ypaint_rolling_row_0
-//   uniforms.ypaint_scroll_ypaint_prim_count
-//   ypaint_scroll_grid_offset
-//   ypaint_scroll_prims_offset
+//   uniforms.ypaint_ypaint_grid_size
+//   uniforms.ypaint_ypaint_cell_size
+//   uniforms.ypaint_ypaint_rolling_row_0
+//   uniforms.ypaint_ypaint_prim_count
+//   ypaint_grid_offset
+//   ypaint_prims_offset
 
 // RENDER_LAYER_BINDINGS_PLACEHOLDER
 
@@ -132,9 +132,9 @@ fn ypaint_unpack_color(packed: u32) -> vec4<f32> {
 // =============================================================================
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let prim_count = uniforms.ypaint_scroll_ypaint_prim_count;
-    let grid_size = uniforms.ypaint_scroll_ypaint_grid_size;
-    let cell_size = uniforms.ypaint_scroll_ypaint_cell_size;
+    let prim_count = uniforms.ypaint_ypaint_prim_count;
+    let grid_size = uniforms.ypaint_ypaint_grid_size;
+    let cell_size = uniforms.ypaint_ypaint_cell_size;
 
     let grid_width = u32(grid_size.x);
     let grid_height = u32(grid_size.y);
@@ -144,8 +144,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);  // Fully transparent
     }
 
-    let grid_offset = ypaint_scroll_grid_offset;
-    let prims_offset = ypaint_scroll_prims_offset;
+    let grid_offset = ypaint_grid_offset;
+    let prims_offset = ypaint_prims_offset;
 
     // Grid pixel bounds
     let grid_pixel_w = grid_size.x * cell_size.x;
@@ -158,10 +158,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     //                 cells growing in the text layer (they multiply from 0).
     // Both run BEFORE cell lookup / SDF eval, so edges stay crisp at any
     // zoom level — the shader re-samples SDF math per fragment.
-    let vz_scale = uniforms.ypaint_scroll_ypaint_visual_zoom_scale;
-    let vz_off   = uniforms.ypaint_scroll_ypaint_visual_zoom_off;
-    let cz_scale = uniforms.ypaint_scroll_ypaint_cell_zoom_scale;
-    let cz_off   = uniforms.ypaint_scroll_ypaint_cell_zoom_off;
+    let vz_scale = uniforms.ypaint_ypaint_visual_zoom_scale;
+    let vz_off   = uniforms.ypaint_ypaint_visual_zoom_off;
+    let cz_scale = uniforms.ypaint_ypaint_cell_zoom_scale;
+    let cz_off   = uniforms.ypaint_ypaint_cell_zoom_off;
     let vz_center = vec2<f32>(grid_pixel_w * 0.5, grid_pixel_h * 0.5);
     let after_visual = (input.position.xy - vz_center) / max(vz_scale, 0.0001)
                      + vz_center + vz_off;
@@ -201,7 +201,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         // Compute primitive's screen Y offset from its rolling_row
         // Use signed arithmetic to handle scrolling past the primitive
         let rolling_row = ypaint_read_rolling_row(prim_offset);
-        let rolling_row_0 = uniforms.ypaint_scroll_ypaint_rolling_row_0;
+        let rolling_row_0 = uniforms.ypaint_ypaint_rolling_row_0;
         let y_offset = f32(i32(rolling_row) - i32(rolling_row_0)) * cell_size.y;
 
         let prim_type = ypaint_read_prim_type(prim_offset);

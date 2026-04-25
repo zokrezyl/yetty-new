@@ -344,10 +344,12 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_ypaint_layer_create(
       layer->canvas, on_canvas_cursor_set,
       (struct yetty_ycore_void_result *)layer);
 
-  /* Resource set */
-  strncpy(layer->rs.namespace,
-          scrolling_mode ? "ypaint_scroll" : "ypaint_overlay",
-          YETTY_YRENDER_NAME_MAX - 1);
+  /* Resource set. Both scrolling and overlay layers share one namespace —
+   * each layer has its own binder/render-target, so the names cannot collide
+   * across layers, and the shader source (ypaint-layer.wgsl) is identical for
+   * both modes. The shader references ypaint_* symbols; binder prefixes them
+   * with this namespace at compile time. */
+  strncpy(layer->rs.namespace, "ypaint", YETTY_YRENDER_NAME_MAX - 1);
 
   /* Buffer 0: grid staging (cell-to-primitive lookup).
    * children_count is recomputed every frame in get_gpu_resource_set from
