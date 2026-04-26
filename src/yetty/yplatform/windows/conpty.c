@@ -67,7 +67,8 @@ struct win_pty_factory {
 /* Forward declarations for factory */
 static void win_pty_factory_destroy(struct yetty_yplatform_pty_factory *self);
 static struct yetty_yplatform_pty_result win_pty_factory_create_pty(
-    struct yetty_yplatform_pty_factory *self);
+    struct yetty_yplatform_pty_factory *self,
+    struct yetty_ycore_event_loop *event_loop);
 
 /* Factory ops table */
 static const struct yetty_yplatform_pty_factory_ops win_pty_factory_ops = {
@@ -372,7 +373,8 @@ static void win_pty_factory_destroy(struct yetty_yplatform_pty_factory *self)
 }
 
 static struct yetty_yplatform_pty_result win_pty_factory_create_pty(
-    struct yetty_yplatform_pty_factory *self)
+    struct yetty_yplatform_pty_factory *self,
+    struct yetty_ycore_event_loop *event_loop)
 {
     struct win_pty_factory *factory = container_of(self, struct win_pty_factory, base);
     struct yetty_yconfig *config = factory->config;
@@ -393,10 +395,11 @@ static struct yetty_yplatform_pty_result win_pty_factory_create_pty(
                 return YETTY_ERR(yetty_yplatform_pty, "QEMU telnet not ready");
             }
         }
-        return telnet_pty_create("127.0.0.1", QEMU_TELNET_PORT);
+        return telnet_pty_create("127.0.0.1", QEMU_TELNET_PORT, event_loop);
     }
 
     /* Default: native ConPTY (cmd.exe / pwsh) */
+    (void)event_loop;
     return win_conpty_create(factory->config);
 }
 

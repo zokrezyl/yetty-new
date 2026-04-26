@@ -411,7 +411,8 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
       yetty_context->app_context.pty_factory;
   if (pty_factory && pty_factory->ops && pty_factory->ops->create_pty) {
     struct yetty_yplatform_pty_result pty_res =
-        pty_factory->ops->create_pty(pty_factory);
+        pty_factory->ops->create_pty(pty_factory,
+                                     terminal->context.yetty_context.event_loop);
     if (YETTY_IS_OK(pty_res)) {
       terminal->context.pty = pty_res.value;
       ydebug("terminal_create: PTY created at %p",

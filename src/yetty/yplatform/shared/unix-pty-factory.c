@@ -22,7 +22,8 @@ struct unix_pty_factory {
 /* Forward declarations */
 static void unix_pty_factory_destroy(struct yetty_yplatform_pty_factory *self);
 static struct yetty_yplatform_pty_result unix_pty_factory_create_pty(
-    struct yetty_yplatform_pty_factory *self);
+    struct yetty_yplatform_pty_factory *self,
+    struct yetty_ycore_event_loop *event_loop);
 
 /* Factory ops table */
 static const struct yetty_yplatform_pty_factory_ops unix_pty_factory_ops = {
@@ -43,7 +44,8 @@ static void unix_pty_factory_destroy(struct yetty_yplatform_pty_factory *self)
 }
 
 static struct yetty_yplatform_pty_result unix_pty_factory_create_pty(
-    struct yetty_yplatform_pty_factory *self)
+    struct yetty_yplatform_pty_factory *self,
+    struct yetty_ycore_event_loop *event_loop)
 {
     struct unix_pty_factory *factory = (struct unix_pty_factory *)self;
     struct yetty_yconfig *config = factory->config;
@@ -71,10 +73,11 @@ static struct yetty_yplatform_pty_result unix_pty_factory_create_pty(
                 return YETTY_ERR(yetty_yplatform_pty, "QEMU telnet not ready");
             }
         }
-        return telnet_pty_create("127.0.0.1", QEMU_TELNET_PORT);
+        return telnet_pty_create("127.0.0.1", QEMU_TELNET_PORT, event_loop);
     }
 
     /* Default: native forkpty */
+    (void)event_loop;
     return fork_pty_create(config);
 }
 
