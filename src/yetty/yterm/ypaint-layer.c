@@ -140,6 +140,10 @@ static void ypaint_layer_set_cursor(struct yetty_yterm_terminal_layer *self,
                                     int col, int row);
 static struct yetty_ycore_void_result ypaint_layer_render(
     struct yetty_yterm_terminal_layer *self, struct yetty_yrender_target *target);
+static uint32_t ypaint_layer_get_live_anchor(
+    const struct yetty_yterm_terminal_layer *self);
+static void ypaint_layer_set_view_top(struct yetty_yterm_terminal_layer *self,
+                                      int active, uint32_t view_top_total_idx);
 
 /* Canvas scroll callback - propagate to other layers */
 static struct yetty_ycore_void_result
@@ -257,6 +261,8 @@ static const struct yetty_yterm_terminal_layer_ops ypaint_layer_ops = {
     .on_char = ypaint_layer_on_char,
     .scroll = ypaint_layer_scroll,
     .set_cursor = ypaint_layer_set_cursor,
+    .get_live_anchor = ypaint_layer_get_live_anchor,
+    .set_view_top = ypaint_layer_set_view_top,
 };
 
 /* Create */
@@ -704,6 +710,34 @@ static struct yetty_ycore_void_result ypaint_layer_scroll(
     layer->base.request_render_fn(layer->base.request_render_userdata);
 
   return YETTY_OK_VOID();
+}
+
+/* Live anchor — canvas-line index of the live viewport top, ignoring any
+ * scrollback override. The terminal uses this to convert mouse-wheel deltas
+ * into a stable absolute view_top. */
+static uint32_t ypaint_layer_get_live_anchor(
+    const struct yetty_yterm_terminal_layer *self) {
+  const struct yetty_yterm_ypaint_layer *layer =
+      (const struct yetty_yterm_ypaint_layer *)self;
+  if (!layer->canvas)
+    return 0;
+  return yetty_ypaint_canvas_live_rolling_row_0(
+      (struct yetty_ypaint_canvas *)layer->canvas);
+}
+
+/* Pin / release the canvas's viewport for tmux-style scrollback view. */
+static void ypaint_layer_set_view_top(struct yetty_yterm_terminal_layer *self,
+                                      int active,
+                                      uint32_t view_top_total_idx) {
+  struct yetty_yterm_ypaint_layer *layer =
+      (struct yetty_yterm_ypaint_layer *)self;
+  if (!layer->canvas)
+    return;
+  yetty_ypaint_canvas_set_view_top(layer->canvas, active ? true : false,
+                                   view_top_total_idx);
+  layer->base.dirty = 1;
+  if (layer->base.request_render_fn)
+    layer->base.request_render_fn(layer->base.request_render_userdata);
 }
 
 /* Set cursor - called when another layer moves cursor */

@@ -64,8 +64,25 @@ yetty_ypaint_canvas_set_cursor_pos(struct yetty_ypaint_canvas *canvas,
 //=============================================================================
 
 // Get rolling_row_0: absolute row of visible line 0 (pass to shader as
-// row_origin)
+// row_origin). Honors any active view_top override (scrollback view), so
+// the shader's coordinate frame matches what rebuild_grid laid out.
 uint32_t yetty_ypaint_canvas_rolling_row_0(struct yetty_ypaint_canvas *canvas);
+
+// The live rolling_row_0 — the canvas-line index that *would* be at the
+// top of the viewport if no scrollback override were active. Use this when
+// you need the live anchor (e.g. to translate a relative scroll-back
+// request into an absolute view_top).
+uint32_t yetty_ypaint_canvas_live_rolling_row_0(
+    struct yetty_ypaint_canvas *canvas);
+
+// Pin the visible viewport to an absolute canvas-line index, freezing the
+// current scrollback content even as new prims keep arriving (active=true).
+// Pass active=false to drop the override and resume tracking the live
+// rolling_row_0. While active, scroll_lines still advances the live anchor
+// in the background — it just doesn't move the visible viewport.
+struct yetty_ycore_void_result
+yetty_ypaint_canvas_set_view_top(struct yetty_ypaint_canvas *canvas,
+                                 bool active, uint32_t view_top);
 
 //=============================================================================
 // Buffer management

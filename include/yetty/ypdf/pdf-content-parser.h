@@ -35,7 +35,10 @@ extern "C" {
  * Types exposed to callbacks
  *===========================================================================*/
 
-/* Text state per PDF spec 9.3 (snapshot passed to the text callback). */
+/* Text state per PDF spec 9.3 (snapshot passed to the text callback).
+ * fill_r/g/b are pulled from the graphics state — PDF text colour is the
+ * non-stroking colour set via rg / RG / g / G / k / sc / scn. Without this
+ * the renderer can't tell black-on-white body text from coloured runs. */
 struct yetty_ypdf_text_state {
     float char_spacing;         /* Tc */
     float word_spacing;         /* Tw */
@@ -44,6 +47,7 @@ struct yetty_ypdf_text_state {
     float font_size;            /* Tfs from Tf */
     float rise;                 /* Ts */
     const char *font_name;      /* PDF font tag, e.g. "/F1" */
+    float fill_r, fill_g, fill_b;  /* non-stroking RGB, [0..1] */
 };
 
 enum yetty_ypdf_paint_mode {

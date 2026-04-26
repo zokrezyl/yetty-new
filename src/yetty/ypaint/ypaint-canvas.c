@@ -118,8 +118,16 @@ struct yetty_ypaint_canvas {
   uint16_t cursor_col;
   uint16_t cursor_row;
 
-  // Rolling row of visible line 0 (increments on scroll)
+  // Rolling row of visible line 0 (increments on scroll). Always tracks
+  // the *live* viewport top — never reset by scrollback view.
   uint32_t rolling_row_0;
+
+  // Scrollback view override. While view_top_override_active is true, the
+  // shader uniform and rebuild_grid use view_top_override instead of
+  // rolling_row_0, so the user sees a frozen historical viewport even as
+  // rolling_row_0 advances in the background due to new content.
+  bool view_top_override_active;
+  uint32_t view_top_override;
 
   // Lines
   struct yetty_ypaint_canvas_line_buffer lines;
@@ -731,9 +739,37 @@ yetty_ypaint_canvas_cursor_row(struct yetty_ypaint_canvas *canvas) {
 // Rolling offset
 //=============================================================================
 
+/* Effective viewport top: returns the override during scrollback view,
+ * otherwise the live rolling_row_0. Both rebuild_grid and the shader
+ * uniform must read through this so the GPU and the cell layout stay in
+ * sync (the shader's y_offset = (prim.rolling_row - row0) needs row0 to
+ * match the canvas-line that gpu_y=0 was filled from). */
+static uint32_t canvas_effective_view_top(
+    const struct yetty_ypaint_canvas *canvas) {
+  if (canvas->view_top_override_active)
+    return canvas->view_top_override;
+  return canvas->rolling_row_0;
+}
+
 uint32_t yetty_ypaint_canvas_rolling_row_0(
     struct yetty_ypaint_canvas *canvas) {
+  return canvas ? canvas_effective_view_top(canvas) : 0;
+}
+
+uint32_t yetty_ypaint_canvas_live_rolling_row_0(
+    struct yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->rolling_row_0 : 0;
+}
+
+struct yetty_ycore_void_result
+yetty_ypaint_canvas_set_view_top(struct yetty_ypaint_canvas *canvas,
+                                 bool active, uint32_t view_top) {
+  if (!canvas)
+    return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
+  canvas->view_top_override_active = active;
+  canvas->view_top_override = view_top;
+  canvas->dirty = true;
+  return YETTY_OK_VOID();
 }
 
 //=============================================================================
@@ -1180,11 +1216,16 @@ yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
             ypaint_canvas_materialize_blob_font(canvas, fv.ttf, fv.ttf_len,
                                                 hint);
         if (YETTY_IS_ERR(fr)) {
-          yerror("add_buffer: font materialize failed: %s", fr.error.msg);
-          final_status = YETTY_ERR(yetty_ycore_void, fr.error.msg);
-          break;
-        }
-        if (fv.font_id >= 0) {
+          /* Failure is non-fatal. PDFs frequently embed tiny subsetted
+           * symbol fonts that msdf-gen rejects ("empty charset" etc.).
+           * Skip the font; spans referencing this font_id will fall back
+           * to the canvas default in the TEXT_SPAN branch below, so the
+           * rest of the buffer still renders and the auto-scroll still
+           * fires at the end. */
+          ywarn("add_buffer: font materialize failed (font_id=%d hint='%s'): "
+                "%s — skipping, spans will use default font",
+                fv.font_id, hint, fr.error.msg);
+        } else if (fv.font_id >= 0) {
           font_map_grow(&fonts_map, (uint32_t)fv.font_id + 1);
           fonts_map.fonts[fv.font_id] = fr.value;
         } else {
@@ -1248,15 +1289,40 @@ yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
   /* Scroll the viewport so the cursor lands on the last visible row.
    * `target_cursor_canvas_line` is one row below the last placed prim,
    * matching text-mode behavior where the cursor sits below the content
-   * just emitted. Lines stay in canvas->lines (scrollback). */
+   * just emitted. Lines stay in canvas->lines (scrollback).
+   *
+   * Sparse-tail correction: PDFs often have a "back cover" canvas-line
+   * that contains only a page number / footer-mark — using it as the
+   * scroll anchor parks the viewport on near-empty rows above it (e.g.
+   * optimizing_cpp.pdf: only 8/42 visible rows had any prim). Walk back
+   * from max_row_seen past rows with fewer than MIN_DENSE_PRIMS prims
+   * placed directly on them; use the first row that crosses the
+   * threshold as the effective end-of-content for the scroll calc. The
+   * cursor still tracks max_row_seen+1, which may end up below the
+   * visible viewport — that's fine, it'll get pulled into view by the
+   * next text-mode scroll on the following emit. */
   if (canvas->scrolling_mode) {
+    const uint32_t MIN_DENSE_PRIMS = 10;
+    uint32_t effective_max_row = max_row_seen;
+    while (effective_max_row > initial_canvas_line) {
+      struct yetty_ypaint_canvas_grid_line *l =
+          line_buffer_get(&canvas->lines, effective_max_row);
+      if (l && l->prims.count >= MIN_DENSE_PRIMS)
+        break;
+      effective_max_row--;
+    }
+
     uint32_t target_cursor_canvas_line = max_row_seen + 1;
+    uint32_t scroll_anchor_canvas_line = effective_max_row + 1;
     uint32_t viewport_bottom =
         canvas->rolling_row_0 + canvas->grid_size.rows - 1;
 
-    if (target_cursor_canvas_line > viewport_bottom) {
+    ydebug("add_buffer: scroll_anchor=%u (effective_max=%u, max_row_seen=%u)",
+           scroll_anchor_canvas_line, effective_max_row, max_row_seen);
+
+    if (scroll_anchor_canvas_line > viewport_bottom) {
       uint32_t lines_to_scroll =
-          target_cursor_canvas_line - viewport_bottom;
+          scroll_anchor_canvas_line - viewport_bottom;
 
       if (!canvas->scroll_callback) {
         yerror("add_buffer: scroll_callback is NULL");
@@ -1405,11 +1471,11 @@ struct yetty_ycore_void_result yetty_ypaint_canvas_rebuild_grid(
   }
 
   /* Build a fixed-size GPU grid for the visible viewport only. The viewport
-   * spans canvas-line indices [rolling_row_0 .. rolling_row_0 + grid_rows).
-   * Off-screen lines stay in canvas->lines as scrollback. */
+   * spans canvas-line indices [view_top .. view_top + grid_rows). In live
+   * mode that's rolling_row_0; in scrollback view it's the override. */
   uint32_t grid_w = canvas->grid_size.cols;
   uint32_t grid_h = canvas->grid_size.rows;
-  uint32_t window_top = canvas->rolling_row_0;
+  uint32_t window_top = canvas_effective_view_top(canvas);
 
   /* Cells beyond grid_size.cols can exist on lines that grew past the
    * default width; widen grid_w to accommodate the visible window's
@@ -1436,12 +1502,22 @@ struct yetty_ycore_void_result yetty_ypaint_canvas_rebuild_grid(
   ensure_grid_staging(canvas, num_cells * 4);
   canvas->grid_staging_count = num_cells;
 
+  uint32_t cells_with_prims = 0;
+  uint32_t total_refs_in_window = 0;
+  uint32_t max_refs_in_one_cell = 0;
+  uint32_t lines_with_prims_in_window = 0;
+  /* Per-row detail kept on the stack — grid_h is small (≤ ~256). */
+  uint32_t row_ref_counts[256] = {0};
+  uint32_t row_line_prims[256] = {0};
+
   for (uint32_t gpu_y = 0; gpu_y < grid_h; gpu_y++) {
     uint32_t canvas_y = window_top + gpu_y;
     bool has_line = canvas_y < canvas->lines.count;
     struct yetty_ypaint_canvas_grid_line *line =
         has_line ? line_buffer_get(&canvas->lines, canvas_y) : NULL;
     uint32_t line_cell_count = line ? line->cell_count : 0;
+    uint32_t row_refs = 0;
+    if (line && gpu_y < 256) row_line_prims[gpu_y] = line->prims.count;
 
     for (uint32_t x = 0; x < grid_w; x++) {
       uint32_t cell_idx = gpu_y * grid_w + x;
@@ -1471,7 +1547,29 @@ struct yetty_ycore_void_result yetty_ypaint_canvas_rebuild_grid(
       }
 
       canvas->grid_staging[count_pos] = count;
+      if (count > 0) cells_with_prims++;
+      if (count > max_refs_in_one_cell) max_refs_in_one_cell = count;
+      row_refs += count;
     }
+
+    total_refs_in_window += row_refs;
+    if (row_refs > 0) lines_with_prims_in_window++;
+    if (gpu_y < 256) row_ref_counts[gpu_y] = row_refs;
+  }
+
+  ydebug("rebuild_grid: window=[%u..%u] grid=%ux%u cells_with_prims=%u/%u "
+         "lines_with_prims=%u total_refs=%u max_refs/cell=%u",
+         window_top, window_top + grid_h - 1, grid_w, grid_h,
+         cells_with_prims, grid_w * grid_h,
+         lines_with_prims_in_window, total_refs_in_window,
+         max_refs_in_one_cell);
+  /* Per-row breakdown so we can see which canvas-lines have prims and
+   * which rows of the screen end up blank. */
+  for (uint32_t gpu_y = 0; gpu_y < grid_h && gpu_y < 256; gpu_y++) {
+    if (row_ref_counts[gpu_y] > 0 || row_line_prims[gpu_y] > 0)
+      ydebug("rebuild_grid:   gpu_y=%2u canvas_y=%u line.prims=%u refs=%u",
+             gpu_y, window_top + gpu_y,
+             row_line_prims[gpu_y], row_ref_counts[gpu_y]);
   }
 
   free(line_base_prim_idx);
@@ -1618,6 +1716,8 @@ yetty_ypaint_canvas_clear(struct yetty_ypaint_canvas *canvas) {
   canvas->cursor_col = 0;
   canvas->cursor_row = 0;
   canvas->rolling_row_0 = 0;
+  canvas->view_top_override_active = false;
+  canvas->view_top_override = 0;
   canvas->dirty = true;
   return YETTY_OK_VOID();
 }
@@ -1662,7 +1762,7 @@ struct yetty_font_font *yetty_ypaint_canvas_get_default_font(
  *   [rolling_row_0 .. rolling_row_0 + grid_size.rows). */
 static void canvas_visible_window(const struct yetty_ypaint_canvas *canvas,
                                   uint32_t *out_top, uint32_t *out_end) {
-  uint32_t top = canvas->rolling_row_0;
+  uint32_t top = canvas_effective_view_top(canvas);
   uint32_t end = top + canvas->grid_size.rows;
   if (end > canvas->lines.count)
     end = canvas->lines.count;
