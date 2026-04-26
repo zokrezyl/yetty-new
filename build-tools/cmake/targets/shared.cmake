@@ -358,7 +358,7 @@ function(yetty_embed_assets TARGET)
     file(MAKE_DIRECTORY "${INCBIN_DATA_DIR}/msdf-fonts")
 
     # Copy logo
-    file(COPY "${YETTY_ROOT}/docs/logo.jpeg" DESTINATION "${INCBIN_DATA_DIR}")
+    file(COPY "${YETTY_ROOT}/docs/logo-2.jpeg" DESTINATION "${INCBIN_DATA_DIR}")
 
     # Collect shaders from module locations
     file(COPY "${YETTY_ROOT}/src/yetty/yterm/text-layer.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
