@@ -260,19 +260,14 @@ CROSS
     ;;
 
 windows-x86_64)
-    # Native MSVC — caller must have vcvarsall'd the shell.
-    CROSS_FILE="$WORK_DIR/native-windows.ini"
-    cat > "$CROSS_FILE" <<CROSS
-[binaries]
-c = 'cl'
-cpp = 'cl'
-ar = 'lib'
-
-[built-in options]
-c_args = []
-cpp_args = []
-CROSS
-    CROSS_FLAG="--native-file $CROSS_FILE"
+    # Native MSYS2 CLANG64 — caller must already be in the CLANG64 shell
+    # (CI: msys2/setup-msys2 with msystem: CLANG64). dav1d's regular
+    # native meson detection already picks up clang/llvm-ar from
+    # /clang64/bin without a cross/native file, so leave $CROSS_FLAG empty.
+    if [ "${MSYSTEM:-}" != "CLANG64" ]; then
+        echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=${MSYSTEM:-unset})" >&2
+        exit 1
+    fi
     ;;
 
 *)
@@ -322,13 +317,12 @@ fi
 #-----------------------------------------------------------------------------
 # Verify install layout
 #-----------------------------------------------------------------------------
-case "$TARGET_PLATFORM" in
-    windows-x86_64) _LIB="$INSTALL_DIR/lib/dav1d.lib"  ;;
-    *)              _LIB="$INSTALL_DIR/lib/libdav1d.a" ;;
-esac
-# meson on windows also writes libdav1d.a in some configurations — accept either.
-if [ ! -f "$_LIB" ] && [ -f "$INSTALL_DIR/lib/libdav1d.a" ]; then
-    _LIB="$INSTALL_DIR/lib/libdav1d.a"
+# MSYS2 CLANG64 produces libdav1d.a (mingw convention) — same as POSIX
+# targets. The earlier MSVC case used dav1d.lib; we keep the fallback so
+# any future toolchain switch still validates.
+_LIB="$INSTALL_DIR/lib/libdav1d.a"
+if [ ! -f "$_LIB" ] && [ -f "$INSTALL_DIR/lib/dav1d.lib" ]; then
+    _LIB="$INSTALL_DIR/lib/dav1d.lib"
 fi
 if [ ! -f "$_LIB" ]; then
     echo "missing library: $_LIB" >&2

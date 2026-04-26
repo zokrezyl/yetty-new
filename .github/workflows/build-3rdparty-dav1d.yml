@@ -41,8 +41,8 @@ jobs:
           echo "tag=lib-dav1d-$V" >> "$GITHUB_OUTPUT"
 
   #===========================================================================
-  # Linux/Android/webasm — Ubuntu cross.
-  # (windows-x86_64 omitted — needs MSVC self-hosted runner.)
+  # Linux/Android/webasm — Ubuntu cross. windows-x86_64 builds on a
+  # GitHub-hosted windows-latest runner via msys2/setup-msys2 (CLANG64).
   #===========================================================================
   build-linux-cross:
     needs: resolve
@@ -119,6 +119,46 @@ jobs:
           TARGET_PLATFORM="${{ matrix.target }}" \
           OUTPUT_DIR="$PWD/out" \
           ./build-tools/3rdparty/dav1d/build.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          files: out/dav1d-${{ matrix.target }}-*.tar.gz
+          fail_on_unmatched_files: true
+
+  build-windows:
+    needs: resolve
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: false
+          install: >-
+            git
+            tar
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-lld
+            mingw-w64-clang-x86_64-meson
+            mingw-w64-clang-x86_64-ninja
+            mingw-w64-clang-x86_64-pkgconf
+            mingw-w64-clang-x86_64-nasm
+
+      - name: Build dav1d for ${{ matrix.target }}
+        shell: msys2 {0}
+        env:
+          TARGET_PLATFORM: ${{ matrix.target }}
+        run: |
+          mkdir -p out
+          OUTPUT_DIR="$(pwd)/out" \
+              ./build-tools/3rdparty/dav1d/build.sh
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve.outputs.tag }}
