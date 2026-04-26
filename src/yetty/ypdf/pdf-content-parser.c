@@ -422,6 +422,9 @@ static struct yetty_ypdf_text_state snapshot_text_state(
     ts.font_size = p->gstate.font_size;
     ts.rise = p->gstate.rise;
     ts.font_name = p->gstate.font_name;
+    ts.fill_r = p->gstate.fill_r;
+    ts.fill_g = p->gstate.fill_g;
+    ts.fill_b = p->gstate.fill_b;
     return ts;
 }
 

@@ -1289,15 +1289,40 @@ yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
   /* Scroll the viewport so the cursor lands on the last visible row.
    * `target_cursor_canvas_line` is one row below the last placed prim,
    * matching text-mode behavior where the cursor sits below the content
-   * just emitted. Lines stay in canvas->lines (scrollback). */
+   * just emitted. Lines stay in canvas->lines (scrollback).
+   *
+   * Sparse-tail correction: PDFs often have a "back cover" canvas-line
+   * that contains only a page number / footer-mark — using it as the
+   * scroll anchor parks the viewport on near-empty rows above it (e.g.
+   * optimizing_cpp.pdf: only 8/42 visible rows had any prim). Walk back
+   * from max_row_seen past rows with fewer than MIN_DENSE_PRIMS prims
+   * placed directly on them; use the first row that crosses the
+   * threshold as the effective end-of-content for the scroll calc. The
+   * cursor still tracks max_row_seen+1, which may end up below the
+   * visible viewport — that's fine, it'll get pulled into view by the
+   * next text-mode scroll on the following emit. */
   if (canvas->scrolling_mode) {
+    const uint32_t MIN_DENSE_PRIMS = 10;
+    uint32_t effective_max_row = max_row_seen;
+    while (effective_max_row > initial_canvas_line) {
+      struct yetty_ypaint_canvas_grid_line *l =
+          line_buffer_get(&canvas->lines, effective_max_row);
+      if (l && l->prims.count >= MIN_DENSE_PRIMS)
+        break;
+      effective_max_row--;
+    }
+
     uint32_t target_cursor_canvas_line = max_row_seen + 1;
+    uint32_t scroll_anchor_canvas_line = effective_max_row + 1;
     uint32_t viewport_bottom =
         canvas->rolling_row_0 + canvas->grid_size.rows - 1;
 
-    if (target_cursor_canvas_line > viewport_bottom) {
+    ydebug("add_buffer: scroll_anchor=%u (effective_max=%u, max_row_seen=%u)",
+           scroll_anchor_canvas_line, effective_max_row, max_row_seen);
+
+    if (scroll_anchor_canvas_line > viewport_bottom) {
       uint32_t lines_to_scroll =
-          target_cursor_canvas_line - viewport_bottom;
+          scroll_anchor_canvas_line - viewport_bottom;
 
       if (!canvas->scroll_callback) {
         yerror("add_buffer: scroll_callback is NULL");
@@ -1481,6 +1506,9 @@ struct yetty_ycore_void_result yetty_ypaint_canvas_rebuild_grid(
   uint32_t total_refs_in_window = 0;
   uint32_t max_refs_in_one_cell = 0;
   uint32_t lines_with_prims_in_window = 0;
+  /* Per-row detail kept on the stack — grid_h is small (≤ ~256). */
+  uint32_t row_ref_counts[256] = {0};
+  uint32_t row_line_prims[256] = {0};
 
   for (uint32_t gpu_y = 0; gpu_y < grid_h; gpu_y++) {
     uint32_t canvas_y = window_top + gpu_y;
@@ -1489,6 +1517,7 @@ struct yetty_ycore_void_result yetty_ypaint_canvas_rebuild_grid(
         has_line ? line_buffer_get(&canvas->lines, canvas_y) : NULL;
     uint32_t line_cell_count = line ? line->cell_count : 0;
     uint32_t row_refs = 0;
+    if (line && gpu_y < 256) row_line_prims[gpu_y] = line->prims.count;
 
     for (uint32_t x = 0; x < grid_w; x++) {
       uint32_t cell_idx = gpu_y * grid_w + x;
@@ -1525,6 +1554,7 @@ struct yetty_ycore_void_result yetty_ypaint_canvas_rebuild_grid(
 
     total_refs_in_window += row_refs;
     if (row_refs > 0) lines_with_prims_in_window++;
+    if (gpu_y < 256) row_ref_counts[gpu_y] = row_refs;
   }
 
   ydebug("rebuild_grid: window=[%u..%u] grid=%ux%u cells_with_prims=%u/%u "
@@ -1533,6 +1563,14 @@ struct yetty_ycore_void_result yetty_ypaint_canvas_rebuild_grid(
          cells_with_prims, grid_w * grid_h,
          lines_with_prims_in_window, total_refs_in_window,
          max_refs_in_one_cell);
+  /* Per-row breakdown so we can see which canvas-lines have prims and
+   * which rows of the screen end up blank. */
+  for (uint32_t gpu_y = 0; gpu_y < grid_h && gpu_y < 256; gpu_y++) {
+    if (row_ref_counts[gpu_y] > 0 || row_line_prims[gpu_y] > 0)
+      ydebug("rebuild_grid:   gpu_y=%2u canvas_y=%u line.prims=%u refs=%u",
+             gpu_y, window_top + gpu_y,
+             row_line_prims[gpu_y], row_ref_counts[gpu_y]);
+  }
 
   free(line_base_prim_idx);
   canvas->dirty = false;

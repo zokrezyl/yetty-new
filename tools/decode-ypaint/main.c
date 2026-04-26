@@ -194,10 +194,10 @@ static int decode_envelope(struct yetty_yface *y,
 						int len = (int)v.text_len;
 						if (len > 40) len = 40;
 						fprintf(stderr,
-							"    span x=%8.2f y=%9.2f size=%5.2f fid=%2d len=%4u text=\"%.*s\"\n",
+							"    span x=%8.2f y=%9.2f size=%5.2f fid=%2d color=0x%08x len=%4u text=\"%.*s\"\n",
 							v.x, v.y, v.font_size,
-							v.font_id, v.text_len,
-							len, v.text);
+							v.font_id, v.color,
+							v.text_len, len, v.text);
 					}
 				}
 			} else if (type >= YETTY_YPAINT_COMPLEX_TYPE_BASE) {
