@@ -7,10 +7,16 @@
 extern "C" {
 #endif
 
-/* Create monospace MSDF font from .cdb file at requested font size */
+/* Create monospace MSDF font from a .cdb file.
+ *
+ * font_size is the visual height of the glyph extent in pixels. The cell
+ * size is derived as font_size * (1 + top + bottom) high and
+ * font_size/hw_ratio * (1 + left + right) wide.
+ */
 struct yetty_font_ms_font_result
 yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
-                               float font_size);
+                               float font_size,
+                               struct yetty_font_ms_padding padding);
 
 #ifdef __cplusplus
 }

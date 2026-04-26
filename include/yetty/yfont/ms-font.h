@@ -20,6 +20,24 @@ extern "C" {
 
 struct yetty_font_ms_font;
 
+/* Cell padding around the glyph, expressed as fractions of the natural glyph
+ * dimensions at the requested font size. Applies to any monospace font
+ * implementation (CDB/MSDF, raster).
+ *
+ * Cell dimensions are derived from these:
+ *   cell_height = font_size       * (1 + top  + bottom)
+ *   cell_width  = font_size / hwr * (1 + left + right)
+ *
+ * Defaults of 0 give a tight cell (cell exactly wraps the glyph), which is
+ * the natural size and avoids the "glyph too small in cell" feel.
+ */
+struct yetty_font_ms_padding {
+	float left;    /* fraction of glyph width  */
+	float right;   /* fraction of glyph width  */
+	float top;     /* fraction of glyph height */
+	float bottom;  /* fraction of glyph height */
+};
+
 /* Font style */
 enum yetty_font_ms_style {
 	YETTY_YFONT_MS_STYLE_REGULAR     = 0,
