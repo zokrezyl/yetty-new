@@ -123,7 +123,7 @@ struct yetty_yterm_ypaint_layer {
 static void ypaint_layer_destroy(struct yetty_yterm_terminal_layer *self);
 static struct yetty_ycore_void_result
 ypaint_layer_write(struct yetty_yterm_terminal_layer *self,
-                   const char *data, size_t len);
+                   int osc_code, const char *data, size_t len);
 static struct yetty_ycore_void_result
 ypaint_layer_resize_grid(struct yetty_yterm_terminal_layer *self,
                          struct grid_size grid_size);
@@ -428,10 +428,11 @@ static void ypaint_layer_destroy(struct yetty_yterm_terminal_layer *self) {
 /* Write - receives ypaint data in format "args;payload" (base64 encoded) */
 static struct yetty_ycore_void_result
 ypaint_layer_write(struct yetty_yterm_terminal_layer *self,
-                   const char *data, size_t len) {
+                   int osc_code, const char *data, size_t len) {
   struct yetty_yterm_ypaint_layer *layer =
       (struct yetty_yterm_ypaint_layer *)self;
   struct yetty_yterm_osc_args args;
+  (void)osc_code;
 
   if (!data || len == 0)
     return YETTY_ERR(yetty_ycore_void, "no data");

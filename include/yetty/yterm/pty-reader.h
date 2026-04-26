@@ -9,10 +9,16 @@
 extern "C" {
 #endif
 
-/* Yetty OSC vendor IDs */
+/* Yetty OSC vendor IDs.
+ *
+ * 6xxxxx = client → server (frontend / ygui / yrich / … emit toward yetty)
+ * 7xxxxx = server → client (yetty terminal emits toward the inferior)
+ *
+ * Wire-format codes (YMGUI_OSC_*) live in <yetty/ymgui/wire.h> — that
+ * file is the single source of truth for both sides. This header only
+ * defines codes that don't (yet) have a wire.h home. */
 #define YETTY_OSC_YPAINT_SCROLL  666674
 #define YETTY_OSC_YPAINT_OVERLAY 666675
-#define YETTY_OSC_YMGUI          666680
 
 struct yetty_yterm_pty_reader;
 

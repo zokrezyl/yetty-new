@@ -95,7 +95,7 @@ static void dispatch_osc(struct yetty_yterm_pty_reader *r)
         size_t payload_len = r->osc_buf_len - id_len - 1;
         ydebug("pty_reader: OSC %ld -> layer %p, payload_len=%zu",
                vendor_id, (void *)layer, payload_len);
-        layer->ops->write(layer, payload, payload_len);
+        layer->ops->write(layer, (int)vendor_id, payload, payload_len);
     } else {
         ydebug("pty_reader: no sink for OSC %ld", vendor_id);
     }
@@ -121,7 +121,7 @@ static void process_data(struct yetty_yterm_pty_reader *r, const char *data, siz
                     ydebug("pty_reader: flush normal %zu bytes -> default_sink",
                            i - normal_start);
                     r->default_sink->ops->write(r->default_sink,
-                        data + normal_start, i - normal_start);
+                        0, data + normal_start, i - normal_start);
                 }
                 r->state = OSC_STATE_ESC;
                 i++;
@@ -140,7 +140,7 @@ static void process_data(struct yetty_yterm_pty_reader *r, const char *data, siz
                 /* Not OSC, send ESC + this char as normal */
                 r->state = OSC_STATE_NORMAL;
                 if (r->default_sink && r->default_sink->ops && r->default_sink->ops->write) {
-                    r->default_sink->ops->write(r->default_sink, "\033", 1);
+                    r->default_sink->ops->write(r->default_sink, 0, "\033", 1);
                 }
                 normal_start = i;
                 /* Don't increment i, reprocess this char */
@@ -191,7 +191,7 @@ static void process_data(struct yetty_yterm_pty_reader *r, const char *data, siz
         ydebug("pty_reader: tail flush %zu bytes -> default_sink",
                i - normal_start);
         r->default_sink->ops->write(r->default_sink,
-            data + normal_start, i - normal_start);
+            0, data + normal_start, i - normal_start);
     }
     ydebug("pty_reader process_data EXIT: state=%d normal_start=%zu i=%zu",
            (int)r->state, normal_start, i);

@@ -1,14 +1,23 @@
 # ymgui_frontend — links into the client app, not into yetty itself.
 #
-# Two translation units of our own:
-#   ymgui_encode.c         — pure C. base64 + growable buf + OSC write.
+# Translation units of our own:
+#   ymgui_encode.c         — pure C. non-blocking OSC write helper.
+#   ymgui_event_loop.c     — pure C. libuv-backed event loop with
+#                            GLFW-style input callbacks + extension
+#                            slots for app fds / timers / posted tasks.
+#                            Skipped on emscripten (no libuv there).
 #   imgui_impl_yetty.cpp   — thin C++ shim on top of Dear ImGui.
 # Dear ImGui itself comes via the imgui_core CPM target (no vendoring).
 
-add_library(ymgui_frontend STATIC
+set(YMGUI_FRONTEND_SOURCES
     ymgui_encode.c
     imgui_impl_yetty.cpp
 )
+if(NOT EMSCRIPTEN)
+    list(APPEND YMGUI_FRONTEND_SOURCES ymgui_event_loop.c)
+endif()
+
+add_library(ymgui_frontend STATIC ${YMGUI_FRONTEND_SOURCES})
 
 target_include_directories(ymgui_frontend PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -16,6 +25,13 @@ target_include_directories(ymgui_frontend PUBLIC
 )
 
 target_link_libraries(ymgui_frontend PUBLIC imgui_core yetty_yface yetty_ycore)
+if(NOT EMSCRIPTEN)
+    # libuv (uv_a) is loaded by build-tools/cmake/targets/shared.cmake
+    # whenever YETTY_ENABLE_LIB_LIBUV is on (default). Guard the include
+    # so the frontend can also be built standalone.
+    include(${YETTY_ROOT}/build-tools/cmake/libs/libuv.cmake)
+    target_link_libraries(ymgui_frontend PUBLIC uv_a)
+endif()
 
 set_target_properties(ymgui_frontend PROPERTIES
     C_STANDARD 11

@@ -1,13 +1,22 @@
 /*
- * yetty/yface/yface.c — streaming OSC stream:
- *   bytes  -->  LZ4F_compress*  -->  streaming base64 encode  -->  out_buf
- *   chars  -->  streaming base64 decode  -->  LZ4F_decompress  -->  in_buf
+ * yetty/yface/yface.c — bidirectional OSC stream:
+ *   bytes  --> [LZ4F_compress*] -->  streaming base64 encode  -->  out_buf
+ *   chars  --> streaming base64 decode --> [LZ4F_decompress]  -->  in_buf
+ *
+ * The LZ4 step is gated by a per-envelope `compressed` flag carried as a
+ * single character right after the first ';' — '0' = raw b64, '1' = LZ4F.
  *
  * The LZ4 contexts hold the dictionary / partial-block state; the b64
  * encoder/decoder hold the 0..2 / 0..3 byte carry that bridges chunked
  * input. Together that means start/write/finish can be called with
  * arbitrarily small chunks and produce identical output to a one-shot
  * encode of the concatenated input.
+ *
+ * On top of the chunked codec there's an envelope scanner driven by
+ * yetty_yface_feed_bytes() — finds \e]…\e\\ in a raw byte stream, drives
+ * the decode for each envelope's body, and fires the user's on_osc
+ * callback with the decoded payload. Bytes outside any envelope go to
+ * on_raw so consumers can keep their keyboard / CSI handling.
  */
 
 #include <yetty/yface/yface.h>
@@ -24,6 +33,16 @@
 
 #define ENC_SCRATCH_CAP_DEFAULT  (64 * 1024)   /* one LZ4 block worth */
 
+/* Stream scanner state — drives feed_bytes(). */
+enum yface_scan_state {
+    YFACE_SCAN_RAW = 0,        /* bytes outside an envelope → on_raw */
+    YFACE_SCAN_AFTER_ESC,      /* saw ESC; deciding if this opens an OSC */
+    YFACE_SCAN_OSC_CODE,       /* reading decimal vendor code */
+    YFACE_SCAN_OSC_FLAG,       /* reading single compflag char */
+    YFACE_SCAN_OSC_BODY,       /* feeding body bytes through codec */
+    YFACE_SCAN_OSC_BODY_ESC,   /* saw ESC inside body — could be ST */
+};
+
 struct yetty_yface {
     struct yetty_ycore_buffer in_buf;
     struct yetty_ycore_buffer out_buf;
@@ -33,16 +52,26 @@ struct yetty_yface {
     uint8_t                    *enc_scratch;
     size_t                      enc_scratch_cap;
     int                         enc_active;
+    int                         enc_compressed;
     /* b64 carry: 0..2 input bytes that didn't form a complete triple yet. */
     uint8_t                     enc_b64_carry[2];
     uint8_t                     enc_b64_carry_n;
 
-    /* Incoming — streaming b64 decode + LZ4F decompress */
+    /* Incoming — streaming b64 decode + (optional) LZ4F decompress */
     LZ4F_decompressionContext_t dec_ctx;
     int                         dec_active;
+    int                         dec_compressed;
     /* b64 carry: 0..3 chars that didn't form a complete quartet yet. */
     char                        dec_b64_carry[4];
     uint8_t                     dec_b64_carry_n;
+
+    /* Stream scanner state. */
+    enum yface_scan_state       scan_state;
+    int                         scan_osc_code;
+    int                         scan_compflag;     /* 0 or 1 */
+    yetty_yface_msg_cb          on_osc;
+    yetty_yface_raw_cb          on_raw;
+    void                       *handler_user;
 };
 
 /*===========================================================================
@@ -206,15 +235,16 @@ ensure_enc_scratch(struct yetty_yface *y, size_t need)
 }
 
 struct yetty_ycore_void_result
-yetty_yface_start_write(struct yetty_yface *y, int osc_code, const char *prefix)
+yetty_yface_start_write(struct yetty_yface *y, int osc_code, int compressed)
 {
     if (!y) return YETTY_ERR(yetty_ycore_void, "yface is NULL");
     if (y->enc_active)
         return YETTY_ERR(yetty_ycore_void, "yface: write already active");
 
-    /* Raw OSC code prefix straight into out_buf: "\e]<code>;" */
+    /* "\e]<code>;<flag>;" — flag is the single compressed/raw discriminator. */
     char hdr[32];
-    int n = snprintf(hdr, sizeof(hdr), "\033]%d;", osc_code);
+    int n = snprintf(hdr, sizeof(hdr), "\033]%d;%c;",
+                     osc_code, compressed ? '1' : '0');
     if (n <= 0 || (size_t)n >= sizeof(hdr))
         return YETTY_ERR(yetty_ycore_void, "yface: bad osc_code");
     {
@@ -223,37 +253,29 @@ yetty_yface_start_write(struct yetty_yface *y, int osc_code, const char *prefix)
         if (!r.ok) return r;
     }
 
-    /* Optional verb / arg prefix: "<prefix>;" — caller-supplied, written
-     * raw so existing OSC argument parsers see the same shape they did
-     * before yface (`<verb>[ <args...>];<base64-body>`). */
-    if (prefix && prefix[0]) {
-        size_t plen = strlen(prefix);
-        struct yetty_ycore_void_result r =
-            yetty_ycore_buffer_write(&y->out_buf, prefix, plen);
-        if (!r.ok) return r;
-        r = yetty_ycore_buffer_write(&y->out_buf, ";", 1);
-        if (!r.ok) return r;
+    y->enc_b64_carry_n = 0;
+    y->enc_compressed  = compressed ? 1 : 0;
+
+    if (!compressed) {
+        y->enc_active = 1;
+        return YETTY_OK_VOID();
     }
 
-    /* Reset b64 carry. */
-    y->enc_b64_carry_n = 0;
-
-    /* Allocate / reuse scratch sized for one LZ4 block worth of output. */
+    /* Compressed path: LZ4F frame opening through b64. */
     {
         struct yetty_ycore_void_result r =
             ensure_enc_scratch(y, ENC_SCRATCH_CAP_DEFAULT);
         if (!r.ok) return r;
     }
 
-    /* Spin up an LZ4 frame. */
     LZ4F_errorCode_t err =
         LZ4F_createCompressionContext(&y->enc_ctx, LZ4F_VERSION);
     if (LZ4F_isError(err))
         return YETTY_ERR(yetty_ycore_void, LZ4F_getErrorName(err));
 
     LZ4F_preferences_t prefs = {0};
-    /* Default block size (64 KB), no checksum (we don't need one — yface's
-     * out_buf is taken as a unit and OSC framing already provides terminators). */
+    /* Default block size (64 KB), no checksum — yface's out_buf is taken
+     * as a unit and OSC framing already provides terminators. */
     size_t hn = LZ4F_compressBegin(y->enc_ctx,
                                    y->enc_scratch, y->enc_scratch_cap, &prefs);
     if (LZ4F_isError(hn)) {
@@ -283,7 +305,12 @@ yetty_yface_write(struct yetty_yface *y, const void *src, size_t len)
     if (len == 0) return YETTY_OK_VOID();
     if (!src)     return YETTY_ERR(yetty_ycore_void, "src is NULL");
 
-    /* Worst case for THIS call's compressed output. */
+    if (!y->enc_compressed) {
+        /* Raw path: source bytes feed b64 directly. */
+        return b64_encode_push(y, (const uint8_t *)src, len);
+    }
+
+    /* Compressed path: LZ4F frame chunk through b64. */
     size_t bound = LZ4F_compressBound(len, NULL);
     {
         struct yetty_ycore_void_result r = ensure_enc_scratch(y, bound);
@@ -304,7 +331,15 @@ yetty_yface_finish_write(struct yetty_yface *y)
     if (!y->enc_active)
         return YETTY_ERR(yetty_ycore_void, "yface: no active write");
 
-    /* compressEnd needs room for footer + buffered last block. */
+    if (!y->enc_compressed) {
+        struct yetty_ycore_void_result r = b64_encode_flush(y);
+        if (!r.ok) { y->enc_active = 0; return r; }
+        r = yetty_ycore_buffer_write(&y->out_buf, "\033\\", 2);
+        y->enc_active = 0;
+        return r;
+    }
+
+    /* Compressed: flush LZ4F frame footer through b64. */
     size_t bound = LZ4F_compressBound(0, NULL);
     {
         struct yetty_ycore_void_result r = ensure_enc_scratch(y, bound);
@@ -323,7 +358,6 @@ yetty_yface_finish_write(struct yetty_yface *y)
         if (!r.ok) goto cleanup;
         r = b64_encode_flush(y);
         if (!r.ok) goto cleanup;
-        /* OSC ST terminator. */
         r = yetty_ycore_buffer_write(&y->out_buf, "\033\\", 2);
         if (!r.ok) goto cleanup;
     }
@@ -344,19 +378,23 @@ cleanup:
  *=========================================================================*/
 
 struct yetty_ycore_void_result
-yetty_yface_start_read(struct yetty_yface *y)
+yetty_yface_start_read(struct yetty_yface *y, int compressed)
 {
     if (!y) return YETTY_ERR(yetty_ycore_void, "yface is NULL");
     if (y->dec_active)
         return YETTY_ERR(yetty_ycore_void, "yface: read already active");
 
-    LZ4F_errorCode_t err =
-        LZ4F_createDecompressionContext(&y->dec_ctx, LZ4F_VERSION);
-    if (LZ4F_isError(err))
-        return YETTY_ERR(yetty_ycore_void, LZ4F_getErrorName(err));
-
     yetty_ycore_buffer_clear(&y->in_buf);
     y->dec_b64_carry_n = 0;
+    y->dec_compressed  = compressed ? 1 : 0;
+
+    if (compressed) {
+        LZ4F_errorCode_t err =
+            LZ4F_createDecompressionContext(&y->dec_ctx, LZ4F_VERSION);
+        if (LZ4F_isError(err))
+            return YETTY_ERR(yetty_ycore_void, LZ4F_getErrorName(err));
+    }
+
     y->dec_active = 1;
     return YETTY_OK_VOID();
 }
@@ -453,7 +491,12 @@ yetty_yface_feed(struct yetty_yface *y, const char *b64, size_t n)
         y->dec_b64_carry[y->dec_b64_carry_n++] = b64[pos++];
     }
 
-    struct yetty_ycore_void_result r = dec_feed_compressed(y, bytes, bytes_n);
+    struct yetty_ycore_void_result r;
+    if (y->dec_compressed) {
+        r = dec_feed_compressed(y, bytes, bytes_n);
+    } else {
+        r = yetty_ycore_buffer_write(&y->in_buf, bytes, bytes_n);
+    }
     free(bytes);
     return r;
 }
@@ -464,16 +507,226 @@ yetty_yface_finish_read(struct yetty_yface *y)
     if (!y) return YETTY_ERR(yetty_ycore_void, "yface is NULL");
     if (!y->dec_active) return YETTY_OK_VOID();
 
-    /* Decode any remaining carry that includes valid chars only — full
-     * quartet (carry_n==4) is impossible at this point since feed would
-     * have drained it. With 1..3 chars left there's no complete byte so
-     * we simply discard the carry; LZ4F_compressEnd on the producer side
-     * inserts proper end-of-frame so the decoder doesn't need any tail
-     * input. */
+    /* For raw mode, finalize any 2- or 3-char b64 tail that decoded into
+     * 1 or 2 raw bytes and was held in carry. b64 padding ('=') means the
+     * encoder produced a complete quartet on flush, so a 2/3-char remainder
+     * here only happens if the wire was truncated — discard. For compressed
+     * mode, LZ4F_compressEnd has already emitted the frame footer so no
+     * tail input is needed.
+     */
     y->dec_b64_carry_n = 0;
-    LZ4F_freeDecompressionContext(y->dec_ctx);
-    y->dec_ctx = NULL;
+    if (y->dec_compressed && y->dec_ctx) {
+        LZ4F_freeDecompressionContext(y->dec_ctx);
+        y->dec_ctx = NULL;
+    }
     y->dec_active = 0;
+    return YETTY_OK_VOID();
+}
+
+/*===========================================================================
+ * Stream scanner — driven by yetty_yface_feed_bytes()
+ *
+ * Walks an arbitrary byte stream looking for \e]<code>;<flag>;<b64>\e\\
+ * envelopes. Bytes outside an envelope are forwarded byte-for-byte through
+ * on_raw. For each complete envelope we drive start_read / feed / finish_read
+ * (so we share the codec with the explicit-body API), then fire on_osc with
+ * the decoded payload pointing into in_buf.
+ *
+ * In-body bytes are batched into spans and handed to feed() in chunks — no
+ * per-byte feed() calls.
+ *=========================================================================*/
+
+void yetty_yface_set_handlers(struct yetty_yface *y,
+                              yetty_yface_msg_cb on_osc,
+                              yetty_yface_raw_cb on_raw,
+                              void *user)
+{
+    if (!y) return;
+    y->on_osc        = on_osc;
+    y->on_raw        = on_raw;
+    y->handler_user  = user;
+}
+
+/* Push a contiguous span of body bytes through the active read codec. */
+static struct yetty_ycore_void_result
+scan_feed_body(struct yetty_yface *y, const char *p, size_t n)
+{
+    if (n == 0) return YETTY_OK_VOID();
+    return yetty_yface_feed(y, p, n);
+}
+
+/* Forward a contiguous span of out-of-envelope bytes to on_raw. */
+static void scan_emit_raw(struct yetty_yface *y, const char *p, size_t n)
+{
+    if (n == 0 || !y->on_raw) return;
+    y->on_raw(y->handler_user, p, n);
+}
+
+struct yetty_ycore_void_result
+yetty_yface_feed_bytes(struct yetty_yface *y, const char *bytes, size_t n)
+{
+    if (!y) return YETTY_ERR(yetty_ycore_void, "yface is NULL");
+    if (!bytes || n == 0) return YETTY_OK_VOID();
+
+    /* span_start tracks the head of the current run we'll flush in one
+     * shot — either to on_raw (in RAW state) or to feed() (in OSC_BODY).
+     * Whenever the state changes we flush and reset. */
+    size_t span_start = 0;
+    size_t i = 0;
+
+    while (i < n) {
+        char c = bytes[i];
+
+        switch (y->scan_state) {
+        case YFACE_SCAN_RAW:
+            if (c == '\033') {
+                /* Flush any raw run up to here, then enter AFTER_ESC. */
+                scan_emit_raw(y, bytes + span_start, i - span_start);
+                y->scan_state = YFACE_SCAN_AFTER_ESC;
+                i++;
+            } else {
+                i++;
+            }
+            break;
+
+        case YFACE_SCAN_AFTER_ESC:
+            if (c == ']') {
+                y->scan_osc_code = 0;
+                y->scan_compflag = 0;
+                y->scan_state    = YFACE_SCAN_OSC_CODE;
+                i++;
+            } else {
+                /* Not an OSC introducer — emit ESC + this byte as raw and
+                 * resume scanning. */
+                if (y->on_raw) {
+                    char esc = '\033';
+                    y->on_raw(y->handler_user, &esc, 1);
+                }
+                span_start    = i; /* current byte goes back to RAW */
+                y->scan_state = YFACE_SCAN_RAW;
+            }
+            break;
+
+        case YFACE_SCAN_OSC_CODE:
+            if (c >= '0' && c <= '9') {
+                y->scan_osc_code = y->scan_osc_code * 10 + (c - '0');
+                i++;
+            } else if (c == ';') {
+                y->scan_state = YFACE_SCAN_OSC_FLAG;
+                i++;
+            } else {
+                /* Malformed — drop and resume RAW from next byte. */
+                y->scan_state = YFACE_SCAN_RAW;
+                span_start    = i + 1;
+                i++;
+            }
+            break;
+
+        case YFACE_SCAN_OSC_FLAG:
+            /* Single char compflag, then ';'. We accept either '0' or '1';
+             * everything else aborts the envelope. */
+            if (c == '0' || c == '1') {
+                y->scan_compflag = (c == '1');
+                i++;
+            } else if (c == ';') {
+                /* Open the read codec and switch to body. */
+                struct yetty_ycore_void_result r =
+                    yetty_yface_start_read(y, y->scan_compflag);
+                if (!r.ok) {
+                    /* Best effort: drop envelope, resume RAW. */
+                    y->scan_state = YFACE_SCAN_RAW;
+                    span_start    = i + 1;
+                    i++;
+                    break;
+                }
+                y->scan_state = YFACE_SCAN_OSC_BODY;
+                i++;
+                span_start = i;  /* body chars start here */
+            } else {
+                y->scan_state = YFACE_SCAN_RAW;
+                span_start    = i + 1;
+                i++;
+            }
+            break;
+
+        case YFACE_SCAN_OSC_BODY:
+            if (c == '\033') {
+                /* Flush body run so far, then check for ST. */
+                struct yetty_ycore_void_result r =
+                    scan_feed_body(y, bytes + span_start, i - span_start);
+                if (!r.ok) {
+                    yetty_yface_finish_read(y);
+                    y->scan_state = YFACE_SCAN_RAW;
+                    span_start    = i + 1;
+                    i++;
+                    break;
+                }
+                y->scan_state = YFACE_SCAN_OSC_BODY_ESC;
+                i++;
+            } else if (c == '\007') {
+                /* BEL terminator (legacy OSC form). Flush, finalize, fire. */
+                struct yetty_ycore_void_result r =
+                    scan_feed_body(y, bytes + span_start, i - span_start);
+                if (!r.ok) {
+                    yetty_yface_finish_read(y);
+                    y->scan_state = YFACE_SCAN_RAW;
+                    span_start    = i + 1;
+                    i++;
+                    break;
+                }
+                yetty_yface_finish_read(y);
+                if (y->on_osc) {
+                    y->on_osc(y->handler_user,
+                              y->scan_osc_code,
+                              y->in_buf.data,
+                              y->in_buf.size);
+                }
+                y->scan_state = YFACE_SCAN_RAW;
+                span_start    = i + 1;
+                i++;
+            } else {
+                i++;
+            }
+            break;
+
+        case YFACE_SCAN_OSC_BODY_ESC:
+            if (c == '\\') {
+                /* ST — envelope complete. Finalize codec + fire callback. */
+                yetty_yface_finish_read(y);
+                if (y->on_osc) {
+                    y->on_osc(y->handler_user,
+                              y->scan_osc_code,
+                              y->in_buf.data,
+                              y->in_buf.size);
+                }
+                y->scan_state = YFACE_SCAN_RAW;
+                span_start    = i + 1;
+                i++;
+            } else {
+                /* Lone ESC inside body — feed it and the current char as
+                 * body bytes, stay in BODY. (We already flushed up to but
+                 * not including the ESC; resume span at the ESC.) */
+                struct yetty_ycore_void_result r =
+                    scan_feed_body(y, "\033", 1);
+                if (!r.ok) {
+                    yetty_yface_finish_read(y);
+                    y->scan_state = YFACE_SCAN_RAW;
+                    span_start    = i;
+                    break;
+                }
+                y->scan_state = YFACE_SCAN_OSC_BODY;
+                span_start    = i; /* current char joins next span */
+            }
+            break;
+        }
+    }
+
+    /* End-of-buffer flush of any pending span. */
+    if (y->scan_state == YFACE_SCAN_RAW)
+        scan_emit_raw(y, bytes + span_start, n - span_start);
+    else if (y->scan_state == YFACE_SCAN_OSC_BODY)
+        return scan_feed_body(y, bytes + span_start, n - span_start);
+
     return YETTY_OK_VOID();
 }
 

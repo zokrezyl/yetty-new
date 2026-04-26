@@ -1,13 +1,19 @@
 /*
  * ymgui/wire.h — binary wire format shared by frontend (C++) and backend (C).
  *
- * Carried over OSC vendor 666680 as base64'd payloads. Three verbs:
+ * All envelopes are carried via yface (see <yetty/yface/yface.h>):
  *
- *   \e]666680;--frame;<base64(ymgui_wire_frame)>\e\\
- *   \e]666680;--tex;<base64(ymgui_wire_tex)>\e\\
- *   \e]666680;--clear\e\\
+ *     \e]<code>;<flag>;<base64[(LZ4F)payload]>\e\\
  *
- * All integers are little-endian. All structs are naturally aligned at 4 bytes.
+ * The OSC <code> identifies the message type — there are no verbs in the
+ * body. Codes in the 600000-range flow client→server (frame, texture,
+ * clear); 700000-range flows server→client (input events).
+ *
+ * The single character right after the first ';' is the compression flag:
+ * '0' for raw b64, '1' for LZ4F+b64. Compression is on for big payloads
+ * (frames, textures, future video) and off for short events (mouse, resize).
+ *
+ * All integers are little-endian. All structs are naturally aligned at 4 B.
  * Vertex layout matches Dear ImGui's ImDrawVert exactly: {pos,uv,col} = 20 B.
  * Index type is 16-bit (ImDrawIdx default); if frontend is built with
  * `#define ImDrawIdx unsigned int` the flag YMGUI_FRAME_FLAG_IDX32 is set.
@@ -22,9 +28,30 @@
 extern "C" {
 #endif
 
-/* Magic numbers (little-endian ASCII). */
-#define YMGUI_WIRE_MAGIC_FRAME  0x4D47494Fu  /* 'OIGM' → "YMGI" */
-#define YMGUI_WIRE_MAGIC_TEX    0x4D58544Fu  /* 'OTXM' → "YMTX" */
+/*=============================================================================
+ * OSC codes
+ *
+ * Allocation policy: 6xxxxx = client→server, 7xxxxx = server→client. Within
+ * each direction the code itself discriminates the message type, so dispatch
+ * is a single switch on osc_code with no body inspection.
+ *===========================================================================*/
+
+/* client → server (frontend → ymgui-layer) */
+#define YMGUI_OSC_CS_FRAME      600000  /* ymgui_wire_frame, compressed=1 */
+#define YMGUI_OSC_CS_TEX        600001  /* ymgui_wire_tex,   compressed=1 */
+#define YMGUI_OSC_CS_CLEAR      600002  /* empty body,       compressed=0 */
+
+/* server → client (yetty terminal → frontend / ygui / yrich) */
+#define YMGUI_OSC_SC_MOUSE      700000  /* ymgui_wire_input_mouse,  comp=0 */
+#define YMGUI_OSC_SC_RESIZE     700001  /* ymgui_wire_input_resize, comp=0 */
+
+/*=============================================================================
+ * Magic numbers + versioning
+ *===========================================================================*/
+#define YMGUI_WIRE_MAGIC_FRAME        0x4D47494Fu  /* 'OIGM' → "YMGI" */
+#define YMGUI_WIRE_MAGIC_TEX          0x4D58544Fu  /* 'OTXM' → "YMTX" */
+#define YMGUI_WIRE_MAGIC_INPUT_MOUSE  0x4D49534Du  /* "MSIM" reversed: "MISM" */
+#define YMGUI_WIRE_MAGIC_INPUT_RESIZE 0x4D52534Du  /* "MSRM" reversed: "MRSM" */
 
 #define YMGUI_WIRE_VERSION      1u
 
@@ -80,7 +107,7 @@ struct ymgui_wire_cmd_list {
 };
 
 /*---------------------------------------------------------------------------
- * Frame header — starts every --frame payload.
+ * Frame header — payload of YMGUI_OSC_CS_FRAME.
  *-------------------------------------------------------------------------*/
 struct ymgui_wire_frame {
     uint32_t magic;           /* YMGUI_WIRE_MAGIC_FRAME */
@@ -99,8 +126,8 @@ struct ymgui_wire_frame {
 };
 
 /*---------------------------------------------------------------------------
- * Texture upload payload. Pixel data follows the header, length = width*height*bpp.
- * bpp = 1 (R8) or 4 (RGBA8).
+ * Texture upload payload of YMGUI_OSC_CS_TEX. Pixel data follows the
+ * header, length = width*height*bpp (1 = R8, 4 = RGBA8).
  *-------------------------------------------------------------------------*/
 struct ymgui_wire_tex {
     uint32_t magic;           /* YMGUI_WIRE_MAGIC_TEX */
@@ -114,10 +141,38 @@ struct ymgui_wire_tex {
     /* Followed by width*height*bpp bytes of pixel data. */
 };
 
-/* OSC vendor identifier for ymgui. Distinct from ygui (666674) and the
- * ypaint-overlay slot (666675). */
-#define YMGUI_OSC_VENDOR     "666680"
-#define YMGUI_OSC_VENDOR_INT 666680
+/*=============================================================================
+ * Input events (server → client)
+ *===========================================================================*/
+
+/* ymgui_wire_input_mouse.kind */
+enum ymgui_wire_input_mouse_kind {
+    YMGUI_INPUT_MOUSE_POS    = 0,  /* x,y; buttons_held mask for drag tracking */
+    YMGUI_INPUT_MOUSE_BUTTON = 1,  /* button transition: button + pressed + x,y */
+    YMGUI_INPUT_MOUSE_WHEEL  = 2,  /* wheel: wheel_dy at x,y */
+};
+
+/* Single struct covers move / button / wheel — kind discriminates.
+ * Fields not relevant to a kind are zero on the wire. */
+struct ymgui_wire_input_mouse {
+    uint32_t magic;           /* YMGUI_WIRE_MAGIC_INPUT_MOUSE */
+    uint32_t version;         /* YMGUI_WIRE_VERSION */
+    uint32_t kind;            /* enum ymgui_wire_input_mouse_kind */
+    int32_t  button;          /* BUTTON: 0=left,1=right,2=middle,...; else -1 */
+    int32_t  pressed;         /* BUTTON: 1=down 0=up; else 0 */
+    uint32_t buttons_held;    /* POS during drag: bitmask (1<<button) */
+    float    x;
+    float    y;
+    float    wheel_dy;        /* WHEEL */
+    uint32_t _pad0;
+};
+
+struct ymgui_wire_input_resize {
+    uint32_t magic;           /* YMGUI_WIRE_MAGIC_INPUT_RESIZE */
+    uint32_t version;         /* YMGUI_WIRE_VERSION */
+    float    width;           /* pixels */
+    float    height;          /* pixels */
+};
 
 #ifdef __cplusplus
 }

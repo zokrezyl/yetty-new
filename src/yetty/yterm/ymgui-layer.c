@@ -118,7 +118,8 @@ struct yetty_yterm_ymgui_layer {
 
 static void ymgui_destroy(struct yetty_yterm_terminal_layer *self);
 static struct yetty_ycore_void_result
-ymgui_write(struct yetty_yterm_terminal_layer *self, const char *data, size_t len);
+ymgui_write(struct yetty_yterm_terminal_layer *self,
+            int osc_code, const char *data, size_t len);
 static struct yetty_ycore_void_result
 ymgui_resize_grid(struct yetty_yterm_terminal_layer *self, struct grid_size gs);
 static struct yetty_ycore_void_result
@@ -609,20 +610,34 @@ handle_tex(struct yetty_yterm_ymgui_layer *l,
     return YETTY_OK_VOID();
 }
 
+/* Body shape: "<flag>;<base64...>" where <flag> is '0' (raw b64) or '1'
+ * (LZ4F+b64). Caller has already stripped the leading "<code>;". */
 static struct yetty_ycore_void_result
-ymgui_write(struct yetty_yterm_terminal_layer *self,
+decode_body(struct yetty_yterm_ymgui_layer *l,
             const char *data, size_t len)
 {
+    if (len < 2 || (data[0] != '0' && data[0] != '1') || data[1] != ';')
+        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed yface body");
+    int compressed = (data[0] == '1');
+    const char *b64 = data + 2;
+    size_t      b64_len = len - 2;
+
+    struct yetty_ycore_void_result r =
+        yetty_yface_start_read(l->yface, compressed);
+    if (YETTY_IS_ERR(r)) return r;
+    r = yetty_yface_feed(l->yface, b64, b64_len);
+    if (YETTY_IS_ERR(r)) { yetty_yface_finish_read(l->yface); return r; }
+    return yetty_yface_finish_read(l->yface);
+}
+
+static struct yetty_ycore_void_result
+ymgui_write(struct yetty_yterm_terminal_layer *self,
+            int osc_code, const char *data, size_t len)
+{
     struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
-    struct yetty_yterm_osc_args args;
-    struct yetty_ycore_void_result res = YETTY_OK_VOID();
 
-    if (!data || len == 0)
-        return YETTY_ERR(yetty_ycore_void, "ymgui: empty OSC body");
-    if (yetty_yterm_osc_args_parse(&args, data, len) < 0)
-        return YETTY_ERR(yetty_ycore_void, "ymgui: arg parse failed");
-
-    if (yetty_yterm_osc_args_has(&args, "clear")) {
+    /* Clear is parameter-less — empty body, no decode. */
+    if (osc_code == YMGUI_OSC_CS_CLEAR) {
         free(l->frame_bytes);
         l->frame_bytes = NULL;
         l->frame_size  = 0;
@@ -630,44 +645,22 @@ ymgui_write(struct yetty_yterm_terminal_layer *self,
         l->base.dirty  = 1;
         if (l->base.request_render_fn)
             l->base.request_render_fn(l->base.request_render_userdata);
-        goto out;
+        return YETTY_OK_VOID();
     }
 
-    struct yetty_ycore_buffer_result payload =
-        yetty_yterm_osc_args_get_payload_buffer(&args);
-    if (YETTY_IS_ERR(payload)) {
-        res = YETTY_ERR(yetty_ycore_void, "ymgui: missing payload");
-        goto out;
-    }
+    if (!data || len == 0)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: empty OSC body");
 
-    /* Stream the base64 payload through yface: b64 decode → LZ4F
-     * decompress → in_buf. No intermediate malloc/copy of the b64 raw
-     * bytes; in_buf grows as decompression emits. */
-    {
-        struct yetty_ycore_void_result r = yetty_yface_start_read(l->yface);
-        if (YETTY_IS_ERR(r)) { res = r; goto out; }
-        r = yetty_yface_feed(l->yface,
-                             (const char *)payload.value.data,
-                             payload.value.size);
-        if (YETTY_IS_ERR(r)) { yetty_yface_finish_read(l->yface); res = r; goto out; }
-        r = yetty_yface_finish_read(l->yface);
-        if (YETTY_IS_ERR(r)) { res = r; goto out; }
-    }
+    struct yetty_ycore_void_result r = decode_body(l, data, len);
+    if (YETTY_IS_ERR(r)) return r;
 
-    {
-        struct yetty_ycore_buffer *in = yetty_yface_in_buf(l->yface);
-        if (yetty_yterm_osc_args_has(&args, "frame"))
-            res = handle_frame(l, in->data, in->size);
-        else if (yetty_yterm_osc_args_has(&args, "tex"))
-            res = handle_tex(l, in->data, in->size);
-        else
-            res = YETTY_ERR(yetty_ycore_void,
-                            "ymgui: expected --frame, --tex, or --clear");
+    struct yetty_ycore_buffer *in = yetty_yface_in_buf(l->yface);
+    switch (osc_code) {
+    case YMGUI_OSC_CS_FRAME: return handle_frame(l, in->data, in->size);
+    case YMGUI_OSC_CS_TEX:   return handle_tex  (l, in->data, in->size);
+    default:
+        return YETTY_ERR(yetty_ycore_void, "ymgui: unexpected OSC code");
     }
-
-out:
-    yetty_yterm_osc_args_free(&args);
-    return res;
 }
 
 /*===========================================================================
