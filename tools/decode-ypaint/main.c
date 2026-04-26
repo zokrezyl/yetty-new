@@ -15,6 +15,7 @@
  * mis-render is in the receiver (canvas / shader / GPU upload).
  */
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,11 +35,17 @@
  * we only need the type-id base constant for classification stats. */
 #define YETTY_YPAINT_COMPLEX_TYPE_BASE 0x80000000u
 
-/* CLI: -v / --verbose dumps per-prim details (position, font, text snippet).
- * -h / --histogram prints a y-bucket histogram of text-span placement so we
- * can spot spans that all collapse onto a few rows or escape the canvas. */
+/* CLI flags:
+ *   -v / --verbose   per-prim details (position, font, text snippet)
+ *   -H / --histogram y-bucket histogram of text-span placement
+ *   -l / --lines     reconstruct lines in screen order, annotate gap/overlap
+ *                    between adjacent glyphs (use --line-y=Y to focus on one)
+ */
 static int g_verbose = 0;
 static int g_histogram = 0;
+static int g_lines = 0;
+static float g_line_y_filter = -1.0f;
+static float g_line_y_tol = 0.5f;
 
 /* Decode one envelope body — i.e. the bytes BETWEEN `ESC ]` and `ESC \`.
  * Shape: "<code>;<args...>;<b64-payload>". */
@@ -294,6 +301,127 @@ static int decode_envelope(struct yetty_yface *y,
 		}
 	}
 
+	/* --lines: reconstruct lines from the spans we have, in screen order.
+	 * For each line (group of spans sharing y to within tolerance), sort
+	 * spans by x and walk pairs reporting "gap" (whitespace between this
+	 * char's x and previous char's pen+font-implied advance), or "OVERLAP"
+	 * when this char's x is left of the previous pen + a small width
+	 * estimate. We don't have the receiver-side bitmap here, so the
+	 * "expected next x" is approximated as previous_x + size*0.6 (a rough
+	 * mean glyph width); the absolute number isn't important — what
+	 * matters is that gaps/overlaps among adjacent chars in the same word
+	 * stay roughly uniform. Alternating big-gap / overlap is the symptom
+	 * we're hunting. */
+	if (g_lines) {
+		/* Pull text spans into an array. */
+		struct span_pt {
+			float x, y, font_size;
+			int32_t font_id;
+			char ch[8]; /* up to 1 codepoint UTF-8 */
+			int ch_len;
+		};
+		size_t cap = 64, n = 0;
+		struct span_pt *arr = malloc(cap * sizeof(*arr));
+		if (!arr) goto lines_done;
+
+		struct yetty_ypaint_core_primitive_iter_result it2 =
+			yetty_ypaint_core_buffer_prim_first(br.value, fw);
+		if (it2.ok) {
+			struct yetty_ypaint_core_primitive_iter cur = it2.value;
+			while (1) {
+				if (cur.fw.data[0] == YETTY_YPAINT_TYPE_TEXT_SPAN) {
+					struct yetty_ypaint_text_span_prim_view v;
+					if (yetty_ypaint_text_span_prim_parse(
+						    cur.fw.data, &v) == 0) {
+						if (g_line_y_filter < 0 ||
+						    fabsf(v.y - g_line_y_filter) <=
+							    g_line_y_tol) {
+							if (n >= cap) {
+								cap *= 2;
+								struct span_pt *tmp =
+									realloc(arr,
+										cap * sizeof(*arr));
+								if (!tmp) break;
+								arr = tmp;
+							}
+							arr[n].x = v.x;
+							arr[n].y = v.y;
+							arr[n].font_size = v.font_size;
+							arr[n].font_id = v.font_id;
+							int copy = (int)v.text_len;
+							if (copy > 7) copy = 7;
+							memcpy(arr[n].ch, v.text, copy);
+							arr[n].ch[copy] = '\0';
+							arr[n].ch_len = copy;
+							n++;
+						}
+					}
+				}
+				struct yetty_ypaint_core_primitive_iter_result nx =
+					yetty_ypaint_core_buffer_prim_next(br.value,
+									   fw, &cur);
+				if (!nx.ok) break;
+				cur = nx.value;
+			}
+		}
+
+		/* Sort by (y, x). */
+		for (size_t i = 1; i < n; i++) {
+			struct span_pt key = arr[i];
+			size_t j = i;
+			while (j > 0) {
+				struct span_pt *prev = &arr[j - 1];
+				if (prev->y < key.y - 0.5f) break;
+				if (fabsf(prev->y - key.y) < 0.5f &&
+				    prev->x <= key.x)
+					break;
+				arr[j] = arr[j - 1];
+				j--;
+			}
+			arr[j] = key;
+		}
+
+		/* Walk lines. */
+		fprintf(stderr,
+			"  lines: %zu spans (%s)\n",
+			n,
+			g_line_y_filter >= 0 ? "filtered" : "all");
+		float line_y = -1e30f;
+		float prev_x = 0.0f, prev_size = 0.0f;
+		for (size_t i = 0; i < n; i++) {
+			struct span_pt *s = &arr[i];
+			if (fabsf(s->y - line_y) > 0.5f) {
+				fprintf(stderr,
+					"\n  --- line y=%.2f ---\n", s->y);
+				line_y = s->y;
+				prev_x = -1e30f;
+				prev_size = 0.0f;
+			}
+
+			float expected_dx = prev_size * 0.6f;
+			float actual_dx = (prev_x > -1e29f) ? (s->x - prev_x)
+							    : 0.0f;
+			const char *flag = "";
+			if (prev_x > -1e29f) {
+				if (actual_dx < 0)
+					flag = " ⚠OVERLAP-NEG";
+				else if (actual_dx < expected_dx * 0.4f)
+					flag = " ⚠cramped";
+				else if (actual_dx > expected_dx * 1.6f &&
+					 expected_dx > 0)
+					flag = " ⚠wide-gap";
+			}
+			fprintf(stderr,
+				"    x=%8.2f size=%5.2f fid=%2d  dx=%6.2f  '%s'%s\n",
+				s->x, s->font_size, s->font_id,
+				actual_dx, s->ch, flag);
+			prev_x = s->x;
+			prev_size = s->font_size;
+		}
+		free(arr);
+	}
+lines_done:
+
 	yetty_ypaint_core_buffer_destroy(br.value);
 	yetty_yterm_osc_args_free(&args);
 	return 0;
@@ -400,9 +528,15 @@ int main(int argc, char **argv)
 		else if (strcmp(argv[i], "-H") == 0 ||
 			 strcmp(argv[i], "--histogram") == 0)
 			g_histogram = 1;
-		else if (argv[i][0] == '-') {
+		else if (strcmp(argv[i], "-l") == 0 ||
+			 strcmp(argv[i], "--lines") == 0)
+			g_lines = 1;
+		else if (strncmp(argv[i], "--line-y=", 9) == 0) {
+			g_lines = 1;
+			g_line_y_filter = (float)atof(argv[i] + 9);
+		} else if (argv[i][0] == '-') {
 			fprintf(stderr,
-				"usage: %s [-v|--verbose] [-H|--histogram] "
+				"usage: %s [-v] [-H] [-l] [--line-y=Y] "
 				"<ycat-output-file>\n",
 				argv[0]);
 			return 1;
@@ -412,7 +546,7 @@ int main(int argc, char **argv)
 	}
 	if (!path) {
 		fprintf(stderr,
-			"usage: %s [-v|--verbose] [-H|--histogram] "
+			"usage: %s [-v] [-H] [-l] [--line-y=Y] "
 			"<ycat-output-file>\n",
 			argv[0]);
 		return 1;

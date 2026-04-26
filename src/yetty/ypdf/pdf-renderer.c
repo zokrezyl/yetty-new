@@ -404,6 +404,29 @@ struct render_ctx {
  * Callbacks
  *===========================================================================*/
 
+/* Decode one UTF-8 codepoint starting at *pp (advances *pp on success).
+ * Returns 0 on bad/empty input. */
+static uint32_t utf8_step(const uint8_t **pp, const uint8_t *end) {
+    if (*pp >= end) return 0;
+    uint8_t b = **pp;
+    uint32_t cp = 0;
+    if ((b & 0x80) == 0) { cp = b; *pp += 1; }
+    else if ((b & 0xE0) == 0xC0) {
+        cp = b & 0x1F; *pp += 1;
+        if (*pp < end) { cp = (cp << 6) | (**pp & 0x3F); *pp += 1; }
+    } else if ((b & 0xF0) == 0xE0) {
+        cp = b & 0x0F; *pp += 1;
+        if (*pp < end) { cp = (cp << 6) | (**pp & 0x3F); *pp += 1; }
+        if (*pp < end) { cp = (cp << 6) | (**pp & 0x3F); *pp += 1; }
+    } else if ((b & 0xF8) == 0xF0) {
+        cp = b & 0x07; *pp += 1;
+        if (*pp < end) { cp = (cp << 6) | (**pp & 0x3F); *pp += 1; }
+        if (*pp < end) { cp = (cp << 6) | (**pp & 0x3F); *pp += 1; }
+        if (*pp < end) { cp = (cp << 6) | (**pp & 0x3F); *pp += 1; }
+    } else { *pp += 1; }
+    return cp;
+}
+
 static struct float_result text_emit_cb(
     void *ud,
     const char *text, size_t text_len,
@@ -430,64 +453,84 @@ static struct float_result text_emit_cb(
         emit_text_p = remap_buf;
     }
 
-    /* Use the PDF's actual non-stroking colour. Hardcoding 0xFF000000
-     * meant every glyph rendered black; on a black-background terminal
-     * that's invisible. Auto-flip near-black to white so default body
-     * text shows up on dark terminals — anything coloured (red/green/blue
-     * highlights, syntax tags, etc.) passes through unchanged. */
+    /* Use the PDF's actual non-stroking colour, but auto-flip near-black
+     * to white so default body text is visible on a dark terminal. */
     float fr = state->fill_r, fg = state->fill_g, fb = state->fill_b;
     float lum = 0.2126f * fr + 0.7152f * fg + 0.0722f * fb;
     if (lum < 0.05f) { fr = 1.0f; fg = 1.0f; fb = 1.0f; }
     uint32_t color = rgb_to_abgr(fr, fg, fb);
-
-    struct yetty_ycore_buffer tb = {
-        (uint8_t *)(uintptr_t)emit_text_p, emit_text_len, emit_text_len
-    };
     int32_t font_id = fi ? (int32_t)fi->buffer_font_id : -1;
-    (void)yetty_ypaint_core_buffer_add_text(
-        c->buffer, sx, sy, &tb,
-        effective_size, color, 0, font_id,
-        (fabsf(rotation_radians) > 0.001f) ? -rotation_radians : 0.0f);
-
-    /* Measure advance at the PDF text-state font size (Tfs), which matches
-     * the units of the text matrix. See PDF spec 9.4.4. */
-    float raw_advance;
-    if (fi && fi->raw_font && fi->raw_font->ops &&
-        fi->raw_font->ops->measure_text) {
-        struct float_result r = fi->raw_font->ops->measure_text(
-            fi->raw_font, emit_text_p, emit_text_len, state->font_size);
-        if (YETTY_IS_ERR(r))
-            return YETTY_ERR(float, r.error.msg);
-        raw_advance = r.value;
-    } else {
-        return YETTY_ERR(float, "no font for advance measurement");
-    }
+    float rotation = (fabsf(rotation_radians) > 0.001f) ? -rotation_radians
+                                                        : 0.0f;
     (void)effective_size;
 
-    /* Count codepoints / spaces for char/word spacing. */
-    int num_cps = 0, num_spaces = 0;
+    if (!fi || !fi->raw_font || !fi->raw_font->ops ||
+        !fi->raw_font->ops->get_advance) {
+        return YETTY_ERR(float, "no font for advance measurement");
+    }
+    struct yetty_font_font *raw = fi->raw_font;
+
+    /* Per-glyph emission. Walk the UTF-8 string codepoint by codepoint;
+     * for each one, look up its individual advance from the embedded TTF
+     * (the same source the text matrix is paced from), apply Tc/Tw/Th
+     * exactly like PDF spec 9.4.4, and emit a one-char TEXT_SPAN at the
+     * precisely computed scene-space x. The receiver's text-span expander
+     * sees a 1-char span and skips the inner cursor walk — its bearing-y
+     * lookup in the MSDF font correctly places the glyph top regardless
+     * of which TTF metric the sender used. Tc/Tw/Th drift between spans
+     * is gone because every glyph carries its own absolute x. */
+    float h_scale = state->horizontal_scaling / 100.0f;
+    float Tc = state->char_spacing;
+    float Tw = state->word_spacing;
+    float cursor_x = sx;
+    float total_advance = 0.0f;
+
     const uint8_t *p = (const uint8_t *)emit_text_p;
     const uint8_t *pe = p + emit_text_len;
     while (p < pe) {
-        uint32_t cp = 0;
-        uint8_t b = *p;
-        if ((b & 0x80) == 0) { cp = b; p += 1; }
-        else if ((b & 0xE0) == 0xC0) {
-            cp = b & 0x1F; p += 1;
-            if (p < pe) { cp = (cp << 6) | (*p & 0x3F); p += 1; }
-        } else if ((b & 0xF0) == 0xE0) { p += 3; }
-        else if ((b & 0xF8) == 0xF0) { p += 4; }
-        else { p += 1; }
-        num_cps++;
-        if (cp == 0x20) num_spaces++;
+        const uint8_t *cp_start = p;
+        uint32_t cp = utf8_step(&p, pe);
+        if (cp == 0) continue;
+        size_t cp_bytes = (size_t)(p - cp_start);
+
+        /* When the glyph is missing from the subset (extremely common for
+         * U+0020 — PDFs often use Tw rather than emit space glyphs, so
+         * the space is dropped from the embedded TTF), FT_Get_Char_Index
+         * returns 0 and get_advance fails. Fall back to half-em so the
+         * cursor still steps; this matches the receiver's
+         * expand_text_span_to_glyphs unknown-glyph branch (font_size*0.5),
+         * so words don't collapse and the advance returned to the parser
+         * stays consistent with what the receiver-side path used to
+         * compute. We still emit the one-char span — the receiver will
+         * skip it harmlessly when its own get_glyph_index also fails. */
+        float adv;
+        struct float_result advr =
+            raw->ops->get_advance(raw, cp, state->font_size);
+        if (YETTY_IS_OK(advr)) {
+            adv = advr.value;
+        } else {
+            adv = state->font_size * 0.5f;
+        }
+
+        /* Per PDF spec 9.4.4: post-show displacement of glyph i is
+         *   ((w_i - Tj/1000) * Tfs + Tc + Tw_if_space) * Th
+         * Tj kerning is handled by the parser between strings, so here
+         * we just add Tc per glyph and Tw per ASCII space, then scale. */
+        float spacing = Tc + ((cp == 0x20) ? Tw : 0.0f);
+        float step = (adv + spacing) * h_scale;
+
+        struct yetty_ycore_buffer tb = {
+            (uint8_t *)(uintptr_t)cp_start, cp_bytes, cp_bytes
+        };
+        (void)yetty_ypaint_core_buffer_add_text(
+            c->buffer, cursor_x, sy, &tb,
+            state->font_size, color, 0, font_id, rotation);
+
+        cursor_x += step;
+        total_advance += step;
     }
 
-    float h_scale = state->horizontal_scaling / 100.0f;
-    float advance = (raw_advance
-                     + num_cps * state->char_spacing
-                     + num_spaces * state->word_spacing) * h_scale;
-
-    return YETTY_OK(float, advance);
+    return YETTY_OK(float, total_advance);
 }
 
 static void rect_paint_cb(
