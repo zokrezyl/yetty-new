@@ -74,5 +74,6 @@ if(YETTY_ENABLE_TOOL_YTHORVG AND YETTY_ENABLE_FEATURE_YTHORVG AND YETTY_ENABLE_L
     add_subdirectory(ythorvg)
 endif()
 
-# decode-ypaint — diagnostic tool, always built (no flag). Tiny, no GPU deps.
-add_subdirectory(decode-ypaint)
+if(YETTY_ENABLE_TOOL_DECODE_YPAINT)
+    add_subdirectory(decode-ypaint)
+endif()

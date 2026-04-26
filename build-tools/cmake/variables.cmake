@@ -141,6 +141,7 @@ option(YETTY_ENABLE_TOOL_YSHEET          "ysheet tool"                       ON)
 option(YETTY_ENABLE_TOOL_YSLIDE          "yslide tool"                       ON)
 option(YETTY_ENABLE_TOOL_QA              "qa static analysis tools"          ON)
 option(YETTY_ENABLE_TOOL_YTHORVG         "yetty-ythorvg CLI (SVG/Lottie -> OSC)" ON)
+option(YETTY_ENABLE_TOOL_DECODE_YPAINT    "decode-ypaint diagnostic tool"     ON)
 
 # Auto-disable QA tools for cross-compilation (requires host LLVM/Clang libs)
 # Also disabled on macOS and Windows — qa-tools/custom/result-checker/CMakeLists.txt
