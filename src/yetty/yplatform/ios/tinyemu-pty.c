@@ -4,6 +4,7 @@
 #include <yetty/platform/pty-factory.h>
 #include <yetty/yconfig.h>
 #include <yetty/ycore/types.h>
+#include <yetty/ytrace.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -11,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /* TinyEMU headers */
@@ -44,8 +46,12 @@ struct tinyemu_pty {
     char *config_path;
 };
 
-/* External: get bundle directory from platform-paths.m */
-extern const char *yetty_yplatform_get_bundle_dir(void);
+/* External platform-paths from platform-paths.m. Assets live under data_dir
+ * (extracted from incbin by yetty_yplatform_extract_assets at startup); the
+ * VM cfg is auto-generated under config_dir/temu/ — same model as Linux
+ * desktop (src/yetty/yplatform/shared/tinyemu-pty.c). */
+extern const char *yetty_yplatform_get_config_dir(void);
+extern const char *yetty_yplatform_get_data_dir(void);
 
 /* Forward declarations */
 static void tinyemu_pty_destroy(struct yetty_yplatform_pty *self);
@@ -496,12 +502,70 @@ static struct yetty_yplatform_pty_result tinyemu_pty_create(struct yetty_yconfig
     /* Terminal polls pty_pipe[0] for VM output */
     pty->pipe_source.abstract = pty->pty_pipe[0];
 
-    /* Get VM config path - use bundle directory */
+    /* Resolve VM config path under <config_dir>/temu/root-riscv64.cfg.
+     * Kernel/opensbi/alpine-rootfs.img were extracted from incbin to
+     * <data_dir>/yemu/ by yetty_yplatform_extract_assets() at startup. If
+     * the cfg does not exist yet, emit it with absolute paths so tinyemu's
+     * get_file_path() resolves them as-is. Mirrors shared/tinyemu-pty.c. */
     {
-        const char *bundle_dir = yetty_yplatform_get_bundle_dir();
-        char path_buf[512];
-        snprintf(path_buf, sizeof(path_buf), "%s/root-riscv64.cfg", bundle_dir);
-        pty->config_path = strdup(path_buf);
+        const char *config_dir = yetty_yplatform_get_config_dir();
+        const char *data_dir = yetty_yplatform_get_data_dir();
+        char cfg_dir[512];
+        char cfg_path[512];
+        int cfg_ready = 1;
+
+        snprintf(cfg_dir, sizeof(cfg_dir), "%s/temu", config_dir);
+        snprintf(cfg_path, sizeof(cfg_path), "%s/root-riscv64.cfg", cfg_dir);
+
+        /* mkdir -p <config_dir>/temu */
+        {
+            char tmp[512];
+            snprintf(tmp, sizeof(tmp), "%s", cfg_dir);
+            for (char *p = tmp + 1; *p && cfg_ready; p++) {
+                if (*p == '/') {
+                    *p = 0;
+                    if (mkdir(tmp, 0755) != 0 && errno != EEXIST)
+                        cfg_ready = 0;
+                    *p = '/';
+                }
+            }
+            if (cfg_ready && mkdir(tmp, 0755) != 0 && errno != EEXIST)
+                cfg_ready = 0;
+        }
+
+        if (cfg_ready && access(cfg_path, F_OK) != 0) {
+            FILE *f = fopen(cfg_path, "w");
+            if (f) {
+                fprintf(f,
+                    "/* TinyEMU VM Configuration (auto-generated; edit to customize) */\n"
+                    "{\n"
+                    "    version: 1,\n"
+                    "    machine: \"riscv64\",\n"
+                    "    memory_size: 256,\n"
+                    "    bios: \"%s/yemu/opensbi-fw_jump.elf\",\n"
+                    "    kernel: \"%s/yemu/kernel-riscv64.bin\",\n"
+                    "    cmdline: \"earlycon=sbi console=hvc0 root=/dev/vda rootfstype=ext4 rw init=/init\",\n"
+                    "    drive0: { file: \"%s/yemu/alpine-rootfs.img\" }\n"
+                    "}\n",
+                    data_dir, data_dir, data_dir);
+                fclose(f);
+                yinfo("tinyemu: wrote default cfg to %s", cfg_path);
+            } else {
+                cfg_ready = 0;
+            }
+        }
+
+        if (!cfg_ready) {
+            close(pty->os_input_pipe[0]);
+            close(pty->os_input_pipe[1]);
+            close(pty->pty_pipe[0]);
+            close(pty->pty_pipe[1]);
+            free(pty);
+            return YETTY_ERR(yetty_yplatform_pty,
+                "failed to prepare temu cfg under config dir");
+        }
+
+        pty->config_path = strdup(cfg_path);
     }
 
     /* Initialize VM */

@@ -8,8 +8,8 @@
 #include <webgpu/webgpu.h>
 #include <pthread.h>
 #include <yetty/yetty.h>
-#include <yetty/config.h>
-#include <yetty/core/event.h>
+#include <yetty/yconfig.h>
+#include <yetty/ycore/event.h>
 #include <yetty/platform/platform-input-pipe.h>
 #include <yetty/platform/pty-factory.h>
 #include <yetty/platform/extract-assets.h>
@@ -17,6 +17,7 @@
 
 /* Forward declarations */
 const char *yetty_yplatform_get_cache_dir(void);
+const char *yetty_yplatform_get_data_dir(void);
 const char *yetty_yplatform_get_runtime_dir(void);
 WGPUSurface yetty_yplatform_create_surface_from_layer(WGPUInstance instance, CAMetalLayer *layer);
 
@@ -97,12 +98,17 @@ static void *render_thread_func(void *arg)
 
     const char *cache_dir = yetty_yplatform_get_cache_dir();
     const char *runtime_dir = yetty_yplatform_get_runtime_dir();
-    ydebug("cache_dir=%s runtime_dir=%s", cache_dir, runtime_dir);
+    /* extract_assets writes shaders/fonts under data_dir (Application
+     * Support/yetty), so point yetty at that — not cache_dir which is never
+     * populated. */
+    const char *data_dir = yetty_yplatform_get_data_dir();
+    ydebug("cache_dir=%s data_dir=%s runtime_dir=%s",
+           cache_dir, data_dir, runtime_dir);
 
     static char shaders_dir[512];
     static char fonts_dir[512];
-    snprintf(shaders_dir, sizeof(shaders_dir), "%s/shaders", cache_dir);
-    snprintf(fonts_dir, sizeof(fonts_dir), "%s/fonts", cache_dir);
+    snprintf(shaders_dir, sizeof(shaders_dir), "%s/shaders", data_dir);
+    snprintf(fonts_dir, sizeof(fonts_dir), "%s/fonts", data_dir);
 
     struct yetty_yplatform_paths paths = {
         .shaders_dir = shaders_dir,

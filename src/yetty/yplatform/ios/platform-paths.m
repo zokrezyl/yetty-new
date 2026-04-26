@@ -6,6 +6,7 @@
 static char cache_dir_buf[512];
 static char config_dir_buf[512];
 static char bundle_dir_buf[512];
+static char data_dir_buf[512];
 
 const char *yetty_yplatform_get_bundle_dir(void)
 {
@@ -46,4 +47,17 @@ const char *yetty_yplatform_get_assets_dir(void)
 {
     /* iOS assets are in the app bundle */
     return yetty_yplatform_get_bundle_dir();
+}
+
+/* Persistent app-private data lives under Application Support — that's
+ * where extract-assets.c writes the extracted incbin payload (yemu/, etc.)
+ * and where shared/tinyemu-pty.c expects to find them. */
+const char *yetty_yplatform_get_data_dir(void)
+{
+    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
+    if (paths.count > 0) {
+        snprintf(data_dir_buf, sizeof(data_dir_buf), "%s/yetty", [paths[0] UTF8String]);
+        return data_dir_buf;
+    }
+    return "/tmp/yetty";
 }

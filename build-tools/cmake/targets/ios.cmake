@@ -1,7 +1,14 @@
 # iOS build target
 
-# Disable desktop-only libraries
+# Disable desktop-only libraries.
+# - GLFW: desktop window system, not used on iOS (UIKit owns the window).
+# - QEMU: --qemu uses fork+exec to spawn qemu-system-riscv64 — neither
+#   primitive is available in the iOS sandbox, and the qemu-ios-* asset
+#   tarball isn't published. Disable up-front so assets_fetch_qemu() in
+#   shared.cmake doesn't try to download a non-existent file. Use --temu
+#   (in-process TinyEMU) instead.
 set(YETTY_ENABLE_LIB_GLFW OFF CACHE BOOL "" FORCE)
+set(YETTY_ENABLE_LIB_QEMU OFF CACHE BOOL "" FORCE)
 
 include(${YETTY_ROOT}/build-tools/cmake/targets/shared.cmake)
 
@@ -13,17 +20,25 @@ include(${YETTY_ROOT}/build-tools/cmake/tinyemu-runtime.cmake)
 set(IOS_ASSETS_DIR "${CMAKE_BINARY_DIR}/ios-assets")
 file(MAKE_DIRECTORY ${IOS_ASSETS_DIR})
 
-# Platform sources — iOS-specific (Objective-C) + shared Unix (C)
-# iOS uses TinyEMU for PTY (RISC-V Linux VM) instead of unix-pty
+# Platform sources — iOS-specific (Objective-C) + shared Unix (C). iOS uses
+# TinyEMU for PTY (RISC-V Linux VM) instead of forkpty, so unix-pty-factory.c
+# / fork-pty.c / glfw-* are intentionally excluded. The shared files are the
+# same set linux.cmake uses, minus the desktop-only pieces.
 set(YETTY_PLATFORM_SOURCES
     ${YETTY_ROOT}/src/yetty/yplatform/ios/main.m
     ${YETTY_ROOT}/src/yetty/yplatform/ios/platform-paths.m
     ${YETTY_ROOT}/src/yetty/yplatform/ios/surface.m
     ${YETTY_ROOT}/src/yetty/yplatform/ios/tinyemu-pty.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/libuv-event-loop.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/ycoroutine.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/ywebgpu.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-pipe.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/unix-socket.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/extract-assets.c
     ${YETTY_ROOT}/src/yetty/incbin-assets.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/term.c
+    ${YETTY_ROOT}/src/yetty/yplatform/shared/fs.c
     ${YETTY_ROOT}/src/yetty/yplatform/shared/time.c
 )
 
@@ -81,6 +96,8 @@ find_library(QUARTZCORE_LIBRARY QuartzCore REQUIRED)
 target_link_libraries(yetty PRIVATE
     ${YETTY_LIBS}
     tinyemu
+    yetty_telnet
+    yetty_yco
     ${CORETEXT_LIBRARY}
     ${COREFOUNDATION_LIBRARY}
     ${COREGRAPHICS_LIBRARY}
@@ -89,8 +106,11 @@ target_link_libraries(yetty PRIVATE
     ${QUARTZCORE_LIBRARY}
 )
 
-# Copy TinyEMU runtime files (RISC-V disk images) to app bundle
-tinyemu_copy_runtime_to_bundle(yetty)
+# TinyEMU runtime (kernel, opensbi, alpine-rootfs.img) is embedded via incbin
+# in shared.cmake's yetty_embed_assets() under the "yemu" prefix; extracted
+# to <data_dir>/yemu/ at startup by yetty_yplatform_extract_assets(). The
+# VM cfg is auto-generated under <config_dir>/temu/ at runtime — same model
+# as Linux desktop. Do NOT bundle the files as Bundle/Resources.
 
 # Generate demo outputs (pre-run demo scripts to capture output for iOS)
 if(YETTY_ENABLE_FEATURE_DEMO)
