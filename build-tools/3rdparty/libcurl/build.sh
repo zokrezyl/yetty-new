@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# libcurl 3rdparty wrapper: picks the right nix shell for $TARGET_PLATFORM
+# and re-execs into _build.sh inside it. Windows uses MSYS2 CLANG64
+# (same pattern as libuv / qemu).
+#
+# libcurl is the first 3rdparty lib with a transitive prebuilt dep —
+# _build.sh fetches the openssl-new tarball from GitHub at build time
+# and links curl statically against it.
+#
+# Required env:
+#   TARGET_PLATFORM   one of:
+#     linux-x86_64 | linux-aarch64 |
+#     macos-arm64 | macos-x86_64 |
+#     android-arm64-v8a | android-x86_64 |
+#     ios-arm64 | ios-x86_64 |
+#     webasm | windows-x86_64
+#   OUTPUT_DIR        where the tarball is written
+#
+# Version is read from ./version.
+
+set -euo pipefail
+
+: "${TARGET_PLATFORM:?TARGET_PLATFORM is required}"
+
+case "$TARGET_PLATFORM" in
+    linux-x86_64|linux-aarch64|\
+    macos-x86_64|macos-arm64|\
+    android-arm64-v8a|android-x86_64|\
+    ios-arm64|ios-x86_64|\
+    webasm)
+        SHELL_NAME="3rdparty-${TARGET_PLATFORM}"
+        ;;
+    windows-x86_64)
+        if [ "${MSYSTEM:-}" != "CLANG64" ]; then
+            echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=${MSYSTEM:-unset})" >&2
+            exit 1
+        fi
+        exec bash "$(dirname "$0")/_build.sh" "$@"
+        ;;
+    *)
+        echo "unknown TARGET_PLATFORM: $TARGET_PLATFORM" >&2
+        exit 1
+        ;;
+esac
+
+if [ "${USE_NIX:-1}" = "0" ]; then
+    exec bash "$(dirname "$0")/_build.sh" "$@"
+fi
+
+cd "$(dirname "$0")/../../.."
+exec nix develop ".#$SHELL_NAME" --command bash build-tools/3rdparty/libcurl/_build.sh "$@"
