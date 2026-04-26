@@ -99,7 +99,6 @@ _CONFIGURE_ARGS=(
     --without-default-features
     --enable-tcg
     --enable-slirp
-    --enable-virtfs
     --enable-fdt=internal
     --enable-trace-backends=nop
     --disable-werror
@@ -109,6 +108,8 @@ _CONFIGURE_ARGS=(
     --disable-qom-cast-debug
     --disable-coroutine-pool
 )
+# virtfs is platform-specific: needs POSIX 9p machinery + xattr that doesn't
+# exist on Windows. Each platform block opts in below.
 _EXTRA_CFLAGS="-Os -ffunction-sections -fdata-sections"
 _EXTRA_CXXFLAGS="-Os -ffunction-sections -fdata-sections"
 _EXTRA_LDFLAGS="-Wl,--gc-sections"
@@ -123,12 +124,13 @@ _STRIP_BIN="strip"
 case "$TARGET_PLATFORM" in
 
 linux-x86_64)
-    _CONFIGURE_ARGS+=(--enable-attr --cc=gcc --cxx=g++)
+    _CONFIGURE_ARGS+=(--enable-virtfs --enable-attr --cc=gcc --cxx=g++)
     ;;
 
 linux-aarch64)
     : "${CROSS_PREFIX:=aarch64-unknown-linux-gnu-}"
     _CONFIGURE_ARGS+=(
+        --enable-virtfs
         --enable-attr
         --cross-prefix="$CROSS_PREFIX"
         --cc="${CROSS_PREFIX}gcc"
@@ -363,8 +365,8 @@ int qemu_shm_alloc(size_t size, Error **errp)\
         --cc="$_CC"
         --cxx="$_CXX"
         --host-cc=gcc
-        # --without-default-features turns every auto feature off; virtfs
-        # needs attr, and bionic satisfies the attr test via in-libc
+        --enable-virtfs
+        # virtfs needs attr, and bionic satisfies the attr test via in-libc
         # getxattr/setxattr (QEMU's libattr_test links without -lattr).
         --enable-attr
     )
@@ -379,6 +381,7 @@ macos-arm64|macos-x86_64)
         macos-x86_64) _ARCH="x86_64" ;;
     esac
     _CONFIGURE_ARGS+=(
+        --enable-virtfs
         --cc=clang
         --cxx=clang++
         --extra-cflags="-arch $_ARCH"
@@ -426,6 +429,7 @@ ios-arm64|ios-x86_64|tvos-arm64)
     _SDK="$(/usr/bin/xcrun --sdk "$_SDK_NAME" --show-sdk-path)"
     _DARWIN_CFLAGS="-isysroot $_SDK -arch $_ARCH $_MIN_FLAG"
     _CONFIGURE_ARGS+=(
+        --enable-virtfs
         --cc=/usr/bin/clang
         --cxx=/usr/bin/clang++
         --objcc=/usr/bin/clang
@@ -440,10 +444,38 @@ ios-arm64|ios-x86_64|tvos-arm64)
     ;;
 
 windows-x86_64)
-    # Windows is MSVC/clang-cl + vcpkg — kept in its own file because of
-    # the size of the pkgconf/patching logic.
-    # shellcheck source=platforms/windows-x86_64.sh
-    source "$SCRIPT_DIR/platforms/windows-x86_64.sh"
+    # Windows uses MSYS2 CLANG64 (clang + lld + mingw-w64 libs). Caller is
+    # expected to be inside the CLANG64 environment with these packages:
+    #   mingw-w64-clang-x86_64-{clang,lld,glib2,pixman,libslirp,zlib,
+    #                          ninja,meson,pkgconf,python}
+    #   git diffutils
+    # CI sets this up via msys2/setup-msys2 in build-3rdparty-qemu.yml.
+    if [ "${MSYSTEM:-}" != "CLANG64" ]; then
+        echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=$MSYSTEM)" >&2
+        exit 1
+    fi
+
+    # QEMU's symlink-install-tree.py creates a staging tree of symlinks for
+    # `meson install`. On Windows without Developer Mode the symlink calls
+    # fail and abort meson setup even though we never run install. Replace
+    # it with a no-op.
+    cat > "$SRC_DIR/scripts/symlink-install-tree.py" <<'PYEOF'
+#!/usr/bin/env python3
+import sys
+sys.exit(0)
+PYEOF
+
+    _CONFIGURE_ARGS+=(
+        --cc=clang
+        --cxx=clang++
+    )
+    # clang 22.x on mingw-w64 hits an LLVM ICE in DwarfDebug::emitDebugLocImpl
+    # while compiling util/oslib-win32.c with debug info. We don't ship
+    # symbols anyway — turn debug info off (also strips ~25% off the .exe).
+    _EXTRA_CFLAGS="-Os -g0 -ffunction-sections -fdata-sections"
+    _EXTRA_CXXFLAGS="-Os -g0 -ffunction-sections -fdata-sections"
+    _EXTRA_LDFLAGS="-Wl,--gc-sections,-s"
+    _QEMU_BINARY_NAME="qemu-system-riscv64.exe"
     ;;
 
 *)
@@ -475,7 +507,15 @@ echo "==> configuring QEMU for $TARGET_PLATFORM"
 "$SRC_DIR/configure" "${_CONFIGURE_ARGS[@]}"
 
 echo "==> building (-j${NCPU})"
-make -j"$NCPU"
+# QEMU's Makefile is a thin wrapper around ninja; on MSYS2 CLANG64 we don't
+# install GNU make (not in the clang-x86_64 package set), so call ninja
+# directly. Other platforms keep using make so any Makefile-only targets
+# (e.g. the kvm/headers targets) still resolve.
+if [ "${MSYSTEM:-}" = "CLANG64" ]; then
+    ninja -j"$NCPU"
+else
+    make -j"$NCPU"
+fi
 
 BUILT="$BUILD_DIR/$_QEMU_BINARY_NAME"
 [ -f "$BUILT" ] || { echo "missing binary: $BUILT" >&2; exit 1; }
@@ -492,6 +532,23 @@ mkdir -p "$STAGE"
 
 OUT_NAME="${_QEMU_OUTPUT_NAME:-$_QEMU_BINARY_NAME}"
 cp "$BUILT" "$STAGE/$OUT_NAME"
+
+# Windows: bundle every non-system DLL the .exe links against. Without
+# these the binary won't start outside an MSYS2 CLANG64 shell. The
+# -Dslirp:default_library=static option only affects QEMU's bundled
+# subproject — we use the system mingw libslirp so it stays dynamic and
+# its DLL has to ship too.
+if [ "$TARGET_PLATFORM" = "windows-x86_64" ]; then
+    _CLANG64_BIN="/clang64/bin"
+    for _dll in libglib-2.0-0.dll libintl-8.dll libiconv-2.dll \
+                libpcre2-8-0.dll libpixman-1-0.dll zlib1.dll \
+                libslirp-0.dll \
+                libwinpthread-1.dll libc++.dll libunwind.dll; do
+        if [ -f "$_CLANG64_BIN/$_dll" ]; then
+            cp "$_CLANG64_BIN/$_dll" "$STAGE/"
+        fi
+    done
+fi
 
 echo "==> packaging -> $TARBALL"
 tar -C "$STAGE" -czf "$TARBALL" .

@@ -22,14 +22,14 @@ case "$TARGET_PLATFORM" in
         SHELL_NAME="assets-qemu-${TARGET_PLATFORM}"
         ;;
     windows-x86_64)
-        # Windows uses MSVC — no nix shell. The caller (build.ps1 or the
-        # CI workflow) is expected to have already loaded vcvarsall, put
-        # meson + GnuWin32 + vcpkg tools on PATH, and exported
-        # VCPKG_INSTALLED. Skip nix and exec the inner build.sh directly.
-        if ! command -v clang-cl >/dev/null 2>&1 && ! command -v clang-cl.exe >/dev/null 2>&1; then
-            echo "error: windows-x86_64 requires clang-cl on PATH" >&2
-            echo "       run via build-tools/3rdparty/qemu/build.ps1 from PowerShell" >&2
-            echo "       (it loads vcvarsall and puts LLVM bin on PATH)" >&2
+        # Windows uses MSYS2 CLANG64 — no nix shell. The caller must already
+        # be inside CLANG64 (CI: msys2/setup-msys2 with msystem: CLANG64;
+        # locally: launch from the CLANG64 start menu shortcut, or run from
+        # any MSYS2 shell with `MSYSTEM=CLANG64 bash -lc ...`). Required
+        # packages are listed in _build.sh's windows-x86_64 case.
+        if [ "${MSYSTEM:-}" != "CLANG64" ]; then
+            echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=${MSYSTEM:-unset})" >&2
+            echo "       launch a CLANG64 shell, or in CI use msys2/setup-msys2 with msystem: CLANG64" >&2
             exit 1
         fi
         exec bash "$(dirname "$0")/_build.sh" "$@"
