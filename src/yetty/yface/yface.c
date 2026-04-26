@@ -538,20 +538,36 @@ yetty_yface_finish_read(struct yetty_yface *y)
     if (!y) return YETTY_ERR(yetty_ycore_void, "yface is NULL");
     if (!y->dec_active) return YETTY_OK_VOID();
 
-    /* For raw mode, finalize any 2- or 3-char b64 tail that decoded into
-     * 1 or 2 raw bytes and was held in carry. b64 padding ('=') means the
-     * encoder produced a complete quartet on flush, so a 2/3-char remainder
-     * here only happens if the wire was truncated — discard. For compressed
-     * mode, LZ4F_compressEnd has already emitted the frame footer so no
-     * tail input is needed.
-     */
+    /* Drain any 2- or 3-char tail in carry into 1 or 2 raw bytes. The b64
+     * encoder pads 1- and 2-byte remainders with '=' chars; feed_bytes
+     * strips '=' before quartet decode (so '=' would never appear in
+     * carry), which leaves a 2/3-char remainder here as the *valid* tail
+     * — not a truncation. Pad with 'A' (= 0) to form a full quartet and
+     * keep only the meaningful (carry_n - 1) bytes of the decoded triple. */
+    struct yetty_ycore_void_result tail_r = YETTY_OK_VOID();
+    if (y->dec_b64_carry_n >= 2) {
+        char tail[4] = {
+            y->dec_b64_carry[0],
+            y->dec_b64_carry[1],
+            y->dec_b64_carry_n >= 3 ? y->dec_b64_carry[2] : 'A',
+            'A',
+        };
+        uint8_t triple[3];
+        if (b64_decode_quartet(tail, triple)) {
+            size_t out_n = (size_t)y->dec_b64_carry_n - 1;
+            if (y->dec_compressed)
+                tail_r = dec_feed_compressed(y, triple, out_n);
+            else
+                tail_r = yetty_ycore_buffer_write(&y->in_buf, triple, out_n);
+        }
+    }
     y->dec_b64_carry_n = 0;
     if (y->dec_compressed && y->dec_ctx) {
         LZ4F_freeDecompressionContext(y->dec_ctx);
         y->dec_ctx = NULL;
     }
     y->dec_active = 0;
-    return YETTY_OK_VOID();
+    return tail_r;
 }
 
 /*===========================================================================
