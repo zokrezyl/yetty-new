@@ -52,7 +52,7 @@ target_include_directories(yetty PRIVATE ${YETTY_INCLUDES} ${YETTY_RENDERER_INCL
 # Note: webasm uses preload files, not incbin, so we only need stubs for symbols
 if(YETTY_ENABLE_LIB_INCBIN)
     incbin_add_resources(yetty
-        Logo "${YETTY_ROOT}/docs/logo.jpeg"
+        Logo "${YETTY_ROOT}/docs/logo-2.jpeg"
         DefaultConfig "${YETTY_ROOT}/assets/default-config.yaml"
     )
 endif()
