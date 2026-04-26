@@ -25,4 +25,4 @@ PAYLOAD=$(echo -n "$YAML" | base64 -w0)
 
 # Send via OSC 666675 (ypaint scroll mode)
 # Format: ESC ] 666675 ; --yaml ; <base64_payload> BEL
-printf '\033]666675;--yaml;%s\007' "$PAYLOAD"
+printf '\033]600002;;%s\007' "$PAYLOAD"

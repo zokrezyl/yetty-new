@@ -7,6 +7,8 @@
 #include <yetty/yconfig.h>
 #include <yetty/ycore/event-loop.h>
 #include <yetty/ycore/event.h>
+#include <yetty/yface/yface.h>
+#include <yetty/ymgui/wire.h>
 #include <yetty/yrender/gpu-allocator.h>
 #include <yetty/yrender/gpu-resource-set.h>
 #include <yetty/yrender/render-target.h>
@@ -60,16 +62,10 @@ struct yetty_yterm_terminal {
   int mouse_move_subscribed;
   int mouse_buttons_held;     /* OR of (1 << button) for currently-down buttons */
 
-  /* tmux-style scrollback view. Mouse wheel enters scrollback and shifts
-   * the absolute viewport top (view_top_total_idx). Enter exits back to
-   * live. While active, both layers freeze their viewport at this index
-   * even as new content keeps arriving. */
-  int scrollback_active;
-  uint32_t view_top_total_idx;
+  /* Long-lived yface for emitting input events to the inferior over the
+   * PTY. Reused across every emit; out_buf is cleared after each write. */
+  struct yetty_yface *emit_yface;
 };
-
-/* How many lines a single mouse-wheel notch moves the scrollback view. */
-#define YETTY_YTERM_WHEEL_LINES_PER_TICK 3
 
 /* Forward declarations */
 static void terminal_read_pty(struct yetty_yterm_terminal *terminal);
@@ -82,7 +78,7 @@ static void terminal_pty_pipe_alloc(void *ctx, size_t suggested_size,
                                     char **buf, size_t *buflen) {
   (void)ctx;
   (void)suggested_size;
-  static char pty_read_buf[65536];
+  static char pty_read_buf[500 * 1024 * 1024];   /* 500 MB */
   *buf = pty_read_buf;
   *buflen = sizeof(pty_read_buf);
 }
@@ -143,7 +139,34 @@ static void terminal_pty_write_raw(struct yetty_yterm_terminal *terminal,
     terminal->context.pty->ops->write(terminal->context.pty, data, len);
 }
 
-/* Emit OSC 777780;<w>;<h>\e\\ — pixel size of the terminal's view. The
+/* Build one yface envelope around `payload` and ship it to the inferior.
+ * compressed=0 because input events are short — LZ4 framing would dominate. */
+static void terminal_yface_emit(struct yetty_yterm_terminal *terminal,
+                                int osc_code,
+                                const void *payload, size_t len) {
+  if (!terminal->emit_yface) return;
+  struct yetty_ycore_void_result r =
+      yetty_yface_start_write(terminal->emit_yface, osc_code,
+                              /*compressed=*/0,
+                              /*args=*/NULL, /*args_len=*/0);
+  if (!r.ok) goto reset;
+  r = yetty_yface_write(terminal->emit_yface, payload, len);
+  if (!r.ok) goto reset;
+  r = yetty_yface_finish_write(terminal->emit_yface);
+  if (!r.ok) goto reset;
+
+  struct yetty_ycore_buffer *out = yetty_yface_out_buf(terminal->emit_yface);
+  if (out && out->size)
+    terminal_pty_write_raw(terminal, (const char *)out->data, out->size);
+
+reset:
+  if (terminal->emit_yface) {
+    struct yetty_ycore_buffer *out = yetty_yface_out_buf(terminal->emit_yface);
+    if (out) yetty_ycore_buffer_clear(out);
+  }
+}
+
+/* Emit YMGUI_OSC_SC_RESIZE — pixel size of the terminal's view. The
  * client uses it as ImGui's DisplaySize. Re-sent every time the size
  * changes or the subscription rises. */
 static void terminal_emit_pixel_size(struct yetty_yterm_terminal *terminal) {
@@ -153,45 +176,54 @@ static void terminal_emit_pixel_size(struct yetty_yterm_terminal *terminal) {
     ydebug("terminal_emit_pixel_size: skipped (bounds=%.0fx%.0f)", w, h);
     return;
   }
-  char buf[64];
-  int n = snprintf(buf, sizeof(buf), "\033]777780;%.0f;%.0f\033\\", w, h);
-  if (n > 0) terminal_pty_write_raw(terminal, buf, (size_t)n);
-  ydebug("terminal_emit_pixel_size: wrote OSC 777780;%.0f;%.0f", w, h);
+  struct ymgui_wire_input_resize msg = {
+      .magic   = YMGUI_WIRE_MAGIC_INPUT_RESIZE,
+      .version = YMGUI_WIRE_VERSION,
+      .width   = w,
+      .height  = h,
+  };
+  terminal_yface_emit(terminal, YMGUI_OSC_SC_RESIZE, &msg, sizeof(msg));
+  ydebug("terminal_emit_pixel_size: %.0fx%.0f", w, h);
 }
 
-/* OSC 777777 (click/scroll) and OSC 777778 (move) — pixel-precise mouse
- * events relative to the terminal's view origin.
- *
- *   \e]777777;<empty>;<button-index>;<press>;<x>;<y>;<scroll-dy>\e\\
- *   \e]777778;<empty>;<buttons-held-mask>;<x>;<y>\e\\
- *
- * 777777 carries the SINGLE button index (0=left, 1=right, 2=middle —
- * matches GLFW + ImGui ordering) so release events still identify the
- * button (a mask after-clearing-the-bit would lose that). 777778 carries
- * the held-button mask so the client can drive drag state.
- *
- * Card-name field is left empty — yetty has no card concept, one
- * terminal per view. Empty leading field keeps field count compatible
- * with parsers that split on ';'. */
+/* Mouse events — pixel-precise, relative to the terminal's view origin.
+ * Single struct (ymgui_wire_input_mouse) with kind discriminator covers
+ * button transitions, wheel ticks, and pure cursor motion. */
 static void terminal_emit_mouse_click(struct yetty_yterm_terminal *terminal,
                                       int button, int press,
                                       float x, float y, float scroll_dy) {
-  char buf[128];
-  int n = snprintf(buf, sizeof(buf),
-                   "\033]777777;;%d;%d;%.2f;%.2f;%.2f\033\\",
-                   button, press, x, y, scroll_dy);
-  if (n > 0) terminal_pty_write_raw(terminal, buf, (size_t)n);
+  struct ymgui_wire_input_mouse msg = {
+      .magic        = YMGUI_WIRE_MAGIC_INPUT_MOUSE,
+      .version      = YMGUI_WIRE_VERSION,
+      .x            = x,
+      .y            = y,
+  };
+  if (scroll_dy != 0.0f) {
+    msg.kind     = YMGUI_INPUT_MOUSE_WHEEL;
+    msg.button   = -1;
+    msg.wheel_dy = scroll_dy;
+  } else {
+    msg.kind    = YMGUI_INPUT_MOUSE_BUTTON;
+    msg.button  = button;
+    msg.pressed = press;
+  }
+  terminal_yface_emit(terminal, YMGUI_OSC_SC_MOUSE, &msg, sizeof(msg));
   ydebug("terminal_emit_mouse_click: btn=%d press=%d (%.1f,%.1f) dy=%.1f",
          button, press, x, y, scroll_dy);
 }
 
 static void terminal_emit_mouse_move(struct yetty_yterm_terminal *terminal,
                                      int buttons_held, float x, float y) {
-  char buf[128];
-  int n = snprintf(buf, sizeof(buf),
-                   "\033]777778;;%d;%.2f;%.2f\033\\",
-                   buttons_held, x, y);
-  if (n > 0) terminal_pty_write_raw(terminal, buf, (size_t)n);
+  struct ymgui_wire_input_mouse msg = {
+      .magic        = YMGUI_WIRE_MAGIC_INPUT_MOUSE,
+      .version      = YMGUI_WIRE_VERSION,
+      .kind         = YMGUI_INPUT_MOUSE_POS,
+      .button       = -1,
+      .buttons_held = (uint32_t)buttons_held,
+      .x            = x,
+      .y            = y,
+  };
+  terminal_yface_emit(terminal, YMGUI_OSC_SC_MOUSE, &msg, sizeof(msg));
 }
 
 /* Mouse-subscription callback fired by the text-layer when libvterm flips
@@ -277,100 +309,6 @@ static void terminal_cursor_callback(struct yetty_yterm_terminal_layer *source,
   }
   ydebug("terminal_cursor_callback EXIT: col=%u row=%u", cursor_pos.cols,
          cursor_pos.rows);
-}
-
-/*-----------------------------------------------------------------------
- * Scrollback view (tmux-style copy mode)
- *
- * Mouse-wheel events drive both layers into scrollback mode together.
- * view_top_total_idx is an absolute line index — text-layer's sb_count
- * and ypaint canvas's rolling_row_0 stay in lockstep (every text scroll
- * triggers a ypaint scroll and vice versa), so the same index identifies
- * the same line in both.
- *---------------------------------------------------------------------*/
-
-/* Find the live anchor across layers. We use the maximum so a layer that
- * has scrolled further (e.g. ypaint just absorbed a multi-page PDF) doesn't
- * leave the others behind — both layers have the same anchor by design,
- * but max() is a safe fallback in case they ever drift. */
-static uint32_t terminal_live_anchor(struct yetty_yterm_terminal *terminal) {
-  uint32_t anchor = 0;
-  for (size_t i = 0; i < terminal->layer_count; i++) {
-    struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
-    if (layer && layer->ops && layer->ops->get_live_anchor) {
-      uint32_t a = layer->ops->get_live_anchor(layer);
-      if (a > anchor)
-        anchor = a;
-    }
-  }
-  return anchor;
-}
-
-/* Push the current scrollback view state to every layer that supports it. */
-static void terminal_push_view_top(struct yetty_yterm_terminal *terminal) {
-  for (size_t i = 0; i < terminal->layer_count; i++) {
-    struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
-    if (layer && layer->ops && layer->ops->set_view_top) {
-      layer->ops->set_view_top(layer, terminal->scrollback_active,
-                               terminal->view_top_total_idx);
-    }
-  }
-  if (terminal->context.yetty_context.event_loop)
-    terminal->context.yetty_context.event_loop->ops->request_render(
-        terminal->context.yetty_context.event_loop);
-}
-
-/* Apply a relative wheel delta. Positive lines = scroll up (older). On the
- * first wheel-up out of live mode we anchor view_top one line back from
- * the current live position and enter scrollback. Scrolling past the live
- * anchor exits back to live. */
-static void terminal_scrollback_apply(struct yetty_yterm_terminal *terminal,
-                                      int lines) {
-  uint32_t live = terminal_live_anchor(terminal);
-
-  if (!terminal->scrollback_active) {
-    if (lines <= 0)
-      return; /* downward wheel in live mode: nothing to do */
-    if (live == 0)
-      return; /* nothing in scrollback yet */
-    terminal->scrollback_active = 1;
-    terminal->view_top_total_idx = live - 1;
-    if ((uint32_t)lines > 1)
-      lines -= 1; /* the entry already consumed one notch */
-    else
-      lines = 0;
-  }
-
-  if (lines > 0) {
-    if ((uint32_t)lines > terminal->view_top_total_idx)
-      terminal->view_top_total_idx = 0;
-    else
-      terminal->view_top_total_idx -= (uint32_t)lines;
-  } else if (lines < 0) {
-    uint32_t n = (uint32_t)(-lines);
-    uint64_t target = (uint64_t)terminal->view_top_total_idx + n;
-    if (target >= live) {
-      /* Scrolled forward into the live region — exit scrollback. */
-      terminal->scrollback_active = 0;
-      terminal->view_top_total_idx = live;
-    } else {
-      terminal->view_top_total_idx = (uint32_t)target;
-    }
-  }
-
-  ydebug("scrollback: active=%d view_top=%u live=%u",
-         terminal->scrollback_active, terminal->view_top_total_idx, live);
-  terminal_push_view_top(terminal);
-}
-
-/* Force a return to live, regardless of current view position. */
-static void terminal_scrollback_exit(struct yetty_yterm_terminal *terminal) {
-  if (!terminal->scrollback_active)
-    return;
-  terminal->scrollback_active = 0;
-  terminal->view_top_total_idx = terminal_live_anchor(terminal);
-  ydebug("scrollback: EXIT (Enter)");
-  terminal_push_view_top(terminal);
 }
 
 /* Event handler - only for PTY poll events registered directly with event loop
@@ -530,6 +468,18 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
         ydebug("terminal_create: pty_reader created");
       }
 
+      /* Long-lived yface for emit_*. One per terminal — out_buf is
+       * cleared after every send so it stays at the steady-state
+       * high-water mark rather than growing per-event. */
+      {
+        struct yetty_yface_ptr_result yr = yetty_yface_create();
+        if (YETTY_IS_OK(yr))
+          terminal->emit_yface = yr.value;
+        else
+          ydebug("terminal_create: emit_yface alloc failed: %s",
+                 yr.error.msg);
+      }
+
       /* Register PTY pipe — uv_pipe_t reads data, callbacks handle it */
       struct yetty_yplatform_pty_pipe_source *pipe_source =
           terminal->context.pty->ops->pipe_source(terminal->context.pty);
@@ -593,11 +543,18 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
       yetty_yterm_terminal_layer_add(terminal, ypaint_res.value);
       ydebug("terminal_create: ypaint scrolling layer created and added");
 
-      /* Register ypaint layer for OSC 666674 */
+      /* Register ypaint layer for the four ypaint OSC codes
+       * (clear/bin/yaml/overlay live in the 600000–600003 block). */
       if (terminal->pty_reader) {
         yetty_yterm_pty_reader_register_osc_sink(
-            terminal->pty_reader, YETTY_OSC_YPAINT_SCROLL, ypaint_res.value);
-        ydebug("terminal_create: ypaint layer registered for OSC 666674");
+            terminal->pty_reader, YETTY_OSC_YPAINT_CLEAR,   ypaint_res.value);
+        yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YETTY_OSC_YPAINT_BIN,     ypaint_res.value);
+        yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YETTY_OSC_YPAINT_YAML,    ypaint_res.value);
+        yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YETTY_OSC_YPAINT_OVERLAY, ypaint_res.value);
+        ydebug("terminal_create: ypaint layer registered for OSC 600000-600003");
       }
     } else {
       ydebug("terminal_create: failed to create ypaint layer (non-fatal): %s",
@@ -619,8 +576,12 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
       yetty_yterm_terminal_layer_add(terminal, ymgui_res.value);
       if (terminal->pty_reader) {
         yetty_yterm_pty_reader_register_osc_sink(
-            terminal->pty_reader, YETTY_OSC_YMGUI, ymgui_res.value);
-        ydebug("terminal_create: ymgui layer registered for OSC 666680");
+            terminal->pty_reader, YMGUI_OSC_CS_CLEAR, ymgui_res.value);
+        yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YMGUI_OSC_CS_FRAME, ymgui_res.value);
+        yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YMGUI_OSC_CS_TEX,   ymgui_res.value);
+        ydebug("terminal_create: ymgui layer registered for OSC 610000/610001/610002");
       }
     } else {
       ydebug("terminal_create: failed to create ymgui layer (non-fatal): %s",
@@ -705,6 +666,11 @@ void yetty_yterm_terminal_destroy(struct yetty_yterm_terminal *terminal) {
     yetty_yterm_pty_reader_destroy(terminal->pty_reader);
   }
 
+  if (terminal->emit_yface) {
+    yetty_yface_destroy(terminal->emit_yface);
+    terminal->emit_yface = NULL;
+  }
+
   ydebug("terminal_destroy: freeing terminal struct");
   free(terminal);
   ydebug("terminal_destroy: done");
@@ -721,7 +687,7 @@ void yetty_yterm_terminal_write(struct yetty_yterm_terminal *terminal,
   if (terminal->layer_count > 0) {
     struct yetty_yterm_terminal_layer *layer = terminal->layers[0];
     if (layer && layer->ops && layer->ops->write) {
-      layer->ops->write(layer, data, len);
+      layer->ops->write(layer, 0, data, len);
       ydebug("terminal_write: sent %zu bytes to text layer", len);
     }
   }
@@ -849,17 +815,6 @@ terminal_view_on_event(struct yetty_yui_view *view,
   case YETTY_EVENT_KEY_DOWN:
     ydebug("terminal: KEY_DOWN key=%d mods=%d", event->key.key,
            event->key.mods);
-    /* In scrollback view, Enter exits and is consumed (matches tmux copy
-     * mode). Other keys also exit scrollback before falling through to
-     * normal dispatch — this means typing while in scrollback returns to
-     * live and delivers the keystroke to the shell, which is what users
-     * expect when they meant to interact with the prompt. */
-    if (terminal->scrollback_active) {
-      int is_enter = (event->key.key == 257); /* GLFW_KEY_ENTER */
-      terminal_scrollback_exit(terminal);
-      if (is_enter)
-        return YETTY_OK(yetty_ycore_int, 1);
-    }
     for (size_t i = 0; i < terminal->layer_count; i++) {
       struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
       if (layer && layer->ops && layer->ops->on_key) {
@@ -872,8 +827,6 @@ terminal_view_on_event(struct yetty_yui_view *view,
   case YETTY_EVENT_CHAR:
     ydebug("terminal: CHAR codepoint=U+%04X mods=%d", event->chr.codepoint,
            event->chr.mods);
-    if (terminal->scrollback_active)
-      terminal_scrollback_exit(terminal);
     for (size_t i = 0; i < terminal->layer_count; i++) {
       struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
       if (layer && layer->ops && layer->ops->on_char) {
@@ -1067,28 +1020,16 @@ terminal_view_on_event(struct yetty_yui_view *view,
   }
 
   case YETTY_EVENT_SCROLL: {
+    if (!terminal->mouse_click_subscribed)
+      return YETTY_OK(yetty_ycore_int, 0);
     float lx = event->scroll.x - view->bounds.x;
     float ly = event->scroll.y - view->bounds.y;
     if (lx < 0.0f || ly < 0.0f ||
         lx >= view->bounds.w || ly >= view->bounds.h)
       return YETTY_OK(yetty_ycore_int, 0);
-
-    /* Once in scrollback view, the wheel always navigates history — even
-     * if a subscribed app would normally consume it. Outside scrollback,
-     * a subscribed app (vim, less, mc...) wins; otherwise wheel drives
-     * scrollback. dy>0 = wheel up = older content. */
-    if (!terminal->scrollback_active && terminal->mouse_click_subscribed) {
-      /* Encode wheel as a synthetic press on a virtual button. The client
-       * reads the scroll-dy field from the trailing position. */
-      terminal_emit_mouse_click(terminal, 0, 1, lx, ly, event->scroll.dy);
-      return YETTY_OK(yetty_ycore_int, 1);
-    }
-
-    int lines = (int)(event->scroll.dy * YETTY_YTERM_WHEEL_LINES_PER_TICK);
-    if (lines == 0 && event->scroll.dy != 0.0f)
-      lines = (event->scroll.dy > 0) ? 1 : -1;
-    if (lines != 0)
-      terminal_scrollback_apply(terminal, lines);
+    /* Encode wheel as a synthetic press on a virtual button. The client
+     * reads the scroll-dy field from the trailing position. */
+    terminal_emit_mouse_click(terminal, 0, 1, lx, ly, event->scroll.dy);
     return YETTY_OK(yetty_ycore_int, 1);
   }
 

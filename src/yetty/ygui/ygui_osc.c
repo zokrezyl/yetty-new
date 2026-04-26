@@ -5,7 +5,9 @@
 #include "ygui_internal.h"
 #include <yetty/yface/yface.h>
 #include <yetty/ycore/types.h>
+#include <yetty/yterm/pty-reader.h>   /* YETTY_OSC_YPAINT_* */
 #include <stdio.h>
+#include <string.h>
 
 #ifdef _WIN32
 #include <io.h>
@@ -58,18 +60,29 @@ static void write_osc(const char* data, size_t len) {
 #define VENDOR_ID "666674"
 
 static void write_clear_and_bin(const uint8_t* data, uint32_t size) {
-    /* 1) Clear the ypaint canvas. */
-    static const char clear_seq[] = "\033]" VENDOR_ID ";--clear\033\\";
+    /* 1) Clear the ypaint canvas. Empty body, no args. */
+    static const char clear_seq[] = "\033]600000;;\033\\";
     write_osc(clear_seq, sizeof(clear_seq) - 1);
 
     if (size == 0 || !data) return;
 
-    /* 2) "--bin;<base64(LZ4F(prims))>" via yetty_yface. The yface emit
-     * helper builds the full envelope into out_buf; we then push it via
-     * the existing blocking write helper. */
+    /* 2) Bin envelope: args = bin meta (compressed=1), payload = LZ4F'd
+     * + b64'd ypaint serialized buffer. yetty_yface_emit builds the
+     * whole envelope into out_buf and we push it via the blocking
+     * write helper. */
+    struct yetty_yface_bin_meta meta = {
+        .magic           = YETTY_YFACE_BIN_MAGIC,
+        .version         = YETTY_YFACE_BIN_VERSION,
+        .compressed      = YETTY_YFACE_COMP_LZ4F,
+        .compression_algo= 0,
+        .raw_size        = size,
+        .reserved        = {0, 0},
+    };
     struct yetty_ycore_buffer out = {0};
     struct yetty_ycore_void_result r = yetty_yface_emit(
-        666674, "--bin", data, size, &out);
+        YETTY_OSC_YPAINT_BIN, /*compressed=*/1,
+        &meta, sizeof(meta),
+        data, size, &out);
     if (YETTY_IS_OK(r) && out.size > 0)
         write_osc((const char *)out.data, out.size);
     yetty_ycore_buffer_destroy(&out);
@@ -89,7 +102,7 @@ void ygui_osc_update_card(const char* name, const uint8_t* data, uint32_t size) 
 void ygui_osc_kill_card(const char* name) {
     /* No named-card concept on this sink — kill = clear the canvas. */
     (void)name;
-    static const char clear_seq[] = "\033]" VENDOR_ID ";--clear\033\\";
+    static const char clear_seq[] = "\033]600000;;\033\\";
     write_osc(clear_seq, sizeof(clear_seq) - 1);
 }
 

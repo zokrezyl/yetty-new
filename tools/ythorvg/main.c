@@ -145,7 +145,7 @@ int main(int argc, char **argv) {
 
 	/* Emit OSC. */
 	if (do_clear) {
-		printf("\033]%u;--clear\033\\", YETTY_OSC_YPAINT_SCROLL);
+		printf("\033]%u;;\033\\", YETTY_OSC_YPAINT_CLEAR);
 	}
 
 	const uint8_t *raw = NULL;
@@ -157,9 +157,18 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	/* OSC: ESC ] 666674 ; --bin ; <base64(LZ4F(framed))> ESC \ */
+	/* OSC: ESC ] 600001 ; <b64(bin meta)> ; <base64(LZ4F(framed))> ESC \ */
+	struct yetty_yface_bin_meta meta = {
+		.magic            = YETTY_YFACE_BIN_MAGIC,
+		.version          = YETTY_YFACE_BIN_VERSION,
+		.compressed       = YETTY_YFACE_COMP_LZ4F,
+		.compression_algo = 0,
+		.raw_size         = raw_size,
+		.reserved         = {0, 0},
+	};
 	struct yetty_ycore_void_result emit_r = yetty_yface_emit_to_fd(
-	    fileno(stdout), YETTY_OSC_YPAINT_SCROLL, "--bin", raw, raw_size);
+	    fileno(stdout), YETTY_OSC_YPAINT_BIN,
+	    /*compressed=*/1, &meta, sizeof(meta), raw, raw_size);
 	if (YETTY_IS_ERR(emit_r))
 		fprintf(stderr, "%s: yface_emit: %s\n", argv[0], emit_r.error.msg);
 	fflush(stdout);

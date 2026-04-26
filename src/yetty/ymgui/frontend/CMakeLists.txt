@@ -1,9 +1,14 @@
 # ymgui_frontend — links into the client app, not into yetty itself.
 #
-# Two translation units of our own:
-#   ymgui_encode.c         — pure C. base64 + growable buf + OSC write.
+# Translation units of our own:
+#   ymgui_encode.c         — pure C. non-blocking OSC write helper.
 #   imgui_impl_yetty.cpp   — thin C++ shim on top of Dear ImGui.
+#
 # Dear ImGui itself comes via the imgui_core CPM target (no vendoring).
+#
+# The libuv-backed event loop now lives in src/yclient-lib (target
+# yetty_yclient) — shared with ygui / yrich / ycat. We link it here so
+# Dear ImGui apps that want the async path get it via this single target.
 
 add_library(ymgui_frontend STATIC
     ymgui_encode.c
@@ -15,7 +20,14 @@ target_include_directories(ymgui_frontend PUBLIC
     ${YETTY_ROOT}/include
 )
 
-target_link_libraries(ymgui_frontend PUBLIC imgui_core yetty_yface yetty_ycore)
+target_link_libraries(ymgui_frontend PUBLIC
+    imgui_core
+    yetty_yface
+    yetty_ycore
+)
+if(NOT EMSCRIPTEN)
+    target_link_libraries(ymgui_frontend PUBLIC yetty_yclient)
+endif()
 
 set_target_properties(ymgui_frontend PROPERTIES
     C_STANDARD 11
@@ -26,6 +38,7 @@ set_target_properties(ymgui_frontend PROPERTIES
 
 # Public headers consumers need:
 #   <yetty/ymgui/wire.h>              (installed with core headers)
+#   <yetty/yclient-lib/event-loop.h>  (installed by yclient-lib)
 #   "imgui_impl_yetty.h"              (this dir)
 #   "ymgui_encode.h"                  (this dir — optional, for custom transports)
 

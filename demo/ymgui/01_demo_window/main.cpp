@@ -2,13 +2,16 @@
  * demo-ymgui-01-demo-window
  *
  * Runs inside a yetty session (`./yetty -e ./demo-ymgui-01-demo-window`).
- * Emits one ImGui frame per tick (default: one per 33 ms) as OSC vendor
- * 666680, which the ymgui terminal-layer picks up and draws anchored at
- * the cursor.
+ * Drives Dear ImGui through the shared yetty_yclient event loop:
  *
- * The demo does no input handling — ImGuiIO.MousePos is pinned off-screen
- * so the demo window renders static. Input plumbing lives in a separate
- * followup.
+ *   stdin → uv_poll → yface stream decode → typed callbacks → ImGuiIO
+ *                                                       → frame_pending
+ *   uv_check fires once per iteration → frame_cb → ImGui::NewFrame /
+ *                                                  Render / RenderDrawData
+ *
+ * No frame timer, no fps cap. The loop runs entirely on input events:
+ * idle = 0 CPU. Pass --frames to cap how many frames we render before
+ * exiting (default: keep going).
  */
 
 #include <stdio.h>
@@ -20,42 +23,97 @@
 
 #include "imgui.h"
 #include "imgui_impl_yetty.h"
+#include <yetty/yclient-lib/event-loop.h>
 
-static void msleep(unsigned ms) {
+struct demo_state {
+    struct yetty_yclient_event_loop *loop;
+    int   frames_rendered;
+    int   frames_max;       /* <=0 = unbounded */
+    uint64_t last_ns;
+
+    /* Telemetry. */
+    uint64_t ui_total_ns;
+    uint64_t render_total_ns;
+    int      sample_n;
+};
+
+static uint64_t now_ns(void) {
     struct timespec ts;
-    ts.tv_sec  = ms / 1000;
-    ts.tv_nsec = (long)(ms % 1000) * 1000000L;
-    nanosleep(&ts, NULL);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-int main(int argc, char **argv) {
-    int frames = 18000;     /* ~10 min at 30 fps — interactive runs */
-    int fps    = 30;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
-            frames = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--fps") == 0 && i + 1 < argc) {
-            fps = atoi(argv[++i]);
-        }
-    }
-    if (fps <= 0) fps = 30;
-    unsigned dt_ms = 1000u / (unsigned)fps;
+static void on_frame(void *user)
+{
+    struct demo_state *S = (struct demo_state *)user;
+    ImGuiIO& io = ImGui::GetIO();
 
-    /* Keep stderr off the PTY (yetty wires the child's stderr to the PTY;
-     * letting logs through would overwrite the rendered demo). Send to
-     * a file so we can inspect frontend traces. */
+    /* DeltaTime from wall-clock. ImGui needs > 0. */
+    uint64_t now = now_ns();
+    if (S->last_ns == 0) S->last_ns = now;
+    uint64_t dt_ns = now - S->last_ns;
+    S->last_ns = now;
+    if (dt_ns == 0) dt_ns = 1;
+    io.DeltaTime = (float)((double)dt_ns / 1e9);
+
+    uint64_t t1 = now_ns();
+    ImGui_ImplYetty_NewFrame();
+    ImGui::NewFrame();
+
+    /* Override the demo window's hardcoded first-use position so it
+     * lands inside the viewport on small displays. */
+    ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(
+        ImVec2(io.DisplaySize.x - 40.0f, io.DisplaySize.y - 40.0f),
+        ImGuiCond_Always);
+
+    bool show = true;
+    ImGui::ShowDemoWindow(&show);
+
+    uint64_t t2 = now_ns();
+    ImGui::Render();
+    ImGui_ImplYetty_RenderDrawData(ImGui::GetDrawData());
+    uint64_t t3 = now_ns();
+
+    S->ui_total_ns     += (t2 - t1);
+    S->render_total_ns += (t3 - t2);
+    S->sample_n++;
+    if (S->sample_n >= 30) {
+        fprintf(stderr,
+                "[demo] avg/iter: ui=%.2fms  render=%.2fms\n",
+                (double)S->ui_total_ns     / S->sample_n / 1e6,
+                (double)S->render_total_ns / S->sample_n / 1e6);
+        S->ui_total_ns = S->render_total_ns = 0;
+        S->sample_n = 0;
+    }
+
+    S->frames_rendered++;
+    if (S->frames_max > 0 && S->frames_rendered >= S->frames_max)
+        yetty_yclient_event_loop_stop(S->loop);
+}
+
+int main(int argc, char **argv)
+{
+    int frames_max = 0;     /* 0 = unbounded */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc)
+            frames_max = atoi(argv[++i]);
+    }
+
+    /* Keep stderr off the PTY — yetty wires the child's stderr to the
+     * PTY, and trace lines would overwrite the rendered demo. Redirect
+     * to a file the user can `tail -f`. */
     (void)freopen("/tmp/ymgui-demo.log", "w", stderr);
     setvbuf(stderr, NULL, _IOLBF, 0);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = NULL;                  /* don't write imgui.ini */
-    /* DisplaySize is overridden by the platform backend as soon as yetty
-     * sends OSC 777780. The placeholder is just so the very first frame
-     * (before any input arrives) doesn't blow up. */
+    io.IniFilename = NULL;
+    /* Placeholder — the platform backend overwrites this as soon as
+     * yetty's first OSC resize arrives. */
     io.DisplaySize = ImVec2(800.0f, 600.0f);
-    io.DeltaTime   = (float)dt_ms / 1000.0f;
+    io.DeltaTime   = 1.0f / 60.0f;
 
     if (!ImGui_ImplYetty_Init()) {
         fprintf(stderr, "ymgui: init failed\n");
@@ -67,61 +125,33 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* Pure event-driven loop. Block on stdin (WaitInput) until yetty
-     * pushes anything (mouse move, click, resize). When woken, drain
-     * the events into ImGui, run one frame, emit unconditionally. No
-     * msleep, no fps cap, no diff/hash — if we got woken, ImGui's
-     * state changed (or could have), and an emit is the right answer.
-     * Idle = poll() blocked on stdin = literally 0 CPU. */
-    auto now_ns = []() {
-        struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-        return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
-    };
-    uint64_t poll_total = 0, ui_total = 0, render_total = 0;
-    int sample_n = 0;
+    struct demo_state state = {};
+    state.frames_max = frames_max;
 
-    for (int n = 0; n < frames; n++) {
-        /* Block until yetty sends something. -1 = wait forever. */
-        ImGui_ImplYetty_WaitInput(-1);
-
-        io.DeltaTime = (float)dt_ms / 1000.0f;
-
-        uint64_t t0 = now_ns();
-        ImGui_ImplYetty_PollInput();
-        uint64_t t1 = now_ns();
-        ImGui_ImplYetty_NewFrame();
-        ImGui::NewFrame();
-
-        /* Override the demo window's hardcoded first-use position
-         * (650, 20) — that puts it almost off-screen at small displays. */
-        ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(
-            ImVec2(io.DisplaySize.x - 40.0f, io.DisplaySize.y - 40.0f),
-            ImGuiCond_Always);
-
-        bool show = true;
-        ImGui::ShowDemoWindow(&show);
-
-        uint64_t t2 = now_ns();
-        ImGui::Render();
-        ImGui_ImplYetty_RenderDrawData(ImGui::GetDrawData());
-        uint64_t t3 = now_ns();
-
-        poll_total   += (t1 - t0);
-        ui_total     += (t2 - t1);
-        render_total += (t3 - t2);
-        sample_n++;
-        if (sample_n >= 30) {
-            fprintf(stderr,
-                    "[demo] avg/iter: poll=%.2fms  ui=%.2fms  render=%.2fms\n",
-                    (double)poll_total   / sample_n / 1e6,
-                    (double)ui_total     / sample_n / 1e6,
-                    (double)render_total / sample_n / 1e6);
-            poll_total = ui_total = render_total = 0;
-            sample_n = 0;
-        }
+    struct yetty_yclient_event_loop_config cfg = {};
+    cfg.in_fd = -1;          /* default: STDIN_FILENO */
+    cfg.user  = &state;
+    state.loop = yetty_yclient_event_loop_create(&cfg);
+    if (!state.loop) {
+        fprintf(stderr, "ymgui: event loop create failed\n");
+        ImGui_ImplYetty_PlatformShutdown();
+        ImGui_ImplYetty_Shutdown();
+        return 1;
     }
 
+    /* Wire mouse/resize from yface → ImGuiIO. The bridge re-points the
+     * loop's `user` to imgui's internal state, so we set our frame_cb
+     * AFTER attach (frame_cb's user is the loop's `user`). */
+    ImGui_ImplYetty_AttachEventLoop(state.loop);
+    yetty_yclient_event_loop_set_user(state.loop, &state);
+    yetty_yclient_event_loop_set_frame_cb(state.loop, on_frame);
+
+    /* Block until yetty pushes its first OSC (resize on subscribe) or
+     * the user moves the mouse / clicks. Idle is 0 CPU. */
+    int rc = yetty_yclient_event_loop_run(state.loop);
+    fprintf(stderr, "[demo] loop exited rc=%d frames=%d\n", rc, state.frames_rendered);
+
+    yetty_yclient_event_loop_destroy(state.loop);
     ImGui_ImplYetty_Clear();
     ImGui_ImplYetty_PlatformShutdown();
     ImGui_ImplYetty_Shutdown();

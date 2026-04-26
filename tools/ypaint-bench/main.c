@@ -8,6 +8,7 @@
 #include <time.h>
 
 #include <yetty/yface/yface.h>
+#include <yetty/yterm/pty-reader.h>   /* YETTY_OSC_YPAINT_BIN */
 
 // Complex primitive type for yplot
 #define YETTY_YPAINT_TYPE_YPLOT 0x80000003u
@@ -391,9 +392,18 @@ int main(int argc, char **argv) {
             raw_bytes = total_words * sizeof(float);
         }
 
-        // OSC sequence via yface: ESC ] 666674 ; --bin ; <b64(LZ4F(bytes))> ST
+        // OSC sequence via yface: ESC ] 600001 ; <b64(meta)> ; <b64(LZ4F(bytes))> ST
+        struct yetty_yface_bin_meta meta = {
+            .magic            = YETTY_YFACE_BIN_MAGIC,
+            .version          = YETTY_YFACE_BIN_VERSION,
+            .compressed       = YETTY_YFACE_COMP_LZ4F,
+            .compression_algo = 0,
+            .raw_size         = raw_bytes,
+            .reserved         = {0, 0},
+        };
         struct yetty_ycore_void_result rr = yetty_yface_emit_to_fd(
-            fileno(stdout), 666674, "--bin", g_buffer, raw_bytes);
+            fileno(stdout), YETTY_OSC_YPAINT_BIN,
+            /*compressed=*/1, &meta, sizeof(meta), g_buffer, raw_bytes);
         if (YETTY_IS_ERR(rr)) {
             fprintf(stderr, "yface_emit: %s\n", rr.error.msg);
             return 1;
