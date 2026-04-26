@@ -108,7 +108,7 @@ bool ImGui_ImplYetty_UploadFontAtlas(void)
     hdr.total_size = (uint32_t)payload_sz;
 
     if (!yetty_yface_start_write(g_state.yface_out,
-                                 YMGUI_OSC_CS_TEX, /*compressed=*/1, /*prefix=*/NULL).ok)
+                                 YMGUI_OSC_CS_TEX, /*compressed=*/1, /*args=*/NULL, /*args_len=*/0).ok)
         return false;
     if (!yetty_yface_write(g_state.yface_out, &hdr, sizeof(hdr)).ok) return false;
     if (!yetty_yface_write(g_state.yface_out, pixels, pixel_bytes).ok) return false;
@@ -176,7 +176,7 @@ void ImGui_ImplYetty_Clear(void)
     if (!g_state.yface_out) return;
     /* Empty body, raw (no LZ4 — nothing to compress). */
     if (!yetty_yface_start_write(g_state.yface_out,
-                                 YMGUI_OSC_CS_CLEAR, /*compressed=*/0, /*prefix=*/NULL).ok) return;
+                                 YMGUI_OSC_CS_CLEAR, /*compressed=*/0, /*args=*/NULL, /*args_len=*/0).ok) return;
     if (!yetty_yface_finish_write(g_state.yface_out).ok) return;
     flush_yface_to_fd();
 }
@@ -220,7 +220,7 @@ void ImGui_ImplYetty_RenderDrawData(ImDrawData* draw_data)
     fh.cmd_list_count = (uint32_t)draw_data->CmdListsCount;
 
     if (!yetty_yface_start_write(g_state.yface_out,
-                                 YMGUI_OSC_CS_FRAME, /*compressed=*/1, /*prefix=*/NULL).ok) return;
+                                 YMGUI_OSC_CS_FRAME, /*compressed=*/1, /*args=*/NULL, /*args_len=*/0).ok) return;
     if (!yetty_yface_write(g_state.yface_out, &fh, sizeof(fh)).ok) return;
 
     static const uint8_t pad[4] = {0, 0, 0, 0};
@@ -402,9 +402,10 @@ void ImGui_ImplYetty_OnResize(double width, double height)
 
 extern "C" {
 static void poll_on_osc(void *user, int osc_code,
+                        const uint8_t *args,    size_t args_len,
                         const uint8_t *payload, size_t len)
 {
-    (void)user;
+    (void)user; (void)args; (void)args_len;  /* mouse/resize have no args */
     switch (osc_code) {
     case YMGUI_OSC_SC_MOUSE: {
         if (len < sizeof(struct ymgui_wire_input_mouse)) return;

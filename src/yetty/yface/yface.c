@@ -38,10 +38,13 @@ enum yface_scan_state {
     YFACE_SCAN_RAW = 0,        /* bytes outside an envelope → on_raw */
     YFACE_SCAN_AFTER_ESC,      /* saw ESC; deciding if this opens an OSC */
     YFACE_SCAN_OSC_CODE,       /* reading decimal vendor code */
-    YFACE_SCAN_OSC_FLAG,       /* reading single compflag char */
-    YFACE_SCAN_OSC_BODY,       /* feeding body bytes through codec */
+    YFACE_SCAN_OSC_ARGS,       /* collecting b64-args until 2nd ';' */
+    YFACE_SCAN_OSC_BODY,       /* feeding payload b64 through codec */
     YFACE_SCAN_OSC_BODY_ESC,   /* saw ESC inside body — could be ST */
 };
+
+#define YFACE_ARGS_MAX_B64   1024  /* 768 bytes raw — enough for any meta */
+#define YFACE_ARGS_MAX_RAW   (YFACE_ARGS_MAX_B64 * 3 / 4)
 
 struct yetty_yface {
     struct yetty_ycore_buffer in_buf;
@@ -68,7 +71,13 @@ struct yetty_yface {
     /* Stream scanner state. */
     enum yface_scan_state       scan_state;
     int                         scan_osc_code;
-    int                         scan_compflag;     /* 0 or 1 */
+    /* Raw b64 chars of the args slot — drained on second ';' into
+     * scan_args_decoded. */
+    char                        scan_args_b64[YFACE_ARGS_MAX_B64];
+    size_t                      scan_args_b64_len;
+    /* Decoded args bytes — handed to on_osc. */
+    uint8_t                     scan_args_decoded[YFACE_ARGS_MAX_RAW];
+    size_t                      scan_args_decoded_len;
     yetty_yface_msg_cb          on_osc;
     yetty_yface_raw_cb          on_raw;
     void                       *handler_user;
@@ -236,17 +245,20 @@ ensure_enc_scratch(struct yetty_yface *y, size_t need)
 
 struct yetty_ycore_void_result
 yetty_yface_start_write(struct yetty_yface *y, int osc_code,
-                        int compressed, const char *prefix)
+                        int compressed,
+                        const void *args, size_t args_len)
 {
     if (!y) return YETTY_ERR(yetty_ycore_void, "yface is NULL");
     if (y->enc_active)
         return YETTY_ERR(yetty_ycore_void, "yface: write already active");
 
-    /* "\e]<code>;<flag>;[<prefix>;]" — flag is the compressed/raw
-     * discriminator; prefix is the optional verb for legacy emitters. */
+    /* Wire shape: "\e]<code>;<b64-args>;<b64-payload>\e\\". The args
+     * slot is always present (empty when args_len==0) so receivers
+     * always see the same `;…;` split. The compressed/raw distinction
+     * is per-code and (for bin codes) lives inside the args meta — not
+     * on the wire as a separate field. */
     char hdr[32];
-    int n = snprintf(hdr, sizeof(hdr), "\033]%d;%c;",
-                     osc_code, compressed ? '1' : '0');
+    int n = snprintf(hdr, sizeof(hdr), "\033]%d;", osc_code);
     if (n <= 0 || (size_t)n >= sizeof(hdr))
         return YETTY_ERR(yetty_ycore_void, "yface: bad osc_code");
     {
@@ -254,16 +266,25 @@ yetty_yface_start_write(struct yetty_yface *y, int osc_code,
             yetty_ycore_buffer_write(&y->out_buf, hdr, (size_t)n);
         if (!r.ok) return r;
     }
-    if (prefix && prefix[0]) {
-        size_t plen = strlen(prefix);
+
+    /* Args slot — b64-encode any bytes, then close with ';'. Even for
+     * args_len==0 we still write the closing ';' so the wire shape
+     * stays uniform. */
+    y->enc_b64_carry_n = 0;
+    if (args && args_len > 0) {
         struct yetty_ycore_void_result r =
-            yetty_ycore_buffer_write(&y->out_buf, prefix, plen);
+            b64_encode_push(y, (const uint8_t *)args, args_len);
         if (!r.ok) return r;
-        r = yetty_ycore_buffer_write(&y->out_buf, ";", 1);
+        r = b64_encode_flush(y);
+        if (!r.ok) return r;
+        y->enc_b64_carry_n = 0;
+    }
+    {
+        struct yetty_ycore_void_result r =
+            yetty_ycore_buffer_write(&y->out_buf, ";", 1);
         if (!r.ok) return r;
     }
 
-    y->enc_b64_carry_n = 0;
     y->enc_compressed  = compressed ? 1 : 0;
 
     if (!compressed) {
@@ -601,9 +622,10 @@ yetty_yface_feed_bytes(struct yetty_yface *y, const char *bytes, size_t n)
 
         case YFACE_SCAN_AFTER_ESC:
             if (c == ']') {
-                y->scan_osc_code = 0;
-                y->scan_compflag = 0;
-                y->scan_state    = YFACE_SCAN_OSC_CODE;
+                y->scan_osc_code         = 0;
+                y->scan_args_b64_len     = 0;
+                y->scan_args_decoded_len = 0;
+                y->scan_state            = YFACE_SCAN_OSC_CODE;
                 i++;
             } else {
                 /* Not an OSC introducer — emit ESC + this byte as raw and
@@ -622,7 +644,11 @@ yetty_yface_feed_bytes(struct yetty_yface *y, const char *bytes, size_t n)
                 y->scan_osc_code = y->scan_osc_code * 10 + (c - '0');
                 i++;
             } else if (c == ';') {
-                y->scan_state = YFACE_SCAN_OSC_FLAG;
+                /* End of code; switch to args slot. We don't open the
+                 * payload codec yet — that happens at the second ';'
+                 * once we've parsed args (which may carry the bin meta
+                 * with the compressed flag). */
+                y->scan_state = YFACE_SCAN_OSC_ARGS;
                 i++;
             } else {
                 /* Malformed — drop and resume RAW from next byte. */
@@ -632,18 +658,56 @@ yetty_yface_feed_bytes(struct yetty_yface *y, const char *bytes, size_t n)
             }
             break;
 
-        case YFACE_SCAN_OSC_FLAG:
-            /* Single char compflag, then ';'. We accept either '0' or '1';
-             * everything else aborts the envelope. */
-            if (c == '0' || c == '1') {
-                y->scan_compflag = (c == '1');
-                i++;
-            } else if (c == ';') {
-                /* Open the read codec and switch to body. */
+        case YFACE_SCAN_OSC_ARGS:
+            if (c == ';') {
+                /* End of args slot. b64-decode whatever we accumulated
+                 * (might be empty), then open the payload codec. */
+                y->scan_args_decoded_len = 0;
+                size_t b64n = y->scan_args_b64_len;
+                /* Strip trailing '=' padding before quartet decode. */
+                while (b64n > 0 &&
+                       y->scan_args_b64[b64n - 1] == '=')
+                    b64n--;
+                size_t pos = 0;
+                while (pos + 4 <= b64n) {
+                    uint8_t triple[3];
+                    if (!b64_decode_quartet(y->scan_args_b64 + pos, triple))
+                        break;
+                    if (y->scan_args_decoded_len + 3 > sizeof(y->scan_args_decoded))
+                        break;
+                    memcpy(y->scan_args_decoded + y->scan_args_decoded_len,
+                           triple, 3);
+                    y->scan_args_decoded_len += 3;
+                    pos += 4;
+                }
+                /* Tail of 2 or 3 valid chars decodes to 1 or 2 bytes. */
+                if (b64n - pos >= 2 &&
+                    y->scan_args_decoded_len + 2 <= sizeof(y->scan_args_decoded)) {
+                    char tail[4] = { y->scan_args_b64[pos],
+                                     y->scan_args_b64[pos + 1],
+                                     b64n - pos >= 3 ? y->scan_args_b64[pos + 2] : 'A',
+                                     'A' };
+                    uint8_t triple[3];
+                    if (b64_decode_quartet(tail, triple)) {
+                        y->scan_args_decoded[y->scan_args_decoded_len++] = triple[0];
+                        if (b64n - pos >= 3)
+                            y->scan_args_decoded[y->scan_args_decoded_len++] = triple[1];
+                    }
+                }
+
+                /* Determine compressed flag. For bin codes the meta
+                 * carries it; otherwise default to uncompressed. */
+                int compressed = 0;
+                if (y->scan_args_decoded_len >= sizeof(struct yetty_yface_bin_meta)) {
+                    const struct yetty_yface_bin_meta *m =
+                        (const struct yetty_yface_bin_meta *)y->scan_args_decoded;
+                    if (m->magic == YETTY_YFACE_BIN_MAGIC)
+                        compressed = (m->compressed != 0);
+                }
+
                 struct yetty_ycore_void_result r =
-                    yetty_yface_start_read(y, y->scan_compflag);
+                    yetty_yface_start_read(y, compressed);
                 if (!r.ok) {
-                    /* Best effort: drop envelope, resume RAW. */
                     y->scan_state = YFACE_SCAN_RAW;
                     span_start    = i + 1;
                     i++;
@@ -651,10 +715,12 @@ yetty_yface_feed_bytes(struct yetty_yface *y, const char *bytes, size_t n)
                 }
                 y->scan_state = YFACE_SCAN_OSC_BODY;
                 i++;
-                span_start = i;  /* body chars start here */
+                span_start = i;
             } else {
-                y->scan_state = YFACE_SCAN_RAW;
-                span_start    = i + 1;
+                /* Accumulate b64 chars (ignore anything outside the b64
+                 * alphabet — caller may have padded weirdly). */
+                if (y->scan_args_b64_len < sizeof(y->scan_args_b64))
+                    y->scan_args_b64[y->scan_args_b64_len++] = c;
                 i++;
             }
             break;
@@ -688,8 +754,8 @@ yetty_yface_feed_bytes(struct yetty_yface *y, const char *bytes, size_t n)
                 if (y->on_osc) {
                     y->on_osc(y->handler_user,
                               y->scan_osc_code,
-                              y->in_buf.data,
-                              y->in_buf.size);
+                              y->scan_args_decoded, y->scan_args_decoded_len,
+                              y->in_buf.data,       y->in_buf.size);
                 }
                 y->scan_state = YFACE_SCAN_RAW;
                 span_start    = i + 1;
@@ -706,8 +772,8 @@ yetty_yface_feed_bytes(struct yetty_yface *y, const char *bytes, size_t n)
                 if (y->on_osc) {
                     y->on_osc(y->handler_user,
                               y->scan_osc_code,
-                              y->in_buf.data,
-                              y->in_buf.size);
+                              y->scan_args_decoded, y->scan_args_decoded_len,
+                              y->in_buf.data,       y->in_buf.size);
                 }
                 y->scan_state = YFACE_SCAN_RAW;
                 span_start    = i + 1;
@@ -787,7 +853,8 @@ struct yetty_ycore_buffer *yetty_yface_out_buf(struct yetty_yface *y)
 #include <errno.h>
 
 struct yetty_ycore_void_result
-yetty_yface_emit(int osc_code, int compressed, const char *prefix,
+yetty_yface_emit(int osc_code, int compressed,
+                 const void *args, size_t args_len,
                  const void *body, size_t body_len,
                  struct yetty_ycore_buffer *out_buf)
 {
@@ -799,7 +866,7 @@ yetty_yface_emit(int osc_code, int compressed, const char *prefix,
     struct yetty_yface *y = yr.value;
 
     struct yetty_ycore_void_result r;
-    r = yetty_yface_start_write(y, osc_code, compressed, prefix);
+    r = yetty_yface_start_write(y, osc_code, compressed, args, args_len);
     if (YETTY_IS_ERR(r)) goto out;
     if (body && body_len) {
         r = yetty_yface_write(y, body, body_len);
@@ -818,12 +885,13 @@ out:
 
 struct yetty_ycore_void_result
 yetty_yface_emit_to_fd(int fd, int osc_code, int compressed,
-                       const char *prefix,
+                       const void *args, size_t args_len,
                        const void *body, size_t body_len)
 {
     struct yetty_ycore_buffer buf = {0};
     struct yetty_ycore_void_result r =
-        yetty_yface_emit(osc_code, compressed, prefix, body, body_len, &buf);
+        yetty_yface_emit(osc_code, compressed, args, args_len,
+                         body, body_len, &buf);
     if (YETTY_IS_ERR(r)) {
         yetty_ycore_buffer_destroy(&buf);
         return r;

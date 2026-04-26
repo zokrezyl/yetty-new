@@ -8,19 +8,35 @@
  *              + optional LZ4F decompress) for a single received envelope.
  *              Cleared at start of each envelope.
  *   out_buf  — accumulates the OSC ENVELOPE for transport
- *              (\e]<code>;<compflag>;<base64[(LZ4F)payload]>\e\\). The
- *              caller ships out_buf.data[..size] over its transport (PTY,
- *              socket, ymux pipe) and clears it afterwards.
+ *              (\e]<code>;<b64-args>;<b64-payload>\e\\). The caller ships
+ *              out_buf.data[..size] over its transport and clears it.
  *
- * The single character right after the first ';' is the compression flag:
- *   '0' — raw b64 of the payload (short events: mouse, resize, …)
- *   '1' — LZ4F-compressed then b64 (large payloads: frames, textures, video)
+ * Wire shape (uniform across all yface-encoded OSCs):
+ *
+ *     \e]<code>;<b64-args>;<b64-payload>\e\\
+ *
+ *   <code>     — the OSC code itself is the discriminator (no verbs).
+ *                Codes are allocated by the consumer; yface is
+ *                content-agnostic.
+ *   <args>     — per-code binary header (b64 on the wire). For "bin"
+ *                codes carrying compressed/large payloads this is a
+ *                yetty_yface_bin_meta. For codes with no parameters
+ *                (clear, mouse, resize, …) this slot is empty — the wire
+ *                still carries `;;` so receivers always split the same
+ *                way.
+ *   <payload>  — body bytes (b64 on the wire, optionally LZ4F-compressed
+ *                if the bin meta says so).
+ *
+ * Whether the body is LZ4F-compressed is a per-code policy known to
+ * both sides; for bin codes the meta in args makes it self-describing
+ * so receivers don't need an extra map.
  *
  * Outgoing pipeline (caller → wire):
  *
- *     yetty_yface_start_write(yface, osc_code, compressed);
- *         emits "\e]<code>;<flag>;" raw, opens an LZ4F frame if requested,
- *         starts the streaming b64 encoder.
+ *     yetty_yface_start_write(yface, osc_code, compressed, args, args_len);
+ *         emits "\e]<code>;" raw, b64-encodes args bytes (if any) into
+ *         the args slot, then ";", opens an LZ4F frame if compressed=1,
+ *         and starts the streaming b64 encoder for the payload.
  *
  *     yetty_yface_write(yface, src, len);          // any number of times
  *         feeds bytes into the codec; produced bytes go through b64 into
@@ -35,9 +51,10 @@
  *     yetty_yface_set_handlers(yface, on_osc, on_raw, user);
  *     yetty_yface_feed_bytes(yface, raw, n);         // any number of times
  *
- *         The stream scanner finds \e]…\e\\ envelopes in `raw`, decodes
- *         their bodies (b64 ± LZ4F per the compflag) into in_buf, then
- *         fires `on_osc(user, osc_code, in_buf.data, in_buf.size)`.
+ *         The stream scanner finds \e]…\e\\ envelopes in `raw`, b64-
+ *         decodes the args slot, b64-decodes the payload (running it
+ *         through LZ4F if the bin meta says so), and fires
+ *         `on_osc(user, osc_code, args, args_len, payload, payload_len)`.
  *         Any bytes outside an envelope are forwarded verbatim through
  *         `on_raw` so consumers can keep their raw-byte handling
  *         (keyboard, CSI, …) alongside structured OSC events.
@@ -60,6 +77,33 @@ extern "C" {
 struct yetty_yface;
 
 YETTY_YRESULT_DECLARE(yetty_yface_ptr, struct yetty_yface *);
+
+/*-----------------------------------------------------------------------------
+ * Wire structs that travel in the args slot
+ *
+ * Each OSC code defines what (if anything) lives in `<args>`. For "bin"
+ * codes that ship a compressed binary payload (ypaint serialized buffer,
+ * ymgui frame, …) the args slot carries this meta header so the receiver
+ * knows how to decode the payload before touching it.
+ *
+ * Codes that need no args (clear, yaml-text, mouse-event, resize, …)
+ * leave the slot empty (`;;` on the wire).
+ *---------------------------------------------------------------------------*/
+
+#define YETTY_YFACE_BIN_MAGIC      0x4E494249u  /* "IBIN" */
+#define YETTY_YFACE_BIN_VERSION    1u
+
+#define YETTY_YFACE_COMP_NONE      0u
+#define YETTY_YFACE_COMP_LZ4F      1u
+
+struct yetty_yface_bin_meta {
+    uint32_t magic;            /* YETTY_YFACE_BIN_MAGIC */
+    uint32_t version;          /* YETTY_YFACE_BIN_VERSION */
+    uint32_t compressed;       /* YETTY_YFACE_COMP_* */
+    uint32_t compression_algo; /* reserved for non-LZ4F future codecs */
+    uint64_t raw_size;         /* uncompressed payload size, 0 if unknown */
+    uint32_t reserved[2];      /* pad to 32 B for forward-compat */
+};
 
 /*-----------------------------------------------------------------------------
  * Lifecycle
@@ -85,14 +129,21 @@ struct yetty_ycore_buffer *yetty_yface_out_buf(struct yetty_yface *yface);
  *       savings outweigh the framing overhead (ImGui frames, textures,
  *       video, multi-MB blobs).
  *---------------------------------------------------------------------------*/
-/* `prefix` (may be NULL) is written raw between the compflag and the
- * b64 body, terminated by ';'. Lets verb-style emitters (ypaint
- * `--bin` / `--clear`, …) keep working alongside code-only dispatch.
- * Pass NULL when no verb is needed (the new ymgui input/output codes). */
+/* `args`/`args_len` are b64-encoded into the args slot of the wire
+ * (`\e]<code>;<b64-args>;<b64-payload>\e\\`). NULL/0 → empty args slot,
+ * the wire still carries `;;` between code and payload so receivers can
+ * uniformly split.
+ *
+ * `compressed` controls whether the body bytes the caller hands to
+ * yetty_yface_write are run through LZ4F before the b64 encoder. For bin
+ * codes the same flag should also be reflected in the meta struct that
+ * lives in `args` so the receiver can mirror the choice without needing
+ * a yface API param. */
 struct yetty_ycore_void_result yetty_yface_start_write (struct yetty_yface *yface,
                                                         int osc_code,
                                                         int compressed,
-                                                        const char *prefix);
+                                                        const void *args,
+                                                        size_t args_len);
 struct yetty_ycore_void_result yetty_yface_write       (struct yetty_yface *yface,
                                                         const void *src, size_t len);
 struct yetty_ycore_void_result yetty_yface_finish_write(struct yetty_yface *yface);
@@ -109,7 +160,8 @@ struct yetty_ycore_void_result yetty_yface_finish_write(struct yetty_yface *yfac
  * Either callback may be NULL to discard that direction.
  *---------------------------------------------------------------------------*/
 typedef void (*yetty_yface_msg_cb)(void *user, int osc_code,
-                                   const uint8_t *payload, size_t len);
+                                   const uint8_t *args,    size_t args_len,
+                                   const uint8_t *payload, size_t payload_len);
 typedef void (*yetty_yface_raw_cb)(void *user, const char *bytes, size_t n);
 
 void yetty_yface_set_handlers(struct yetty_yface *yface,
@@ -142,26 +194,26 @@ struct yetty_ycore_void_result yetty_yface_finish_read (struct yetty_yface *yfac
  * long-lived yetty_yface around instead — saves the LZ4 context alloc.
  *---------------------------------------------------------------------------*/
 
-/* Encode `body` and append the full OSC sequence
- *   "\e]<osc_code>;<flag>;[<prefix>;]<base64[(LZ4F)body]>\e\\"
- * to `out_buf`. `prefix` may be NULL/empty (no verb — the modern
- * code-only path). `body` may be NULL/0 (envelope around an empty
- * payload — useful for `--clear`-style commands). `compressed` matches
+/* Encode and append the full OSC sequence
+ *   "\e]<osc_code>;<b64(args)>;<b64[(LZ4F)body]>\e\\"
+ * to `out_buf`. `args`/`args_len` and `body`/`body_len` may both be 0;
+ * the wire still carries `;;` between them. `compressed` matches
  * yetty_yface_start_write. */
 struct yetty_ycore_void_result yetty_yface_emit(
-    int osc_code, int compressed, const char *prefix,
+    int osc_code, int compressed,
+    const void *args, size_t args_len,
     const void *body, size_t body_len,
     struct yetty_ycore_buffer *out_buf);
 
-/* Same, but write the full envelope straight to `fd` (blocking write).
- * Convenience for low-rate emitters that don't have their own queueing. */
+/* Same, but write the full envelope straight to `fd` (blocking write). */
 struct yetty_ycore_void_result yetty_yface_emit_to_fd(
-    int fd, int osc_code, int compressed, const char *prefix,
+    int fd, int osc_code, int compressed,
+    const void *args, size_t args_len,
     const void *body, size_t body_len);
 
-/* Decode an OSC body (the bytes the caller has isolated as the b64
- * payload between `<flag>;[<prefix>;]` and the trailing ESC\) into
- * `out_buf`. `compressed` must match what the writer used. */
+/* Decode an OSC body's b64-payload (the bytes between the second `;`
+ * and the trailing ESC\) into `out_buf`. `compressed` must match the
+ * writer (typically read from the bin meta in args). */
 struct yetty_ycore_void_result yetty_yface_decode(
     const char *b64, size_t n, int compressed,
     struct yetty_ycore_buffer *out_buf);

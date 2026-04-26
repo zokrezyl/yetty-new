@@ -13,6 +13,7 @@
 #include <yetty/ycore/types.h>
 #include <yetty/yface/yface.h>
 #include <yetty/ypaint-core/buffer.h>
+#include <yetty/yterm/pty-reader.h>   /* YETTY_OSC_YPAINT_* */
 #include <yetty/yrich/yrich-document.h>
 #include <yetty/yrich/yrich-element.h>
 #include <yetty/yrich/yrich-types.h>
@@ -71,7 +72,7 @@ static void write_all(const char *s, size_t n)
 	(void)w;
 }
 
-#define OSC_CANVAS_VENDOR "666674"
+#define OSC_CANVAS_CLEAR "600000"
 
 void yrich_runner_subscribe(bool enable)
 {
@@ -86,7 +87,7 @@ void yrich_runner_subscribe(bool enable)
 static void emit_clear(void)
 {
 	static const char clear[] =
-		"\033]" OSC_CANVAS_VENDOR ";--clear\033\\";
+		"\033]" OSC_CANVAS_CLEAR ";;\033\\";
 	write_all(clear, sizeof(clear) - 1);
 }
 
@@ -97,9 +98,19 @@ static void emit_bin(const struct yetty_ypaint_core_buffer *buf)
 		(struct yetty_ypaint_core_buffer *)buf, &raw);
 	if (raw_size == 0 || !raw) return;
 
+	struct yetty_yface_bin_meta meta = {
+		.magic            = YETTY_YFACE_BIN_MAGIC,
+		.version          = YETTY_YFACE_BIN_VERSION,
+		.compressed       = YETTY_YFACE_COMP_LZ4F,
+		.compression_algo = 0,
+		.raw_size         = raw_size,
+		.reserved         = {0, 0},
+	};
 	struct yetty_ycore_buffer envelope = {0};
 	struct yetty_ycore_void_result r = yetty_yface_emit(
-		666674, /*compressed=*/1, "--bin", raw, raw_size, &envelope);
+		YETTY_OSC_YPAINT_BIN, /*compressed=*/1,
+		&meta, sizeof(meta),
+		raw, raw_size, &envelope);
 	if (YETTY_IS_OK(r) && envelope.size > 0)
 		write_all((const char *)envelope.data, envelope.size);
 	yetty_ycore_buffer_destroy(&envelope);

@@ -124,9 +124,11 @@ struct yetty_yclient_event_loop {
  *===========================================================================*/
 
 static void on_yface_osc(void *user, int osc_code,
+                         const uint8_t *args,    size_t args_len,
                          const uint8_t *payload, size_t len)
 {
     struct yetty_yclient_event_loop *L = user;
+    (void)args; (void)args_len;  /* mouse/resize codes carry no args */
 
     switch (osc_code) {
     case YMGUI_OSC_SC_MOUSE: {

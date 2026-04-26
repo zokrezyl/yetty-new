@@ -36,10 +36,11 @@ extern "C" {
  * is a single switch on osc_code with no body inspection.
  *===========================================================================*/
 
-/* client → server (frontend → ymgui-layer) */
-#define YMGUI_OSC_CS_FRAME      600000  /* ymgui_wire_frame, compressed=1 */
-#define YMGUI_OSC_CS_TEX        600001  /* ymgui_wire_tex,   compressed=1 */
-#define YMGUI_OSC_CS_CLEAR      600002  /* empty body,       compressed=0 */
+/* client → server (frontend → ymgui-layer). 600000–600003 belong to
+ * ypaint (see <yetty/yterm/pty-reader.h>); ymgui starts at 610000. */
+#define YMGUI_OSC_CS_CLEAR      610000  /* empty body */
+#define YMGUI_OSC_CS_FRAME      610001  /* ymgui_wire_frame, compressed=1 */
+#define YMGUI_OSC_CS_TEX        610002  /* ymgui_wire_tex,   compressed=1 */
 
 /* server → client (yetty terminal → frontend / ygui / yrich) */
 #define YMGUI_OSC_SC_MOUSE      700000  /* ymgui_wire_input_mouse,  comp=0 */

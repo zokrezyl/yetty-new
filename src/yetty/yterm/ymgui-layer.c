@@ -610,22 +610,31 @@ handle_tex(struct yetty_yterm_ymgui_layer *l,
     return YETTY_OK_VOID();
 }
 
-/* Body shape: "<flag>;<base64...>" where <flag> is '0' (raw b64) or '1'
- * (LZ4F+b64). Caller has already stripped the leading "<code>;". */
+/* Body shape after pty-reader strips "<code>;" is "<b64-args>;<b64-payload>".
+ * For frame/tex the args slot carries a yetty_yface_bin_meta; we just
+ * skip past the first ';' and feed the payload to yface (compressed
+ * is implicit per code: frame and tex are always LZ4F-compressed). */
 static struct yetty_ycore_void_result
-decode_body(struct yetty_yterm_ymgui_layer *l,
-            const char *data, size_t len)
+ymgui_decode(struct yetty_yterm_ymgui_layer *l,
+             const char *data, size_t len)
 {
-    if (len < 2 || (data[0] != '0' && data[0] != '1') || data[1] != ';')
-        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed yface body");
-    int compressed = (data[0] == '1');
-    const char *b64 = data + 2;
-    size_t      b64_len = len - 2;
+    /* Find the args/payload separator. */
+    const char *payload = NULL;
+    size_t      payload_len = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] == ';') {
+            payload     = data + i + 1;
+            payload_len = len - i - 1;
+            break;
+        }
+    }
+    if (!payload)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed body (need ;)");
 
     struct yetty_ycore_void_result r =
-        yetty_yface_start_read(l->yface, compressed);
+        yetty_yface_start_read(l->yface, /*compressed=*/1);
     if (YETTY_IS_ERR(r)) return r;
-    r = yetty_yface_feed(l->yface, b64, b64_len);
+    r = yetty_yface_feed(l->yface, payload, payload_len);
     if (YETTY_IS_ERR(r)) { yetty_yface_finish_read(l->yface); return r; }
     return yetty_yface_finish_read(l->yface);
 }
@@ -636,7 +645,7 @@ ymgui_write(struct yetty_yterm_terminal_layer *self,
 {
     struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
 
-    /* Clear is parameter-less — empty body, no decode. */
+    /* Clear has an empty body — short-circuit before splitting. */
     if (osc_code == YMGUI_OSC_CS_CLEAR) {
         free(l->frame_bytes);
         l->frame_bytes = NULL;
@@ -651,7 +660,7 @@ ymgui_write(struct yetty_yterm_terminal_layer *self,
     if (!data || len == 0)
         return YETTY_ERR(yetty_ycore_void, "ymgui: empty OSC body");
 
-    struct yetty_ycore_void_result r = decode_body(l, data, len);
+    struct yetty_ycore_void_result r = ymgui_decode(l, data, len);
     if (YETTY_IS_ERR(r)) return r;
 
     struct yetty_ycore_buffer *in = yetty_yface_in_buf(l->yface);

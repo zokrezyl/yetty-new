@@ -147,7 +147,8 @@ static void terminal_yface_emit(struct yetty_yterm_terminal *terminal,
   if (!terminal->emit_yface) return;
   struct yetty_ycore_void_result r =
       yetty_yface_start_write(terminal->emit_yface, osc_code,
-                              /*compressed=*/0, /*prefix=*/NULL);
+                              /*compressed=*/0,
+                              /*args=*/NULL, /*args_len=*/0);
   if (!r.ok) goto reset;
   r = yetty_yface_write(terminal->emit_yface, payload, len);
   if (!r.ok) goto reset;
@@ -542,11 +543,18 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
       yetty_yterm_terminal_layer_add(terminal, ypaint_res.value);
       ydebug("terminal_create: ypaint scrolling layer created and added");
 
-      /* Register ypaint layer for OSC 666674 */
+      /* Register ypaint layer for the four ypaint OSC codes
+       * (clear/bin/yaml/overlay live in the 600000–600003 block). */
       if (terminal->pty_reader) {
         yetty_yterm_pty_reader_register_osc_sink(
-            terminal->pty_reader, YETTY_OSC_YPAINT_SCROLL, ypaint_res.value);
-        ydebug("terminal_create: ypaint layer registered for OSC 666674");
+            terminal->pty_reader, YETTY_OSC_YPAINT_CLEAR,   ypaint_res.value);
+        yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YETTY_OSC_YPAINT_BIN,     ypaint_res.value);
+        yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YETTY_OSC_YPAINT_YAML,    ypaint_res.value);
+        yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YETTY_OSC_YPAINT_OVERLAY, ypaint_res.value);
+        ydebug("terminal_create: ypaint layer registered for OSC 600000-600003");
       }
     } else {
       ydebug("terminal_create: failed to create ypaint layer (non-fatal): %s",
@@ -568,12 +576,12 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
       yetty_yterm_terminal_layer_add(terminal, ymgui_res.value);
       if (terminal->pty_reader) {
         yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YMGUI_OSC_CS_CLEAR, ymgui_res.value);
+        yetty_yterm_pty_reader_register_osc_sink(
             terminal->pty_reader, YMGUI_OSC_CS_FRAME, ymgui_res.value);
         yetty_yterm_pty_reader_register_osc_sink(
             terminal->pty_reader, YMGUI_OSC_CS_TEX,   ymgui_res.value);
-        yetty_yterm_pty_reader_register_osc_sink(
-            terminal->pty_reader, YMGUI_OSC_CS_CLEAR, ymgui_res.value);
-        ydebug("terminal_create: ymgui layer registered for OSC 600000/600001/600002");
+        ydebug("terminal_create: ymgui layer registered for OSC 610000/610001/610002");
       }
     } else {
       ydebug("terminal_create: failed to create ymgui layer (non-fatal): %s",
