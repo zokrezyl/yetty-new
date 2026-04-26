@@ -188,9 +188,16 @@ webasm)
     ;;
 
 windows-x86_64)
-    # Native MSVC — caller must have vcvarsall'd the shell.
-    CFG_TARGET="VC-WIN64A"
-    MAKE_CMD="nmake"
+    # MSYS2 CLANG64 — use openssl's mingw64 target with clang. CI:
+    # msys2/setup-msys2 with msystem: CLANG64.
+    if [ "${MSYSTEM:-}" != "CLANG64" ]; then
+        echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=${MSYSTEM:-unset})" >&2
+        exit 1
+    fi
+    CFG_TARGET="mingw64"
+    export CC="clang"
+    export AR="llvm-ar"
+    export RANLIB="llvm-ranlib"
     ;;
 
 *)
@@ -226,11 +233,7 @@ for _D in lib lib64; do
 done
 cp -a "$INSTALL_DIR/include" "$STAGE/"
 
-if [ "$TARGET_PLATFORM" = "windows-x86_64" ]; then
-    _LIBS=("libssl.lib" "libcrypto.lib")
-else
-    _LIBS=("libssl.a" "libcrypto.a")
-fi
+_LIBS=("libssl.a" "libcrypto.a")
 
 for _LIB in "${_LIBS[@]}"; do
     if [ ! -f "$STAGE/lib/$_LIB" ]; then
