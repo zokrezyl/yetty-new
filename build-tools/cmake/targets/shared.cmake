@@ -402,7 +402,7 @@ function(yetty_embed_assets TARGET)
             file(COPY "${YEMU_ASSETS_DIR}/alpine-rootfs.img" DESTINATION "${INCBIN_YEMU_DIR}")
         endif()
 
-        incbin_add_directory(${TARGET} "yemu" "${INCBIN_YEMU_DIR}" "*" FALSE)
+        incbin_add_directory(${TARGET} "yemu" "${INCBIN_YEMU_DIR}" "*" TRUE)
     endif()
 
     # Embed QEMU binary if enabled (fetched by assets_fetch_qemu())

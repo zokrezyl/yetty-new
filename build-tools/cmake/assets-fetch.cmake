@@ -89,16 +89,26 @@ function(_yetty_assets_fetch_one ASSET_NAME EXTRACT_SUBDIR STAMP_FILE)
 
     if(NOT EXISTS "${_TARBALL}")
         message(STATUS "assets-fetch: downloading ${_FILENAME}")
-        file(DOWNLOAD "${_URL}" "${_TARBALL}"
-            SHOW_PROGRESS
-            STATUS _DL_STATUS
-            TLS_VERIFY ON
-        )
-        list(GET _DL_STATUS 0 _DL_CODE)
+        # Prefer system curl — its CA store stays current, while CMake's
+        # bundled libcurl ships an OpenSSL CA bundle that goes stale.
+        find_program(_CURL NAMES curl)
+        if(_CURL)
+            execute_process(
+                COMMAND ${_CURL} --fail --location --silent --show-error
+                                 --output "${_TARBALL}" "${_URL}"
+                RESULT_VARIABLE _DL_CODE)
+        else()
+            file(DOWNLOAD "${_URL}" "${_TARBALL}"
+                SHOW_PROGRESS
+                STATUS _DL_STATUS
+                TLS_VERIFY ON
+            )
+            list(GET _DL_STATUS 0 _DL_CODE)
+        endif()
         if(NOT _DL_CODE EQUAL 0)
             file(REMOVE "${_TARBALL}")
             message(FATAL_ERROR
-                "assets-fetch: download failed for ${_URL}: ${_DL_STATUS}")
+                "assets-fetch: download failed for ${_URL}: ${_DL_CODE}")
         endif()
     endif()
 

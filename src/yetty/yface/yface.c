@@ -520,8 +520,7 @@ struct yetty_ycore_buffer *yetty_yface_out_buf(struct yetty_yface *y)
  * yface for the call, do the streaming op once, copy result, free.
  *=========================================================================*/
 
-#include <unistd.h>
-#include <errno.h>
+#include <yetty/yplatform/term.h>
 
 struct yetty_ycore_void_result
 yetty_yface_emit(int osc_code, const char *prefix,
@@ -554,8 +553,8 @@ out:
 }
 
 struct yetty_ycore_void_result
-yetty_yface_emit_to_fd(int fd, int osc_code, const char *prefix,
-                       const void *body, size_t body_len)
+yetty_yface_emit_to_stdout(int osc_code, const char *prefix,
+                           const void *body, size_t body_len)
 {
     struct yetty_ycore_buffer buf = {0};
     struct yetty_ycore_void_result r =
@@ -564,16 +563,9 @@ yetty_yface_emit_to_fd(int fd, int osc_code, const char *prefix,
         yetty_ycore_buffer_destroy(&buf);
         return r;
     }
-    /* Blocking write_all — caller asked for the convenience function. */
-    size_t off = 0;
-    while (off < buf.size) {
-        ssize_t w = write(fd, buf.data + off, buf.size - off);
-        if (w < 0) {
-            if (errno == EINTR) continue;
-            yetty_ycore_buffer_destroy(&buf);
-            return YETTY_ERR(yetty_ycore_void, "write failed");
-        }
-        off += (size_t)w;
+    if (yplatform_stdout_write(buf.data, buf.size) != 0) {
+        yetty_ycore_buffer_destroy(&buf);
+        return YETTY_ERR(yetty_ycore_void, "stdout write failed");
     }
     yetty_ycore_buffer_destroy(&buf);
     return YETTY_OK_VOID();

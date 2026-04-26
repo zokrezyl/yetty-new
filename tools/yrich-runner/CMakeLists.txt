@@ -13,7 +13,13 @@ target_link_libraries(yrich_runner PUBLIC
     yetty_ypaint_core
     yetty_yface
     yetty_ycore
-    m
 )
+if(NOT WIN32)
+    target_link_libraries(yrich_runner PUBLIC m)
+endif()
 
-target_compile_options(yrich_runner PRIVATE -Wall -Wextra)
+if(MSVC)
+    target_compile_options(yrich_runner PRIVATE /W3)
+else()
+    target_compile_options(yrich_runner PRIVATE -Wall -Wextra)
+endif()

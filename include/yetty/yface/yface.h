@@ -117,10 +117,11 @@ struct yetty_ycore_void_result yetty_yface_emit(
     const void *body, size_t body_len,
     struct yetty_ycore_buffer *out_buf);
 
-/* Same, but write the full envelope straight to `fd` (blocking write).
- * Convenience for low-rate emitters that don't have their own queueing. */
-struct yetty_ycore_void_result yetty_yface_emit_to_fd(
-    int fd, int osc_code, const char *prefix,
+/* Same, but write the full envelope straight to stdout (blocking write,
+ * via the yplatform stdout writer). Convenience for low-rate emitters
+ * that don't have their own queueing. */
+struct yetty_ycore_void_result yetty_yface_emit_to_stdout(
+    int osc_code, const char *prefix,
     const void *body, size_t body_len);
 
 /* Decode an OSC body (the bytes between `<osc_code>;<prefix>;` and the

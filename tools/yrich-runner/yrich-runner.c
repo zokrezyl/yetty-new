@@ -13,52 +13,20 @@
 #include <yetty/ycore/types.h>
 #include <yetty/yface/yface.h>
 #include <yetty/ypaint-core/buffer.h>
+#include <yetty/yplatform/term.h>
+#include <yetty/yplatform/time.h>
 #include <yetty/yrich/yrich-document.h>
 #include <yetty/yrich/yrich-element.h>
 #include <yetty/yrich/yrich-types.h>
 
-#include <errno.h>
 #include <math.h>
-#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <termios.h>
-#include <time.h>
-#include <unistd.h>
-
-/*=============================================================================
- * Termios raw mode
- *===========================================================================*/
-
-static struct termios g_orig_termios;
-static bool g_raw_mode = false;
-
-static void raw_mode_disable(void)
-{
-	if (g_raw_mode) {
-		tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_orig_termios);
-		g_raw_mode = false;
-	}
-}
 
 void yrich_runner_raw_mode_enable(void)
 {
-	if (g_raw_mode)
-		return;
-	if (tcgetattr(STDIN_FILENO, &g_orig_termios) < 0)
-		return;
-	atexit(raw_mode_disable);
-
-	struct termios raw = g_orig_termios;
-	raw.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
-	raw.c_oflag &= ~(OPOST);
-	raw.c_cflag |= CS8;
-	raw.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
-	raw.c_cc[VMIN] = 0;
-	raw.c_cc[VTIME] = 0;
-	tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
-	g_raw_mode = true;
+	yplatform_stdin_raw_mode_enable();
 }
 
 /*=============================================================================
@@ -67,8 +35,7 @@ void yrich_runner_raw_mode_enable(void)
 
 static void write_all(const char *s, size_t n)
 {
-	ssize_t w = write(STDOUT_FILENO, s, n);
-	(void)w;
+	(void)yplatform_stdout_write(s, n);
 }
 
 #define OSC_CANVAS_VENDOR "666674"
@@ -97,12 +64,7 @@ static void emit_bin(const struct yetty_ypaint_core_buffer *buf)
 		(struct yetty_ypaint_core_buffer *)buf, &raw);
 	if (raw_size == 0 || !raw) return;
 
-	struct yetty_ycore_buffer envelope = {0};
-	struct yetty_ycore_void_result r = yetty_yface_emit(
-		666674, "--bin", raw, raw_size, &envelope);
-	if (YETTY_IS_OK(r) && envelope.size > 0)
-		write_all((const char *)envelope.data, envelope.size);
-	yetty_ycore_buffer_destroy(&envelope);
+	(void)yetty_yface_emit_to_stdout(666674, "--bin", raw, raw_size);
 }
 
 void yrich_runner_emit(struct yrich_runner *r)
@@ -146,9 +108,7 @@ void yrich_runner_fini(struct yrich_runner *r)
 
 static uint64_t now_ms(void)
 {
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+	return (uint64_t)(ytime_monotonic_sec() * 1000.0);
 }
 
 /*=============================================================================
@@ -482,27 +442,20 @@ struct yetty_ycore_void_result yrich_runner_loop(struct yrich_runner *r)
 		return YETTY_OK_VOID();
 
 	while (r->running) {
-		struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
-		int pr = poll(&pfd, 1, 16);  /* ~60fps idle tick */
-		if (pr < 0) {
-			if (errno == EINTR)
-				continue;
+		int pr = yplatform_stdin_wait_readable(16); /* ~60fps idle */
+		if (pr < 0)
 			return YETTY_ERR(yetty_ycore_void,
-					 "yrich-runner: poll failed");
-		}
+					 "yrich-runner: stdin wait failed");
 
-		if (pr > 0 && (pfd.revents & POLLIN)) {
+		if (pr > 0) {
 			char buf[4096];
-			ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
+			int n = yplatform_stdin_read(buf, sizeof(buf));
 			if (n == 0)  /* EOF */
 				break;
-			if (n < 0) {
-				if (errno == EINTR || errno == EAGAIN)
-					continue;
+			if (n < 0)
 				return YETTY_ERR(yetty_ycore_void,
 						 "yrich-runner: read failed");
-			}
-			for (ssize_t i = 0; i < n; i++)
+			for (int i = 0; i < n; i++)
 				process_byte(r, buf[i]);
 		}
 

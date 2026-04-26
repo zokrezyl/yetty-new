@@ -158,8 +158,8 @@ int main(int argc, char **argv) {
 	}
 
 	/* OSC: ESC ] 666674 ; --bin ; <base64(LZ4F(framed))> ESC \ */
-	struct yetty_ycore_void_result emit_r = yetty_yface_emit_to_fd(
-	    fileno(stdout), YETTY_OSC_YPAINT_SCROLL, "--bin", raw, raw_size);
+	struct yetty_ycore_void_result emit_r = yetty_yface_emit_to_stdout(
+	    YETTY_OSC_YPAINT_SCROLL, "--bin", raw, raw_size);
 	if (YETTY_IS_ERR(emit_r))
 		fprintf(stderr, "%s: yface_emit: %s\n", argv[0], emit_r.error.msg);
 	fflush(stdout);

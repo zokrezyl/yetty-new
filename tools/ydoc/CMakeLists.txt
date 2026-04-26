@@ -3,8 +3,7 @@ add_executable(ydoc
     main.c
     ${YETTY_ROOT}/src/yetty/ytrace.c
     ${YETTY_ROOT}/src/yetty/yplatform/getopt.c
-    ${YETTY_ROOT}/src/yetty/yplatform/shared/thread.c
-    ${YETTY_ROOT}/src/yetty/yplatform/shared/term.c
+    ${YETTY_YPLATFORM_THREAD_SOURCES}
 )
 
 find_package(Threads REQUIRED)
@@ -22,4 +21,8 @@ target_link_libraries(ydoc PRIVATE
     Threads::Threads
 )
 
-target_compile_options(ydoc PRIVATE -Wall -Wextra)
+if(MSVC)
+    target_compile_options(ydoc PRIVATE /W3)
+else()
+    target_compile_options(ydoc PRIVATE -Wall -Wextra)
+endif()
