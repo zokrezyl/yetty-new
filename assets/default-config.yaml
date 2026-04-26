@@ -42,8 +42,20 @@ terminal:
       # - msdf:   Multi-channel signed distance field. Crisp at any zoom
       #           level because MSDF is re-evaluated per fragment.
       render-method: "msdf"
-      # Font size in pixels (for msdf)
+      # Font size in pixels — the visual height of the glyph extent (top of
+      # tallest ascender to bottom of lowest descender). Cell height/width
+      # are derived from this plus the padding below.
       size: 14
+      # Cell padding around the glyph, as fractions of the glyph dimensions:
+      #   cell_height = size           * (1 + top  + bottom)
+      #   cell_width  = size / hwratio * (1 + left + right)
+      # Defaults of 0 give a tight cell — the cell exactly wraps the glyph
+      # extent, with no "small glyph in cell" gap.
+      padding:
+        left:   0.0
+        right:  0.0
+        top:    0.0
+        bottom: 0.2
 
 # ─────────────────────────────────────────────────────────────────────────────
 # YPaint (non-monospace font used for ypaint text spans)

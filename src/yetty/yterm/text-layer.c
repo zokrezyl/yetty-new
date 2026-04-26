@@ -392,7 +392,23 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
         ydebug("text_layer: ms-msdf cdb_path='%s' shader='%s'", cdb_path, shader_path);
         float msdf_font_size = (float)config->ops->get_int(
             config, "terminal/text-layer/font/size", 14);
-        font_res = yetty_font_ms_msdf_font_create(cdb_path, shader_path, msdf_font_size);
+
+        /* Cell padding around the glyph, fractions of glyph dim. Default 0
+         * = cell exactly wraps the glyph extent, which fixes the "glyph too
+         * small in cell" feel introduced by the underscore fix. */
+        struct yetty_font_ms_padding padding = {
+            .left   = strtof(config->ops->get_string(
+                config, "terminal/text-layer/font/padding/left",   "0.0"), NULL),
+            .right  = strtof(config->ops->get_string(
+                config, "terminal/text-layer/font/padding/right",  "0.0"), NULL),
+            .top    = strtof(config->ops->get_string(
+                config, "terminal/text-layer/font/padding/top",    "0.0"), NULL),
+            .bottom = strtof(config->ops->get_string(
+                config, "terminal/text-layer/font/padding/bottom", "0.0"), NULL),
+        };
+
+        font_res = yetty_font_ms_msdf_font_create(cdb_path, shader_path,
+                                                  msdf_font_size, padding);
     } else {
         font_res = yetty_font_ms_raster_font_create(
             config,

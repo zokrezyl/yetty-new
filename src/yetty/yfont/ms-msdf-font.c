@@ -71,12 +71,16 @@ struct ms_msdf_font {
 	float hw_ratio;        /* height/width ratio (from first glyph) */
 	float pixel_range;
 
-	/* Font vertical metrics (base-size units). Tracked as glyphs load so the
-	 * shader can place the baseline correctly — 0.8*cell_height is a hack
-	 * that hides descenders (underscore, g, y, p, q) when the font's real
-	 * descent exceeds 20% of ascent+descent. */
-	float max_ascent;      /* = max(bearing_y) over loaded glyphs */
-	float max_descent;     /* = max(size_y - bearing_y) over loaded glyphs */
+	/* Font vertical metrics in CDB base-size units, tracked as glyphs load.
+	 * max_ascent  = max(bearing_y) — used to find baseline given glyph height.
+	 * max_descent = max(size_y - bearing_y) — used to scale glyph_height = max_ascent + max_descent
+	 * to the requested font_size in pixels. */
+	float max_ascent;
+	float max_descent;
+
+	/* Cell padding (fractions of glyph dimensions). Cell wraps the glyph
+	 * extent with padding on each side. */
+	struct yetty_font_ms_padding padding;
 
 	/* Shader code (owned) */
 	struct yetty_ycore_buffer shader_code;
@@ -271,9 +275,11 @@ ms_msdf_get_cell_size(const struct yetty_font_ms_font *self)
 		return YETTY_ERR(pixel_size, "font is NULL");
 	if (f->hw_ratio <= 0.0f)
 		return YETTY_ERR(pixel_size, "hw_ratio not set");
+	float glyph_h = f->requested_size;
+	float glyph_w = f->requested_size / f->hw_ratio;
 	struct pixel_size sz;
-	sz.height = f->requested_size;
-	sz.width = f->requested_size / f->hw_ratio;
+	sz.height = glyph_h * (1.0f + f->padding.top  + f->padding.bottom);
+	sz.width  = glyph_w * (1.0f + f->padding.left + f->padding.right);
 	return YETTY_OK(pixel_size, sz);
 }
 
@@ -348,14 +354,31 @@ ms_msdf_get_gpu_resource_set(struct yetty_font_ms_font *self)
 		f->rs.buffers[0].size = (size_t)f->next_slot * sizeof(struct glyph_meta_gpu);
 		f->rs.buffers[0].dirty = 1;
 
-		/* Update uniforms */
+		/* Compute pixel-domain placement values for the shader.
+		 *
+		 * scale maps CDB-units to cell pixels at em-square ratio. With
+		 * base_size as the divisor a font.size of N px makes the em-square
+		 * exactly N px tall — i.e. caps fit tightly within the row.
+		 * Descenders that extend below the em (e.g. underscore on fonts
+		 * like DejaVu) will overflow past the cell bottom; users who want
+		 * them visible add padding.bottom.
+		 *
+		 * Baseline is placed dynamically from the font's actual ascent —
+		 * this is the load-bearing piece of the underscore fix, kept here
+		 * because hard-coding 80% misplaces it on fonts whose ascender
+		 * isn't 80% of the em.
+		 */
+		float scale = f->requested_size / f->base_size;
+		float top_pad_px  = f->requested_size * f->padding.top;
+		float glyph_w     = (f->hw_ratio > 0.0f)
+		                    ? f->requested_size / f->hw_ratio : 0.0f;
+		float left_pad_px = glyph_w * f->padding.left;
+		float baseline_y  = top_pad_px + f->max_ascent * scale;
+
 		f->rs.uniforms[0].f32 = f->pixel_range;
-		f->rs.uniforms[1].f32 = (f->base_size > 0) ?
-			f->requested_size / f->base_size : 1.0f;
-		f->rs.uniforms[2].f32 = f->max_ascent;
-		float line_height = f->max_ascent + f->max_descent;
-		f->rs.uniforms[3].f32 = (line_height > 0.0f) ? line_height
-		                                             : f->base_size;
+		f->rs.uniforms[1].f32 = scale;
+		f->rs.uniforms[2].f32 = baseline_y;
+		f->rs.uniforms[3].f32 = left_pad_px;
 
 		f->dirty = 0;
 	}
@@ -371,12 +394,17 @@ ms_msdf_set_cell_size(struct yetty_font_ms_font *self, struct pixel_size cell_si
 		return YETTY_ERR(yetty_ycore_void, "font is NULL");
 	if (cell_size.height <= 0.0f)
 		return YETTY_ERR(yetty_ycore_void, "invalid cell height");
-	/* MSDF is resolution-independent; the cell size drives the requested
-	 * render size, and get_cell_size() derives width from requested_size via
-	 * the cached hw_ratio. Update hw_ratio too so non-square cells survive. */
-	f->requested_size = cell_size.height;
-	if (cell_size.width > 0.0f)
-		f->hw_ratio = cell_size.height / cell_size.width;
+	/* The caller hands us a cell size; back out the glyph dimensions by
+	 * subtracting the padding (so the cell-wrap stays consistent). */
+	float h_div = 1.0f + f->padding.top  + f->padding.bottom;
+	float w_div = 1.0f + f->padding.left + f->padding.right;
+	float glyph_h = cell_size.height / h_div;
+	f->requested_size = glyph_h;
+	if (cell_size.width > 0.0f) {
+		float glyph_w = cell_size.width / w_div;
+		if (glyph_w > 0.0f)
+			f->hw_ratio = glyph_h / glyph_w;
+	}
 	f->dirty = 1;
 	return YETTY_OK_VOID();
 }
@@ -400,7 +428,8 @@ static const struct yetty_font_ms_font_ops ms_msdf_ops = {
 
 struct yetty_font_ms_font_result
 yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
-                               float font_size)
+                               float font_size,
+                               struct yetty_font_ms_padding padding)
 {
 	if (!cdb_path)
 		return YETTY_ERR(yetty_font_ms_font, "cdb_path is NULL");
@@ -436,6 +465,7 @@ yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
 	font->requested_size = font_size;
 	font->base_size = 32.0f; /* TODO: read from CDB or config */
 	font->pixel_range = 4.0f;
+	font->padding = padding;
 	font->dirty = 1;
 
 	/* Init atlas */
@@ -501,25 +531,33 @@ yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
 	font->rs.uniforms[0].type = YETTY_YRENDER_UNIFORM_F32;
 	font->rs.uniforms[0].f32 = font->pixel_range;
 
+	/* scale: pixels per CDB-unit. Lets the shader convert per-glyph
+	 * (size, bearing) — stored in CDB-units — to cell pixels. */
 	strncpy(font->rs.uniforms[1].name, "scale", YETTY_YRENDER_NAME_MAX - 1);
 	font->rs.uniforms[1].type = YETTY_YRENDER_UNIFORM_F32;
-	font->rs.uniforms[1].f32 = font->requested_size / font->base_size;
+	font->rs.uniforms[1].f32 = 0.0f;
 
-	/* Ascent / total-height for proper baseline placement (base-size units,
-	 * shader divides to get 0..1 ratio and cell-relative baseline). */
-	strncpy(font->rs.uniforms[2].name, "ascent_em", YETTY_YRENDER_NAME_MAX - 1);
+	/* baseline_y: distance in pixels from cell top to the font baseline.
+	 * Computed CPU-side from padding.top + max_ascent*scale. */
+	strncpy(font->rs.uniforms[2].name, "baseline_y", YETTY_YRENDER_NAME_MAX - 1);
 	font->rs.uniforms[2].type = YETTY_YRENDER_UNIFORM_F32;
 	font->rs.uniforms[2].f32 = 0.0f;
 
-	strncpy(font->rs.uniforms[3].name, "line_height_em", YETTY_YRENDER_NAME_MAX - 1);
+	/* glyph_left: distance in pixels from cell left to the glyph origin.
+	 * Computed CPU-side from padding.left * glyph_width. */
+	strncpy(font->rs.uniforms[3].name, "glyph_left", YETTY_YRENDER_NAME_MAX - 1);
 	font->rs.uniforms[3].type = YETTY_YRENDER_UNIFORM_F32;
-	font->rs.uniforms[3].f32 = font->base_size;
+	font->rs.uniforms[3].f32 = 0.0f;
 
 	yetty_yrender_shader_code_set(&font->rs.shader,
 		(const char *)font->shader_code.data, font->shader_code.size);
 
-	/* Load a glyph to determine hw_ratio */
-	load_one(font, 'M');
+	/* Pre-load Basic Latin so hw_ratio and the max_ascent/max_descent
+	 * extents are settled before the first frame. Otherwise the scale would
+	 * visibly shift as glyphs (especially descenders like underscore) load
+	 * on demand. */
+	for (uint32_t cp = 0x20; cp <= 0x7E; cp++)
+		load_one(font, cp);
 	if (font->hw_ratio <= 0.0f) {
 		free(font->meta);
 		free(font->atlas_pixels);
@@ -530,8 +568,10 @@ yetty_font_ms_msdf_font_create(const char *cdb_path, const char *shader_path,
 		return YETTY_ERR(yetty_font_ms_font, "failed to determine hw_ratio");
 	}
 
-	yinfo("ms_msdf_font: created from %s, size=%.0f, hw_ratio=%.3f",
-	      cdb_path, font_size, font->hw_ratio);
+	yinfo("ms_msdf_font: created from %s, size=%.0f, hw_ratio=%.3f, "
+	      "ascent=%.2f, descent=%.2f",
+	      cdb_path, font_size, font->hw_ratio,
+	      font->max_ascent, font->max_descent);
 
 	return YETTY_OK(yetty_font_ms_font, &font->base);
 }

@@ -31,19 +31,21 @@ fn font_sample(glyph_index: u32, local_px: vec2<f32>, cell_size: vec2<f32>) -> f
         return 0.0;
     }
 
-    // Fit the font's full ascent+descent into cell_size.y so descenders
-    // (underscore, g, y, p, q) don't spill past the cell bottom. Baseline
-    // sits at (ascent / line_height) of the cell, derived from the actual
-    // metrics tracked on the CPU as glyphs load — not a hardcoded 80%.
-    let line_height_em = max(uniforms.ms_msdf_font_line_height_em, 1.0);
-    let ascent_em      = uniforms.ms_msdf_font_ascent_em;
-    let scale          = cell_size.y / line_height_em;
+    // Placement is fully resolved on the CPU and pushed via uniforms:
+    //   scale       = pixels per CDB-unit (font size mapped to glyph extent)
+    //   baseline    = pixels from cell top down to baseline (top pad + ascent)
+    //   glyph_left  = pixels from cell left to glyph origin (left pad)
+    //
+    // The glyph's own (size, bearing) come from CDB metadata, in CDB-units;
+    // the shader just multiplies by `scale`.
+    let scale          = uniforms.ms_msdf_font_scale;
+    let baseline       = uniforms.ms_msdf_font_baseline_y;
+    let glyph_origin_x = uniforms.ms_msdf_font_glyph_left;
     let scaled_size    = glyph_size * scale;
     let scaled_bearing = bearing * scale;
 
-    let baseline   = ascent_em * scale;
     let glyph_top  = baseline - scaled_bearing.y;
-    let glyph_left = scaled_bearing.x;
+    let glyph_left = glyph_origin_x + scaled_bearing.x;
 
     let glyph_min = vec2<f32>(glyph_left, glyph_top);
     let glyph_max = vec2<f32>(glyph_left + scaled_size.x, glyph_top + scaled_size.y);
