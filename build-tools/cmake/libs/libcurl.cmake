@@ -1,33 +1,103 @@
-# libcurl (system) — used by ycat for http(s):// fetching.
+# libcurl — HTTP(S) client. Used by ycat for http(s):// fetching.
 #
-# System libcurl is available on Linux/macOS out of the box; Windows would
-# need a build-from-source fallback (not addressed here yet). Exports target
-# `CURL::libcurl`.
+# Consumes a prebuilt static lib + headers from the 3rdparty release
+# tarball published by build-3rdparty-libcurl.yml. The tarball was built
+# statically against OpenSSL 4 (lib-openssl-new — see
+# build-tools/3rdparty/libcurl/_build.sh for the exact link recipe).
+#
+# Exposes `CURL::libcurl` (the find_package(CURL) target name yetty + cpr
+# expect). The interface link list pulls in the matching openssl-new
+# static archives directly so downstream code links against the SAME
+# OpenSSL 4 used at libcurl build time.
+#
+# WARNING / SCOPE:
+# At time of writing, libssh2 still links the OLD janbar 1.1.1w openssl
+# (see libs/libssh2.cmake → openssl.cmake). Linking yetty with BOTH this
+# libcurl AND libssh2 in the same binary will cause OpenSSL symbol
+# conflicts. Either:
+#   - disable libssh2 (YETTY_ENABLE_LIB_LIBSSH2=OFF) until it migrates, OR
+#   - migrate libssh2 to also use openssl-new (not done yet).
 
-message(STATUS "libcurl: configuring")
+include_guard(GLOBAL)
+include(${YETTY_ROOT}/build-tools/cmake/3rdparty-fetch.cmake)
 
 if(TARGET CURL::libcurl)
-    message(STATUS "libcurl: CURL::libcurl already exists")
     return()
 endif()
 
-find_package(CURL)
-if(NOT CURL_FOUND)
-    message(FATAL_ERROR
-        "libcurl not found. Install libcurl4-openssl-dev (Debian/Ubuntu), "
-        "libcurl-devel (Fedora), or set YETTY_ENABLE_LIB_LIBCURL=OFF.")
-endif()
-message(STATUS "libcurl: found v${CURL_VERSION_STRING} at ${CURL_LIBRARIES}")
+#-----------------------------------------------------------------------------
+# Fetch libcurl prebuilt + the openssl-new prebuilt it was built against.
+#-----------------------------------------------------------------------------
+yetty_3rdparty_fetch(libcurl     _LIBCURL_DIR)
+yetty_3rdparty_fetch(openssl-new _OSSL_DIR)
 
-# Promote to a global imported target so downstream subdirectories can link
-# against it. Some CMake versions create CURL::libcurl at local scope only.
-if(TARGET CURL::libcurl)
-    message(STATUS "libcurl: promoting CURL::libcurl to GLOBAL")
-    set_target_properties(CURL::libcurl PROPERTIES IMPORTED_GLOBAL TRUE)
+# Tarball layout: lib/libcurl.a + include/curl/*.h
+if(WIN32 AND EXISTS "${_LIBCURL_DIR}/lib/curl.lib")
+    set(_LIBCURL_LIB "${_LIBCURL_DIR}/lib/curl.lib")
+elseif(EXISTS "${_LIBCURL_DIR}/lib/libcurl.a")
+    set(_LIBCURL_LIB "${_LIBCURL_DIR}/lib/libcurl.a")
 else()
-    message(STATUS "libcurl: creating CURL::libcurl INTERFACE wrapper")
-    add_library(CURL::libcurl INTERFACE IMPORTED GLOBAL)
-    set_target_properties(CURL::libcurl PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES "${CURL_INCLUDE_DIRS}"
-        INTERFACE_LINK_LIBRARIES      "${CURL_LIBRARIES}")
+    message(FATAL_ERROR
+        "libcurl: no static lib found in ${_LIBCURL_DIR}/lib/ — \
+tarball layout changed? (check build-tools/3rdparty/libcurl/_build.sh)")
 endif()
+if(NOT EXISTS "${_LIBCURL_DIR}/include/curl/curl.h")
+    message(FATAL_ERROR
+        "libcurl: curl.h not found in ${_LIBCURL_DIR}/include/curl/ — tarball layout changed?")
+endif()
+
+# openssl-new prebuilt: lib/libssl.a + lib/libcrypto.a (from build-3rdparty-openssl-new.yml)
+set(_OSSL_SSL    "${_OSSL_DIR}/lib/libssl.a")
+set(_OSSL_CRYPTO "${_OSSL_DIR}/lib/libcrypto.a")
+if(WIN32)
+    if(NOT EXISTS "${_OSSL_SSL}")
+        set(_OSSL_SSL "${_OSSL_DIR}/lib/libssl.lib")
+    endif()
+    if(NOT EXISTS "${_OSSL_CRYPTO}")
+        set(_OSSL_CRYPTO "${_OSSL_DIR}/lib/libcrypto.lib")
+    endif()
+endif()
+foreach(_F "${_OSSL_SSL}" "${_OSSL_CRYPTO}")
+    if(NOT EXISTS "${_F}")
+        message(FATAL_ERROR
+            "libcurl: openssl-new prebuilt lib missing: ${_F} — \
+push the lib-openssl-new-${YETTY_3RDPARTY_openssl-new_VERSION} release first")
+    endif()
+endforeach()
+
+#-----------------------------------------------------------------------------
+# Imported targets
+#-----------------------------------------------------------------------------
+add_library(CURL::libcurl STATIC IMPORTED GLOBAL)
+set_target_properties(CURL::libcurl PROPERTIES
+    IMPORTED_LOCATION "${_LIBCURL_LIB}"
+    INTERFACE_INCLUDE_DIRECTORIES "${_LIBCURL_DIR}/include"
+)
+
+# Per-platform link deps that libcurl requires.
+set(_LIBCURL_DEPS "${_OSSL_SSL};${_OSSL_CRYPTO}")
+if(WIN32)
+    list(APPEND _LIBCURL_DEPS ws2_32 crypt32 bcrypt advapi32 user32)
+elseif(APPLE)
+    # Curl on Apple uses CoreFoundation/Security for SecureTransport-adjacent
+    # APIs even with OpenSSL backend (timer/cert helpers).
+    list(APPEND _LIBCURL_DEPS "-framework CoreFoundation" "-framework Security")
+elseif(ANDROID)
+    list(APPEND _LIBCURL_DEPS dl)
+elseif(EMSCRIPTEN)
+    # nothing extra — emscripten libc covers it.
+elseif(UNIX)
+    list(APPEND _LIBCURL_DEPS pthread dl)
+endif()
+set_target_properties(CURL::libcurl PROPERTIES
+    INTERFACE_LINK_LIBRARIES "${_LIBCURL_DEPS}"
+)
+
+# find_package(CURL) compat — cpr / any other consumer reading these vars.
+set(CURL_FOUND          TRUE                                  CACHE BOOL    "" FORCE)
+set(CURL_INCLUDE_DIRS   "${_LIBCURL_DIR}/include"             CACHE PATH    "" FORCE)
+set(CURL_LIBRARIES      CURL::libcurl                         CACHE STRING  "" FORCE)
+set(CURL_VERSION_STRING "${YETTY_3RDPARTY_libcurl_VERSION}"   CACHE STRING  "" FORCE)
+
+message(STATUS "libcurl: prebuilt v${YETTY_3RDPARTY_libcurl_VERSION} "
+               "(TLS: openssl-new ${YETTY_3RDPARTY_openssl-new_VERSION})")
