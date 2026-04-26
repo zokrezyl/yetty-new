@@ -207,24 +207,88 @@ static int text_layer_is_empty(const struct yetty_yterm_terminal_layer *self)
     return 0;
 }
 
-/* Receive scroll from other layers (e.g., ypaint) */
+/* Append a synthetic blank scrollback line — used when ypaint asks to
+ * scroll more lines than the live screen contains. Without this we'd
+ * desync from ypaint's rolling_row_0 (which counts every row of unified
+ * scroll history, including space the text screen never had content in). */
+static void push_blank_sb_line(struct yetty_yterm_terminal_text_layer *layer,
+                               int cols)
+{
+    if (cols <= 0)
+        return;
+    if (layer->sb_count >= layer->sb_capacity) {
+        uint32_t new_cap = layer->sb_capacity == 0 ? 256 : layer->sb_capacity * 2;
+        struct yetty_yterm_text_sb_line *grown = realloc(
+            layer->sb_lines,
+            new_cap * sizeof(struct yetty_yterm_text_sb_line));
+        if (!grown) {
+            yerror("push_blank_sb_line: realloc failed");
+            return;
+        }
+        layer->sb_lines = grown;
+        layer->sb_capacity = new_cap;
+    }
+    struct yetty_yterm_text_sb_line *line = &layer->sb_lines[layer->sb_count];
+    line->cells = calloc((size_t)cols, sizeof(VTermScreenCell));
+    if (!line->cells) {
+        yerror("push_blank_sb_line: calloc failed (cols=%d)", cols);
+        return;
+    }
+    line->cols = cols;
+    layer->sb_count++;
+}
+
+/* Receive scroll from other layers (e.g., ypaint).
+ *
+ * libvterm's vterm_scroll_rect() takes a fast path when |downward| >= rows:
+ * it just erases the screen and skips the per-row moverect machinery, so
+ * sb_pushline never fires. That fast path desyncs us from ypaint's
+ * rolling_row_0 — every row of unified scroll history must add exactly one
+ * entry to sb_lines, even when the text screen had no content for it.
+ *
+ * Solution: cap the chunk vterm sees at rows-1 (so it always takes the slow,
+ * sb-pushing path), and once vterm has emptied the screen, append blank
+ * entries directly for the remainder. */
 static struct yetty_ycore_void_result text_layer_scroll(
     struct yetty_yterm_terminal_layer *self, int lines)
 {
     struct yetty_yterm_terminal_text_layer *text_layer =
         container_of(self, struct yetty_yterm_terminal_text_layer, base);
 
-    ydebug("text_layer_scroll ENTER: lines=%d screen=%p", lines, (void*)text_layer->screen);
+    ydebug("text_layer_scroll ENTER: lines=%d screen=%p", lines,
+           (void *)text_layer->screen);
 
     if (!text_layer->screen)
         return YETTY_ERR(yetty_ycore_void, "screen is NULL");
     if (lines <= 0)
         return YETTY_OK_VOID();
 
-    vterm_screen_scroll_lines(text_layer->screen, lines);
+    int rows = (int)text_layer->base.grid_size.rows;
+    int cols = (int)text_layer->base.grid_size.cols;
+    int chunk_max = rows > 1 ? rows - 1 : 1;
+
+    /* Two chunks through vterm are enough to push every row of original
+     * screen content into scrollback (chunk_max=rows-1 then 1). After that
+     * the screen is all-blank, so further vterm_screen_scroll_lines calls
+     * would push blank rows — append them directly instead, much cheaper
+     * than driving libvterm 200+ times for an empty screen. */
+    int via_vterm = lines < 2 * rows ? lines : 2 * rows;
+    int remaining = via_vterm;
+    while (remaining > 0) {
+        int chunk = remaining > chunk_max ? chunk_max : remaining;
+        vterm_screen_scroll_lines(text_layer->screen, chunk);
+        remaining -= chunk;
+    }
+
+    int blank_lines = lines - via_vterm;
+    for (int i = 0; i < blank_lines; i++)
+        push_blank_sb_line(text_layer, cols);
+
     text_layer->base.dirty = 1;
 
-    ydebug("text_layer_scroll EXIT: lines=%d scrolled", lines);
+    ydebug("text_layer_scroll EXIT: lines=%d (via_vterm=%d blanks=%d) "
+           "sb_count=%u",
+           lines, via_vterm, blank_lines, text_layer->sb_count);
     return YETTY_OK_VOID();
 }
 

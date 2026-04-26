@@ -1216,11 +1216,16 @@ yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
             ypaint_canvas_materialize_blob_font(canvas, fv.ttf, fv.ttf_len,
                                                 hint);
         if (YETTY_IS_ERR(fr)) {
-          yerror("add_buffer: font materialize failed: %s", fr.error.msg);
-          final_status = YETTY_ERR(yetty_ycore_void, fr.error.msg);
-          break;
-        }
-        if (fv.font_id >= 0) {
+          /* Failure is non-fatal. PDFs frequently embed tiny subsetted
+           * symbol fonts that msdf-gen rejects ("empty charset" etc.).
+           * Skip the font; spans referencing this font_id will fall back
+           * to the canvas default in the TEXT_SPAN branch below, so the
+           * rest of the buffer still renders and the auto-scroll still
+           * fires at the end. */
+          ywarn("add_buffer: font materialize failed (font_id=%d hint='%s'): "
+                "%s — skipping, spans will use default font",
+                fv.font_id, hint, fr.error.msg);
+        } else if (fv.font_id >= 0) {
           font_map_grow(&fonts_map, (uint32_t)fv.font_id + 1);
           fonts_map.fonts[fv.font_id] = fr.value;
         } else {
@@ -1472,12 +1477,18 @@ struct yetty_ycore_void_result yetty_ypaint_canvas_rebuild_grid(
   ensure_grid_staging(canvas, num_cells * 4);
   canvas->grid_staging_count = num_cells;
 
+  uint32_t cells_with_prims = 0;
+  uint32_t total_refs_in_window = 0;
+  uint32_t max_refs_in_one_cell = 0;
+  uint32_t lines_with_prims_in_window = 0;
+
   for (uint32_t gpu_y = 0; gpu_y < grid_h; gpu_y++) {
     uint32_t canvas_y = window_top + gpu_y;
     bool has_line = canvas_y < canvas->lines.count;
     struct yetty_ypaint_canvas_grid_line *line =
         has_line ? line_buffer_get(&canvas->lines, canvas_y) : NULL;
     uint32_t line_cell_count = line ? line->cell_count : 0;
+    uint32_t row_refs = 0;
 
     for (uint32_t x = 0; x < grid_w; x++) {
       uint32_t cell_idx = gpu_y * grid_w + x;
@@ -1507,8 +1518,21 @@ struct yetty_ycore_void_result yetty_ypaint_canvas_rebuild_grid(
       }
 
       canvas->grid_staging[count_pos] = count;
+      if (count > 0) cells_with_prims++;
+      if (count > max_refs_in_one_cell) max_refs_in_one_cell = count;
+      row_refs += count;
     }
+
+    total_refs_in_window += row_refs;
+    if (row_refs > 0) lines_with_prims_in_window++;
   }
+
+  ydebug("rebuild_grid: window=[%u..%u] grid=%ux%u cells_with_prims=%u/%u "
+         "lines_with_prims=%u total_refs=%u max_refs/cell=%u",
+         window_top, window_top + grid_h - 1, grid_w, grid_h,
+         cells_with_prims, grid_w * grid_h,
+         lines_with_prims_in_window, total_refs_in_window,
+         max_refs_in_one_cell);
 
   free(line_base_prim_idx);
   canvas->dirty = false;

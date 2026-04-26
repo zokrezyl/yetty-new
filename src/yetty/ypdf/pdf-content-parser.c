@@ -2,12 +2,18 @@
  * PDF content stream parser (C port of yetty-poc pdf-content-parser.cpp).
  *
  * Stateful interpreter for the PDF operator stream. Tokenises via
- * pdfioStreamGetToken, keeps a small operand stack, and dispatches operators
+ * pdfioStreamGetToken, keeps a growable operand stack, and dispatches operators
  * to inline handlers that mutate graphics / text / path state.
  *
  * Storage choices:
- *   - operand stack: fixed-size slot array (MAX_OPERANDS × MAX_OPERAND_LEN),
- *     no malloc in the hot path. PDF operator arities top out at 6 (cm/Tm).
+ *   - operand stack: realloc-doubling growable array of (char *, size_t)
+ *     slots. Most operators take ≤6 operands, but a single TJ can stack
+ *     hundreds of array elements (alternating string / kerning offset),
+ *     and a real PDF page issues many such; an unbounded stack matches
+ *     the original C++ implementation's std::vector and avoids dropping
+ *     text mid-array. Each slot holds a pointer to its own malloc'd
+ *     buffer sized to the largest token that ever passed through, so
+ *     large strings don't force a 4KB minimum per slot.
  *   - current path: realloc-doubling growable array of pdf_path_point.
  *   - graphics state stack: realloc-doubling growable array. q/Q pairs
  *     typically nest shallowly (<10) but the spec allows more.
@@ -24,11 +30,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_OPERANDS     32
-#define MAX_OPERAND_LEN  4096
-#define STATE_STACK_INIT 8
-#define PATH_INIT        32
-#define DECODED_INIT     256
+#define OPERAND_STACK_INIT 16
+#define MAX_OPERAND_LEN    4096
+#define STATE_STACK_INIT   8
+#define PATH_INIT          32
+#define DECODED_INIT       256
 
 /*=============================================================================
  * Internal types
@@ -90,10 +96,15 @@ struct pdf_gstate {
 struct yetty_ypdf_content_parser {
     struct yetty_ypdf_content_parser_callbacks cb;
 
-    /* Operand stack (fixed capacity). */
-    char operands[MAX_OPERANDS][MAX_OPERAND_LEN];
-    size_t operand_lens[MAX_OPERANDS];
+    /* Operand stack — growable. operands[i] is a pointer to a malloc'd
+     * buffer (NUL-terminated). operand_lens[i] is the unterminated length.
+     * Slots are kept allocated across ops_clear() so we reuse them on the
+     * next operator without reallocating; only operand_count drops to 0. */
+    char **operands;
+    size_t *operand_lens;
+    size_t *operand_caps;       /* per-slot buffer capacity */
     int operand_count;
+    int operand_capacity;       /* number of slots allocated */
 
     /* Graphics state (current + saved stack). */
     struct pdf_gstate gstate;
@@ -125,19 +136,58 @@ struct yetty_ypdf_content_parser {
  *===========================================================================*/
 
 static void ops_clear(struct yetty_ypdf_content_parser *p) {
+    /* Keep slot buffers alive — only reset the count. */
     p->operand_count = 0;
+}
+
+/* Grow the slot table to at least `want` slots. Existing slot buffers are
+ * left intact; new slots start with NULL/0 capacity and get a buffer on
+ * first push. Returns 0 on success, -1 on OOM. */
+static int ops_reserve(struct yetty_ypdf_content_parser *p, int want) {
+    if (want <= p->operand_capacity) return 0;
+    int cap = p->operand_capacity ? p->operand_capacity * 2 : OPERAND_STACK_INIT;
+    while (cap < want) cap *= 2;
+    char **no = realloc(p->operands, (size_t)cap * sizeof(*no));
+    if (!no) return -1;
+    p->operands = no;
+    size_t *nl = realloc(p->operand_lens, (size_t)cap * sizeof(*nl));
+    if (!nl) return -1;
+    p->operand_lens = nl;
+    size_t *nc = realloc(p->operand_caps, (size_t)cap * sizeof(*nc));
+    if (!nc) return -1;
+    p->operand_caps = nc;
+    /* Zero-init the newly added slots so first push allocates fresh. */
+    for (int i = p->operand_capacity; i < cap; i++) {
+        p->operands[i] = NULL;
+        p->operand_lens[i] = 0;
+        p->operand_caps[i] = 0;
+    }
+    p->operand_capacity = cap;
+    return 0;
 }
 
 static void ops_push(struct yetty_ypdf_content_parser *p,
                      const char *s, size_t len) {
-    if (p->operand_count >= MAX_OPERANDS) {
-        ywarn("ypdf: operand stack overflow, dropping token");
+    if (ops_reserve(p, p->operand_count + 1) < 0) {
+        ywarn("ypdf: operand stack realloc failed, dropping token");
         return;
     }
-    if (len >= MAX_OPERAND_LEN) len = MAX_OPERAND_LEN - 1;
-    memcpy(p->operands[p->operand_count], s, len);
-    p->operands[p->operand_count][len] = '\0';
-    p->operand_lens[p->operand_count] = len;
+    int i = p->operand_count;
+    size_t need = len + 1;
+    if (p->operand_caps[i] < need) {
+        size_t cap = p->operand_caps[i] ? p->operand_caps[i] * 2 : 64;
+        while (cap < need) cap *= 2;
+        char *nb = realloc(p->operands[i], cap);
+        if (!nb) {
+            ywarn("ypdf: operand slot realloc failed, dropping token");
+            return;
+        }
+        p->operands[i] = nb;
+        p->operand_caps[i] = cap;
+    }
+    memcpy(p->operands[i], s, len);
+    p->operands[i][len] = '\0';
+    p->operand_lens[i] = len;
     p->operand_count++;
 }
 
@@ -822,6 +872,13 @@ yetty_ypdf_content_parser_create(
 
 void yetty_ypdf_content_parser_destroy(struct yetty_ypdf_content_parser *p) {
     if (!p) return;
+    if (p->operands) {
+        for (int i = 0; i < p->operand_capacity; i++)
+            free(p->operands[i]);
+        free(p->operands);
+    }
+    free(p->operand_lens);
+    free(p->operand_caps);
     free(p->path);
     free(p->state_stack);
     free(p->decode_buf);
