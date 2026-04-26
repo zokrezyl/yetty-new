@@ -26,12 +26,14 @@
  *       OnResize from wherever the events come from. The renderer is
  *       independent of input plumbing.
  *
- *   (3) Async with libuv: create a `ymgui_event_loop`, then call
+ *   (3) Async with libuv: create a `yetty_yclient_event_loop`
+ *       (<yetty/yclient-lib/event-loop.h>), then call
  *       ImGui_ImplYetty_AttachEventLoop(loop) — wires the loop's
  *       per-event callbacks into ImGuiIO so the app's only job is to
  *       set a frame_cb that does NewFrame → Render → RenderDrawData.
  *       App code can also register its own fds / timers / posted tasks
- *       on the same loop for network etc.
+ *       on the same loop for network etc. The loop is shared with
+ *       ygui / yrich / ycat — same primitive across all client tools.
  */
 
 #ifndef YETTY_YMGUI_IMGUI_IMPL_YETTY_H
@@ -44,7 +46,7 @@
 #define IMGUI_IMPL_API
 #endif
 
-struct ymgui_event_loop;
+struct yetty_yclient_event_loop;
 
 IMGUI_IMPL_API bool ImGui_ImplYetty_Init(void);
 IMGUI_IMPL_API void ImGui_ImplYetty_Shutdown(void);
@@ -111,6 +113,6 @@ IMGUI_IMPL_API void ImGui_ImplYetty_OnResize     (double width, double height);
  * app's frame_cb is the only thing the app still owns — it does
  * NewFrame → ImGui::NewFrame → render UI → ImGui::Render → RenderDrawData.
  *===========================================================================*/
-IMGUI_IMPL_API void ImGui_ImplYetty_AttachEventLoop(struct ymgui_event_loop *loop);
+IMGUI_IMPL_API void ImGui_ImplYetty_AttachEventLoop(struct yetty_yclient_event_loop *loop);
 
 #endif /* YETTY_YMGUI_IMGUI_IMPL_YETTY_H */

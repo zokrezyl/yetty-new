@@ -75,7 +75,7 @@ option(YETTY_ENABLE_FEATURE_MSDF_GEN  "ymsdf-gen — MSDF font generator"       
 # Terminal / display
 option(YETTY_ENABLE_FEATURE_YECHO     "yecho — echo/display"                 OFF)
 option(YETTY_ENABLE_FEATURE_YGUI      "ygui — pure-C widget library"          ON)
-option(YETTY_ENABLE_FEATURE_YMGUI     "ymgui — Dear ImGui ↔ yetty bridge"    OFF)
+option(YETTY_ENABLE_FEATURE_YMGUI     "ymgui — Dear ImGui ↔ yetty bridge"    ON)
 
 # Drawing / rendering
 option(YETTY_ENABLE_FEATURE_YDRAW     "ydraw — 2D vector drawing"            OFF)

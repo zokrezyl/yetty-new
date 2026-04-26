@@ -1,5 +1,6 @@
 /*
- * ymgui_event_loop.c — libuv-backed event loop for ymgui frontend.
+ * yclient-lib/event-loop.c — libuv-backed event loop, shared across all
+ * yetty client apps (ymgui frontends, ygui, yrich, …).
  *
  * I/O model:
  *
@@ -8,19 +9,21 @@
  *                    -> on_osc(code, payload, len) -> typed dispatch
  *                    -> on_raw(bytes, n)            -> app's raw cb
  *               -> set frame_pending
- *   stdout -> uv_poll (WRITABLE) [activated only when out queue has tail]
  *
  * Frame coalescing: a uv_check_t runs once per iteration after I/O. If
  * frame_pending is set (any input fired or request_frame was called) it
  * fires the user's frame_cb and clears the flag.
  *
+ * Stdout watching is intentionally NOT here — write-side queueing belongs
+ * to the consumer (ymgui's pending-write helper, ygui's emitter, …).
+ * Consumers that need writability notifications can register their out_fd
+ * via add_fd(WRITABLE) and remove it once their queue is drained.
+ *
  * App extensions: small fixed-size tables of uv_poll_t / uv_timer_t /
- * pending posted tasks. Sized to typical ImGui-app needs; can grow if
- * required, but the goal is to stay simple.
+ * pending posted tasks. Sized to typical app needs; can grow if required.
  */
 
-#include "ymgui_event_loop.h"
-#include "ymgui_encode.h"
+#include <yetty/yclient-lib/event-loop.h>
 
 #include <yetty/yface/yface.h>
 #include <yetty/ymgui/wire.h>
@@ -31,57 +34,53 @@
 #include <errno.h>
 #include <uv.h>
 
-#define YMGUI_LOOP_FD_SLOTS    16
-#define YMGUI_LOOP_TIMER_SLOTS 16
-#define YMGUI_LOOP_READ_BUF    8192
+#define YETTY_YCLIENT_FD_SLOTS    16
+#define YETTY_YCLIENT_TIMER_SLOTS 16
+#define YETTY_YCLIENT_READ_BUF    8192
 
 /*=============================================================================
  * App extension slots
  *===========================================================================*/
 
 struct loop_fd_slot {
-    uv_poll_t    poll;
-    int          id;
-    int          fd;
-    int          events_mask;
-    ymgui_fd_cb  cb;
-    void        *cb_user;
-    int          active;
-    struct ymgui_event_loop *loop;
+    uv_poll_t              poll;
+    int                    id;
+    int                    fd;
+    int                    events_mask;
+    yetty_yclient_fd_cb    cb;
+    void                  *cb_user;
+    int                    active;
+    struct yetty_yclient_event_loop *loop;
 };
 
 struct loop_timer_slot {
-    uv_timer_t      timer;
-    int             id;
-    int             timeout_ms;
-    int             repeat_ms;
-    ymgui_timer_cb  cb;
-    void           *cb_user;
-    int             active;
-    struct ymgui_event_loop *loop;
+    uv_timer_t              timer;
+    int                     id;
+    int                     timeout_ms;
+    int                     repeat_ms;
+    yetty_yclient_timer_cb  cb;
+    void                   *cb_user;
+    int                     active;
+    struct yetty_yclient_event_loop *loop;
 };
 
 /* Single-linked queue of (fn, arg) callbacks scheduled via post(). Drained
  * by the post_async handler. */
 struct post_node {
-    ymgui_task_cb     cb;
-    void             *cb_user;
-    struct post_node *next;
+    yetty_yclient_task_cb     cb;
+    void                     *cb_user;
+    struct post_node         *next;
 };
 
-struct ymgui_event_loop {
+struct yetty_yclient_event_loop {
     uv_loop_t       loop;
-    int             owns_loop;        /* always 1 — we never embed an external loop yet */
 
     int             in_fd;
-    int             out_fd;
     void           *user;
 
     /* I/O handles */
     uv_poll_t       in_poll;
     int             in_poll_active;
-    uv_poll_t       out_poll;
-    int             out_poll_active;
 
     /* Stop / wake */
     uv_async_t      stop_async;
@@ -93,19 +92,19 @@ struct ymgui_event_loop {
     struct yetty_yface *yface;
 
     /* Input callbacks */
-    ymgui_mouse_pos_cb     on_pos;
-    ymgui_mouse_button_cb  on_btn;
-    ymgui_mouse_wheel_cb   on_wheel;
-    ymgui_resize_cb        on_resize;
-    ymgui_raw_cb           on_raw;
-    ymgui_frame_cb         on_frame;
+    yetty_yclient_mouse_pos_cb     on_pos;
+    yetty_yclient_mouse_button_cb  on_btn;
+    yetty_yclient_mouse_wheel_cb   on_wheel;
+    yetty_yclient_resize_cb        on_resize;
+    yetty_yclient_raw_cb           on_raw;
+    yetty_yclient_frame_cb         on_frame;
 
     /* Frame coalescing */
     int             frame_pending;
 
     /* App extensions */
-    struct loop_fd_slot     fd_slots   [YMGUI_LOOP_FD_SLOTS];
-    struct loop_timer_slot  timer_slots[YMGUI_LOOP_TIMER_SLOTS];
+    struct loop_fd_slot     fd_slots   [YETTY_YCLIENT_FD_SLOTS];
+    struct loop_timer_slot  timer_slots[YETTY_YCLIENT_TIMER_SLOTS];
     int                     next_fd_id;
     int                     next_timer_id;
 
@@ -117,12 +116,17 @@ struct ymgui_event_loop {
 
 /*=============================================================================
  * yface dispatch
+ *
+ * Decodes the wire structs that yetty's terminal sends (700000 mouse,
+ * 700001 resize) and routes them to the per-event-type callbacks. The
+ * actual wire structs live in <yetty/ymgui/wire.h> — yclient-lib depends
+ * on them as the canonical wire format definition for both directions.
  *===========================================================================*/
 
 static void on_yface_osc(void *user, int osc_code,
                          const uint8_t *payload, size_t len)
 {
-    struct ymgui_event_loop *L = user;
+    struct yetty_yclient_event_loop *L = user;
 
     switch (osc_code) {
     case YMGUI_OSC_SC_MOUSE: {
@@ -166,7 +170,7 @@ static void on_yface_osc(void *user, int osc_code,
 
 static void on_yface_raw(void *user, const char *bytes, size_t n)
 {
-    struct ymgui_event_loop *L = user;
+    struct yetty_yclient_event_loop *L = user;
     if (L->on_raw)
         L->on_raw(L->user, bytes, n);
     /* Raw bytes (keyboard, CSI) usually do change app state — request a
@@ -175,15 +179,15 @@ static void on_yface_raw(void *user, const char *bytes, size_t n)
 }
 
 /*=============================================================================
- * stdin / stdout polling
+ * stdin polling
  *===========================================================================*/
 
 static void on_in_readable(uv_poll_t *handle, int status, int events)
 {
-    struct ymgui_event_loop *L = handle->data;
+    struct yetty_yclient_event_loop *L = handle->data;
     if (status < 0 || !(events & UV_READABLE)) return;
 
-    char buf[YMGUI_LOOP_READ_BUF];
+    char buf[YETTY_YCLIENT_READ_BUF];
     for (;;) {
         ssize_t n = read(L->in_fd, buf, sizeof(buf));
         if (n > 0) {
@@ -197,35 +201,13 @@ static void on_in_readable(uv_poll_t *handle, int status, int events)
     }
 }
 
-static void on_out_writable(uv_poll_t *handle, int status, int events)
-{
-    struct ymgui_event_loop *L = handle->data;
-    if (status < 0 || !(events & UV_WRITABLE)) return;
-
-    /* Drain whatever the encoder queued up. If the queue is empty, stop
-     * watching for writability (otherwise we'd spin on POLLOUT). */
-    int rc = ymgui_pending_flush(L->out_fd);
-    if (rc != 1) {
-        uv_poll_stop(&L->out_poll);
-        L->out_poll_active = 0;
-    }
-}
-
 /*=============================================================================
  * Frame coalescer + cross-thread asyncs
  *===========================================================================*/
 
 static void on_frame_check(uv_check_t *handle)
 {
-    struct ymgui_event_loop *L = handle->data;
-
-    /* If we have queued bytes and stdout isn't yet being watched, start
-     * watching now. */
-    if (ymgui_pending_active() && !L->out_poll_active) {
-        uv_poll_start(&L->out_poll, UV_WRITABLE, on_out_writable);
-        L->out_poll_active = 1;
-    }
-
+    struct yetty_yclient_event_loop *L = handle->data;
     if (!L->frame_pending) return;
     L->frame_pending = 0;
     if (L->on_frame) L->on_frame(L->user);
@@ -233,19 +215,19 @@ static void on_frame_check(uv_check_t *handle)
 
 static void on_stop_async(uv_async_t *handle)
 {
-    struct ymgui_event_loop *L = handle->data;
+    struct yetty_yclient_event_loop *L = handle->data;
     uv_stop(&L->loop);
 }
 
 static void on_frame_async(uv_async_t *handle)
 {
-    struct ymgui_event_loop *L = handle->data;
+    struct yetty_yclient_event_loop *L = handle->data;
     L->frame_pending = 1;
 }
 
 static void on_post_async(uv_async_t *handle)
 {
-    struct ymgui_event_loop *L = handle->data;
+    struct yetty_yclient_event_loop *L = handle->data;
 
     struct post_node *head;
     uv_mutex_lock(&L->post_mutex);
@@ -266,20 +248,18 @@ static void on_post_async(uv_async_t *handle)
  * Lifecycle
  *===========================================================================*/
 
-struct ymgui_event_loop *ymgui_event_loop_create(
-    const struct ymgui_event_loop_config *cfg)
+struct yetty_yclient_event_loop *yetty_yclient_event_loop_create(
+    const struct yetty_yclient_event_loop_config *cfg)
 {
-    struct ymgui_event_loop *L = calloc(1, sizeof(*L));
+    struct yetty_yclient_event_loop *L = calloc(1, sizeof(*L));
     if (!L) return NULL;
 
-    L->in_fd  = (cfg && cfg->in_fd  >= 0) ? cfg->in_fd  : STDIN_FILENO;
-    L->out_fd = (cfg && cfg->out_fd >= 0) ? cfg->out_fd : STDOUT_FILENO;
-    L->user   = cfg ? cfg->user : NULL;
+    L->in_fd = (cfg && cfg->in_fd >= 0) ? cfg->in_fd : STDIN_FILENO;
+    L->user  = cfg ? cfg->user : NULL;
     L->next_fd_id    = 1;
     L->next_timer_id = 1;
 
     if (uv_loop_init(&L->loop) != 0) goto fail;
-    L->owns_loop = 1;
 
     /* Stream decoder. */
     {
@@ -289,25 +269,19 @@ struct ymgui_event_loop *ymgui_event_loop_create(
         yetty_yface_set_handlers(L->yface, on_yface_osc, on_yface_raw, L);
     }
 
-    /* uv_poll on stdin. uv_poll_init_socket would set non-blocking; for
-     * a regular fd uv_poll_init does the right thing. */
     if (uv_poll_init(&L->loop, &L->in_poll, L->in_fd) != 0) goto fail;
     L->in_poll.data = L;
     if (uv_poll_start(&L->in_poll, UV_READABLE, on_in_readable) != 0) goto fail;
     L->in_poll_active = 1;
 
-    if (uv_poll_init(&L->loop, &L->out_poll, L->out_fd) != 0) goto fail;
-    L->out_poll.data = L;
-    /* not started — we only watch when we have a queued tail */
-
-    if (uv_async_init(&L->loop, &L->stop_async, on_stop_async) != 0) goto fail;
-    L->stop_async.data = L;
+    if (uv_async_init(&L->loop, &L->stop_async,  on_stop_async)  != 0) goto fail;
+    L->stop_async.data  = L;
     if (uv_async_init(&L->loop, &L->frame_async, on_frame_async) != 0) goto fail;
     L->frame_async.data = L;
-    if (uv_async_init(&L->loop, &L->post_async, on_post_async) != 0) goto fail;
-    L->post_async.data = L;
+    if (uv_async_init(&L->loop, &L->post_async,  on_post_async)  != 0) goto fail;
+    L->post_async.data  = L;
 
-    if (uv_check_init(&L->loop, &L->frame_check) != 0) goto fail;
+    if (uv_check_init (&L->loop, &L->frame_check) != 0) goto fail;
     L->frame_check.data = L;
     if (uv_check_start(&L->frame_check, on_frame_check) != 0) goto fail;
 
@@ -316,29 +290,27 @@ struct ymgui_event_loop *ymgui_event_loop_create(
     return L;
 
 fail:
-    ymgui_event_loop_destroy(L);
+    yetty_yclient_event_loop_destroy(L);
     return NULL;
 }
 
 static void on_handle_close(uv_handle_t *h) { (void)h; }
 
-void ymgui_event_loop_destroy(struct ymgui_event_loop *L)
+void yetty_yclient_event_loop_destroy(struct yetty_yclient_event_loop *L)
 {
     if (!L) return;
 
-    /* Stop + close all live handles before tearing down the loop. */
-    if (L->in_poll_active)  uv_poll_stop(&L->in_poll);
-    if (L->out_poll_active) uv_poll_stop(&L->out_poll);
+    if (L->in_poll_active) uv_poll_stop(&L->in_poll);
     uv_check_stop(&L->frame_check);
 
-    for (int i = 0; i < YMGUI_LOOP_FD_SLOTS; i++) {
+    for (int i = 0; i < YETTY_YCLIENT_FD_SLOTS; i++) {
         if (L->fd_slots[i].active) {
             uv_poll_stop(&L->fd_slots[i].poll);
             uv_close((uv_handle_t *)&L->fd_slots[i].poll, on_handle_close);
             L->fd_slots[i].active = 0;
         }
     }
-    for (int i = 0; i < YMGUI_LOOP_TIMER_SLOTS; i++) {
+    for (int i = 0; i < YETTY_YCLIENT_TIMER_SLOTS; i++) {
         if (L->timer_slots[i].active) {
             uv_timer_stop(&L->timer_slots[i].timer);
             uv_close((uv_handle_t *)&L->timer_slots[i].timer, on_handle_close);
@@ -348,20 +320,16 @@ void ymgui_event_loop_destroy(struct ymgui_event_loop *L)
 
     if (uv_is_active((uv_handle_t *)&L->in_poll))
         uv_close((uv_handle_t *)&L->in_poll, on_handle_close);
-    if (uv_is_active((uv_handle_t *)&L->out_poll))
-        uv_close((uv_handle_t *)&L->out_poll, on_handle_close);
     uv_close((uv_handle_t *)&L->stop_async,  on_handle_close);
     uv_close((uv_handle_t *)&L->frame_async, on_handle_close);
     uv_close((uv_handle_t *)&L->post_async,  on_handle_close);
     uv_close((uv_handle_t *)&L->frame_check, on_handle_close);
 
     /* Drain pending closes. */
-    if (L->owns_loop)
-        uv_run(&L->loop, UV_RUN_NOWAIT);
+    uv_run(&L->loop, UV_RUN_NOWAIT);
 
     uv_mutex_destroy(&L->post_mutex);
-
-    if (L->owns_loop) uv_loop_close(&L->loop);
+    uv_loop_close(&L->loop);
 
     if (L->yface) yetty_yface_destroy(L->yface);
 
@@ -378,34 +346,34 @@ void ymgui_event_loop_destroy(struct ymgui_event_loop *L)
 /*=============================================================================
  * Callback wiring
  *===========================================================================*/
-void ymgui_event_loop_set_user           (struct ymgui_event_loop *L, void *u)               { L->user = u; }
-void ymgui_event_loop_set_mouse_pos_cb   (struct ymgui_event_loop *L, ymgui_mouse_pos_cb c)    { L->on_pos    = c; }
-void ymgui_event_loop_set_mouse_button_cb(struct ymgui_event_loop *L, ymgui_mouse_button_cb c) { L->on_btn    = c; }
-void ymgui_event_loop_set_mouse_wheel_cb (struct ymgui_event_loop *L, ymgui_mouse_wheel_cb c)  { L->on_wheel  = c; }
-void ymgui_event_loop_set_resize_cb      (struct ymgui_event_loop *L, ymgui_resize_cb c)       { L->on_resize = c; }
-void ymgui_event_loop_set_raw_cb         (struct ymgui_event_loop *L, ymgui_raw_cb c)          { L->on_raw    = c; }
-void ymgui_event_loop_set_frame_cb       (struct ymgui_event_loop *L, ymgui_frame_cb c)        { L->on_frame  = c; }
+void yetty_yclient_event_loop_set_user           (struct yetty_yclient_event_loop *L, void *u)                          { L->user = u; }
+void yetty_yclient_event_loop_set_mouse_pos_cb   (struct yetty_yclient_event_loop *L, yetty_yclient_mouse_pos_cb c)     { L->on_pos    = c; }
+void yetty_yclient_event_loop_set_mouse_button_cb(struct yetty_yclient_event_loop *L, yetty_yclient_mouse_button_cb c)  { L->on_btn    = c; }
+void yetty_yclient_event_loop_set_mouse_wheel_cb (struct yetty_yclient_event_loop *L, yetty_yclient_mouse_wheel_cb c)   { L->on_wheel  = c; }
+void yetty_yclient_event_loop_set_resize_cb      (struct yetty_yclient_event_loop *L, yetty_yclient_resize_cb c)        { L->on_resize = c; }
+void yetty_yclient_event_loop_set_raw_cb         (struct yetty_yclient_event_loop *L, yetty_yclient_raw_cb c)           { L->on_raw    = c; }
+void yetty_yclient_event_loop_set_frame_cb       (struct yetty_yclient_event_loop *L, yetty_yclient_frame_cb c)         { L->on_frame  = c; }
 
 /*=============================================================================
  * Run
  *===========================================================================*/
 
-int ymgui_event_loop_run(struct ymgui_event_loop *L)
+int yetty_yclient_event_loop_run(struct yetty_yclient_event_loop *L)
 {
     return uv_run(&L->loop, UV_RUN_DEFAULT);
 }
 
-int ymgui_event_loop_poll(struct ymgui_event_loop *L, int wait)
+int yetty_yclient_event_loop_poll(struct yetty_yclient_event_loop *L, int wait)
 {
     return uv_run(&L->loop, wait ? UV_RUN_ONCE : UV_RUN_NOWAIT);
 }
 
-void ymgui_event_loop_stop(struct ymgui_event_loop *L)
+void yetty_yclient_event_loop_stop(struct yetty_yclient_event_loop *L)
 {
     uv_async_send(&L->stop_async);
 }
 
-void ymgui_event_loop_request_frame(struct ymgui_event_loop *L)
+void yetty_yclient_event_loop_request_frame(struct yetty_yclient_event_loop *L)
 {
     uv_async_send(&L->frame_async);
 }
@@ -414,9 +382,9 @@ void ymgui_event_loop_request_frame(struct ymgui_event_loop *L)
  * App extensions: fds
  *===========================================================================*/
 
-static struct loop_fd_slot *find_fd_slot(struct ymgui_event_loop *L, int id)
+static struct loop_fd_slot *find_fd_slot(struct yetty_yclient_event_loop *L, int id)
 {
-    for (int i = 0; i < YMGUI_LOOP_FD_SLOTS; i++)
+    for (int i = 0; i < YETTY_YCLIENT_FD_SLOTS; i++)
         if (L->fd_slots[i].active && L->fd_slots[i].id == id)
             return &L->fd_slots[i];
     return NULL;
@@ -428,19 +396,19 @@ static void on_app_fd(uv_poll_t *handle, int status, int events)
     if (status < 0 || !slot->cb) return;
 
     int mask = 0;
-    if (events & UV_READABLE) mask |= YMGUI_FD_READABLE;
-    if (events & UV_WRITABLE) mask |= YMGUI_FD_WRITABLE;
+    if (events & UV_READABLE) mask |= YETTY_YCLIENT_FD_READABLE;
+    if (events & UV_WRITABLE) mask |= YETTY_YCLIENT_FD_WRITABLE;
     slot->cb(slot->cb_user, slot->fd, mask);
 }
 
-int ymgui_event_loop_add_fd(struct ymgui_event_loop *L,
-                            int fd, int events_mask,
-                            ymgui_fd_cb cb, void *cb_user)
+int yetty_yclient_event_loop_add_fd(struct yetty_yclient_event_loop *L,
+                                    int fd, int events_mask,
+                                    yetty_yclient_fd_cb cb, void *cb_user)
 {
     if (!L || fd < 0 || !cb) return 0;
 
     int idx = -1;
-    for (int i = 0; i < YMGUI_LOOP_FD_SLOTS; i++) {
+    for (int i = 0; i < YETTY_YCLIENT_FD_SLOTS; i++) {
         if (!L->fd_slots[i].active) { idx = i; break; }
     }
     if (idx < 0) return 0;
@@ -457,8 +425,8 @@ int ymgui_event_loop_add_fd(struct ymgui_event_loop *L,
     s->active    = 1;
 
     int uv_events = 0;
-    if (events_mask & YMGUI_FD_READABLE) uv_events |= UV_READABLE;
-    if (events_mask & YMGUI_FD_WRITABLE) uv_events |= UV_WRITABLE;
+    if (events_mask & YETTY_YCLIENT_FD_READABLE) uv_events |= UV_READABLE;
+    if (events_mask & YETTY_YCLIENT_FD_WRITABLE) uv_events |= UV_WRITABLE;
     if (uv_poll_start(&s->poll, uv_events, on_app_fd) != 0) {
         uv_close((uv_handle_t *)&s->poll, on_handle_close);
         s->active = 0;
@@ -467,7 +435,7 @@ int ymgui_event_loop_add_fd(struct ymgui_event_loop *L,
     return s->id;
 }
 
-void ymgui_event_loop_remove_fd(struct ymgui_event_loop *L, int id)
+void yetty_yclient_event_loop_remove_fd(struct yetty_yclient_event_loop *L, int id)
 {
     struct loop_fd_slot *s = find_fd_slot(L, id);
     if (!s) return;
@@ -480,9 +448,9 @@ void ymgui_event_loop_remove_fd(struct ymgui_event_loop *L, int id)
  * App extensions: timers
  *===========================================================================*/
 
-static struct loop_timer_slot *find_timer_slot(struct ymgui_event_loop *L, int id)
+static struct loop_timer_slot *find_timer_slot(struct yetty_yclient_event_loop *L, int id)
 {
-    for (int i = 0; i < YMGUI_LOOP_TIMER_SLOTS; i++)
+    for (int i = 0; i < YETTY_YCLIENT_TIMER_SLOTS; i++)
         if (L->timer_slots[i].active && L->timer_slots[i].id == id)
             return &L->timer_slots[i];
     return NULL;
@@ -494,14 +462,14 @@ static void on_app_timer(uv_timer_t *handle)
     if (s->cb) s->cb(s->cb_user);
 }
 
-int ymgui_event_loop_add_timer(struct ymgui_event_loop *L,
-                               int timeout_ms, int repeat_ms,
-                               ymgui_timer_cb cb, void *cb_user)
+int yetty_yclient_event_loop_add_timer(struct yetty_yclient_event_loop *L,
+                                       int timeout_ms, int repeat_ms,
+                                       yetty_yclient_timer_cb cb, void *cb_user)
 {
     if (!L || timeout_ms < 0 || !cb) return 0;
 
     int idx = -1;
-    for (int i = 0; i < YMGUI_LOOP_TIMER_SLOTS; i++) {
+    for (int i = 0; i < YETTY_YCLIENT_TIMER_SLOTS; i++) {
         if (!L->timer_slots[i].active) { idx = i; break; }
     }
     if (idx < 0) return 0;
@@ -527,7 +495,7 @@ int ymgui_event_loop_add_timer(struct ymgui_event_loop *L,
     return s->id;
 }
 
-void ymgui_event_loop_remove_timer(struct ymgui_event_loop *L, int id)
+void yetty_yclient_event_loop_remove_timer(struct yetty_yclient_event_loop *L, int id)
 {
     struct loop_timer_slot *s = find_timer_slot(L, id);
     if (!s) return;
@@ -540,8 +508,8 @@ void ymgui_event_loop_remove_timer(struct ymgui_event_loop *L, int id)
  * App extensions: posted tasks
  *===========================================================================*/
 
-void ymgui_event_loop_post(struct ymgui_event_loop *L,
-                           ymgui_task_cb cb, void *cb_user)
+void yetty_yclient_event_loop_post(struct yetty_yclient_event_loop *L,
+                                   yetty_yclient_task_cb cb, void *cb_user)
 {
     if (!L || !cb) return;
     struct post_node *n = calloc(1, sizeof(*n));

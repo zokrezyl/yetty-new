@@ -13,7 +13,9 @@
 #include <stddef.h>
 
 /* Forward declare libuv types */
-typedef struct uv_loop_s uv_loop_t;
+/* Forward decl — full type in <yetty/yclient-lib/event-loop.h>. ygui's
+ * event loop is the shared yclient one (libuv-backed, yface-driven). */
+struct yetty_yclient_event_loop;
 
 #ifdef __cplusplus
 extern "C" {
@@ -166,8 +168,11 @@ void ygui_engine_show(ygui_engine_t* engine);
  * Usually not needed - engine auto-renders when dirty. */
 void ygui_engine_render(ygui_engine_t* engine);
 
-/* Attach engine to user's libuv loop (for advanced usage) */
-void ygui_engine_attach(ygui_engine_t* engine, uv_loop_t* loop);
+/* Attach engine to a shared yclient event loop (for advanced usage —
+ * lets multiple clients on the same app drain stdin together). The
+ * engine takes the loop by reference; ownership stays with the caller. */
+void ygui_engine_attach(ygui_engine_t* engine,
+                        struct yetty_yclient_event_loop* loop);
 
 /* Run event loop (creates libuv loop internally for simple usage)
  * Blocks until ygui_engine_stop() called or 'q' pressed. */
@@ -408,8 +413,8 @@ void ygui_engine_set_card_size(ygui_engine_t* engine, int card_w, int card_h);
  * For tests, call this to set canvas size before creating widgets. */
 void ygui_engine_set_display_pixel_size(ygui_engine_t* engine, float width, float height);
 
-/* Get access to engine's libuv loop (after attach/run) */
-uv_loop_t* ygui_engine_get_loop(ygui_engine_t* engine);
+/* Get access to engine's yclient event loop (after attach/run). */
+struct yetty_yclient_event_loop* ygui_engine_get_loop(ygui_engine_t* engine);
 
 /* Process pending events without blocking (run one loop iteration)
  * Returns 0 if no more events, 1 if there are still pending events */

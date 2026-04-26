@@ -146,7 +146,8 @@ static void terminal_yface_emit(struct yetty_yterm_terminal *terminal,
                                 const void *payload, size_t len) {
   if (!terminal->emit_yface) return;
   struct yetty_ycore_void_result r =
-      yetty_yface_start_write(terminal->emit_yface, osc_code, /*compressed=*/0);
+      yetty_yface_start_write(terminal->emit_yface, osc_code,
+                              /*compressed=*/0, /*prefix=*/NULL);
   if (!r.ok) goto reset;
   r = yetty_yface_write(terminal->emit_yface, payload, len);
   if (!r.ok) goto reset;

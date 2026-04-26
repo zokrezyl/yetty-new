@@ -393,7 +393,8 @@ int main(int argc, char **argv) {
 
         // OSC sequence via yface: ESC ] 666674 ; --bin ; <b64(LZ4F(bytes))> ST
         struct yetty_ycore_void_result rr = yetty_yface_emit_to_fd(
-            fileno(stdout), 666674, "--bin", g_buffer, raw_bytes);
+            fileno(stdout), 666674,
+            /*compressed=*/1, "--bin", g_buffer, raw_bytes);
         if (YETTY_IS_ERR(rr)) {
             fprintf(stderr, "yface_emit: %s\n", rr.error.msg);
             return 1;

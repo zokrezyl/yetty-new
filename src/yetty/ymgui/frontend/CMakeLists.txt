@@ -2,35 +2,31 @@
 #
 # Translation units of our own:
 #   ymgui_encode.c         — pure C. non-blocking OSC write helper.
-#   ymgui_event_loop.c     — pure C. libuv-backed event loop with
-#                            GLFW-style input callbacks + extension
-#                            slots for app fds / timers / posted tasks.
-#                            Skipped on emscripten (no libuv there).
 #   imgui_impl_yetty.cpp   — thin C++ shim on top of Dear ImGui.
+#
 # Dear ImGui itself comes via the imgui_core CPM target (no vendoring).
+#
+# The libuv-backed event loop now lives in src/yclient-lib (target
+# yetty_yclient) — shared with ygui / yrich / ycat. We link it here so
+# Dear ImGui apps that want the async path get it via this single target.
 
-set(YMGUI_FRONTEND_SOURCES
+add_library(ymgui_frontend STATIC
     ymgui_encode.c
     imgui_impl_yetty.cpp
 )
-if(NOT EMSCRIPTEN)
-    list(APPEND YMGUI_FRONTEND_SOURCES ymgui_event_loop.c)
-endif()
-
-add_library(ymgui_frontend STATIC ${YMGUI_FRONTEND_SOURCES})
 
 target_include_directories(ymgui_frontend PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${YETTY_ROOT}/include
 )
 
-target_link_libraries(ymgui_frontend PUBLIC imgui_core yetty_yface yetty_ycore)
+target_link_libraries(ymgui_frontend PUBLIC
+    imgui_core
+    yetty_yface
+    yetty_ycore
+)
 if(NOT EMSCRIPTEN)
-    # libuv (uv_a) is loaded by build-tools/cmake/targets/shared.cmake
-    # whenever YETTY_ENABLE_LIB_LIBUV is on (default). Guard the include
-    # so the frontend can also be built standalone.
-    include(${YETTY_ROOT}/build-tools/cmake/libs/libuv.cmake)
-    target_link_libraries(ymgui_frontend PUBLIC uv_a)
+    target_link_libraries(ymgui_frontend PUBLIC yetty_yclient)
 endif()
 
 set_target_properties(ymgui_frontend PROPERTIES
@@ -42,6 +38,7 @@ set_target_properties(ymgui_frontend PROPERTIES
 
 # Public headers consumers need:
 #   <yetty/ymgui/wire.h>              (installed with core headers)
+#   <yetty/yclient-lib/event-loop.h>  (installed by yclient-lib)
 #   "imgui_impl_yetty.h"              (this dir)
 #   "ymgui_encode.h"                  (this dir — optional, for custom transports)
 

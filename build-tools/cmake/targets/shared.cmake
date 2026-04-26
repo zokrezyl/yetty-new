@@ -200,6 +200,15 @@ endif()
 # be declared before src/yetty so yetty_vnc (et al.) can link against it.
 add_subdirectory(${YETTY_ROOT}/src/yrender-utils ${CMAKE_BINARY_DIR}/src/yrender-utils)
 
+# Shared client-side support (libuv event loop + yface bridge for ymgui /
+# ygui / yrich / ycat). Outside src/yetty for the same reason as
+# yrender-utils — keeps server abstractions out of client tools. Declared
+# before src/yetty so the ymgui-layer (server side) and ymgui frontend
+# can both link it.
+if(NOT EMSCRIPTEN)
+    add_subdirectory(${YETTY_ROOT}/src/yclient-lib ${CMAKE_BINARY_DIR}/src/yclient-lib)
+endif()
+
 # Add src/yetty (populates YETTY_SOURCES, YETTY_CORE_SOURCES, builds feature libraries)
 add_subdirectory(${YETTY_ROOT}/src/yetty ${CMAKE_BINARY_DIR}/src/yetty)
 

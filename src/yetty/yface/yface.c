@@ -235,13 +235,15 @@ ensure_enc_scratch(struct yetty_yface *y, size_t need)
 }
 
 struct yetty_ycore_void_result
-yetty_yface_start_write(struct yetty_yface *y, int osc_code, int compressed)
+yetty_yface_start_write(struct yetty_yface *y, int osc_code,
+                        int compressed, const char *prefix)
 {
     if (!y) return YETTY_ERR(yetty_ycore_void, "yface is NULL");
     if (y->enc_active)
         return YETTY_ERR(yetty_ycore_void, "yface: write already active");
 
-    /* "\e]<code>;<flag>;" — flag is the single compressed/raw discriminator. */
+    /* "\e]<code>;<flag>;[<prefix>;]" — flag is the compressed/raw
+     * discriminator; prefix is the optional verb for legacy emitters. */
     char hdr[32];
     int n = snprintf(hdr, sizeof(hdr), "\033]%d;%c;",
                      osc_code, compressed ? '1' : '0');
@@ -250,6 +252,14 @@ yetty_yface_start_write(struct yetty_yface *y, int osc_code, int compressed)
     {
         struct yetty_ycore_void_result r =
             yetty_ycore_buffer_write(&y->out_buf, hdr, (size_t)n);
+        if (!r.ok) return r;
+    }
+    if (prefix && prefix[0]) {
+        size_t plen = strlen(prefix);
+        struct yetty_ycore_void_result r =
+            yetty_ycore_buffer_write(&y->out_buf, prefix, plen);
+        if (!r.ok) return r;
+        r = yetty_ycore_buffer_write(&y->out_buf, ";", 1);
         if (!r.ok) return r;
     }
 
@@ -777,7 +787,7 @@ struct yetty_ycore_buffer *yetty_yface_out_buf(struct yetty_yface *y)
 #include <errno.h>
 
 struct yetty_ycore_void_result
-yetty_yface_emit(int osc_code, const char *prefix,
+yetty_yface_emit(int osc_code, int compressed, const char *prefix,
                  const void *body, size_t body_len,
                  struct yetty_ycore_buffer *out_buf)
 {
@@ -789,7 +799,7 @@ yetty_yface_emit(int osc_code, const char *prefix,
     struct yetty_yface *y = yr.value;
 
     struct yetty_ycore_void_result r;
-    r = yetty_yface_start_write(y, osc_code, prefix);
+    r = yetty_yface_start_write(y, osc_code, compressed, prefix);
     if (YETTY_IS_ERR(r)) goto out;
     if (body && body_len) {
         r = yetty_yface_write(y, body, body_len);
@@ -807,12 +817,13 @@ out:
 }
 
 struct yetty_ycore_void_result
-yetty_yface_emit_to_fd(int fd, int osc_code, const char *prefix,
+yetty_yface_emit_to_fd(int fd, int osc_code, int compressed,
+                       const char *prefix,
                        const void *body, size_t body_len)
 {
     struct yetty_ycore_buffer buf = {0};
     struct yetty_ycore_void_result r =
-        yetty_yface_emit(osc_code, prefix, body, body_len, &buf);
+        yetty_yface_emit(osc_code, compressed, prefix, body, body_len, &buf);
     if (YETTY_IS_ERR(r)) {
         yetty_ycore_buffer_destroy(&buf);
         return r;
@@ -833,7 +844,7 @@ yetty_yface_emit_to_fd(int fd, int osc_code, const char *prefix,
 }
 
 struct yetty_ycore_void_result
-yetty_yface_decode(const char *b64, size_t n,
+yetty_yface_decode(const char *b64, size_t n, int compressed,
                    struct yetty_ycore_buffer *out_buf)
 {
     if (!out_buf) return YETTY_ERR(yetty_ycore_void, "out_buf is NULL");
@@ -844,7 +855,7 @@ yetty_yface_decode(const char *b64, size_t n,
     struct yetty_yface *y = yr.value;
 
     struct yetty_ycore_void_result r;
-    r = yetty_yface_start_read(y);
+    r = yetty_yface_start_read(y, compressed);
     if (YETTY_IS_ERR(r)) goto out;
     r = yetty_yface_feed(y, b64, n);
     if (YETTY_IS_ERR(r)) goto out;

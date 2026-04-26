@@ -13,8 +13,8 @@
 
 #include "imgui_impl_yetty.h"
 #include "ymgui_encode.h"
-#include "ymgui_event_loop.h"
 
+#include <yetty/yclient-lib/event-loop.h>
 #include <yetty/ymgui/wire.h>
 #include <yetty/yface/yface.h>
 #include <yetty/ycore/types.h>
@@ -108,7 +108,7 @@ bool ImGui_ImplYetty_UploadFontAtlas(void)
     hdr.total_size = (uint32_t)payload_sz;
 
     if (!yetty_yface_start_write(g_state.yface_out,
-                                 YMGUI_OSC_CS_TEX, /*compressed=*/1).ok)
+                                 YMGUI_OSC_CS_TEX, /*compressed=*/1, /*prefix=*/NULL).ok)
         return false;
     if (!yetty_yface_write(g_state.yface_out, &hdr, sizeof(hdr)).ok) return false;
     if (!yetty_yface_write(g_state.yface_out, pixels, pixel_bytes).ok) return false;
@@ -176,7 +176,7 @@ void ImGui_ImplYetty_Clear(void)
     if (!g_state.yface_out) return;
     /* Empty body, raw (no LZ4 — nothing to compress). */
     if (!yetty_yface_start_write(g_state.yface_out,
-                                 YMGUI_OSC_CS_CLEAR, /*compressed=*/0).ok) return;
+                                 YMGUI_OSC_CS_CLEAR, /*compressed=*/0, /*prefix=*/NULL).ok) return;
     if (!yetty_yface_finish_write(g_state.yface_out).ok) return;
     flush_yface_to_fd();
 }
@@ -220,7 +220,7 @@ void ImGui_ImplYetty_RenderDrawData(ImDrawData* draw_data)
     fh.cmd_list_count = (uint32_t)draw_data->CmdListsCount;
 
     if (!yetty_yface_start_write(g_state.yface_out,
-                                 YMGUI_OSC_CS_FRAME, /*compressed=*/1).ok) return;
+                                 YMGUI_OSC_CS_FRAME, /*compressed=*/1, /*prefix=*/NULL).ok) return;
     if (!yetty_yface_write(g_state.yface_out, &fh, sizeof(fh)).ok) return;
 
     static const uint8_t pad[4] = {0, 0, 0, 0};
@@ -515,12 +515,12 @@ static void loop_on_resize(void *u, double w, double h) {
 }
 }  /* extern "C" */
 
-void ImGui_ImplYetty_AttachEventLoop(struct ymgui_event_loop *loop)
+void ImGui_ImplYetty_AttachEventLoop(struct yetty_yclient_event_loop *loop)
 {
     if (!loop) return;
-    ymgui_event_loop_set_user(loop, &g_state);
-    ymgui_event_loop_set_mouse_pos_cb   (loop, loop_on_pos);
-    ymgui_event_loop_set_mouse_button_cb(loop, loop_on_btn);
-    ymgui_event_loop_set_mouse_wheel_cb (loop, loop_on_wheel);
-    ymgui_event_loop_set_resize_cb      (loop, loop_on_resize);
+    yetty_yclient_event_loop_set_user           (loop, &g_state);
+    yetty_yclient_event_loop_set_mouse_pos_cb   (loop, loop_on_pos);
+    yetty_yclient_event_loop_set_mouse_button_cb(loop, loop_on_btn);
+    yetty_yclient_event_loop_set_mouse_wheel_cb (loop, loop_on_wheel);
+    yetty_yclient_event_loop_set_resize_cb      (loop, loop_on_resize);
 }

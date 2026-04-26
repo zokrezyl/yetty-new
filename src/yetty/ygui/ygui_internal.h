@@ -8,9 +8,9 @@
 #include "ygui.h"
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/yfont/font.h>
+#include <yetty/yclient-lib/event-loop.h>
 #include <stdlib.h>
 #include <string.h>
-#include <uv.h>
 
 /*=============================================================================
  * Forward Declarations
@@ -271,17 +271,19 @@ struct ygui_engine {
     int dirty;
     int running;
 
-    /* libuv event loop */
-    uv_loop_t* loop;
-    int owns_loop;       /* 1 if we created the loop */
+    /* Shared yclient event loop (libuv + yface). Owned if we created it
+     * in ygui_engine_run, borrowed if the user attached an external one
+     * in ygui_engine_attach. */
+    struct yetty_yclient_event_loop* loop;
+    int owns_loop;
     int input_fd;        /* Input file descriptor (default: STDIN_FILENO) */
     int output_fd;       /* Output file descriptor (default: STDOUT_FILENO) */
-    uv_poll_t stdin_poll;
-    uv_prepare_t prepare_handle;  /* For auto-render before polling */
 
-    /* Input buffer for parsing */
-    char input_buffer[4096];
-    int input_len;
+    /* Accumulator for non-OSC bytes (CSI cell-size response, keyboard).
+     * yface's stream decoder hands us out-of-envelope bytes; we keep a
+     * small sliding window and scan for ESC[6;h;wt and printable keys. */
+    char raw_buf[1024];
+    int  raw_len;
 
     /* Event subscriptions */
     int clicks_subscribed;

@@ -85,9 +85,14 @@ struct yetty_ycore_buffer *yetty_yface_out_buf(struct yetty_yface *yface);
  *       savings outweigh the framing overhead (ImGui frames, textures,
  *       video, multi-MB blobs).
  *---------------------------------------------------------------------------*/
+/* `prefix` (may be NULL) is written raw between the compflag and the
+ * b64 body, terminated by ';'. Lets verb-style emitters (ypaint
+ * `--bin` / `--clear`, …) keep working alongside code-only dispatch.
+ * Pass NULL when no verb is needed (the new ymgui input/output codes). */
 struct yetty_ycore_void_result yetty_yface_start_write (struct yetty_yface *yface,
                                                         int osc_code,
-                                                        int compressed);
+                                                        int compressed,
+                                                        const char *prefix);
 struct yetty_ycore_void_result yetty_yface_write       (struct yetty_yface *yface,
                                                         const void *src, size_t len);
 struct yetty_ycore_void_result yetty_yface_finish_write(struct yetty_yface *yface);
@@ -138,26 +143,27 @@ struct yetty_ycore_void_result yetty_yface_finish_read (struct yetty_yface *yfac
  *---------------------------------------------------------------------------*/
 
 /* Encode `body` and append the full OSC sequence
- *   "\e]<osc_code>;<prefix>;<base64(LZ4F(body))>\e\\"
- * to `out_buf`. `prefix` may be NULL/empty (no verb). `body` may be
- * NULL/0 (envelope around an empty payload — useful for `--clear`-style
- * verbs). */
+ *   "\e]<osc_code>;<flag>;[<prefix>;]<base64[(LZ4F)body]>\e\\"
+ * to `out_buf`. `prefix` may be NULL/empty (no verb — the modern
+ * code-only path). `body` may be NULL/0 (envelope around an empty
+ * payload — useful for `--clear`-style commands). `compressed` matches
+ * yetty_yface_start_write. */
 struct yetty_ycore_void_result yetty_yface_emit(
-    int osc_code, const char *prefix,
+    int osc_code, int compressed, const char *prefix,
     const void *body, size_t body_len,
     struct yetty_ycore_buffer *out_buf);
 
 /* Same, but write the full envelope straight to `fd` (blocking write).
  * Convenience for low-rate emitters that don't have their own queueing. */
 struct yetty_ycore_void_result yetty_yface_emit_to_fd(
-    int fd, int osc_code, const char *prefix,
+    int fd, int osc_code, int compressed, const char *prefix,
     const void *body, size_t body_len);
 
-/* Decode an OSC body (the bytes between `<osc_code>;<prefix>;` and the
- * trailing ESC\) into `out_buf`. The caller has already split the
- * envelope and isolated the base64 payload. */
+/* Decode an OSC body (the bytes the caller has isolated as the b64
+ * payload between `<flag>;[<prefix>;]` and the trailing ESC\) into
+ * `out_buf`. `compressed` must match what the writer used. */
 struct yetty_ycore_void_result yetty_yface_decode(
-    const char *b64, size_t n,
+    const char *b64, size_t n, int compressed,
     struct yetty_ycore_buffer *out_buf);
 
 #ifdef __cplusplus

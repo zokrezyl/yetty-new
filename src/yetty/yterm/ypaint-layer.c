@@ -512,7 +512,8 @@ ypaint_layer_write(struct yetty_yterm_terminal_layer *self,
     ydebug("ypaint_layer_write: bin payload_len=%zu", payload.value.size);
 
     {
-      struct yetty_ycore_void_result r = yetty_yface_start_read(layer->yface);
+      struct yetty_ycore_void_result r =
+          yetty_yface_start_read(layer->yface, /*compressed=*/1);
       if (YETTY_IS_ERR(r)) {
         yetty_yterm_osc_args_free(&args);
         return r;

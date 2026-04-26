@@ -99,7 +99,7 @@ static void emit_bin(const struct yetty_ypaint_core_buffer *buf)
 
 	struct yetty_ycore_buffer envelope = {0};
 	struct yetty_ycore_void_result r = yetty_yface_emit(
-		666674, "--bin", raw, raw_size, &envelope);
+		666674, /*compressed=*/1, "--bin", raw, raw_size, &envelope);
 	if (YETTY_IS_OK(r) && envelope.size > 0)
 		write_all((const char *)envelope.data, envelope.size);
 	yetty_ycore_buffer_destroy(&envelope);

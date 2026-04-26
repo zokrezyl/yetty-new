@@ -69,7 +69,7 @@ static void write_clear_and_bin(const uint8_t* data, uint32_t size) {
      * the existing blocking write helper. */
     struct yetty_ycore_buffer out = {0};
     struct yetty_ycore_void_result r = yetty_yface_emit(
-        666674, "--bin", data, size, &out);
+        666674, /*compressed=*/1, "--bin", data, size, &out);
     if (YETTY_IS_OK(r) && out.size > 0)
         write_osc((const char *)out.data, out.size);
     yetty_ycore_buffer_destroy(&out);

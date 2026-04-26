@@ -34,7 +34,8 @@ size_t yetty_ycat_osc_bin_emit(const struct yetty_ypaint_core_buffer *buffer,
 
 	struct yetty_ycore_buffer envelope = {0};
 	struct yetty_ycore_void_result r = yetty_yface_emit(
-		YCAT_OSC_VENDOR_ID, "--bin", raw_bytes, raw_size, &envelope);
+		YCAT_OSC_VENDOR_ID, /*compressed=*/1, "--bin",
+		raw_bytes, raw_size, &envelope);
 	if (YETTY_IS_ERR(r)) {
 		yetty_ycore_buffer_destroy(&envelope);
 		return 0;
