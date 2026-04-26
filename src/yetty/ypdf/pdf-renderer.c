@@ -430,7 +430,15 @@ static struct float_result text_emit_cb(
         emit_text_p = remap_buf;
     }
 
-    uint32_t color = 0xFF000000u; /* opaque black */
+    /* Use the PDF's actual non-stroking colour. Hardcoding 0xFF000000
+     * meant every glyph rendered black; on a black-background terminal
+     * that's invisible. Auto-flip near-black to white so default body
+     * text shows up on dark terminals — anything coloured (red/green/blue
+     * highlights, syntax tags, etc.) passes through unchanged. */
+    float fr = state->fill_r, fg = state->fill_g, fb = state->fill_b;
+    float lum = 0.2126f * fr + 0.7152f * fg + 0.0722f * fb;
+    if (lum < 0.05f) { fr = 1.0f; fg = 1.0f; fb = 1.0f; }
+    uint32_t color = rgb_to_abgr(fr, fg, fb);
 
     struct yetty_ycore_buffer tb = {
         (uint8_t *)(uintptr_t)emit_text_p, emit_text_len, emit_text_len

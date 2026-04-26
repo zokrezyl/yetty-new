@@ -73,3 +73,6 @@ endif()
 if(YETTY_ENABLE_TOOL_YTHORVG AND YETTY_ENABLE_FEATURE_YTHORVG AND YETTY_ENABLE_LIB_THORVG)
     add_subdirectory(ythorvg)
 endif()
+
+# decode-ypaint — diagnostic tool, always built (no flag). Tiny, no GPU deps.
+add_subdirectory(decode-ypaint)
