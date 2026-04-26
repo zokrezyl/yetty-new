@@ -8,7 +8,7 @@
 #   TARGET_PLATFORM   linux-x86_64 | linux-aarch64 |
 #                     macos-arm64 | macos-x86_64 |
 #                     android-arm64-v8a | android-x86_64 |
-#                     ios-arm64 | ios-x86_64 |
+#                     ios-arm64 | ios-x86_64 | tvos-x86_64 |
 #                     webasm | windows-x86_64
 #   OUTPUT_DIR        where the tarball is written
 #
@@ -22,6 +22,7 @@
 #                     share a single download
 #   ANDROID_API       default 26 (matches yetty Android build)
 #   IOS_MIN           default 15.0
+#   TVOS_MIN          default 17.0
 #   CROSS_PREFIX      default aarch64-unknown-linux-gnu- (linux-aarch64)
 
 set -Eeuo pipefail
@@ -179,7 +180,7 @@ CROSS
     CROSS_FLAG="--cross-file $CROSS_FILE"
     ;;
 
-ios-arm64|ios-x86_64)
+ios-arm64|ios-x86_64|tvos-x86_64)
     # Same nix-on-macOS xcrun trap as openh264 — see that script for full
     # explanation. /usr/bin must be first on PATH for any bare-`xcrun`
     # shell-out (meson does this internally for SDK detection).
@@ -187,6 +188,7 @@ ios-arm64|ios-x86_64)
     export PATH="/usr/bin:$PATH"
 
     : "${IOS_MIN:=15.0}"
+    : "${TVOS_MIN:=17.0}"
     case "$TARGET_PLATFORM" in
         ios-arm64)
             _IOS_SDK="iphoneos"
@@ -199,6 +201,12 @@ ios-arm64|ios-x86_64)
             _IOS_ARCH="x86_64"
             DAV1D_CPU_FAMILY=x86_64;  DAV1D_CPU=x86_64
             _MIN_FLAG="-mios-simulator-version-min=${IOS_MIN}"
+            ;;
+        tvos-x86_64)
+            _IOS_SDK="appletvsimulator"
+            _IOS_ARCH="x86_64"
+            DAV1D_CPU_FAMILY=x86_64;  DAV1D_CPU=x86_64
+            _MIN_FLAG="-mtvos-simulator-version-min=${TVOS_MIN}"
             ;;
     esac
     _IOS_SYSROOT="$(/usr/bin/xcrun --sdk "$_IOS_SDK" --show-sdk-path)"

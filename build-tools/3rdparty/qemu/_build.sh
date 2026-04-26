@@ -8,7 +8,8 @@
 #   TARGET_PLATFORM   linux-x86_64 | linux-aarch64 |
 #                     android-arm64-v8a | android-x86_64 |
 #                     macos-arm64 | macos-x86_64 |
-#                     ios-arm64 | ios-x86_64 | tvos-arm64 |
+#                     ios-arm64 | ios-x86_64 |
+#                     tvos-arm64 | tvos-x86_64 |
 #                     windows-x86_64
 #   VERSION           e.g. 0.0.1
 #   OUTPUT_DIR        where the tarball is written
@@ -392,7 +393,7 @@ macos-arm64|macos-x86_64)
     _QEMU_OUTPUT_NAME="qemu-system-riscv64"
     ;;
 
-ios-arm64|ios-x86_64|tvos-arm64)
+ios-arm64|ios-x86_64|tvos-arm64|tvos-x86_64)
     # Cross from macOS. The nix shell puts xcbuild's stub xcrun on PATH —
     # call Apple's /usr/bin/xcrun directly to resolve Xcode SDK paths.
     # The shell also exports DEVELOPER_DIR=<nix apple-sdk> which /usr/bin/xcrun
@@ -424,6 +425,11 @@ ios-arm64|ios-x86_64|tvos-arm64)
             _SDK_NAME="appletvos";        _ARCH="arm64"
             _MIN_FLAG="-mtvos-version-min=${TVOS_MIN_VERSION:-17.0}"
             _MESON_CPU=aarch64
+            ;;
+        tvos-x86_64)
+            _SDK_NAME="appletvsimulator"; _ARCH="x86_64"
+            _MIN_FLAG="-mtvos-simulator-version-min=${TVOS_MIN_VERSION:-17.0}"
+            _MESON_CPU=x86_64
             ;;
     esac
     _SDK="$(/usr/bin/xcrun --sdk "$_SDK_NAME" --show-sdk-path)"

@@ -8,7 +8,7 @@
 #   TARGET_PLATFORM   linux-x86_64 | linux-aarch64 |
 #                     macos-arm64 | macos-x86_64 |
 #                     android-arm64-v8a | android-x86_64 |
-#                     ios-arm64 | ios-x86_64 |
+#                     ios-arm64 | ios-x86_64 | tvos-x86_64 |
 #                     webasm | windows-x86_64
 #   OUTPUT_DIR        where the tarball is written
 #
@@ -21,6 +21,7 @@
 #   CACHE_DIR         default $HOME/.cache/yetty-3rdparty
 #   ANDROID_API       default 26
 #   IOS_MIN           default 15.0
+#   TVOS_MIN          default 17.0
 #   CROSS_PREFIX      default aarch64-unknown-linux-gnu-
 
 set -Eeuo pipefail
@@ -156,6 +157,22 @@ ios-arm64|ios-x86_64)
             ;;
     esac
     CFG_ARGS+=("-mios-version-min=${IOS_MIN}")
+    ;;
+
+tvos-x86_64)
+    # Same xcrun trap as ios — see above.
+    unset DEVELOPER_DIR MACOSX_DEPLOYMENT_TARGET SDKROOT NIX_APPLE_SDK_VERSION
+    export PATH="/usr/bin:$PATH"
+
+    : "${TVOS_MIN:=17.0}"
+    # OpenSSL 4.0 has no built-in tvOS target. Reuse iossimulator-x86_64-xcrun
+    # as the base — its `-arch x86_64 -fno-common` cflags + macosx asm scheme
+    # are correct for the appletvsimulator x86_64 ABI — and override CC via
+    # env to point at the tvOS simulator SDK. sys_id stays "iOS" (cosmetic
+    # string baked into the lib's version output, no binary effect).
+    CFG_TARGET="iossimulator-x86_64-xcrun"
+    export CC="xcrun -sdk appletvsimulator cc"
+    CFG_ARGS+=("-mtvos-simulator-version-min=${TVOS_MIN}")
     ;;
 
 android-arm64-v8a|android-x86_64)
