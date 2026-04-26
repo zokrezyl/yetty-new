@@ -28,8 +28,11 @@ case "$TARGET_PLATFORM" in
         SHELL_NAME="3rdparty-${TARGET_PLATFORM}"
         ;;
     windows-x86_64)
-        if ! command -v cl >/dev/null 2>&1 && ! command -v cl.exe >/dev/null 2>&1; then
-            echo "error: windows-x86_64 requires MSVC cl on PATH" >&2
+        # Windows uses MSYS2 CLANG64 — no nix shell. CI: msys2/setup-msys2
+        # with msystem: CLANG64; locally: any MSYS2 shell with
+        # `MSYSTEM=CLANG64 bash -lc ...`.
+        if [ "${MSYSTEM:-}" != "CLANG64" ]; then
+            echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=${MSYSTEM:-unset})" >&2
             exit 1
         fi
         exec bash "$(dirname "$0")/_build.sh" "$@"

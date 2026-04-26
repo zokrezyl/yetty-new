@@ -198,9 +198,12 @@ webasm)
     ;;
 
 windows-x86_64)
-    # Native MSVC — caller must have vcvarsall'd the shell. Use Ninja so
-    # the static lib lands at $INSTALL_DIR/lib/{ssl,crypto}.lib.
-    CMAKE_ARGS+=("-DCMAKE_SYSTEM_NAME=Windows")
+    # Native MSYS2 CLANG64 — cmake auto-detects clang/llvm-ar from
+    # /clang64/bin and builds .a static libs (mingw convention).
+    if [ "${MSYSTEM:-}" != "CLANG64" ]; then
+        echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=${MSYSTEM:-unset})" >&2
+        exit 1
+    fi
     ;;
 
 *)
@@ -226,11 +229,7 @@ cmake --install "$BUILD_DIR"
 # crypto/ssl on unix-like targets, libcrypto/libssl on Windows; some
 # multi-arch hosts install to lib64/. Normalise both into lib/ in stage.
 #-----------------------------------------------------------------------------
-if [ "$TARGET_PLATFORM" = "windows-x86_64" ]; then
-    _LIBS=("libssl.lib" "libcrypto.lib")
-else
-    _LIBS=("libssl.a" "libcrypto.a")
-fi
+_LIBS=("libssl.a" "libcrypto.a")
 
 mkdir -p "$STAGE/lib"
 for _D in lib lib64; do
