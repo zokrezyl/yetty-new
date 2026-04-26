@@ -125,13 +125,34 @@ if(YETTY_ENABLE_FEATURE_DEMO)
     )
 endif()
 
-# Remove stamp files that can cause issues with Emscripten file packaging
+# Stage fetched 3rdparty assets into ${CMAKE_BINARY_DIR}/assets/<subdir>/
+# pre-link, so emcc's --preload-file=${CMAKE_BINARY_DIR}/assets@/assets
+# (above) packs them into the wasm virtual filesystem under /assets.
+# Three fetch dirs (linux + opensbi + alpine-disk) all contribute to
+# /assets/yemu, so a multi-preload would collide — single staging dir is
+# the only path. Stamp files (.fetched-<ver>) are filtered out so emcc
+# doesn't pack them.
 add_custom_command(TARGET yetty PRE_LINK
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/assets/msdf-fonts"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/assets/yemu"
+    # cdb (.cdb.br files)
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${YETTY_3RDPARTY_cdb_DIR}" "${CMAKE_BINARY_DIR}/assets/msdf-fonts"
+    # linux (kernel + alpine-rootfs/ tree)
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${YETTY_3RDPARTY_linux_DIR}" "${CMAKE_BINARY_DIR}/assets/yemu"
+    # opensbi (firmware bins)
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${YETTY_3RDPARTY_opensbi_DIR}" "${CMAKE_BINARY_DIR}/assets/yemu"
+    # alpine-disk (raw ext4)
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${YETTY_3RDPARTY_alpine-disk_DIR}" "${CMAKE_BINARY_DIR}/assets/yemu"
+    # 3rdparty-fetch leaves stamp + .br files; strip the fetch-internal stamps
+    # (the .br files stay — runtime decompresses on read).
     COMMAND ${CMAKE_COMMAND} -E rm -f
-        ${CMAKE_BINARY_DIR}/assets/msdf-fonts/.cdb_generated
-        ${CMAKE_BINARY_DIR}/assets/msdf-fonts/.fetched
-        ${CMAKE_BINARY_DIR}/assets/msdf-fonts/.expanded
-    COMMENT "Removing asset stamp files before linking"
+        "${CMAKE_BINARY_DIR}/assets/msdf-fonts/.fetched-*"
+        "${CMAKE_BINARY_DIR}/assets/yemu/.fetched-*"
+    COMMENT "Staging 3rdparty fetched assets into ${CMAKE_BINARY_DIR}/assets/ for emcc preload"
 )
 
 # Copy web files

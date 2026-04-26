@@ -125,11 +125,13 @@ if(YETTY_ENABLE_FEATURE_ASSETS)
     add_dependencies(yetty copy-shaders copy-shaders-for-incbin copy-fonts-for-incbin)
 endif()
 
-# Copy prebuilt CDB fonts to Android assets dir after build
-if(YETTY_ENABLE_FEATURE_CDB_GEN)
+# Copy prebuilt CDB fonts to Android assets dir after build. Source is the
+# 3rdparty fetch dir populated by yetty_3rdparty_fetch(cdb). Files arrive
+# brotli-pre-compressed (.cdb.br); the runtime decompresses on read.
+if(YETTY_ENABLE_FEATURE_CDB_GEN AND DEFINED YETTY_3RDPARTY_cdb_DIR)
     add_custom_command(TARGET yetty POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/assets/msdf-fonts ${ANDROID_ASSETS_DIR}/msdf-fonts
-        COMMENT "Copying CDB fonts to Android assets"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${YETTY_3RDPARTY_cdb_DIR}" "${ANDROID_ASSETS_DIR}/msdf-fonts"
+        COMMENT "Copying CDB fonts to Android assets (from 3rdparty fetch)"
     )
 endif()
 
@@ -145,7 +147,8 @@ if(YETTY_ENABLE_LIB_QEMU)
     endif()
     if(ANDROID_BUILD_DIR AND ANDROID_ABI)
         set(_QEMU_JNILIBS_DIR "${ANDROID_BUILD_DIR}/jniLibs/${ANDROID_ABI}")
-        set(_QEMU_SRC "${CMAKE_BINARY_DIR}/assets/qemu/qemu-system-riscv64")
+        # Source: prebuilt qemu fetch dir (yetty_3rdparty_fetch(qemu)).
+        set(_QEMU_SRC "${YETTY_3RDPARTY_qemu_DIR}/qemu-system-riscv64")
         set(_QEMU_DST "${_QEMU_JNILIBS_DIR}/libqemu-system-riscv64.so")
         if(EXISTS "${_QEMU_SRC}")
             file(MAKE_DIRECTORY "${_QEMU_JNILIBS_DIR}")

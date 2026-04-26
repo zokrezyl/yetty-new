@@ -2,7 +2,13 @@
 # Auto-generates MSDF CDB fonts at configure time if they don't exist
 # This runs BEFORE incbin so the GLOB finds the CDB files
 
-set(PREBUILT_CDB_DIR "${CMAKE_BINARY_DIR}/assets/msdf-fonts")
+# Local-gen output goes alongside the prebuilt fetch dir so shared.cmake's
+# glob picks them up. Note: local-gen produces raw .cdb (uncompressed);
+# the embed pipeline globs *.cdb.br first — to use local-gen for embed
+# you'd need to brotli the output. Today this dir is mainly for the
+# YETTY_ENABLE_FEATURE_CDB_GEN path used by ymsdf-gen tooling, not the
+# default embed path.
+set(PREBUILT_CDB_DIR "${CMAKE_BINARY_DIR}/3rdparty/cdb")
 set(FONT_DIR "${YETTY_ROOT}/assets/fonts")
 
 set(CDB_FILES

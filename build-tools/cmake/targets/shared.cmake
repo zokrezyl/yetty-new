@@ -72,8 +72,11 @@ if(YETTY_ENABLE_LIB_TINYEMU OR YETTY_ENABLE_LIB_QEMU)
 endif()
 
 # qemu binary — per-host platform (ships per-target tarball).
+# Pull qemu.cmake to make qemu_embed_runtime() available; the from-source
+# qemu_build() in there is dormant unless explicitly invoked.
 if(YETTY_ENABLE_LIB_QEMU)
     yetty_3rdparty_fetch(qemu _QEMU_DIR)
+    include(${YETTY_ROOT}/build-tools/cmake/qemu.cmake)
 endif()
 
 #-----------------------------------------------------------------------------
