@@ -90,6 +90,15 @@ static void init_uniforms(struct yetty_yrender_gpu_resource_set *rs)
     set_visual_zoom(rs, 1.0f, 0.0f, 0.0f);
 }
 
+/* One row of scrollback — cells captured at the moment vterm pushed the row
+ * off the top of the primary screen. Each line owns its own cells array and
+ * remembers its width at push time, so a later resize can pop it back at the
+ * column count vterm asks for (truncate or pad as needed). */
+struct yetty_yterm_text_sb_line {
+    VTermScreenCell *cells;
+    int cols;
+};
+
 /* Text layer - embeds base as first member */
 struct yetty_yterm_terminal_text_layer {
     struct yetty_yterm_terminal_layer base;
@@ -105,6 +114,32 @@ struct yetty_yterm_terminal_text_layer {
      * forward GLFW mouse events as OSC 777777/777778. */
     int mouse_click_subscribed;
     int mouse_move_subscribed;
+
+    /* Scrollback buffer. Lines are appended in chronological order: index 0
+     * is the oldest line, sb_lines[sb_count-1] is the newest (most recently
+     * pushed off the top of the live screen). vterm requests pops from the
+     * tail (most-recent first) when growing the screen. */
+    struct yetty_yterm_text_sb_line *sb_lines;
+    uint32_t sb_count;
+    uint32_t sb_capacity;
+
+    /* Scrollback view (tmux-style copy mode). When active, the GPU buffer
+     * is built by stitching sb_lines + live screen so the user sees a
+     * frozen historical viewport whose top is anchored at view_top_total_idx
+     * (an absolute line index where 0..sb_count-1 are scrollback and
+     * sb_count..sb_count+rows-1 are live). The cursor is hidden in this
+     * mode — it's a live-screen artifact and would mislead the reader. */
+    int view_active;
+    uint32_t view_top_total_idx;
+    /* Synthetic VTermScreenCell array used as the GPU buffer when view is
+     * active. Sized cols*rows; reallocated on resize. */
+    VTermScreenCell *view_staging;
+    size_t view_staging_capacity;
+    /* Latest cursor visibility reported by vterm. We track this separately
+     * because while view_active=1 the GPU uniform is forced to 0; on exit
+     * we restore from this so the cursor reappears at whatever state vterm
+     * settled on while we were in scrollback view. */
+    float vterm_cursor_visible;
 };
 
 /* Forward declarations */
@@ -121,11 +156,17 @@ static int text_layer_on_key(struct yetty_yterm_terminal_layer *self, int key, i
 static int text_layer_on_char(struct yetty_yterm_terminal_layer *self, uint32_t codepoint, int mods);
 static struct yetty_ycore_void_result text_layer_render(
     struct yetty_yterm_terminal_layer *self, struct yetty_yrender_target *target);
+static uint32_t text_layer_get_live_anchor(
+    const struct yetty_yterm_terminal_layer *self);
+static void text_layer_set_view_top(struct yetty_yterm_terminal_layer *self,
+                                    int active, uint32_t view_top_total_idx);
+static void text_layer_build_view(struct yetty_yterm_terminal_text_layer *layer);
 
 /* VTerm callbacks */
 static int on_damage(VTermRect rect, void *user);
 static int on_move_cursor(VTermPos pos, VTermPos oldpos, int visible, void *user);
 static int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user);
+static int on_sb_popline(int cols, VTermScreenCell *cells, void *user);
 static int on_settermprop(VTermProp prop, VTermValue *val, void *user);
 
 /* Glyph resolver — called by vterm for every codepoint */
@@ -265,6 +306,8 @@ static const struct yetty_yterm_terminal_layer_ops text_layer_ops = {
     .on_char = text_layer_on_char,
     .scroll = text_layer_scroll,
     .set_cursor = text_layer_set_cursor,
+    .get_live_anchor = text_layer_get_live_anchor,
+    .set_view_top = text_layer_set_view_top,
 };
 
 /* VTerm screen callbacks */
@@ -276,7 +319,7 @@ static VTermScreenCallbacks screen_callbacks = {
     .bell = NULL,
     .resize = NULL,
     .sb_pushline = on_sb_pushline,
-    .sb_popline = NULL,
+    .sb_popline = on_sb_popline,
     .sb_clear = NULL,
 };
 
@@ -498,6 +541,11 @@ static void text_layer_destroy(struct yetty_yterm_terminal_layer *self)
     if (text_layer->vterm)
         vterm_free(text_layer->vterm);
 
+    for (uint32_t i = 0; i < text_layer->sb_count; i++)
+        free(text_layer->sb_lines[i].cells);
+    free(text_layer->sb_lines);
+    free(text_layer->view_staging);
+
     free(text_layer->shader_code.data);
     free(text_layer);
 }
@@ -638,12 +686,26 @@ static struct yetty_yrender_gpu_resource_set_result text_layer_get_gpu_resource_
         (struct yetty_yterm_terminal_text_layer *)
         ((const char *)self - offsetof(struct yetty_yterm_terminal_text_layer, base));
 
-    /* Use vterm buffer directly - no conversion needed.
-     * VTermScreenCell is already 12 bytes matching shader expectations.
+    /* Live mode: GPU reads vterm's buffer directly (zero-copy).
+     * Scrollback view: rebuild the stitched buffer every dirty pass — new
+     * pushlines arriving in the background change what live[0] is, and the
+     * bottom of the viewport may dip into live, so a single snapshot at
+     * view-enter time isn't enough. The cost is cols*rows cells per dirty
+     * frame, which is small (e.g. 80*30*12 = 28KB).
      * Cast away const is safe: buffer is readonly, GPU only reads from it. */
     if (text_layer->base.dirty) {
-        text_layer->rs.buffers[0].data = (uint8_t *)vterm_screen_get_buffer(text_layer->screen);
-        text_layer->rs.buffers[0].size = vterm_screen_get_buffer_size(text_layer->screen);
+        if (text_layer->view_active) {
+            text_layer_build_view(text_layer);
+            text_layer->rs.buffers[0].data = (uint8_t *)text_layer->view_staging;
+            text_layer->rs.buffers[0].size =
+                (size_t)text_layer->base.grid_size.cols *
+                text_layer->base.grid_size.rows * sizeof(VTermScreenCell);
+        } else {
+            text_layer->rs.buffers[0].data =
+                (uint8_t *)vterm_screen_get_buffer(text_layer->screen);
+            text_layer->rs.buffers[0].size =
+                vterm_screen_get_buffer_size(text_layer->screen);
+        }
         text_layer->rs.buffers[0].dirty = 1;
     }
 
@@ -682,7 +744,12 @@ static int on_move_cursor(VTermPos pos, VTermPos oldpos, int visible, void *user
     struct yetty_yterm_terminal_text_layer *text_layer = user;
     (void)oldpos;
     set_cursor_pos(&text_layer->rs, (float)pos.col, (float)pos.row);
-    set_cursor_visible(&text_layer->rs, visible ? 1.0f : 0.0f);
+    /* Track vterm's reported visibility so we can restore it on exit from
+     * scrollback view. Only push to the GPU uniform when not in view —
+     * while in view the cursor is forced hidden. */
+    text_layer->vterm_cursor_visible = visible ? 1.0f : 0.0f;
+    if (!text_layer->view_active)
+        set_cursor_visible(&text_layer->rs, text_layer->vterm_cursor_visible);
     text_layer->base.dirty = 1;
 
     /* Notify cursor callback */
@@ -699,8 +766,40 @@ static int on_move_cursor(VTermPos pos, VTermPos oldpos, int visible, void *user
 static int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
 {
     struct yetty_yterm_terminal_text_layer *text_layer = user;
-    (void)cols;
-    (void)cells;
+
+    /* Capture the row vterm is evicting from the top of the live screen.
+     * Each line owns its own cells buffer so resizes that change cols don't
+     * invalidate older entries. Append-only: index 0 is oldest. */
+    if (cells && cols > 0) {
+        if (text_layer->sb_count >= text_layer->sb_capacity) {
+            uint32_t new_cap = text_layer->sb_capacity == 0
+                                   ? 256
+                                   : text_layer->sb_capacity * 2;
+            struct yetty_yterm_text_sb_line *new_lines = realloc(
+                text_layer->sb_lines,
+                new_cap * sizeof(struct yetty_yterm_text_sb_line));
+            if (!new_lines) {
+                yerror("on_sb_pushline: realloc sb_lines failed");
+                return 1;
+            }
+            text_layer->sb_lines = new_lines;
+            text_layer->sb_capacity = new_cap;
+        }
+
+        struct yetty_yterm_text_sb_line *line =
+            &text_layer->sb_lines[text_layer->sb_count];
+        line->cells = malloc((size_t)cols * sizeof(VTermScreenCell));
+        if (!line->cells) {
+            yerror("on_sb_pushline: malloc cells failed (cols=%d)", cols);
+            return 1;
+        }
+        memcpy(line->cells, cells, (size_t)cols * sizeof(VTermScreenCell));
+        line->cols = cols;
+        text_layer->sb_count++;
+
+        ydebug("on_sb_pushline: stored line cols=%d sb_count=%u", cols,
+               text_layer->sb_count);
+    }
 
     /* Notify scroll callback - 1 line scrolled down
      * BUT: if in_external_scroll is set, this scroll was triggered by another
@@ -713,5 +812,134 @@ static int on_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
             text_layer->pending_error = res;
         }
     }
+    return 1;
+}
+
+/* Live anchor — count of rows pushed off the top of the screen so far. The
+ * terminal converts mouse-wheel deltas relative to this so view_top_total_idx
+ * stays absolute and stable as new content keeps arriving during scrollback. */
+static uint32_t text_layer_get_live_anchor(
+    const struct yetty_yterm_terminal_layer *self)
+{
+    const struct yetty_yterm_terminal_text_layer *text_layer =
+        container_of((struct yetty_yterm_terminal_layer *)self,
+                     struct yetty_yterm_terminal_text_layer, base);
+    return text_layer->sb_count;
+}
+
+/* Reallocate view_staging if the requested cell count outgrew capacity.
+ * Returns 1 on success. Caller writes cells * sizeof(VTermScreenCell) bytes. */
+static int ensure_view_staging(struct yetty_yterm_terminal_text_layer *layer,
+                               size_t cells)
+{
+    size_t bytes = cells * sizeof(VTermScreenCell);
+    if (bytes <= layer->view_staging_capacity)
+        return 1;
+    void *new_buf = realloc(layer->view_staging, bytes);
+    if (!new_buf) {
+        yerror("ensure_view_staging: realloc(%zu) failed", bytes);
+        return 0;
+    }
+    layer->view_staging = new_buf;
+    layer->view_staging_capacity = bytes;
+    return 1;
+}
+
+/* Stitch sb_lines + live screen into view_staging so the GPU sees a frozen
+ * historical viewport. Each gpu_y maps to absolute total_idx
+ * (view_top_total_idx + gpu_y); below sb_count we read from sb_lines, at or
+ * above sb_count we read from the live vterm screen. Beyond either source we
+ * clear the row to a blank cell so old garbage from a prior view doesn't leak.
+ *
+ * Width mismatches between an sb line (captured at one cols) and the current
+ * grid cols are handled by truncating or clearing the trailing columns. */
+static void text_layer_build_view(struct yetty_yterm_terminal_text_layer *layer)
+{
+    uint32_t cols = layer->base.grid_size.cols;
+    uint32_t rows = layer->base.grid_size.rows;
+    if (cols == 0 || rows == 0)
+        return;
+
+    if (!ensure_view_staging(layer, (size_t)cols * rows))
+        return;
+
+    const VTermScreenCell *live = vterm_screen_get_buffer(layer->screen);
+    VTermScreenCell blank;
+    memset(&blank, 0, sizeof(blank));
+
+    for (uint32_t gpu_y = 0; gpu_y < rows; gpu_y++) {
+        uint32_t total_idx = layer->view_top_total_idx + gpu_y;
+        VTermScreenCell *dst = layer->view_staging + (size_t)gpu_y * cols;
+
+        if (total_idx < layer->sb_count) {
+            const struct yetty_yterm_text_sb_line *sl =
+                &layer->sb_lines[total_idx];
+            int copy = (sl->cols < (int)cols) ? sl->cols : (int)cols;
+            memcpy(dst, sl->cells, (size_t)copy * sizeof(VTermScreenCell));
+            for (int c = copy; c < (int)cols; c++)
+                dst[c] = blank;
+        } else if (live) {
+            uint32_t live_row = total_idx - layer->sb_count;
+            if (live_row < rows) {
+                memcpy(dst, live + (size_t)live_row * cols,
+                       (size_t)cols * sizeof(VTermScreenCell));
+            } else {
+                for (uint32_t c = 0; c < cols; c++)
+                    dst[c] = blank;
+            }
+        } else {
+            for (uint32_t c = 0; c < cols; c++)
+                dst[c] = blank;
+        }
+    }
+}
+
+/* Pin the layer to a historical viewport (active=1) or release back to the
+ * live screen (active=0). When activating, hide the cursor and snap the GPU
+ * buffer to the synthetic stitched view; on release, restore the cursor to
+ * whatever vterm last reported and re-point the buffer at the live screen. */
+static void text_layer_set_view_top(struct yetty_yterm_terminal_layer *self,
+                                    int active, uint32_t view_top_total_idx)
+{
+    struct yetty_yterm_terminal_text_layer *text_layer =
+        container_of(self, struct yetty_yterm_terminal_text_layer, base);
+
+    text_layer->view_active = active ? 1 : 0;
+    text_layer->view_top_total_idx = view_top_total_idx;
+
+    if (text_layer->view_active) {
+        set_cursor_visible(&text_layer->rs, 0.0f);
+    } else {
+        set_cursor_visible(&text_layer->rs, text_layer->vterm_cursor_visible);
+    }
+
+    text_layer->base.dirty = 1;
+    if (text_layer->base.request_render_fn)
+        text_layer->base.request_render_fn(text_layer->base.request_render_userdata);
+}
+
+/* vterm asks for a previously-pushed line back, e.g. when the screen grows
+ * and rows above the cursor need to be backfilled. We hand back the most
+ * recent stored line and drop it from our buffer. Width mismatches are
+ * vterm's problem: it only reads up to min(stored_cols, target_cols) and
+ * clears the rest itself (see screen.c sb_popline call site). */
+static int on_sb_popline(int cols, VTermScreenCell *cells, void *user)
+{
+    struct yetty_yterm_terminal_text_layer *text_layer = user;
+    if (text_layer->sb_count == 0 || !cells || cols <= 0)
+        return 0;
+
+    struct yetty_yterm_text_sb_line *line =
+        &text_layer->sb_lines[text_layer->sb_count - 1];
+    int copy_cols = (line->cols < cols) ? line->cols : cols;
+    memcpy(cells, line->cells, (size_t)copy_cols * sizeof(VTermScreenCell));
+
+    free(line->cells);
+    line->cells = NULL;
+    line->cols = 0;
+    text_layer->sb_count--;
+
+    ydebug("on_sb_popline: returned %d cols (target=%d) sb_count=%u",
+           copy_cols, cols, text_layer->sb_count);
     return 1;
 }

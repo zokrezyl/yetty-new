@@ -97,6 +97,20 @@ struct yetty_yterm_terminal_layer_ops {
   struct yetty_ycore_void_result (*scroll)(struct yetty_yterm_terminal_layer *self, int lines);
   /* Cursor - called when another layer moves cursor */
   void (*set_cursor)(struct yetty_yterm_terminal_layer *self, int col, int row);
+  /* Live anchor — absolute line index that represents "top of live viewport"
+   * right now. Text-layer returns its scrollback row count (lines pushed off
+   * the top of the screen); ypaint-layer returns its canvas rolling_row_0.
+   * The terminal uses this value to convert mouse-wheel deltas into a stable
+   * absolute view_top_total_idx that doesn't drift when new content arrives
+   * during scrollback view. Optional — NULL means the layer can't anchor a
+   * scrollback view (it'll be skipped by set_view_top). */
+  uint32_t (*get_live_anchor)(const struct yetty_yterm_terminal_layer *self);
+  /* Pin the viewport to the absolute line index `view_top_total_idx` while
+   * `active` is non-zero. When active=0, return to live (track the live
+   * anchor). The layer is expected to freeze its display at the given
+   * historical position even as new content keeps arriving. Optional. */
+  void (*set_view_top)(struct yetty_yterm_terminal_layer *self,
+                       int active, uint32_t view_top_total_idx);
 };
 
 /* Layer base - embed as first member in subclasses */

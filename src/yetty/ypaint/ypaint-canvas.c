@@ -118,8 +118,16 @@ struct yetty_ypaint_canvas {
   uint16_t cursor_col;
   uint16_t cursor_row;
 
-  // Rolling row of visible line 0 (increments on scroll)
+  // Rolling row of visible line 0 (increments on scroll). Always tracks
+  // the *live* viewport top — never reset by scrollback view.
   uint32_t rolling_row_0;
+
+  // Scrollback view override. While view_top_override_active is true, the
+  // shader uniform and rebuild_grid use view_top_override instead of
+  // rolling_row_0, so the user sees a frozen historical viewport even as
+  // rolling_row_0 advances in the background due to new content.
+  bool view_top_override_active;
+  uint32_t view_top_override;
 
   // Lines
   struct yetty_ypaint_canvas_line_buffer lines;
@@ -731,9 +739,37 @@ yetty_ypaint_canvas_cursor_row(struct yetty_ypaint_canvas *canvas) {
 // Rolling offset
 //=============================================================================
 
+/* Effective viewport top: returns the override during scrollback view,
+ * otherwise the live rolling_row_0. Both rebuild_grid and the shader
+ * uniform must read through this so the GPU and the cell layout stay in
+ * sync (the shader's y_offset = (prim.rolling_row - row0) needs row0 to
+ * match the canvas-line that gpu_y=0 was filled from). */
+static uint32_t canvas_effective_view_top(
+    const struct yetty_ypaint_canvas *canvas) {
+  if (canvas->view_top_override_active)
+    return canvas->view_top_override;
+  return canvas->rolling_row_0;
+}
+
 uint32_t yetty_ypaint_canvas_rolling_row_0(
     struct yetty_ypaint_canvas *canvas) {
+  return canvas ? canvas_effective_view_top(canvas) : 0;
+}
+
+uint32_t yetty_ypaint_canvas_live_rolling_row_0(
+    struct yetty_ypaint_canvas *canvas) {
   return canvas ? canvas->rolling_row_0 : 0;
+}
+
+struct yetty_ycore_void_result
+yetty_ypaint_canvas_set_view_top(struct yetty_ypaint_canvas *canvas,
+                                 bool active, uint32_t view_top) {
+  if (!canvas)
+    return YETTY_ERR(yetty_ycore_void, "canvas is NULL");
+  canvas->view_top_override_active = active;
+  canvas->view_top_override = view_top;
+  canvas->dirty = true;
+  return YETTY_OK_VOID();
 }
 
 //=============================================================================
@@ -1405,11 +1441,11 @@ struct yetty_ycore_void_result yetty_ypaint_canvas_rebuild_grid(
   }
 
   /* Build a fixed-size GPU grid for the visible viewport only. The viewport
-   * spans canvas-line indices [rolling_row_0 .. rolling_row_0 + grid_rows).
-   * Off-screen lines stay in canvas->lines as scrollback. */
+   * spans canvas-line indices [view_top .. view_top + grid_rows). In live
+   * mode that's rolling_row_0; in scrollback view it's the override. */
   uint32_t grid_w = canvas->grid_size.cols;
   uint32_t grid_h = canvas->grid_size.rows;
-  uint32_t window_top = canvas->rolling_row_0;
+  uint32_t window_top = canvas_effective_view_top(canvas);
 
   /* Cells beyond grid_size.cols can exist on lines that grew past the
    * default width; widen grid_w to accommodate the visible window's
@@ -1618,6 +1654,8 @@ yetty_ypaint_canvas_clear(struct yetty_ypaint_canvas *canvas) {
   canvas->cursor_col = 0;
   canvas->cursor_row = 0;
   canvas->rolling_row_0 = 0;
+  canvas->view_top_override_active = false;
+  canvas->view_top_override = 0;
   canvas->dirty = true;
   return YETTY_OK_VOID();
 }
@@ -1662,7 +1700,7 @@ struct yetty_font_font *yetty_ypaint_canvas_get_default_font(
  *   [rolling_row_0 .. rolling_row_0 + grid_size.rows). */
 static void canvas_visible_window(const struct yetty_ypaint_canvas *canvas,
                                   uint32_t *out_top, uint32_t *out_end) {
-  uint32_t top = canvas->rolling_row_0;
+  uint32_t top = canvas_effective_view_top(canvas);
   uint32_t end = top + canvas->grid_size.rows;
   if (end > canvas->lines.count)
     end = canvas->lines.count;
