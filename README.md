@@ -2,7 +2,7 @@
 
 
 <p align="center">
-  <img src="docs/logo.jpeg" alt="Yetty Logo" width="200">
+  <img src="docs/logo-2.jpeg" alt="Yetty Logo" width="200">
 </p>
 
 # Yetty
