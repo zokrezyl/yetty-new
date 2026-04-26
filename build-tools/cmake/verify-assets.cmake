@@ -21,6 +21,21 @@ function(check_file FILE_PATH DESCRIPTION)
     endif()
 endfunction()
 
+# check_file_or_br: succeeds if either ${PATH_NO_BR} or ${PATH_NO_BR}.br
+# exists. Used for assets that may arrive either as raw files (from the
+# local-gen path in prepare-assets.cmake or the runtime-decompressed
+# yemu files) or as .br-only (from the prebuilt-fetch path —
+# assets_fetch_cdb in assets-fetch.cmake leaves cdbs compressed for
+# direct incbin embedding).
+function(check_file_or_br PATH_NO_BR DESCRIPTION)
+    math(EXPR CHECKED_COUNT "${CHECKED_COUNT} + 1" OUTPUT_FORMAT DECIMAL)
+    set(CHECKED_COUNT ${CHECKED_COUNT} PARENT_SCOPE)
+    if(NOT EXISTS "${BUILD_DIR}/${PATH_NO_BR}" AND NOT EXISTS "${BUILD_DIR}/${PATH_NO_BR}.br")
+        list(APPEND MISSING_FILES "${PATH_NO_BR}{,.br} (${DESCRIPTION})")
+        set(MISSING_FILES ${MISSING_FILES} PARENT_SCOPE)
+    endif()
+endfunction()
+
 function(check_dir DIR_PATH DESCRIPTION)
     math(EXPR CHECKED_COUNT "${CHECKED_COUNT} + 1" OUTPUT_FORMAT DECIMAL)
     set(CHECKED_COUNT ${CHECKED_COUNT} PARENT_SCOPE)
@@ -54,10 +69,10 @@ check_file("${ASSETS_PREFIX}/fonts/DejaVuSansMNerdFontMono-BoldOblique.ttf" "Bol
 # Font CDB files (only if CDB generation is enabled)
 if(CHECK_CDB)
     check_dir("${ASSETS_PREFIX}/msdf-fonts" "Font CDB directory")
-    check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Regular.cdb" "Regular font CDB")
-    check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Bold.cdb" "Bold font CDB")
-    check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Oblique.cdb" "Oblique font CDB")
-    check_file("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-BoldOblique.cdb" "Bold Oblique font CDB")
+    check_file_or_br("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Regular.cdb" "Regular font CDB")
+    check_file_or_br("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Bold.cdb" "Bold font CDB")
+    check_file_or_br("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-Oblique.cdb" "Oblique font CDB")
+    check_file_or_br("${ASSETS_PREFIX}/msdf-fonts/DejaVuSansMNerdFontMono-BoldOblique.cdb" "Bold Oblique font CDB")
 endif()
 
 # Shader directory structure
