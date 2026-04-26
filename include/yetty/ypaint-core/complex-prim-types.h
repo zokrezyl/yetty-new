@@ -23,10 +23,16 @@ extern "C" {
 // Complex primitive type IDs (0x80000000+ to avoid collision with SDF 0-255)
 //=============================================================================
 
+/* Tier ranges for ypaint primitive types:
+ *   [0x00000000, 0x000000FF]   Simple SDF (fixed-size, generated)
+ *   [0x40000000, 0x7FFFFFFF]   Flyweight (variable-size, no GPU pipeline)
+ *                                FONT       — yetty/ypaint-core/font-prim.h
+ *                                TEXT_SPAN  — yetty/ypaint-core/text-span-prim.h
+ *   [0x80000000, 0xFFFFFFFF]   Complex (factory + per-instance GPU resources)
+ *                                each concrete factory owns its own type id
+ *                                (e.g. YETTY_YPLOT_TYPE_ID in yplot-gen.h).
+ */
 #define YETTY_YPAINT_COMPLEX_TYPE_BASE   0x80000000u
-#define YETTY_YPAINT_TYPE_FONT           0x80000001u
-#define YETTY_YPAINT_TYPE_TEXT_SPAN      0x80000002u
-#define YETTY_YPAINT_TYPE_YPLOT          0x80000003u
 
 //=============================================================================
 // Complex primitive header (FAM wire format)
