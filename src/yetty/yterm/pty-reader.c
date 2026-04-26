@@ -8,7 +8,7 @@
 #define PTY_READ_BUF_SIZE 4096
 #define PTY_READ_MAX_CHUNK 65536
 #define OSC_BUF_INITIAL 4096
-#define OSC_BUF_MAX (64 * 1024 * 1024)
+#define OSC_BUF_MAX (500 * 1024 * 1024)   /* 500 MB */
 #define MAX_OSC_SINKS 64
 
 enum osc_state {

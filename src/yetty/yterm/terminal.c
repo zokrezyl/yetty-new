@@ -78,7 +78,7 @@ static void terminal_pty_pipe_alloc(void *ctx, size_t suggested_size,
                                     char **buf, size_t *buflen) {
   (void)ctx;
   (void)suggested_size;
-  static char pty_read_buf[65536];
+  static char pty_read_buf[500 * 1024 * 1024];   /* 500 MB */
   *buf = pty_read_buf;
   *buflen = sizeof(pty_read_buf);
 }
