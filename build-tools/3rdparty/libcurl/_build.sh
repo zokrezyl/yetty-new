@@ -151,11 +151,12 @@ CMAKE_ARGS=(
     -DOPENSSL_SSL_LIBRARY="$OSSL_DIR/lib/libssl.a"
     -DOPENSSL_CRYPTO_LIBRARY="$OSSL_DIR/lib/libcrypto.a"
 
+    # Flag-name conventions are mixed in curl 8.x: CURL_USE_* for some,
+    # USE_* for others (libidn2, nghttp2, librtmp). Audit confirmed
+    # against curl 8.19.0's CMakeLists.txt option() declarations.
     -DCURL_USE_LIBSSH2=OFF
     -DCURL_USE_LIBPSL=OFF
-    -DCURL_USE_LIBIDN2=OFF
-    -DCURL_USE_GSASL=OFF
-    -DCURL_USE_NSS=OFF
+    -DUSE_LIBIDN2=OFF
     -DCURL_USE_GNUTLS=OFF
     -DCURL_USE_MBEDTLS=OFF
     -DCURL_USE_WOLFSSL=OFF
@@ -166,8 +167,20 @@ CMAKE_ARGS=(
     -DCURL_ZSTD=OFF
     -DCURL_ZLIB=OFF
     -DUSE_NGHTTP2=OFF
+    -DUSE_NGTCP2=OFF
+    -DUSE_QUICHE=OFF
     -DUSE_LIBRTMP=OFF
     -DENABLE_UNIX_SOCKETS=OFF
+    # Belt-and-suspenders: tell CMake's find_package() to refuse the
+    # auto-detected nix-store deps even if upstream curl ever flips
+    # one of the above to ON by default.
+    -DCMAKE_DISABLE_FIND_PACKAGE_Libidn2=ON
+    -DCMAKE_DISABLE_FIND_PACKAGE_NGHTTP2=ON
+    -DCMAKE_DISABLE_FIND_PACKAGE_LibPSL=ON
+    -DCMAKE_DISABLE_FIND_PACKAGE_LibSSH2=ON
+    -DCMAKE_DISABLE_FIND_PACKAGE_ZLIB=ON
+    -DCMAKE_DISABLE_FIND_PACKAGE_BROTLI=ON
+    -DCMAKE_DISABLE_FIND_PACKAGE_ZSTD=ON
 )
 EMCMAKE_PREFIX=""
 
