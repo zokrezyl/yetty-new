@@ -2,6 +2,8 @@ add_library(yetty_ypaint_core STATIC
     buffer.c
     complex-prim-types.c
     flyweight.c
+    font-prim.c
+    text-span-prim.c
 )
 
 target_include_directories(yetty_ypaint_core PUBLIC

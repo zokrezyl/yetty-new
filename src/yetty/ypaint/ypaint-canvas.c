@@ -6,20 +6,28 @@
 #include <stdlib.h>
 #include <string.h>
 #include <yetty/yplatform/compat.h>
+#include <yetty/yplatform/fs.h>
 #include <yetty/ycore/result.h>
 #include <yetty/ycore/types.h>
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/ypaint-core/complex-prim-types.h>
+#include <yetty/ypaint-core/font-prim.h>
+#include <yetty/ypaint-core/text-span-prim.h>
 #include <yetty/ypaint/flyweight.h>
 #include <yetty/ypaint/core/ypaint-canvas.h>
 #include <yetty/yfont/font.h>
 #include <yetty/yfont/msdf-font.h>
 #include <yetty/yfont/raster-font.h>
+#include <yetty/ymsdf-gen/ymsdf-gen.h>
 #include <yetty/ysdf/types.gen.h>
 #include <yetty/yconfig.h>
 #include <yetty/yetty.h>
 #include <yetty/yplot/yplot-gen.h>
 #include <yetty/ytrace.h>
+
+/* Provided per-platform (yplatform/{linux,macos,windows,android,ios,webasm}/
+ * platform-paths.{c,m}). Returns a writable directory unique to the user. */
+extern const char *yetty_yplatform_get_cache_dir(void);
 
 /* Glyph primitive type (not in ysdf types.gen.h since not SDF) */
 #define YETTY_YSDF_GLYPH 200
@@ -472,25 +480,92 @@ ypaint_canvas_make_default_font(const struct yetty_ypaint_canvas *canvas) {
   return yetty_font_msdf_font_create(cdb_path, shader_path);
 }
 
-/* Construct a yetty_font_font for a buffer-supplied font blob. The blob's
- * `name` holds the source path; its extension decides which backend to use,
- * falling back to the canvas-configured method. */
-static struct yetty_font_font_result
-ypaint_canvas_make_blob_font(const struct yetty_ypaint_canvas *canvas,
-                             const char *blob_name) {
-  if (!blob_name || !blob_name[0])
-    return YETTY_ERR(yetty_font_font, "font blob name is empty");
+/* FNV-1a 64-bit hash — content-addressing for font cache filenames. */
+static uint64_t fnv1a64(const uint8_t *data, size_t len) {
+  uint64_t h = 14695981039346656037ULL;
+  for (size_t i = 0; i < len; i++) {
+    h ^= data[i];
+    h *= 1099511628211ULL;
+  }
+  return h;
+}
 
-  char shader_path[768];
-  if (blob_is_raster(blob_name, canvas->font_render_method)) {
+/* Materialize a buffer-supplied FONT prim into a yetty_font_font.
+ *
+ * The TTF bytes travel inline in the prim payload — we hash them, write to
+ * a content-addressed file under <cache>/ypaint-fonts/, generate the MSDF
+ * CDB on cache miss via ymsdf-gen, then load the MSDF font. Subsequent
+ * occurrences of the same font (same content hash) reuse the cached CDB. */
+static struct yetty_font_font_result
+ypaint_canvas_materialize_blob_font(const struct yetty_ypaint_canvas *canvas,
+                                    const uint8_t *ttf, uint32_t ttf_len,
+                                    const char *hint_name) {
+  if (!ttf || ttf_len == 0)
+    return YETTY_ERR(yetty_font_font, "TTF blob is empty");
+
+  uint64_t h = fnv1a64(ttf, ttf_len);
+  char hex[17];
+  snprintf(hex, sizeof(hex), "%016llx", (unsigned long long)h);
+
+  const char *cache_dir = yetty_yplatform_get_cache_dir();
+  if (!cache_dir || !*cache_dir)
+    return YETTY_ERR(yetty_font_font, "no cache dir");
+
+  char fonts_dir[768];
+  snprintf(fonts_dir, sizeof(fonts_dir), "%s/ypaint-fonts", cache_dir);
+  yplatform_mkdir_p(fonts_dir);
+
+  char ttf_path[1024], cdb_path[1024], shader_path[1024];
+  snprintf(ttf_path, sizeof(ttf_path), "%s/pdf_%s.ttf", fonts_dir, hex);
+  snprintf(cdb_path, sizeof(cdb_path), "%s/pdf_%s.cdb", fonts_dir, hex);
+
+  /* Raster path: just write the TTF and load it directly — no atlas
+   * pre-generation needed. Used when the canvas is configured for raster
+   * rendering or when the hint name explicitly says so. */
+  if (blob_is_raster(hint_name, canvas->font_render_method)) {
+    if (!yplatform_file_exists(ttf_path)) {
+      FILE *f = fopen(ttf_path, "wb");
+      if (!f)
+        return YETTY_ERR(yetty_font_font, "open ttf cache for write");
+      fwrite(ttf, 1, ttf_len, f);
+      fclose(f);
+    }
     snprintf(shader_path, sizeof(shader_path), "%s/raster-font.wgsl",
              canvas->shaders_dir);
-    return yetty_font_raster_font_create_from_file(blob_name, shader_path,
+    return yetty_font_raster_font_create_from_file(ttf_path, shader_path,
                                                    canvas->raster_base_size);
   }
+
+  /* MSDF path: write the TTF to cache, then generate the CDB on miss. */
+  if (!yplatform_file_exists(ttf_path)) {
+    FILE *f = fopen(ttf_path, "wb");
+    if (!f)
+      return YETTY_ERR(yetty_font_font, "open ttf cache for write");
+    fwrite(ttf, 1, ttf_len, f);
+    fclose(f);
+    ydebug("ypaint_canvas: cached TTF '%s' (%u bytes) hint='%s'",
+           ttf_path, ttf_len, hint_name ? hint_name : "");
+  }
+
+  if (!yplatform_file_exists(cdb_path)) {
+    struct yetty_ymsdf_gen_config gen = {0};
+    gen.ttf_path = ttf_path;
+    gen.output_dir = fonts_dir;
+    gen.font_size = 32.0f;
+    gen.pixel_range = 4.0f;
+    gen.thread_count = 0;
+    gen.all_glyphs = 1; /* PDFs may use any codepoint in the font */
+    struct yetty_ycore_void_result gr = yetty_ymsdf_gen_cpu_generate(&gen);
+    if (YETTY_IS_ERR(gr)) {
+      yerror("ypaint_canvas: msdf-gen failed: %s", gr.error.msg);
+      return YETTY_ERR(yetty_font_font, gr.error.msg);
+    }
+    ydebug("ypaint_canvas: generated CDB '%s'", cdb_path);
+  }
+
   snprintf(shader_path, sizeof(shader_path), "%s/msdf-font.wgsl",
            canvas->shaders_dir);
-  return yetty_font_msdf_font_create(blob_name, shader_path);
+  return yetty_font_msdf_font_create(cdb_path, shader_path);
 }
 
 //=============================================================================
@@ -936,6 +1011,235 @@ struct yetty_ycore_void_result yetty_ypaint_canvas_commit_buffer_internal(
 // Buffer management (public API)
 //=============================================================================
 
+/* Local font map populated as FONT prims are encountered during this
+ * add_buffer call. Maps the producer-assigned font_id (text spans
+ * reference fonts by this id) to the materialized yetty_font_font.
+ *
+ * Capacity is grown on demand — text spans typically reference a small
+ * set of font_ids but a single PDF can carry dozens. */
+struct font_map {
+  struct yetty_font_font **fonts;  /* fonts[i] for font_id == i, NULL if absent */
+  uint32_t capacity;
+};
+
+static void font_map_init(struct font_map *m) {
+  m->fonts = NULL;
+  m->capacity = 0;
+}
+
+static void font_map_grow(struct font_map *m, uint32_t want) {
+  if (want <= m->capacity) return;
+  uint32_t new_cap = m->capacity ? m->capacity * 2 : 8;
+  while (new_cap < want) new_cap *= 2;
+  m->fonts = realloc(m->fonts, new_cap * sizeof(struct yetty_font_font *));
+  for (uint32_t i = m->capacity; i < new_cap; i++)
+    m->fonts[i] = NULL;
+  m->capacity = new_cap;
+}
+
+static struct yetty_font_font *font_map_get(const struct font_map *m,
+                                            uint32_t id) {
+  return id < m->capacity ? m->fonts[id] : NULL;
+}
+
+/* Expand a TEXT_SPAN view into per-glyph SDF primitives at the canvas's
+ * current cursor. Returns the highest grid row touched (0 if no glyphs
+ * placed). */
+static uint32_t expand_text_span_to_glyphs(
+    struct yetty_ypaint_canvas *canvas,
+    const struct yetty_ypaint_text_span_prim_view *ts,
+    struct yetty_font_font *font) {
+  static uint32_t glyph_z_order = 0;
+  float base_size = font->ops->get_base_size(font);
+  float scale = (base_size > 0) ? ts->font_size / base_size : 1.0f;
+  float cursor_x = ts->x;
+  uint32_t glyph_max_row = 0;
+
+  const uint8_t *ptr = (const uint8_t *)ts->text;
+  const uint8_t *end = ptr + ts->text_len;
+
+  while (ptr < end) {
+    /* UTF-8 decode */
+    uint32_t cp = 0;
+    if ((*ptr & 0x80) == 0) {
+      cp = *ptr++;
+    } else if ((*ptr & 0xE0) == 0xC0) {
+      cp = (*ptr++ & 0x1F) << 6;
+      if (ptr < end) cp |= (*ptr++ & 0x3F);
+    } else if ((*ptr & 0xF0) == 0xE0) {
+      cp = (*ptr++ & 0x0F) << 12;
+      if (ptr < end) cp |= (*ptr++ & 0x3F) << 6;
+      if (ptr < end) cp |= (*ptr++ & 0x3F);
+    } else if ((*ptr & 0xF8) == 0xF0) {
+      cp = (*ptr++ & 0x07) << 18;
+      if (ptr < end) cp |= (*ptr++ & 0x3F) << 12;
+      if (ptr < end) cp |= (*ptr++ & 0x3F) << 6;
+      if (ptr < end) cp |= (*ptr++ & 0x3F);
+    } else {
+      ptr++;
+      continue;
+    }
+
+    struct uint32_result gi_res = font->ops->get_glyph_index(font, cp);
+    if (YETTY_IS_ERR(gi_res)) {
+      cursor_x += ts->font_size * 0.5f;
+      continue;
+    }
+    uint32_t glyph_index = gi_res.value;
+
+    struct yetty_yrender_gpu_resource_set_result rs_res =
+        font->ops->get_gpu_resource_set(font);
+    if (YETTY_IS_ERR(rs_res))
+      continue;
+    const struct yetty_yrender_gpu_resource_set *rs = rs_res.value;
+    if (rs->buffer_count == 0 || !rs->buffers[0].data)
+      continue;
+
+    /* Per-glyph metadata: 6 floats [size_x, size_y, bearing_x, bearing_y,
+     * advance, _pad]. */
+    const float *meta = (const float *)rs->buffers[0].data;
+    uint32_t meta_count =
+        (uint32_t)(rs->buffers[0].size / (6 * sizeof(float)));
+    if (glyph_index >= meta_count) {
+      cursor_x += ts->font_size * 0.5f;
+      continue;
+    }
+
+    const float *gm = meta + glyph_index * 6;
+    float size_x = gm[0], size_y = gm[1];
+    float bearing_x = gm[2], bearing_y = gm[3];
+    float advance = gm[4];
+
+    if (size_x <= 0.0f || size_y <= 0.0f) {
+      cursor_x += advance * scale;
+      continue;
+    }
+
+    float gx = cursor_x + bearing_x * scale;
+    float gy = ts->y - bearing_y * scale;
+    float gw = size_x * scale;
+    float gh = size_y * scale;
+
+    /* Glyph SDF prim (7 words): type, z_order, x, y, font_size, packed, color */
+    float glyph_data[YPAINT_GLYPH_WORDS];
+    uint32_t tmp;
+    tmp = YETTY_YSDF_GLYPH;
+    memcpy(&glyph_data[0], &tmp, sizeof(float));
+    tmp = glyph_z_order++;
+    memcpy(&glyph_data[1], &tmp, sizeof(float));
+    glyph_data[2] = gx;
+    glyph_data[3] = gy;
+    glyph_data[4] = ts->font_size;
+    uint32_t packed_gf = (glyph_index & 0xFFFF) |
+                         (((uint32_t)(ts->font_id + 1) & 0xFFFF) << 16);
+    memcpy(&glyph_data[5], &packed_gf, sizeof(float));
+    memcpy(&glyph_data[6], &ts->color, sizeof(float));
+
+    float abs_y = gy + canvas->cursor_row * canvas->cell_size.height;
+    float abs_y_max = abs_y + gh;
+    uint32_t glyph_row_max =
+        (uint32_t)(abs_y_max / canvas->cell_size.height);
+
+    canvas_ensure_lines(canvas, glyph_row_max + 1);
+
+    uint32_t rolling_row = canvas->rolling_row_0 + canvas->cursor_row;
+
+    struct yetty_ypaint_canvas_grid_line *base_line =
+        line_buffer_get(&canvas->lines, glyph_row_max);
+    if (!base_line) {
+      cursor_x += advance * scale;
+      continue;
+    }
+
+    uint32_t prim_idx = prim_data_array_push(&base_line->prims,
+                                             rolling_row, glyph_data,
+                                             YPAINT_GLYPH_WORDS);
+
+    uint32_t col_min = (canvas->cell_size.width > 0)
+        ? (uint32_t)(gx / canvas->cell_size.width) : 0;
+    uint32_t col_max = (canvas->cell_size.width > 0)
+        ? (uint32_t)((gx + gw) / canvas->cell_size.width) : 0;
+    uint32_t row_min = (uint32_t)(abs_y / canvas->cell_size.height);
+
+    if (col_max >= canvas->grid_size.cols && canvas->grid_size.cols > 0)
+      col_max = canvas->grid_size.cols - 1;
+
+    for (uint32_t row = row_min; row <= glyph_row_max; row++) {
+      struct yetty_ypaint_canvas_grid_line *line =
+          line_buffer_get(&canvas->lines, row);
+      grid_line_ensure_cells(line, col_max + 1);
+      uint16_t lines_ahead = (uint16_t)(glyph_row_max - row);
+      for (uint32_t col = col_min; col <= col_max; col++) {
+        struct yetty_ypaint_canvas_prim_ref ref = {
+            lines_ahead, (uint16_t)prim_idx};
+        prim_ref_array_push(&line->cells[col].refs, ref);
+      }
+    }
+
+    if (glyph_row_max > glyph_max_row)
+      glyph_max_row = glyph_row_max;
+
+    cursor_x += advance * scale;
+  }
+
+  return glyph_max_row;
+}
+
+/* Attach `font` to the grid line at `glyph_max_row`. If the same font
+ * was previously attached to a higher (older) line, migrate it down.
+ * Skip when font is NULL or is the canvas's default font. */
+static void attach_font_to_line(struct yetty_ypaint_canvas *canvas,
+                                struct yetty_font_font *font,
+                                int32_t font_id,
+                                uint32_t glyph_max_row,
+                                struct font_map *fonts_map) {
+  if (!font || font == canvas->default_font || glyph_max_row == 0)
+    return;
+  struct yetty_ypaint_canvas_grid_line *target =
+      line_buffer_get(&canvas->lines, glyph_max_row);
+  if (!target)
+    return;
+
+  bool found = false;
+  for (uint32_t li = 0; li < canvas->lines.count && !found; li++) {
+    struct yetty_ypaint_canvas_grid_line *l = &canvas->lines.lines[li];
+    for (uint32_t fi = 0; fi < l->font_count; fi++) {
+      if (l->fonts[fi].font == font) {
+        if (li != glyph_max_row) {
+          if (target->font_count >= target->font_capacity) {
+            uint32_t new_cap = target->font_capacity == 0
+                ? 4 : target->font_capacity * 2;
+            target->fonts = realloc(target->fonts,
+                new_cap * sizeof(struct yetty_ypaint_canvas_font_entry));
+            target->font_capacity = new_cap;
+          }
+          target->fonts[target->font_count++] = l->fonts[fi];
+          l->fonts[fi] = l->fonts[--l->font_count];
+        }
+        found = true;
+        break;
+      }
+    }
+  }
+  if (!found) {
+    if (target->font_count >= target->font_capacity) {
+      uint32_t new_cap = target->font_capacity == 0
+          ? 4 : target->font_capacity * 2;
+      target->fonts = realloc(target->fonts,
+          new_cap * sizeof(struct yetty_ypaint_canvas_font_entry));
+      target->font_capacity = new_cap;
+    }
+    struct yetty_ypaint_canvas_font_entry entry = {0};
+    entry.font = font;
+    entry.font_id = font_id;
+    target->fonts[target->font_count++] = entry;
+    /* Ownership transferred to the line — drop from the local map so
+     * the post-loop cleanup doesn't double-free. */
+    if (font_id >= 0 && (uint32_t)font_id < fonts_map->capacity)
+      fonts_map->fonts[font_id] = NULL;
+  }
+}
+
 struct yetty_ycore_void_result
 yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
                                struct yetty_ypaint_core_buffer *buffer) {
@@ -948,92 +1252,61 @@ yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
     return YETTY_ERR(yetty_ycore_void, "buffer is NULL");
   }
 
-  // Check if buffer has SDF primitives (text spans handled separately in PASS 4)
   struct yetty_ypaint_core_primitive_iter_result iter_res =
       yetty_ypaint_core_buffer_prim_first(buffer, canvas->flyweight_registry);
-  bool has_sdf_primitives = YETTY_IS_OK(iter_res);
+  bool has_primitives = YETTY_IS_OK(iter_res);
 
-  // Save original cursor - primitives coords are relative to THIS position
   uint16_t original_cursor_row = canvas->cursor_row;
-  uint32_t original_rolling_row_0 = canvas->rolling_row_0;
-  (void)original_rolling_row_0;
 
-  ydebug("add_buffer: START cursor_row=%u grid_rows=%u rolling_row_0=%u has_sdf=%d",
+  ydebug("add_buffer: START cursor_row=%u grid_rows=%u rolling_row_0=%u has_prims=%d",
          canvas->cursor_row, canvas->grid_size.rows, canvas->rolling_row_0,
-         has_sdf_primitives);
+         has_primitives);
+
+  if (!has_primitives) {
+    canvas->dirty = true;
+    return YETTY_OK_VOID();
+  }
 
   uint16_t lines_scrolled = 0;
   uint32_t max_row_seen = 0;
 
-  // PASS 1: Compute max_row needed for ALL content (SDF + text spans)
+  /* PASS 1 — walk every primitive once, take the AABB max-y. Type-agnostic:
+   * every prim has an aabb via its base ops (FONT returns an empty rect, so
+   * it doesn't push max_row up). */
   uint32_t max_row_needed = 0;
   float cursor_y_offset = original_cursor_row * canvas->cell_size.height;
-
-  // PASS 1a: SDF primitives
-  if (has_sdf_primitives) {
+  {
     struct yetty_ypaint_core_primitive_iter iter = iter_res.value;
-
     while (1) {
-      if (!iter.fw.ops->aabb)
-        break;
-      struct rectangle_result aabb_res = iter.fw.ops->aabb(iter.fw.data);
-      if (YETTY_IS_ERR(aabb_res))
-        break;
-      struct rectangle aabb = aabb_res.value;
-
-      float abs_max_y = aabb.max.y + cursor_y_offset;
-      uint32_t prim_max_row =
-          (canvas->cell_size.height > 0)
-              ? (uint32_t)floorf(abs_max_y / canvas->cell_size.height)
-              : 0;
-
-      if (prim_max_row > max_row_needed)
-        max_row_needed = prim_max_row;
-
-      iter_res = yetty_ypaint_core_buffer_prim_next(buffer, canvas->flyweight_registry, &iter);
-      if (YETTY_IS_ERR(iter_res))
-        break;
-      iter = iter_res.value;
+      if (iter.fw.ops->aabb) {
+        struct rectangle_result aabb_res = iter.fw.ops->aabb(iter.fw.data);
+        if (YETTY_IS_OK(aabb_res)) {
+          float abs_max_y = aabb_res.value.max.y + cursor_y_offset;
+          uint32_t prim_max_row =
+              (canvas->cell_size.height > 0)
+                  ? (uint32_t)floorf(abs_max_y / canvas->cell_size.height)
+                  : 0;
+          if (prim_max_row > max_row_needed)
+            max_row_needed = prim_max_row;
+        }
+      }
+      struct yetty_ypaint_core_primitive_iter_result nx =
+          yetty_ypaint_core_buffer_prim_next(buffer,
+                                             canvas->flyweight_registry, &iter);
+      if (YETTY_IS_ERR(nx)) break;
+      iter = nx.value;
     }
-  }
-
-  // PASS 1b: Text spans - estimate max row from position + font size
-  uint32_t span_count = yetty_ypaint_core_buffer_text_span_count(buffer);
-  for (uint32_t si = 0; si < span_count; si++) {
-    const struct yetty_text_span *ts =
-        yetty_ypaint_core_buffer_get_text_span(buffer, si);
-    if (!ts || !ts->named_buf.buf.data || ts->named_buf.buf.size == 0)
-      continue;
-
-    // Estimate: baseline at ts->y, glyph extends ~font_size below baseline
-    // (conservative estimate - actual depends on font metrics)
-    float estimated_max_y = ts->y + ts->font_size;
-    float abs_max_y = estimated_max_y + cursor_y_offset;
-    uint32_t text_max_row =
-        (canvas->cell_size.height > 0)
-            ? (uint32_t)floorf(abs_max_y / canvas->cell_size.height)
-            : 0;
-
-    if (text_max_row > max_row_needed)
-      max_row_needed = text_max_row;
   }
 
   ydebug("add_buffer: PASS1 max_row_needed=%u (cursor at row %u)",
          max_row_needed, original_cursor_row);
 
-  // SCROLL if content extends beyond visible area (scrolling mode only).
-  // In overlay (non-scrolling) mode the cursor is driven externally by the
-  // text layer; the canvas neither scrolls itself nor asks others to scroll.
-  // Content that does not fit at the current cursor is left to be clipped
-  // by the shader (cells past grid_size.rows are never read) and by the
-  // complex-prim visibility loops (which cap at grid_size.rows).
+  /* Scroll if the buffer reaches past the visible grid (scrolling mode only).
+   * Overlay mode has its cursor driven externally — never scroll there. */
   uint32_t target_cursor_row = max_row_needed + 1;
   if (canvas->scrolling_mode &&
       target_cursor_row >= canvas->grid_size.rows) {
     lines_scrolled = (uint16_t)(target_cursor_row - canvas->grid_size.rows + 1);
-
-    ydebug("add_buffer: SCROLL NEEDED target=%u >= grid_rows=%u, scroll %u",
-           target_cursor_row, canvas->grid_size.rows, lines_scrolled);
 
     if (!canvas->scroll_callback) {
       yerror("yetty_ypaint_canvas_add_buffer: scroll_callback is NULL");
@@ -1041,320 +1314,115 @@ yetty_ypaint_canvas_add_buffer(struct yetty_ypaint_canvas *canvas,
     }
     struct yetty_ycore_void_result scroll_res = canvas->scroll_callback(
         canvas->scroll_callback_user_data, lines_scrolled);
-    if (YETTY_IS_ERR(scroll_res)) {
-      yerror("yetty_ypaint_canvas_add_buffer: scroll_callback failed");
+    if (YETTY_IS_ERR(scroll_res))
       return scroll_res;
-    }
-
     yetty_ypaint_canvas_scroll_lines(canvas, lines_scrolled);
-
-    ydebug("add_buffer: after scroll cursor_row=%u rolling_row_0=%u",
-           canvas->cursor_row, canvas->rolling_row_0);
   }
 
-  // PASS 2: Add SDF primitives with adjusted cursor
   uint16_t adjusted_cursor = (original_cursor_row >= lines_scrolled)
                                  ? (original_cursor_row - lines_scrolled)
                                  : 0;
   canvas->cursor_row = adjusted_cursor;
 
-  if (has_sdf_primitives) {
-    ydebug("add_buffer: PASS2 using adjusted cursor_row=%u (original=%u - "
-           "scrolled=%u)",
-           adjusted_cursor, original_cursor_row, lines_scrolled);
+  /* PASS 2 — single dispatch loop. Type word at prim[0] picks the path:
+   *   FONT       → materialize, record in fonts_map (no grid placement)
+   *   TEXT_SPAN  → resolve font, decompose into glyph SDF prims
+   *   else (SDF, complex) → add_primitive_internal
+   */
+  struct font_map fonts_map;
+  font_map_init(&fonts_map);
 
-    iter_res = yetty_ypaint_core_buffer_prim_first(buffer, canvas->flyweight_registry);
-    struct yetty_ypaint_core_primitive_iter iter = iter_res.value;
+  iter_res = yetty_ypaint_core_buffer_prim_first(
+      buffer, canvas->flyweight_registry);
+  struct yetty_ypaint_core_primitive_iter iter = iter_res.value;
+  struct yetty_ycore_void_result final_status = YETTY_OK_VOID();
 
-    while (1) {
+  while (1) {
+    uint32_t prim_type = iter.fw.data[0];
+
+    if (prim_type == YETTY_YPAINT_TYPE_FONT) {
+      struct yetty_ypaint_font_prim_view fv;
+      if (yetty_ypaint_font_prim_parse(iter.fw.data, &fv) == 0) {
+        char hint[YETTY_YCORE_NAMED_BUFFER_MAX_NAME_LENGTH];
+        size_t hl = fv.name_len < sizeof(hint) - 1
+                        ? fv.name_len : sizeof(hint) - 1;
+        memcpy(hint, fv.name, hl);
+        hint[hl] = '\0';
+
+        struct yetty_font_font_result fr =
+            ypaint_canvas_materialize_blob_font(canvas, fv.ttf, fv.ttf_len,
+                                                hint);
+        if (YETTY_IS_ERR(fr)) {
+          yerror("add_buffer: font materialize failed: %s", fr.error.msg);
+          final_status = YETTY_ERR(yetty_ycore_void, fr.error.msg);
+          break;
+        }
+        if (fv.font_id >= 0) {
+          font_map_grow(&fonts_map, (uint32_t)fv.font_id + 1);
+          fonts_map.fonts[fv.font_id] = fr.value;
+        } else {
+          /* Producer didn't tag — drop it. */
+          fr.value->ops->destroy(fr.value);
+        }
+      }
+    } else if (prim_type == YETTY_YPAINT_TYPE_TEXT_SPAN) {
+      struct yetty_ypaint_text_span_prim_view tv;
+      if (yetty_ypaint_text_span_prim_parse(iter.fw.data, &tv) == 0) {
+        struct yetty_font_font *font = NULL;
+        if (tv.font_id >= 0)
+          font = font_map_get(&fonts_map, (uint32_t)tv.font_id);
+        if (!font && tv.font_id == -1)
+          font = canvas->default_font;
+        if (!font) {
+          /* Fall back to the canvas default rather than failing the whole
+           * buffer — keeps PDFs with unknown font_ids partially renderable. */
+          font = canvas->default_font;
+        }
+        if (font) {
+          uint32_t glyph_max_row =
+              expand_text_span_to_glyphs(canvas, &tv, font);
+          if (glyph_max_row > max_row_seen)
+            max_row_seen = glyph_max_row;
+          attach_font_to_line(canvas, font, tv.font_id, glyph_max_row,
+                              &fonts_map);
+        }
+      }
+    } else {
+      /* SDF or complex prim — uniform path. */
       struct uint32_result prim_res = add_primitive_internal(canvas, &iter);
       if (YETTY_IS_ERR(prim_res)) {
         yerror("add_buffer: add_primitive_internal failed: %s",
                prim_res.error.msg);
-        return YETTY_ERR(yetty_ycore_void, prim_res.error.msg);
-      }
-      uint32_t prim_max_row = prim_res.value;
-
-      ydebug("add_buffer: PASS2 added prim type=%u max_row=%u", iter.fw.data[0],
-             prim_max_row);
-
-      if (prim_max_row > max_row_seen)
-        max_row_seen = prim_max_row;
-
-      iter_res = yetty_ypaint_core_buffer_prim_next(buffer, canvas->flyweight_registry, &iter);
-      if (YETTY_IS_ERR(iter_res))
+        final_status = YETTY_ERR(yetty_ycore_void, prim_res.error.msg);
         break;
-      iter = iter_res.value;
-    }
-  } // end if (has_sdf_primitives)
-
-  // PASS 3: Process font blobs → create font objects.
-  // Font kind (MSDF vs raster) is decided by the blob name's extension;
-  // unrecognised extensions fall back to the canvas-configured render method.
-  uint32_t font_count = yetty_ypaint_core_buffer_font_count(buffer);
-  struct yetty_font_font **fonts = NULL;
-  if (font_count > 0) {
-    fonts = calloc(font_count, sizeof(struct yetty_font_font *));
-    for (uint32_t i = 0; i < font_count; i++) {
-      const struct yetty_font_blob *fb =
-          yetty_ypaint_core_buffer_get_font(buffer, i);
-      if (!fb || !fb->named_buf.buf.data) continue;
-      struct yetty_font_font_result fr =
-          ypaint_canvas_make_blob_font(canvas, fb->named_buf.name);
-      if (YETTY_IS_ERR(fr)) {
-        yerror("add_buffer: font creation failed: %s", fr.error.msg);
-        free(fonts);
-        return YETTY_ERR(yetty_ycore_void, fr.error.msg);
       }
-      fonts[i] = fr.value;
+      if (prim_res.value > max_row_seen)
+        max_row_seen = prim_res.value;
     }
+
+    struct yetty_ypaint_core_primitive_iter_result nx =
+        yetty_ypaint_core_buffer_prim_next(buffer,
+                                           canvas->flyweight_registry, &iter);
+    if (YETTY_IS_ERR(nx)) break;
+    iter = nx.value;
   }
 
-  // PASS 4: Process text spans → decompose into glyph primitives
-  // (span_count already computed in PASS 1b)
-  ydebug("add_buffer: PASS4 span_count=%u default_font=%p",
-         span_count, (void *)canvas->default_font);
-  for (uint32_t si = 0; si < span_count; si++) {
-    const struct yetty_text_span *ts =
-        yetty_ypaint_core_buffer_get_text_span(buffer, si);
-    if (!ts || !ts->named_buf.buf.data || ts->named_buf.buf.size == 0)
-      continue;
-
-    ydebug("add_buffer: PASS4 span[%u] font_id=%d x=%.1f y=%.1f",
-           si, ts->font_id, ts->x, ts->y);
-
-    struct yetty_font_font *font = NULL;
-    if (ts->font_id >= 0 && (uint32_t)ts->font_id < font_count)
-      font = fonts[ts->font_id];
-    if (!font && ts->font_id == -1)
-      font = canvas->default_font;
-    if (!font) {
-      yerror("add_buffer: span[%u] font_id=%d not found and no default", si, ts->font_id);
-      if (fonts) free(fonts);
-      return YETTY_ERR(yetty_ycore_void, "text span font not found");
-    }
-
-    float base_size = font->ops->get_base_size(font);
-    float scale = (base_size > 0) ? ts->font_size / base_size : 1.0f;
-    float cursor_x = ts->x;
-    uint32_t glyph_max_row = 0;
-
-    const uint8_t *ptr = ts->named_buf.buf.data;
-    const uint8_t *end = ptr + ts->named_buf.buf.size;
-
-    while (ptr < end) {
-      /* UTF-8 decode */
-      uint32_t cp = 0;
-      if ((*ptr & 0x80) == 0) {
-        cp = *ptr++;
-      } else if ((*ptr & 0xE0) == 0xC0) {
-        cp = (*ptr++ & 0x1F) << 6;
-        if (ptr < end) cp |= (*ptr++ & 0x3F);
-      } else if ((*ptr & 0xF0) == 0xE0) {
-        cp = (*ptr++ & 0x0F) << 12;
-        if (ptr < end) cp |= (*ptr++ & 0x3F) << 6;
-        if (ptr < end) cp |= (*ptr++ & 0x3F);
-      } else if ((*ptr & 0xF8) == 0xF0) {
-        cp = (*ptr++ & 0x07) << 18;
-        if (ptr < end) cp |= (*ptr++ & 0x3F) << 12;
-        if (ptr < end) cp |= (*ptr++ & 0x3F) << 6;
-        if (ptr < end) cp |= (*ptr++ & 0x3F);
-      } else {
-        ptr++;
-        continue;
-      }
-
-      struct uint32_result gi_res = font->ops->get_glyph_index(font, cp);
-      if (YETTY_IS_ERR(gi_res)) {
-        ydebug("add_buffer: glyph_index FAILED cp=0x%x: %s", cp, gi_res.error.msg);
-        cursor_x += ts->font_size * 0.5f;
-        continue;
-      }
-      uint32_t glyph_index = gi_res.value;
-
-      /* Read glyph metadata from font's metadata buffer */
-      struct yetty_yrender_gpu_resource_set_result rs_res =
-          font->ops->get_gpu_resource_set(font);
-      if (YETTY_IS_ERR(rs_res)) {
-        ydebug("add_buffer: get_gpu_resource_set FAILED: %s", rs_res.error.msg);
-        continue;
-      }
-      const struct yetty_yrender_gpu_resource_set *rs = rs_res.value;
-      if (rs->buffer_count == 0 || !rs->buffers[0].data) {
-        ydebug("add_buffer: no buffer data buf_count=%zu data=%p", rs->buffer_count, (void*)rs->buffers[0].data);
-        continue;
-      }
-
-      /* Metadata: 6 floats per glyph [size_x, size_y, bearing_x, bearing_y, advance, _pad] */
-      const float *meta = (const float *)rs->buffers[0].data;
-      uint32_t meta_count = (uint32_t)(rs->buffers[0].size / (6 * sizeof(float)));
-      ydebug("add_buffer: cp=0x%x glyph_index=%u meta_count=%u buf_size=%zu", cp, glyph_index, meta_count, rs->buffers[0].size);
-      if (glyph_index >= meta_count) {
-        ydebug("add_buffer: glyph_index %u >= meta_count %u, skipping", glyph_index, meta_count);
-        cursor_x += ts->font_size * 0.5f;
-        continue;
-      }
-
-      const float *gm = meta + glyph_index * 6;
-      float size_x = gm[0], size_y = gm[1];
-      float bearing_x = gm[2], bearing_y = gm[3];
-      float advance = gm[4];
-
-      /* Skip empty glyphs (space, etc.) - just advance cursor */
-      if (size_x <= 0.0f || size_y <= 0.0f) {
-        cursor_x += advance * scale;
-        continue;
-      }
-
-      float gx = cursor_x + bearing_x * scale;
-      float gy = ts->y - bearing_y * scale;
-      float gw = size_x * scale;
-      float gh = size_y * scale;
-
-      /* Pack glyph primitive (7 words): type, z_order, x, y, font_size, packed, color */
-      static uint32_t glyph_z_order = 0;
-      float glyph_data[YPAINT_GLYPH_WORDS];
-      uint32_t tmp;
-      tmp = YETTY_YSDF_GLYPH;
-      memcpy(&glyph_data[0], &tmp, sizeof(float));
-      tmp = glyph_z_order++;
-      memcpy(&glyph_data[1], &tmp, sizeof(float));
-      glyph_data[2] = gx;
-      glyph_data[3] = gy;
-      glyph_data[4] = ts->font_size;  /* target render size */
-      /* Pack glyph_index (16 bits) | font_id (16 bits) */
-      uint32_t packed_gf = (glyph_index & 0xFFFF) |
-                           (((uint32_t)(ts->font_id + 1) & 0xFFFF) << 16);
-      memcpy(&glyph_data[5], &packed_gf, sizeof(float));
-      /* Color */
-      uint32_t color = ts->color.r | (ts->color.g << 8) |
-                       (ts->color.b << 16) | (ts->color.a << 24);
-      memcpy(&glyph_data[6], &color, sizeof(float));
-
-      /* Compute glyph AABB in absolute coords */
-      float abs_y = gy + canvas->cursor_row * canvas->cell_size.height;
-      float abs_y_max = abs_y + gh;
-      uint32_t glyph_row_max =
-          (uint32_t)(abs_y_max / canvas->cell_size.height);
-
-      canvas_ensure_lines(canvas, glyph_row_max + 1);
-
-      uint32_t rolling_row = canvas->rolling_row_0 + canvas->cursor_row;
-
-      /* Store glyph as primitive at its max row */
-      struct yetty_ypaint_canvas_grid_line *base_line =
-          line_buffer_get(&canvas->lines, glyph_row_max);
-      if (!base_line) goto next_glyph;
-
-      uint32_t prim_idx = prim_data_array_push(&base_line->prims,
-                                               rolling_row, glyph_data,
-                                               YPAINT_GLYPH_WORDS);
-
-      /* Register in grid cells */
-      uint32_t col_min = (canvas->cell_size.width > 0)
-          ? (uint32_t)(gx / canvas->cell_size.width) : 0;
-      uint32_t col_max = (canvas->cell_size.width > 0)
-          ? (uint32_t)((gx + gw) / canvas->cell_size.width) : 0;
-      uint32_t row_min = (uint32_t)(abs_y / canvas->cell_size.height);
-
-      if (col_max >= canvas->grid_size.cols && canvas->grid_size.cols > 0)
-        col_max = canvas->grid_size.cols - 1;
-
-      for (uint32_t row = row_min; row <= glyph_row_max; row++) {
-        struct yetty_ypaint_canvas_grid_line *line =
-            line_buffer_get(&canvas->lines, row);
-        grid_line_ensure_cells(line, col_max + 1);
-        uint16_t lines_ahead = (uint16_t)(glyph_row_max - row);
-        for (uint32_t col = col_min; col <= col_max; col++) {
-          struct yetty_ypaint_canvas_prim_ref ref = {
-              lines_ahead, (uint16_t)prim_idx};
-          prim_ref_array_push(&line->cells[col].refs, ref);
-        }
-      }
-
-      if (glyph_row_max > glyph_max_row)
-        glyph_max_row = glyph_row_max;
-      if (glyph_row_max > max_row_seen)
-        max_row_seen = glyph_row_max;
-
-next_glyph:
-      cursor_x += advance * scale;
-    }
-
-    /* Attach font to the lowest row this span's glyphs reach.
-     * Skip default font - it's owned by canvas, not by lines. */
-    if (font && font != canvas->default_font && glyph_max_row > 0) {
-      struct yetty_ypaint_canvas_grid_line *target_line =
-          line_buffer_get(&canvas->lines, glyph_max_row);
-      if (target_line) {
-        /* Check if font already attached to a higher line — move it down */
-        bool found = false;
-        for (uint32_t li = 0; li < canvas->lines.count && !found; li++) {
-          struct yetty_ypaint_canvas_grid_line *l =
-              &canvas->lines.lines[li];
-          for (uint32_t fi = 0; fi < l->font_count; fi++) {
-            if (l->fonts[fi].font == font) {
-              /* Move from old line to target line */
-              if (li != glyph_max_row) {
-                /* Add to target */
-                if (target_line->font_count >= target_line->font_capacity) {
-                  uint32_t new_cap = target_line->font_capacity == 0
-                      ? 4 : target_line->font_capacity * 2;
-                  target_line->fonts = realloc(target_line->fonts,
-                      new_cap * sizeof(struct yetty_ypaint_canvas_font_entry));
-                  target_line->font_capacity = new_cap;
-                }
-                target_line->fonts[target_line->font_count++] = l->fonts[fi];
-                /* Remove from old line */
-                l->fonts[fi] = l->fonts[--l->font_count];
-              }
-              found = true;
-              break;
-            }
-          }
-        }
-        if (!found) {
-          /* First time — attach to target line */
-          if (target_line->font_count >= target_line->font_capacity) {
-            uint32_t new_cap = target_line->font_capacity == 0
-                ? 4 : target_line->font_capacity * 2;
-            target_line->fonts = realloc(target_line->fonts,
-                new_cap * sizeof(struct yetty_ypaint_canvas_font_entry));
-            target_line->font_capacity = new_cap;
-          }
-          struct yetty_ypaint_canvas_font_entry entry = {0};
-          entry.font = font;
-          entry.font_id = ts->font_id;
-          target_line->fonts[target_line->font_count++] = entry;
-          /* Null out from fonts array so it's not double-freed */
-          if (ts->font_id >= 0 && (uint32_t)ts->font_id < font_count)
-            fonts[ts->font_id] = NULL;
-        }
-      }
-    }
+  /* Free fonts that didn't get attached to a grid line (typically fonts
+   * referenced only by spans we couldn't render, or none at all). */
+  for (uint32_t i = 0; i < fonts_map.capacity; i++) {
+    if (fonts_map.fonts[i] && fonts_map.fonts[i]->ops)
+      fonts_map.fonts[i]->ops->destroy(fonts_map.fonts[i]);
   }
+  free(fonts_map.fonts);
 
-  /* Free any fonts not attached to grid lines */
-  if (fonts) {
-    for (uint32_t i = 0; i < font_count; i++) {
-      if (fonts[i] && fonts[i]->ops)
-        fonts[i]->ops->destroy(fonts[i]);
-    }
-    free(fonts);
-  }
+  if (YETTY_IS_ERR(final_status))
+    return final_status;
 
-  // Set final cursor position = row after max primitive row.
-  // Only meaningful in scrolling mode — in overlay mode the cursor is driven
-  // by the text layer and the canvas must not push it around.
   if (canvas->scrolling_mode) {
     uint32_t final_cursor = max_row_seen + 1;
-    if (final_cursor >= canvas->grid_size.rows) {
-      // Shouldn't happen since we scrolled, but clamp just in case
+    if (final_cursor >= canvas->grid_size.rows)
       final_cursor = canvas->grid_size.rows - 1;
-    }
     canvas->cursor_row = (uint16_t)final_cursor;
-
-    // Notify text layer of final cursor position
     if (canvas->cursor_set_callback) {
       canvas->cursor_set_callback(canvas->cursor_set_callback_user_data,
                                   canvas->cursor_row);

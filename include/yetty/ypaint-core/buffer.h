@@ -115,25 +115,21 @@ struct yetty_ypaint_core_primitive_iter_result yetty_ypaint_core_buffer_prim_nex
     const struct yetty_ypaint_core_primitive_iter *iter);
 
 /*=============================================================================
- * Font blob storage
+ * Producer convenience: pack flyweight FONT and TEXT_SPAN prims into the
+ * buffer. These are thin wrappers — same path as add_prim. Readers iterate
+ * via the flyweight registry; the canvas dispatches by prim type.
  *===========================================================================*/
 
-/* Add font TTF data to buffer. Returns fontId for use in text spans. */
+/* Pack a FONT primitive (font-prim.h). Returns the producer-assigned
+ * font_id (consecutive, starts at 0). Text spans reference fonts by this
+ * id. */
 struct yetty_ycore_int_result
 yetty_ypaint_core_buffer_add_font(struct yetty_ypaint_core_buffer *buf,
                                   const struct yetty_ycore_buffer *ttf_data,
                                   const char *name);
 
-uint32_t yetty_ypaint_core_buffer_font_count(
-    const struct yetty_ypaint_core_buffer *buf);
-
-const struct yetty_font_blob *yetty_ypaint_core_buffer_get_font(
-    const struct yetty_ypaint_core_buffer *buf, uint32_t index);
-
-/*=============================================================================
- * Text span storage
- *===========================================================================*/
-
+/* Pack a TEXT_SPAN primitive (text-span-prim.h). font_id must match a
+ * previously-added FONT prim's id, or be -1 to use the canvas default. */
 struct yetty_ycore_void_result
 yetty_ypaint_core_buffer_add_text(struct yetty_ypaint_core_buffer *buf,
                                   float x, float y,
@@ -141,12 +137,6 @@ yetty_ypaint_core_buffer_add_text(struct yetty_ypaint_core_buffer *buf,
                                   float font_size, uint32_t color,
                                   uint32_t layer, int32_t font_id,
                                   float rotation);
-
-uint32_t yetty_ypaint_core_buffer_text_span_count(
-    const struct yetty_ypaint_core_buffer *buf);
-
-const struct yetty_text_span *yetty_ypaint_core_buffer_get_text_span(
-    const struct yetty_ypaint_core_buffer *buf, uint32_t index);
 
 #ifdef __cplusplus
 }

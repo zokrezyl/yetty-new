@@ -9,4 +9,8 @@ add_library(yetty_ypaint STATIC
 target_link_libraries(yetty_ypaint PUBLIC
     yetty_ypaint_core
     yetty_ysdf
+    yetty_ymsdf_gen
 )
+# Note: yetty_ypaint references yplatform_mkdir_p / yplatform_file_exists
+# (per-platform shared sources). Final executables already include
+# YETTY_YPLATFORM_THREAD_SOURCES, so these symbols resolve at link time.
