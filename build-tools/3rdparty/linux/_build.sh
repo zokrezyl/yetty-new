@@ -19,7 +19,12 @@
 
 set -euo pipefail
 
-: "${VERSION:?VERSION is required}"
+# Version is read from ./version file — single source of truth (matches
+# the lib-<name>-<version> tag pushed via build-tools/push-3rdparty-tag.sh).
+VERSION_FILE="$(dirname "$0")/version"
+[ -f "$VERSION_FILE" ] || { echo "missing $VERSION_FILE" >&2; exit 1; }
+VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+[ -n "$VERSION" ] || { echo "$VERSION_FILE is empty" >&2; exit 1; }
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -111,7 +116,7 @@ mkdir -p "$STAGE"
 # Brotli q11 the kernel — embed pipeline picks it up pre-compressed,
 # avoids a recompress on every yetty configure. Runtime path mode
 # (tinyemu_copy_runtime_to_bundle) gets a decompressed copy side-by-side
-# at consumer-side fetch time (assets-fetch.cmake).
+# at consumer-side fetch time (3rdparty-fetch.cmake).
 : "${BROTLI_QUALITY:=11}"
 echo "==> brotli kernel-riscv64.bin (quality $BROTLI_QUALITY)"
 in_size="$(stat -c%s "$KERNEL_IMAGE" 2>/dev/null || stat -f%z "$KERNEL_IMAGE")"

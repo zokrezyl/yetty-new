@@ -26,7 +26,7 @@ endif()
 
 # The shared RISC-V runtime (OpenSBI firmware, Linux kernel, Alpine rootfs)
 # and the QEMU binary are now fetched as prebuilt release assets from
-# shared.cmake via assets-fetch.cmake — no local toolchain build here.
+# shared.cmake via 3rdparty-fetch.cmake — no local toolchain build here.
 
 # Desktop-specific subdirectories
 if(YETTY_ENABLE_FEATURE_GPU)

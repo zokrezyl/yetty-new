@@ -11,7 +11,12 @@
 
 set -euo pipefail
 
-: "${VERSION:?VERSION is required}"
+# Version is read from ./version file — single source of truth (matches
+# the lib-<name>-<version> tag pushed via build-tools/push-3rdparty-tag.sh).
+VERSION_FILE="$(dirname "$0")/version"
+[ -f "$VERSION_FILE" ] || { echo "missing $VERSION_FILE" >&2; exit 1; }
+VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+[ -n "$VERSION" ] || { echo "$VERSION_FILE is empty" >&2; exit 1; }
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

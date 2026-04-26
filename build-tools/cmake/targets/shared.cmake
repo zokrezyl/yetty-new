@@ -36,21 +36,44 @@ else()
 endif()
 
 
-# Prebuilt assets: downloads pinned tarballs from GitHub releases into
-# ${CMAKE_BINARY_DIR}/assets so the rest of the build can consume them as
-# if they had been generated locally.
-include(${YETTY_ROOT}/build-tools/cmake/assets-fetch.cmake)
+# Prebuilt 3rdparty assets — each one its own per-lib fetch, version
+# pinned in build-tools/3rdparty/<name>/version. yetty_3rdparty_fetch
+# downloads + extracts + auto-decompresses .br files side-by-side.
+include(${YETTY_ROOT}/build-tools/cmake/3rdparty-fetch.cmake)
 
+# msdf-fonts (cdb): pre-brotli'd, embedded directly by incbin.
 if(YETTY_ENABLE_FEATURE_CDB_GEN OR YETTY_ENABLE_FEATURE_MSDF_GEN)
-    assets_fetch_cdb()
+    yetty_3rdparty_fetch(cdb _CDB_DIR)
 endif()
 
+# yemu runtime (kernel + opensbi + alpine ext4): consumed by both the
+# embed pipeline (via .cdb.br/.bin.br/.elf.br/.img.br) and the runtime
+# path mode (via the auto-decompressed raw files).
 if(YETTY_ENABLE_LIB_TINYEMU OR YETTY_ENABLE_LIB_QEMU)
-    assets_fetch_yemu()
+    yetty_3rdparty_fetch(linux       _LINUX_DIR)
+    yetty_3rdparty_fetch(opensbi     _OPENSBI_DIR)
+    yetty_3rdparty_fetch(alpine-disk _ALPINE_DIR)
+
+    # Path constants consumed by tinyemu-runtime.cmake (bundle copy at
+    # build time) and any future runtime-path consumer. Point at the
+    # auto-decompressed RAW files; 3rdparty-fetch keeps the .br alongside.
+    set(TINYEMU_OPENSBI_PATH
+        "${_OPENSBI_DIR}/opensbi-fw_jump.elf"
+        CACHE FILEPATH "" FORCE)
+    set(QEMU_OPENSBI_PATH
+        "${_OPENSBI_DIR}/opensbi-fw_dynamic.bin"
+        CACHE FILEPATH "" FORCE)
+    set(TINYEMU_KERNEL_PATH
+        "${_LINUX_DIR}/kernel-riscv64.bin"
+        CACHE FILEPATH "" FORCE)
+    set(TINYEMU_ROOTFS_IMG
+        "${_ALPINE_DIR}/alpine-rootfs.img"
+        CACHE FILEPATH "" FORCE)
 endif()
 
+# qemu binary — per-host platform (ships per-target tarball).
 if(YETTY_ENABLE_LIB_QEMU)
-    assets_fetch_qemu()
+    yetty_3rdparty_fetch(qemu _QEMU_DIR)
 endif()
 
 #-----------------------------------------------------------------------------
@@ -354,10 +377,10 @@ function(yetty_embed_assets TARGET)
         file(COPY "${FONT_FILE}" DESTINATION "${INCBIN_DATA_DIR}/fonts")
     endforeach()
 
-    # Copy msdf-fonts (assets shipped pre-brotli'd as *.cdb.br; incbin's
+    # Copy msdf-fonts (cdb shipped pre-brotli'd as *.cdb.br; incbin's
     # already-compressed path embeds the bytes as-is and strips .br from
-    # the in-binary asset name).
-    file(GLOB MSDF_FILES "${CMAKE_BINARY_DIR}/assets/msdf-fonts/*.cdb.br")
+    # the in-binary asset name). Source dir comes from yetty_3rdparty_fetch(cdb).
+    file(GLOB MSDF_FILES "${YETTY_3RDPARTY_cdb_DIR}/*.cdb.br")
     foreach(MSDF_FILE ${MSDF_FILES})
         file(COPY "${MSDF_FILE}" DESTINATION "${INCBIN_DATA_DIR}/msdf-fonts")
     endforeach()
@@ -380,36 +403,37 @@ function(yetty_embed_assets TARGET)
     # Embed config (not compressed)
     incbin_add_directory(${TARGET} "yconfig" "${INCBIN_CONFIG_DIR}" "*" FALSE)
 
-    # Embed shared RISC-V runtime (kernel, opensbi, rootfs) under yemu/ prefix
-    # Used by both --temu (TinyEMU, in-process) and --qemu (external QEMU via telnet).
-    # Assets are fetched at configure time by assets_fetch_yemu() and live in
-    # ${CMAKE_BINARY_DIR}/assets/yemu.
+    # Embed shared RISC-V runtime (kernel, opensbi, rootfs) under yemu/ prefix.
+    # Used by both --temu (TinyEMU, in-process) and --qemu (external QEMU via
+    # telnet). After the per-asset 3rdparty split, files come from three
+    # separate fetched dirs (linux, opensbi, alpine-disk). Producer ships
+    # them brotli-q11 (*.br); 3rdparty-fetch auto-decompresses raw copies
+    # side-by-side for runtime path mode (see tinyemu_copy_runtime_to_bundle).
+    # incbin's already-compressed path embeds the .br bytes as-is and strips
+    # the .br suffix from the in-binary asset name.
     if(YETTY_ENABLE_LIB_TINYEMU OR YETTY_ENABLE_LIB_QEMU)
-        set(YEMU_ASSETS_DIR "${CMAKE_BINARY_DIR}/assets/yemu")
         set(INCBIN_YEMU_DIR "${CMAKE_BINARY_DIR}/incbin-yemu")
-
         file(REMOVE_RECURSE "${INCBIN_YEMU_DIR}")
         file(MAKE_DIRECTORY "${INCBIN_YEMU_DIR}")
 
-        # Producer ships .br (brotli q11). incbin's already-compressed
-        # path detects the suffix, embeds bytes as-is, strips .br from
-        # the in-binary asset name, marks manifest compressed=1.
-        # Runtime path mode reads the raw files (decompressed by
-        # assets_fetch_yemu) at the same YEMU_ASSETS_DIR — those raw
-        # copies are NOT what we ship into the binary.
-        foreach(_F kernel-riscv64.bin.br
-                   opensbi-fw_jump.elf.br
-                   opensbi-fw_dynamic.bin.br
-                   alpine-rootfs.img.br)
-            if(EXISTS "${YEMU_ASSETS_DIR}/${_F}")
-                file(COPY "${YEMU_ASSETS_DIR}/${_F}" DESTINATION "${INCBIN_YEMU_DIR}")
+        # source-dir → file (per-asset)
+        foreach(_PAIR
+                "${YETTY_3RDPARTY_linux_DIR}|kernel-riscv64.bin.br"
+                "${YETTY_3RDPARTY_opensbi_DIR}|opensbi-fw_jump.elf.br"
+                "${YETTY_3RDPARTY_opensbi_DIR}|opensbi-fw_dynamic.bin.br"
+                "${YETTY_3RDPARTY_alpine-disk_DIR}|alpine-rootfs.img.br")
+            string(REPLACE "|" ";" _PARTS "${_PAIR}")
+            list(GET _PARTS 0 _SRC_DIR)
+            list(GET _PARTS 1 _F)
+            if(EXISTS "${_SRC_DIR}/${_F}")
+                file(COPY "${_SRC_DIR}/${_F}" DESTINATION "${INCBIN_YEMU_DIR}")
             endif()
         endforeach()
 
         incbin_add_directory(${TARGET} "yemu" "${INCBIN_YEMU_DIR}" "*" FALSE)
     endif()
 
-    # Embed QEMU binary if enabled (fetched by assets_fetch_qemu())
+    # Embed QEMU binary if enabled (fetched by yetty_3rdparty_fetch(qemu))
     if(YETTY_ENABLE_LIB_QEMU)
         qemu_embed_runtime(${TARGET})
     endif()

@@ -5,9 +5,11 @@ name: CMake on multiple platforms
 on:
   push:
     tags:
-      - '*'
-      - '!assets-*'       # prebuilt-asset releases are handled by build-assets.yml
-      - '!lib-*'          # per-lib 3rdparty releases handled by build-3rdparty-<lib>.yml
+      # Main yetty release tags only. Prebuilt 3rdparty (libs + assets)
+      # use their own `lib-<name>-*` namespaces, handled by the per-lib
+      # build-3rdparty-<name>.yml workflows; those don't trigger the
+      # main multi-platform build.
+      - 'yetty-*'
     branches:
       - '**'
 

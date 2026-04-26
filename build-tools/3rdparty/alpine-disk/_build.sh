@@ -21,7 +21,12 @@
 
 set -euo pipefail
 
-: "${VERSION:?VERSION is required}"
+# Version is read from ./version file — single source of truth (matches
+# the lib-<name>-<version> tag pushed via build-tools/push-3rdparty-tag.sh).
+VERSION_FILE="$(dirname "$0")/version"
+[ -f "$VERSION_FILE" ] || { echo "missing $VERSION_FILE" >&2; exit 1; }
+VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+[ -n "$VERSION" ] || { echo "$VERSION_FILE is empty" >&2; exit 1; }
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
 
 WORK_DIR="${WORK_DIR:-/tmp/yetty-asset-alpine-disk}"
@@ -124,7 +129,7 @@ mkdir -p "$STAGE"
 # ext4 is highly compressible (~5-10x) so the binary-size saving is
 # substantial. Embed pipeline picks the .br up pre-compressed; runtime
 # path mode gets a decompressed copy at consumer-side fetch time
-# (assets-fetch.cmake).
+# (3rdparty-fetch.cmake).
 : "${BROTLI_QUALITY:=11}"
 echo "==> brotli alpine-rootfs.img (quality $BROTLI_QUALITY)"
 in_size="$(stat -c%s "$IMG" 2>/dev/null || stat -f%z "$IMG")"

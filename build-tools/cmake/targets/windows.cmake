@@ -2,7 +2,7 @@
 
 # RISC-V emulator integrations on Windows. Both enabled.
 # - qemu:    uses the locally-built binary from build-windows-minimal/
-#            (see assets-fetch.cmake::assets_fetch_qemu's WIN32 branch).
+#            (see 3rdparty-fetch.cmake / qemu/_build.sh windows path).
 # - tinyemu: ported to Win32. SLIRP user-mode networking is left out for now
 #            (16 files of POSIX socket code) — see tinyemu.cmake's WIN32 branch.
 set(YETTY_ENABLE_LIB_TINYEMU ON CACHE BOOL "" FORCE)

@@ -198,14 +198,22 @@ function(qemu_embed_runtime TARGET)
     endif()
 
     set(_STAGING "${CMAKE_BINARY_DIR}/incbin-qemu")
-    set(_BIN "${QEMU_OUTPUT_DIR}/qemu-system-riscv64")
-
     file(MAKE_DIRECTORY "${_STAGING}")
 
-    if(EXISTS "${_BIN}")
+    # Source: prefer the prebuilt 3rdparty fetch; fall back to the
+    # legacy from-source QEMU_OUTPUT_DIR if a developer kept that path.
+    if(DEFINED YETTY_3RDPARTY_qemu_DIR AND IS_DIRECTORY "${YETTY_3RDPARTY_qemu_DIR}")
+        set(_BIN "${YETTY_3RDPARTY_qemu_DIR}/qemu-system-riscv64")
+    elseif(DEFINED QEMU_OUTPUT_DIR)
+        set(_BIN "${QEMU_OUTPUT_DIR}/qemu-system-riscv64")
+    else()
+        set(_BIN "")
+    endif()
+
+    if(_BIN AND EXISTS "${_BIN}")
         file(COPY "${_BIN}" DESTINATION "${_STAGING}")
     else()
-        message(WARNING "qemu_embed_runtime: ${_BIN} not found; QEMU will be embedded empty")
+        message(WARNING "qemu_embed_runtime: qemu-system-riscv64 not found at '${_BIN}'; QEMU will be embedded empty")
     endif()
 
     # Not compressed — it's an executable, runtime extracts and chmods it

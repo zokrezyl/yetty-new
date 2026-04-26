@@ -14,7 +14,12 @@
 
 set -euo pipefail
 
-: "${VERSION:?VERSION is required}"
+# Version is read from ./version file — single source of truth (matches
+# the lib-<name>-<version> tag pushed via build-tools/push-3rdparty-tag.sh).
+VERSION_FILE="$(dirname "$0")/version"
+[ -f "$VERSION_FILE" ] || { echo "missing $VERSION_FILE" >&2; exit 1; }
+VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+[ -n "$VERSION" ] || { echo "$VERSION_FILE is empty" >&2; exit 1; }
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
 WORK_DIR="${WORK_DIR:-/tmp/yetty-asset-opensbi}"
 OPENSBI_VERSION="${OPENSBI_VERSION:-1.4}"
@@ -59,7 +64,7 @@ mkdir -p "$STAGE"
 
 # Brotli q11 — embed pipeline picks them up pre-compressed; runtime
 # path mode (tinyemu_copy_runtime_to_bundle) gets a decompressed copy
-# side-by-side at consumer-side fetch time (assets-fetch.cmake).
+# side-by-side at consumer-side fetch time (3rdparty-fetch.cmake).
 : "${BROTLI_QUALITY:=11}"
 echo "==> brotli opensbi binaries (quality $BROTLI_QUALITY)"
 for src_dst in \
