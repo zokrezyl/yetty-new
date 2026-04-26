@@ -78,7 +78,9 @@ target_compile_definitions(yetty PRIVATE
     YETTY_HAS_VNC=1
 )
 
-target_include_directories(yetty PRIVATE ${ytrace_SOURCE_DIR}/include ${spdlog_SOURCE_DIR}/include)
+# (removed dead `${ytrace_SOURCE_DIR}/include ${spdlog_SOURCE_DIR}/include`
+# — neither external lib is used by yetty's C source; the C ytrace impl
+# is in src/yetty/ytrace.c.)
 
 target_link_options(yetty PRIVATE
     -sUSE_GLFW=3

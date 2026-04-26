@@ -270,12 +270,23 @@ function(incbin_add_directory TARGET PREFIX DIR)
 ")
         foreach(FILE ${FILES})
             file(RELATIVE_PATH REL_PATH "${DIR}" "${FILE}")
+            # Strip .br suffix from in-binary asset name so consumers
+            # look up the logical name, regardless of pre-compression.
+            set(_PRECOMPRESSED FALSE)
+            if(REL_PATH MATCHES "\\.br$")
+                set(_PRECOMPRESSED TRUE)
+                string(REGEX REPLACE "\\.br$" "" REL_PATH "${REL_PATH}")
+            endif()
             string(REPLACE "/" "_" SAFE_NAME "${REL_PATH}")
             string(REPLACE "." "_" SAFE_NAME "${SAFE_NAME}")
             string(REPLACE "-" "_" SAFE_NAME "${SAFE_NAME}")
             set(SYMBOL_NAME "${PREFIX_SAFE}_${SAFE_NAME}")
             set(ASSET_NAME "${PREFIX}/${REL_PATH}")
-            list(APPEND MANIFEST_ENTRIES "${SYMBOL_NAME}|${ASSET_NAME}|0")
+            if(_PRECOMPRESSED)
+                list(APPEND MANIFEST_ENTRIES "${SYMBOL_NAME}|${ASSET_NAME}|1")
+            else()
+                list(APPEND MANIFEST_ENTRIES "${SYMBOL_NAME}|${ASSET_NAME}|0")
+            endif()
 
             file(APPEND ${RESOURCE_SOURCE}
 "const unsigned char g${SYMBOL_NAME}Data[] = {0};
@@ -292,13 +303,24 @@ const unsigned int g${SYMBOL_NAME}Size = 0;
 
         foreach(FILE ${FILES})
             file(RELATIVE_PATH REL_PATH "${DIR}" "${FILE}")
+            # Pre-compressed input: strip .br from REL_PATH so symbol +
+            # asset name match the logical filename. Bytes are embedded
+            # as-is.
+            set(_PRECOMPRESSED FALSE)
+            if(REL_PATH MATCHES "\\.br$")
+                set(_PRECOMPRESSED TRUE)
+                string(REGEX REPLACE "\\.br$" "" REL_PATH "${REL_PATH}")
+            endif()
             string(REPLACE "/" "_" SAFE_NAME "${REL_PATH}")
             string(REPLACE "." "_" SAFE_NAME "${SAFE_NAME}")
             string(REPLACE "-" "_" SAFE_NAME "${SAFE_NAME}")
             set(SYMBOL_NAME "${PREFIX_SAFE}_${SAFE_NAME}")
             set(ASSET_NAME "${PREFIX}/${REL_PATH}")
 
-            if(COMPRESS)
+            if(_PRECOMPRESSED)
+                file(APPEND ${INCBIN_INPUT} "INCBIN(${SYMBOL_NAME}, \"${FILE}\");\n")
+                list(APPEND MANIFEST_ENTRIES "${SYMBOL_NAME}|${ASSET_NAME}|1")
+            elseif(COMPRESS)
                 get_filename_component(FILE_NAME "${FILE}" NAME)
                 set(COMPRESSED_FILE "${COMPRESSED_DIR}/${FILE_NAME}.br")
                 execute_process(
@@ -336,6 +358,9 @@ extern \"C\" {
 ")
         foreach(FILE ${FILES})
             file(RELATIVE_PATH REL_PATH "${DIR}" "${FILE}")
+            # Match the .br stripping done in the matching INCBIN loop
+            # above so the symbol names line up.
+            string(REGEX REPLACE "\\.br$" "" REL_PATH "${REL_PATH}")
             string(REPLACE "/" "_" SAFE_NAME "${REL_PATH}")
             string(REPLACE "." "_" SAFE_NAME "${SAFE_NAME}")
             string(REPLACE "-" "_" SAFE_NAME "${SAFE_NAME}")
@@ -362,14 +387,24 @@ extern const unsigned int g${SYMBOL_NAME}Size;
 ")
         foreach(FILE ${FILES})
             file(RELATIVE_PATH REL_PATH "${DIR}" "${FILE}")
+            # Pre-compressed input: strip .br from REL_PATH so symbol +
+            # asset name match the logical filename. Bytes embedded as-is.
+            set(_PRECOMPRESSED FALSE)
+            if(REL_PATH MATCHES "\\.br$")
+                set(_PRECOMPRESSED TRUE)
+                string(REGEX REPLACE "\\.br$" "" REL_PATH "${REL_PATH}")
+            endif()
             string(REPLACE "/" "_" SAFE_NAME "${REL_PATH}")
             string(REPLACE "." "_" SAFE_NAME "${SAFE_NAME}")
             string(REPLACE "-" "_" SAFE_NAME "${SAFE_NAME}")
             set(SYMBOL_NAME "${PREFIX_SAFE}_${SAFE_NAME}")
             set(ASSET_NAME "${PREFIX}/${REL_PATH}")
 
-            # Compress file if requested
-            if(COMPRESS)
+            if(_PRECOMPRESSED)
+                file(APPEND ${RESOURCE_SOURCE} "INCBIN(${SYMBOL_NAME}, \"${FILE}\");\n")
+                list(APPEND MANIFEST_ENTRIES "${SYMBOL_NAME}|${ASSET_NAME}|1")
+                message(STATUS "incbin: Embed pre-compressed ${ASSET_NAME}")
+            elseif(COMPRESS)
                 get_filename_component(FILE_NAME "${FILE}" NAME)
                 set(COMPRESSED_FILE "${COMPRESSED_DIR}/${FILE_NAME}.br")
                 execute_process(

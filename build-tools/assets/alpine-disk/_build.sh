@@ -11,8 +11,8 @@
 #   VERSION         required — used in output filename
 #   OUTPUT_DIR      required — where to place the tarball
 #   WORK_DIR        optional — intermediate build tree (default: /tmp/yetty-asset-alpine-disk)
-#   ALPINE_VERSION  optional — alpine minor (default: 3.21)
-#   ALPINE_RELEASE  optional — alpine full  (default: 3.21.7)
+#   ALPINE_VERSION  optional — alpine minor (default: 3.23)
+#   ALPINE_RELEASE  optional — alpine full  (default: 3.23.4)
 #   ALPINE_ARCH     optional — alpine arch  (default: riscv64)
 #
 # Needs: curl, tar, gzip, e2fsprogs, util-linux, and passwordless sudo
@@ -25,8 +25,8 @@ set -euo pipefail
 : "${OUTPUT_DIR:?OUTPUT_DIR is required}"
 
 WORK_DIR="${WORK_DIR:-/tmp/yetty-asset-alpine-disk}"
-ALPINE_VERSION="${ALPINE_VERSION:-3.21}"
-ALPINE_RELEASE="${ALPINE_RELEASE:-3.21.7}"
+ALPINE_VERSION="${ALPINE_VERSION:-3.23}"
+ALPINE_RELEASE="${ALPINE_RELEASE:-3.23.4}"
 ALPINE_ARCH="${ALPINE_ARCH:-riscv64}"
 
 ALPINE_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/${ALPINE_ARCH}/alpine-minirootfs-${ALPINE_RELEASE}-${ALPINE_ARCH}.tar.gz"
@@ -119,7 +119,20 @@ LOOP_DEV=""
 STAGE="$WORK_DIR/stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
-cp "$IMG" "$STAGE/alpine-rootfs.img"
+
+# Brotli q11 the rootfs image — this is the biggest single asset; raw
+# ext4 is highly compressible (~5-10x) so the binary-size saving is
+# substantial. Embed pipeline picks the .br up pre-compressed; runtime
+# path mode gets a decompressed copy at consumer-side fetch time
+# (assets-fetch.cmake).
+: "${BROTLI_QUALITY:=11}"
+echo "==> brotli alpine-rootfs.img (quality $BROTLI_QUALITY)"
+in_size="$(stat -c%s "$IMG" 2>/dev/null || stat -f%z "$IMG")"
+brotli -q "$BROTLI_QUALITY" -f -o "$STAGE/alpine-rootfs.img.br" "$IMG"
+out_size="$(stat -c%s "$STAGE/alpine-rootfs.img.br" 2>/dev/null || stat -f%z "$STAGE/alpine-rootfs.img.br")"
+printf "    alpine-rootfs.img  %10d -> %10d bytes (%.1f%%)\n" \
+    "$in_size" "$out_size" \
+    "$(awk -v a="$out_size" -v b="$in_size" 'BEGIN{printf "%.1f", a/b*100}')"
 
 OUT_TARBALL="$OUTPUT_DIR/alpine-disk-${VERSION}.tar.gz"
 echo "==> packaging -> $OUT_TARBALL"

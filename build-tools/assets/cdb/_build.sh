@@ -70,7 +70,9 @@ fi
 # Brotli-compress each CDB into the stage. The main build's incbin
 # pipeline embeds these verbatim and decompresses at runtime (same
 # scheme used by build-tools/cmake/incbin.cmake with COMPRESS=TRUE).
-: "${BROTLI_QUALITY:=6}"
+# q11 = max compression. CI runs once per release; runtime decompresses
+# in-binary at startup, so producer-side cost is amortised forever.
+: "${BROTLI_QUALITY:=11}"
 for cdb in "$RAW_DIR"/*.cdb; do
     name="$(basename "$cdb")"
     in_size="$(stat -c%s "$cdb" 2>/dev/null || stat -f%z "$cdb")"

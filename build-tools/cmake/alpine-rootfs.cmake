@@ -9,8 +9,8 @@
 include_guard(GLOBAL)
 
 # Version
-set(ALPINE_VERSION "3.21" CACHE STRING "Alpine Linux version")
-set(ALPINE_RELEASE "3.21.7" CACHE STRING "Alpine Linux release")
+set(ALPINE_VERSION "3.23" CACHE STRING "Alpine Linux version")
+set(ALPINE_RELEASE "3.23.4" CACHE STRING "Alpine Linux release")
 
 # URL
 set(ALPINE_URL "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/releases/riscv64/alpine-minirootfs-${ALPINE_RELEASE}-riscv64.tar.gz")

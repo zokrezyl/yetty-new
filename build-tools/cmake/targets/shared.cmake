@@ -226,7 +226,9 @@ if(YETTY_ENABLE_LIB_VTERM)
     list(APPEND YETTY_LIBS vterm)
 endif()
 if(YETTY_ENABLE_LIB_MSGPACK)
-    list(APPEND YETTY_LIBS msgpack-cxx)
+    # yetty's only msgpack consumer (yrpc) uses the C API → link the static
+    # C library. The C++ msgpack-cxx target was dropped — see msgpack.cmake.
+    list(APPEND YETTY_LIBS msgpack-c)
 endif()
 if(YETTY_ENABLE_LIB_MSDFGEN)
     list(APPEND YETTY_LIBS msdfgen::msdfgen-core msdfgen::msdfgen-ext ${FREETYPE_ALL_LIBS} ${BROTLIDEC_LIBRARIES})
@@ -352,8 +354,10 @@ function(yetty_embed_assets TARGET)
         file(COPY "${FONT_FILE}" DESTINATION "${INCBIN_DATA_DIR}/fonts")
     endforeach()
 
-    # Copy msdf-fonts (generated at configure time)
-    file(GLOB MSDF_FILES "${CMAKE_BINARY_DIR}/assets/msdf-fonts/*.cdb")
+    # Copy msdf-fonts (assets shipped pre-brotli'd as *.cdb.br; incbin's
+    # already-compressed path embeds the bytes as-is and strips .br from
+    # the in-binary asset name).
+    file(GLOB MSDF_FILES "${CMAKE_BINARY_DIR}/assets/msdf-fonts/*.cdb.br")
     foreach(MSDF_FILE ${MSDF_FILES})
         file(COPY "${MSDF_FILE}" DESTINATION "${INCBIN_DATA_DIR}/msdf-fonts")
     endforeach()
@@ -387,20 +391,20 @@ function(yetty_embed_assets TARGET)
         file(REMOVE_RECURSE "${INCBIN_YEMU_DIR}")
         file(MAKE_DIRECTORY "${INCBIN_YEMU_DIR}")
 
-        if(EXISTS "${YEMU_ASSETS_DIR}/kernel-riscv64.bin")
-            file(COPY "${YEMU_ASSETS_DIR}/kernel-riscv64.bin" DESTINATION "${INCBIN_YEMU_DIR}")
-        endif()
-        if(EXISTS "${YEMU_ASSETS_DIR}/opensbi-fw_jump.elf")
-            file(COPY "${YEMU_ASSETS_DIR}/opensbi-fw_jump.elf" DESTINATION "${INCBIN_YEMU_DIR}")
-        endif()
-        if(EXISTS "${YEMU_ASSETS_DIR}/opensbi-fw_dynamic.bin")
-            file(COPY "${YEMU_ASSETS_DIR}/opensbi-fw_dynamic.bin" DESTINATION "${INCBIN_YEMU_DIR}")
-        endif()
-
-        # Raw ext4 image — embedded as-is, mounted by the guest as virtio-blk.
-        if(EXISTS "${YEMU_ASSETS_DIR}/alpine-rootfs.img")
-            file(COPY "${YEMU_ASSETS_DIR}/alpine-rootfs.img" DESTINATION "${INCBIN_YEMU_DIR}")
-        endif()
+        # Producer ships .br (brotli q11). incbin's already-compressed
+        # path detects the suffix, embeds bytes as-is, strips .br from
+        # the in-binary asset name, marks manifest compressed=1.
+        # Runtime path mode reads the raw files (decompressed by
+        # assets_fetch_yemu) at the same YEMU_ASSETS_DIR — those raw
+        # copies are NOT what we ship into the binary.
+        foreach(_F kernel-riscv64.bin.br
+                   opensbi-fw_jump.elf.br
+                   opensbi-fw_dynamic.bin.br
+                   alpine-rootfs.img.br)
+            if(EXISTS "${YEMU_ASSETS_DIR}/${_F}")
+                file(COPY "${YEMU_ASSETS_DIR}/${_F}" DESTINATION "${INCBIN_YEMU_DIR}")
+            endif()
+        endforeach()
 
         incbin_add_directory(${TARGET} "yemu" "${INCBIN_YEMU_DIR}" "*" FALSE)
     endif()

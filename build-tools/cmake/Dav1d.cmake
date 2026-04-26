@@ -1,211 +1,59 @@
-# dav1d - AV1 video decoder
-# BSD 2-Clause license, VideoLAN project
-# Uses Meson build system, requires meson and ninja
+# dav1d - AV1 video decoder (VideoLAN, BSD 2-Clause).
+#
+# Consumes a prebuilt static lib + headers from the 3rdparty release tarball
+# published by build-3rdparty-dav1d.yml. The from-source build for every
+# yetty target (per-platform meson cross files for android/ios/wasm/win)
+# now lives in build-tools/3rdparty/dav1d/_build.sh — see that script and
+# build-tools/3rdparty/README.md for how to add platforms or bump versions.
 
-include(ExternalProject)
-include(ProcessorCount)
+include_guard(GLOBAL)
+include(${YETTY_ROOT}/build-tools/cmake/3rdparty-fetch.cmake)
 
-ProcessorCount(NPROC)
-if(NPROC EQUAL 0)
-    set(NPROC 4)
+if(TARGET dav1d)
+    return()
 endif()
 
-set(DAV1D_VERSION "1.5.0")
+yetty_3rdparty_fetch(dav1d _DAV1D_DIR)
 
-# Download dav1d source
-CPMAddPackage(
-    NAME dav1d
-    URL https://code.videolan.org/videolan/dav1d/-/archive/${DAV1D_VERSION}/dav1d-${DAV1D_VERSION}.tar.gz
-    DOWNLOAD_ONLY YES
+# Tarball layout: lib/libdav1d.a (or lib/dav1d.lib on windows) + include/dav1d/dav1d.h
+if(WIN32)
+    set(_DAV1D_LIB_NAME "dav1d.lib")
+else()
+    set(_DAV1D_LIB_NAME "libdav1d.a")
+endif()
+
+set(_DAV1D_LIB_PATH "${_DAV1D_DIR}/lib/${_DAV1D_LIB_NAME}")
+# meson on windows can also install as libdav1d.a — accept either.
+if(NOT EXISTS "${_DAV1D_LIB_PATH}" AND EXISTS "${_DAV1D_DIR}/lib/libdav1d.a")
+    set(_DAV1D_LIB_PATH "${_DAV1D_DIR}/lib/libdav1d.a")
+endif()
+set(_DAV1D_INCLUDE_DIR "${_DAV1D_DIR}/include")
+
+if(NOT EXISTS "${_DAV1D_LIB_PATH}")
+    message(FATAL_ERROR
+        "dav1d: library not found at ${_DAV1D_LIB_PATH} — \
+tarball layout changed? (check build-tools/3rdparty/dav1d/_build.sh)")
+endif()
+if(NOT EXISTS "${_DAV1D_INCLUDE_DIR}/dav1d/dav1d.h")
+    message(FATAL_ERROR
+        "dav1d: dav1d.h not found in ${_DAV1D_INCLUDE_DIR}/dav1d/ — \
+tarball layout changed?")
+endif()
+
+add_library(dav1d STATIC IMPORTED GLOBAL)
+set_target_properties(dav1d PROPERTIES
+    IMPORTED_LOCATION "${_DAV1D_LIB_PATH}"
+    INTERFACE_INCLUDE_DIRECTORIES "${_DAV1D_INCLUDE_DIR}"
 )
 
-if(dav1d_ADDED)
-    set(DAV1D_INSTALL_DIR "${CMAKE_BINARY_DIR}/_deps/dav1d-install")
-    set(DAV1D_BUILD_DIR "${CMAKE_BINARY_DIR}/_deps/dav1d-build")
-
-    # Platform-specific library name
-    # Meson always produces libdav1d.a on all platforms (even Windows with MSVC)
-    set(DAV1D_LIB_NAME "libdav1d.a")
-
-    # Platform-specific cross-compilation setup
-    if(ANDROID)
-        # Map Android ABI to meson cpu/cpu_family
-        if(ANDROID_ABI STREQUAL "arm64-v8a")
-            set(DAV1D_CPU "aarch64")
-            set(DAV1D_CPU_FAMILY "aarch64")
-        elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
-            set(DAV1D_CPU "armv7")
-            set(DAV1D_CPU_FAMILY "arm")
-        elseif(ANDROID_ABI STREQUAL "x86_64")
-            set(DAV1D_CPU "x86_64")
-            set(DAV1D_CPU_FAMILY "x86_64")
-        elseif(ANDROID_ABI STREQUAL "x86")
-            set(DAV1D_CPU "i686")
-            set(DAV1D_CPU_FAMILY "x86")
-        endif()
-
-        # Generate meson cross file for Android
-        set(DAV1D_CROSS_FILE "${CMAKE_BINARY_DIR}/_deps/dav1d-android-cross.txt")
-        file(WRITE ${DAV1D_CROSS_FILE}
-"[binaries]
-c = '${CMAKE_C_COMPILER}'
-cpp = '${CMAKE_CXX_COMPILER}'
-ar = '${CMAKE_AR}'
-strip = '${CMAKE_STRIP}'
-
-[built-in options]
-c_args = ['-DANDROID', '-fPIC', '--target=${ANDROID_LLVM_TRIPLE}', '--sysroot=${CMAKE_SYSROOT}']
-c_link_args = ['--target=${ANDROID_LLVM_TRIPLE}', '--sysroot=${CMAKE_SYSROOT}']
-cpp_args = ['-DANDROID', '-fPIC', '--target=${ANDROID_LLVM_TRIPLE}', '--sysroot=${CMAKE_SYSROOT}']
-cpp_link_args = ['--target=${ANDROID_LLVM_TRIPLE}', '--sysroot=${CMAKE_SYSROOT}']
-
-[host_machine]
-system = 'android'
-cpu_family = '${DAV1D_CPU_FAMILY}'
-cpu = '${DAV1D_CPU}'
-endian = 'little'
-")
-        set(DAV1D_CROSS_ARGS --cross-file ${DAV1D_CROSS_FILE})
-    elseif(EMSCRIPTEN)
-        # Generate meson cross file for Emscripten/WebAssembly
-        set(DAV1D_CROSS_FILE "${CMAKE_BINARY_DIR}/_deps/dav1d-emscripten-cross.txt")
-        file(WRITE ${DAV1D_CROSS_FILE}
-"[binaries]
-c = 'emcc'
-cpp = 'em++'
-ar = 'emar'
-strip = 'emstrip'
-
-[built-in options]
-c_args = ['-fPIC', '-pthread']
-c_link_args = ['-pthread']
-
-[host_machine]
-system = 'emscripten'
-cpu_family = 'wasm32'
-cpu = 'wasm32'
-endian = 'little'
-")
-        set(DAV1D_CROSS_ARGS --cross-file ${DAV1D_CROSS_FILE})
-        # Disable ASM for WebAssembly
-        set(DAV1D_EXTRA_ARGS -Denable_asm=false)
-    elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-        # iOS cross-compilation
-        if(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
-            set(DAV1D_CPU "aarch64")
-            set(DAV1D_CPU_FAMILY "aarch64")
-        elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
-            set(DAV1D_CPU "x86_64")
-            set(DAV1D_CPU_FAMILY "x86_64")
-        endif()
-
-        # Determine iOS platform type for -m flag
-        if(CMAKE_OSX_SYSROOT MATCHES "iphonesimulator" OR CMAKE_OSX_SYSROOT MATCHES "Simulator")
-            set(DAV1D_IOS_VERSION_FLAG "-mios-simulator-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-        else()
-            set(DAV1D_IOS_VERSION_FLAG "-miphoneos-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-        endif()
-
-        # Generate meson cross file for iOS
-        set(DAV1D_CROSS_FILE "${CMAKE_BINARY_DIR}/_deps/dav1d-ios-cross.txt")
-        file(WRITE ${DAV1D_CROSS_FILE}
-"[binaries]
-c = '/usr/bin/clang'
-cpp = '/usr/bin/clang++'
-ar = '/usr/bin/ar'
-strip = '/usr/bin/strip'
-
-[built-in options]
-c_args = ['-arch', '${CMAKE_OSX_ARCHITECTURES}', '-isysroot', '${CMAKE_OSX_SYSROOT}', '${DAV1D_IOS_VERSION_FLAG}']
-c_link_args = ['-arch', '${CMAKE_OSX_ARCHITECTURES}', '-isysroot', '${CMAKE_OSX_SYSROOT}']
-cpp_args = ['-arch', '${CMAKE_OSX_ARCHITECTURES}', '-isysroot', '${CMAKE_OSX_SYSROOT}', '${DAV1D_IOS_VERSION_FLAG}']
-cpp_link_args = ['-arch', '${CMAKE_OSX_ARCHITECTURES}', '-isysroot', '${CMAKE_OSX_SYSROOT}']
-
-[host_machine]
-system = 'darwin'
-cpu_family = '${DAV1D_CPU_FAMILY}'
-cpu = '${DAV1D_CPU}'
-endian = 'little'
-")
-        set(DAV1D_CROSS_ARGS --cross-file ${DAV1D_CROSS_FILE})
-        # Disable ASM for iOS (meson NASM integration problematic with cross-compilation)
-        set(DAV1D_EXTRA_ARGS -Denable_asm=false)
-    elseif(WIN32)
-        # Windows: use native file to ensure MSVC is used
-        set(DAV1D_CROSS_FILE "${CMAKE_BINARY_DIR}/_deps/dav1d-windows-native.txt")
-        file(WRITE ${DAV1D_CROSS_FILE}
-"[binaries]
-c = 'cl'
-cpp = 'cl'
-ar = 'lib'
-
-[built-in options]
-c_args = []
-cpp_args = []
-")
-        set(DAV1D_CROSS_ARGS --native-file ${DAV1D_CROSS_FILE})
-        set(DAV1D_EXTRA_ARGS "")
-    else()
-        set(DAV1D_CROSS_ARGS "")
-        set(DAV1D_EXTRA_ARGS "")
-    endif()
-
-    # iOS needs archive fix after install (meson uses GNU ar which creates incompatible archives)
-    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-        set(DAV1D_INSTALL_COMMAND
-            ninja -C ${DAV1D_BUILD_DIR} install
-            COMMAND sh -c "xcrun libtool -static -o ${DAV1D_INSTALL_DIR}/lib/libdav1d_fixed.a ${DAV1D_BUILD_DIR}/src/libdav1d.a.p/*.o ${DAV1D_BUILD_DIR}/src/libdav1d_bitdepth_8.a.p/*.o ${DAV1D_BUILD_DIR}/src/libdav1d_bitdepth_16.a.p/*.o && mv ${DAV1D_INSTALL_DIR}/lib/libdav1d_fixed.a ${DAV1D_INSTALL_DIR}/lib/libdav1d.a"
-        )
-    else()
-        set(DAV1D_INSTALL_COMMAND ninja -C ${DAV1D_BUILD_DIR} install)
-    endif()
-
-    # Build dav1d using meson + ninja
-    ExternalProject_Add(dav1d_ext
-        SOURCE_DIR ${dav1d_SOURCE_DIR}
-        BINARY_DIR ${DAV1D_BUILD_DIR}
-        INSTALL_DIR ${DAV1D_INSTALL_DIR}
-
-        UPDATE_DISCONNECTED TRUE
-
-        CONFIGURE_COMMAND
-            meson setup ${dav1d_SOURCE_DIR} ${DAV1D_BUILD_DIR}
-            --prefix=${DAV1D_INSTALL_DIR}
-            --libdir=lib
-            --default-library=static
-            --buildtype=release
-            -Denable_tools=false
-            -Denable_tests=false
-            -Denable_examples=false
-            ${DAV1D_EXTRA_ARGS}
-            ${DAV1D_CROSS_ARGS}
-
-        BUILD_COMMAND ninja -C ${DAV1D_BUILD_DIR} -j${NPROC}
-        INSTALL_COMMAND ${DAV1D_INSTALL_COMMAND}
-
-        BUILD_BYPRODUCTS
-            ${DAV1D_INSTALL_DIR}/lib/${DAV1D_LIB_NAME}
-            ${DAV1D_INSTALL_DIR}/include/dav1d/dav1d.h
-    )
-
-    # Pre-create include dir for CMake validation
-    file(MAKE_DIRECTORY ${DAV1D_INSTALL_DIR}/include)
-
-    # Create imported static library target
-    add_library(dav1d STATIC IMPORTED GLOBAL)
+# Match the link-deps the from-source build set up:
+#   - Linux (glibc): pthreads + libdl
+#   - everywhere else: nothing extra (Apple/Android/Windows/wasm toolchain handles it)
+if(UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN)
+    find_package(Threads REQUIRED)
     set_target_properties(dav1d PROPERTIES
-        IMPORTED_LOCATION ${DAV1D_INSTALL_DIR}/lib/${DAV1D_LIB_NAME}
-        INTERFACE_INCLUDE_DIRECTORIES ${DAV1D_INSTALL_DIR}/include
+        INTERFACE_LINK_LIBRARIES "Threads::Threads;${CMAKE_DL_LIBS}"
     )
-    add_dependencies(dav1d dav1d_ext)
-
-    # On Unix, dav1d may need pthreads and libdl
-    if(UNIX AND NOT APPLE)
-        find_package(Threads REQUIRED)
-        set_target_properties(dav1d PROPERTIES
-            INTERFACE_LINK_LIBRARIES "Threads::Threads;${CMAKE_DL_LIBS}"
-        )
-    endif()
-
-    message(STATUS "dav1d: Built from source v${DAV1D_VERSION}")
 endif()
+
+message(STATUS "dav1d: prebuilt v${YETTY_3RDPARTY_dav1d_VERSION} (${_DAV1D_LIB_PATH})")
