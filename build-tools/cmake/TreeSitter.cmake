@@ -1,93 +1,57 @@
-# Tree-sitter core library - download tarball instead of cloning
-CPMAddPackage(
-    NAME tree-sitter
-    URL https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.26.5.tar.gz
-    DOWNLOAD_ONLY YES
-)
+# tree-sitter — core lib + 15 grammars. Consumes the prebuilt bundle
+# tarball published by build-3rdparty-tree-sitter.yml. The from-source
+# build (download core + 15 grammar tarballs, compile each per target)
+# now lives in build-tools/3rdparty/tree-sitter/_build.sh.
+#
+# Exposed targets (matched to what build-tools/cmake/TreeSitter.cmake
+# previously created):
+#   tree-sitter-core         imported static (lib/src/lib.c)
+#   ts-grammar-<name>        imported static (parser.c [+scanner.{c,cc}])
+# Plus the per-grammar TS_QUERIES_DIR_<name> cache vars pointing at the
+# packaged queries dir.
 
-if(tree-sitter_ADDED)
-    add_library(tree-sitter-core STATIC
-        ${tree-sitter_SOURCE_DIR}/lib/src/lib.c
-    )
-    target_include_directories(tree-sitter-core
-        PUBLIC  ${tree-sitter_SOURCE_DIR}/lib/include
-        PRIVATE ${tree-sitter_SOURCE_DIR}/lib/src
-    )
-    set_target_properties(tree-sitter-core PROPERTIES C_STANDARD 11)
+include_guard(GLOBAL)
+include(${YETTY_ROOT}/build-tools/cmake/3rdparty-fetch.cmake)
+
+if(TARGET tree-sitter-core)
+    return()
 endif()
 
-# ─── Helper: add a tree-sitter grammar ──────────────────────────────────────
-# Usage: add_ts_grammar(NAME c REPO tree-sitter/tree-sitter-c TAG v0.24.1)
-#        add_ts_grammar(NAME cpp REPO tree-sitter/tree-sitter-cpp TAG v0.23.4 SCANNER)
-#        add_ts_grammar(NAME xml ... SUBDIR xml QUERIES_SUBDIR xml)
-#        add_ts_grammar(NAME markdown ... SUBDIR tree-sitter-md QUERIES_DIR tree-sitter-md/queries)
-#
-# SUBDIR: subdirectory under the repo root that holds src/parser.c etc.
-# QUERIES_SUBDIR: subdirectory under queries/ (queries/${QUERIES_SUBDIR}/highlights.scm)
-# QUERIES_DIR: full relative path overriding QUERIES_SUBDIR (for layouts like
-#              tree-sitter-markdown where queries live inside the SUBDIR)
-#
-# Downloads release tarballs instead of cloning git repos for faster builds.
-function(add_ts_grammar)
-    cmake_parse_arguments(G "SCANNER" "NAME;REPO;TAG;SUBDIR;QUERIES_SUBDIR;QUERIES_DIR" "" ${ARGN})
+yetty_3rdparty_fetch(tree-sitter _TS_DIR)
 
-    # Download tarball from GitHub releases instead of git clone
-    CPMAddPackage(
-        NAME tree-sitter-${G_NAME}
-        URL https://github.com/${G_REPO}/archive/refs/tags/${G_TAG}.tar.gz
-        DOWNLOAD_ONLY YES
+# Core
+set(_TS_CORE_LIB "${_TS_DIR}/lib/libtree-sitter-core.a")
+if(NOT EXISTS "${_TS_CORE_LIB}")
+    message(FATAL_ERROR
+        "tree-sitter: prebuilt core lib not found: ${_TS_CORE_LIB} — \
+tarball layout changed? (check build-tools/3rdparty/tree-sitter/_build.sh)")
+endif()
+add_library(tree-sitter-core STATIC IMPORTED GLOBAL)
+set_target_properties(tree-sitter-core PROPERTIES
+    IMPORTED_LOCATION "${_TS_CORE_LIB}"
+    INTERFACE_INCLUDE_DIRECTORIES "${_TS_DIR}/include"
+)
+
+# Grammars + per-grammar queries dir constants.
+set(_TS_GRAMMARS
+    c cpp python javascript typescript rust go java bash json
+    yaml toml html xml markdown)
+
+foreach(_g ${_TS_GRAMMARS})
+    set(_lib "${_TS_DIR}/lib/libts-grammar-${_g}.a")
+    if(NOT EXISTS "${_lib}")
+        message(FATAL_ERROR
+            "tree-sitter: grammar lib not found: ${_lib} — \
+update GRAMMARS table in _build.sh and bump version")
+    endif()
+    add_library(ts-grammar-${_g} STATIC IMPORTED GLOBAL)
+    set_target_properties(ts-grammar-${_g} PROPERTIES
+        IMPORTED_LOCATION "${_lib}"
     )
+    set(TS_QUERIES_DIR_${_g} "${_TS_DIR}/queries/${_g}"
+        CACHE PATH "Queries dir for tree-sitter-${_g}" FORCE)
+endforeach()
 
-    if(G_SUBDIR)
-        set(SRC_DIR ${tree-sitter-${G_NAME}_SOURCE_DIR}/${G_SUBDIR}/src)
-    else()
-        set(SRC_DIR ${tree-sitter-${G_NAME}_SOURCE_DIR}/src)
-    endif()
-    set(SRCS ${SRC_DIR}/parser.c)
-    if(G_SCANNER)
-        if(EXISTS ${SRC_DIR}/scanner.c)
-            list(APPEND SRCS ${SRC_DIR}/scanner.c)
-        elseif(EXISTS ${SRC_DIR}/scanner.cc)
-            list(APPEND SRCS ${SRC_DIR}/scanner.cc)
-        endif()
-    endif()
-
-    add_library(ts-grammar-${G_NAME} STATIC ${SRCS})
-    target_include_directories(ts-grammar-${G_NAME} PRIVATE
-        ${SRC_DIR}
-        ${tree-sitter_SOURCE_DIR}/lib/include
-    )
-
-    # Export the queries directory path
-    if(G_QUERIES_DIR)
-        set(TS_QUERIES_DIR_${G_NAME} "${tree-sitter-${G_NAME}_SOURCE_DIR}/${G_QUERIES_DIR}"
-            CACHE PATH "Queries dir for tree-sitter-${G_NAME}" FORCE)
-    elseif(G_QUERIES_SUBDIR)
-        set(TS_QUERIES_DIR_${G_NAME} "${tree-sitter-${G_NAME}_SOURCE_DIR}/queries/${G_QUERIES_SUBDIR}"
-            CACHE PATH "Queries dir for tree-sitter-${G_NAME}" FORCE)
-    else()
-        set(TS_QUERIES_DIR_${G_NAME} "${tree-sitter-${G_NAME}_SOURCE_DIR}/queries"
-            CACHE PATH "Queries dir for tree-sitter-${G_NAME}" FORCE)
-    endif()
-endfunction()
-
-# ─── Grammars ───────────────────────────────────────────────────────────────
-add_ts_grammar(NAME c          REPO tree-sitter/tree-sitter-c          TAG v0.24.1)
-add_ts_grammar(NAME cpp        REPO tree-sitter/tree-sitter-cpp        TAG v0.23.4  SCANNER)
-add_ts_grammar(NAME python     REPO tree-sitter/tree-sitter-python     TAG v0.25.0  SCANNER)
-add_ts_grammar(NAME javascript REPO tree-sitter/tree-sitter-javascript TAG v0.25.0  SCANNER)
-add_ts_grammar(NAME typescript REPO tree-sitter/tree-sitter-typescript TAG v0.23.2  SCANNER SUBDIR typescript)
-add_ts_grammar(NAME rust       REPO tree-sitter/tree-sitter-rust       TAG v0.24.0  SCANNER)
-add_ts_grammar(NAME go         REPO tree-sitter/tree-sitter-go         TAG v0.25.0)
-add_ts_grammar(NAME java       REPO tree-sitter/tree-sitter-java       TAG v0.23.5)
-add_ts_grammar(NAME bash       REPO tree-sitter/tree-sitter-bash       TAG v0.25.1  SCANNER)
-add_ts_grammar(NAME json       REPO tree-sitter/tree-sitter-json       TAG v0.24.8)
-add_ts_grammar(NAME yaml       REPO tree-sitter-grammars/tree-sitter-yaml TAG v0.7.2 SCANNER)
-add_ts_grammar(NAME toml       REPO tree-sitter-grammars/tree-sitter-toml TAG v0.7.0 SCANNER)
-add_ts_grammar(NAME html       REPO tree-sitter/tree-sitter-html          TAG v0.23.2 SCANNER)
-add_ts_grammar(NAME xml        REPO tree-sitter-grammars/tree-sitter-xml  TAG v0.7.0  SCANNER SUBDIR xml QUERIES_SUBDIR xml)
-# Markdown: split grammar (block + inline). We wire the block grammar only;
-# it covers headers/emphasis/code/etc. Queries live inside the subdir.
-add_ts_grammar(NAME markdown   REPO tree-sitter-grammars/tree-sitter-markdown TAG v0.4.1 SCANNER
-               SUBDIR tree-sitter-markdown
-               QUERIES_DIR tree-sitter-markdown/queries)
+list(LENGTH _TS_GRAMMARS _TS_GRAMMARS_COUNT)
+message(STATUS "tree-sitter: prebuilt v${YETTY_3RDPARTY_tree-sitter_VERSION} "
+               "(core + ${_TS_GRAMMARS_COUNT} grammars; queries under ${_TS_DIR}/queries)")
