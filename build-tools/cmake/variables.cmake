@@ -22,8 +22,12 @@ option(YETTY_ENABLE_LIB_GLM         "glm — math"                            OF
 option(YETTY_ENABLE_LIB_STB         "stb — image loading"                   OFF)
 option(YETTY_ENABLE_LIB_YAML_CPP    "yaml-cpp — config parsing (C++)"       OFF)
 option(YETTY_ENABLE_LIB_LIBYAML     "libyaml — config parsing (C)"          ON)
-option(YETTY_ENABLE_LIB_SPDLOG      "spdlog — logging backend"              ON)
-option(YETTY_ENABLE_LIB_YTRACE      "ytrace — tracing framework"            ON)
+# spdlog + the upstream zokrezyl/ytrace C++ lib are unused — yetty's own
+# pure-C implementation in src/yetty/ytrace.c (driven by include/yetty/ytrace.h)
+# provides the trace/log macros. Keeping these OFF avoids pulling C++ into
+# the build for nothing.
+option(YETTY_ENABLE_LIB_SPDLOG      "spdlog — logging backend (UNUSED)"     OFF)
+option(YETTY_ENABLE_LIB_YTRACE      "ytrace — external C++ tracing lib (UNUSED)" OFF)
 option(YETTY_ENABLE_LIB_MSGPACK     "msgpack — serialization"               ON)
 option(YETTY_ENABLE_LIB_WEBGPU      "webgpu/dawn — GPU backend"             ON)
 option(YETTY_ENABLE_LIB_VTERM       "libvterm — terminal emulation"          ON)

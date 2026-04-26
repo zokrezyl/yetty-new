@@ -10,8 +10,8 @@
 #   REPO_ROOT       optional — yetty checkout root (default: ../../.. from this script)
 #   WORK_DIR        optional — intermediate build tree (default: /tmp/yetty-asset-linux)
 #   LINUX_VERSION   optional — kernel tag (default: 7.0)
-#   ALPINE_VERSION  optional — alpine minor (default: 3.21)
-#   ALPINE_RELEASE  optional — alpine full (default: 3.21.7)
+#   ALPINE_VERSION  optional — alpine minor (default: 3.23)
+#   ALPINE_RELEASE  optional — alpine full (default: 3.23.4)
 #   CROSS_COMPILE   optional — toolchain prefix (default: riscv64-unknown-linux-gnu-)
 #
 # Hermetic Linux build: needs make, RISC-V cross-toolchain, bc, bison,
@@ -26,8 +26,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="${REPO_ROOT:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 WORK_DIR="${WORK_DIR:-/tmp/yetty-asset-linux}"
 LINUX_VERSION="${LINUX_VERSION:-7.0}"
-ALPINE_VERSION="${ALPINE_VERSION:-3.21}"
-ALPINE_RELEASE="${ALPINE_RELEASE:-3.21.7}"
+ALPINE_VERSION="${ALPINE_VERSION:-3.23}"
+ALPINE_RELEASE="${ALPINE_RELEASE:-3.23.4}"
 CROSS_COMPILE="${CROSS_COMPILE:-riscv64-unknown-linux-gnu-}"
 
 KERNEL_CONFIG="$REPO_ROOT/poc/qemu/configs/linux-kernel-${LINUX_VERSION}.config"
@@ -108,7 +108,19 @@ STAGE="$WORK_DIR/stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
-cp "$KERNEL_IMAGE" "$STAGE/kernel-riscv64.bin"
+# Brotli q11 the kernel — embed pipeline picks it up pre-compressed,
+# avoids a recompress on every yetty configure. Runtime path mode
+# (tinyemu_copy_runtime_to_bundle) gets a decompressed copy side-by-side
+# at consumer-side fetch time (assets-fetch.cmake).
+: "${BROTLI_QUALITY:=11}"
+echo "==> brotli kernel-riscv64.bin (quality $BROTLI_QUALITY)"
+in_size="$(stat -c%s "$KERNEL_IMAGE" 2>/dev/null || stat -f%z "$KERNEL_IMAGE")"
+brotli -q "$BROTLI_QUALITY" -f -o "$STAGE/kernel-riscv64.bin.br" "$KERNEL_IMAGE"
+out_size="$(stat -c%s "$STAGE/kernel-riscv64.bin.br" 2>/dev/null || stat -f%z "$STAGE/kernel-riscv64.bin.br")"
+printf "    kernel-riscv64.bin  %10d -> %10d bytes\n" "$in_size" "$out_size"
+
+# alpine-rootfs/ stays raw — only used by --qemu virtio-9p at runtime,
+# never embedded into the yetty binary, so no compression win.
 # rsync preserves perms/symlinks; skip /dev so device nodes don't leak
 rsync -a --delete --exclude='dev/*' "$ROOTFS_DIR/" "$STAGE/alpine-rootfs/"
 mkdir -p "$STAGE/alpine-rootfs/dev"

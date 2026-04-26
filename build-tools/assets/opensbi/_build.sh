@@ -57,8 +57,20 @@ STAGE="$WORK_DIR/stage"
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
-cp "$FW_JUMP"    "$STAGE/opensbi-fw_jump.elf"
-cp "$FW_DYNAMIC" "$STAGE/opensbi-fw_dynamic.bin"
+# Brotli q11 — embed pipeline picks them up pre-compressed; runtime
+# path mode (tinyemu_copy_runtime_to_bundle) gets a decompressed copy
+# side-by-side at consumer-side fetch time (assets-fetch.cmake).
+: "${BROTLI_QUALITY:=11}"
+echo "==> brotli opensbi binaries (quality $BROTLI_QUALITY)"
+for src_dst in \
+    "$FW_JUMP|opensbi-fw_jump.elf.br" \
+    "$FW_DYNAMIC|opensbi-fw_dynamic.bin.br"; do
+    src="${src_dst%%|*}"; dst="${src_dst##*|}"
+    in_size="$(stat -c%s "$src" 2>/dev/null || stat -f%z "$src")"
+    brotli -q "$BROTLI_QUALITY" -f -o "$STAGE/$dst" "$src"
+    out_size="$(stat -c%s "$STAGE/$dst" 2>/dev/null || stat -f%z "$STAGE/$dst")"
+    printf "    %-30s  %10d -> %10d bytes\n" "$dst" "$in_size" "$out_size"
+done
 
 TARBALL="$OUTPUT_DIR/opensbi-${VERSION}.tar.gz"
 echo "==> packaging -> $TARBALL"

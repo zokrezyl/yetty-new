@@ -174,36 +174,41 @@ endfunction()
 function(assets_fetch_cdb)
     message(STATUS "assets-fetch: cdb-${YETTY_ASSETS_VERSION}")
     _yetty_assets_fetch_one("cdb" "msdf-fonts" ".fetched")
+    # Tarball ships .cdb.br (brotli-pre-compressed at q11). The embed
+    # pipeline (incbin.cmake) detects the .br suffix and embeds the bytes
+    # as-is — no decompress, no recompress. Pure passthrough.
+endfunction()
 
-    # The release tarball ships .cdb.br (brotli-pre-compressed). The rest of
-    # the build globs for *.cdb and lets incbin re-compress, so expand the
-    # .br payloads back to plain .cdb once, after extraction.
-    set(_CDB_DIR "${YETTY_ASSETS_OUTPUT_DIR}/msdf-fonts")
-    set(_EXPAND_STAMP "${_CDB_DIR}/.expanded")
-    if(EXISTS "${_EXPAND_STAMP}")
+# Decompress a single .br file to its raw form alongside, idempotently.
+# Used for assets that need both modes:
+#   - embed pipeline (incbin) reads the .br directly (already-compressed path)
+#   - runtime path mode (tinyemu_copy_runtime_to_bundle) reads the raw file
+function(_yetty_assets_decompress_br BR_FILE)
+    string(REGEX REPLACE "\\.br$" "" _RAW "${BR_FILE}")
+    if(EXISTS "${_RAW}" AND EXISTS "${BR_FILE}")
+        # Already decompressed; check timestamp to allow re-run after a
+        # fresh download.
+        file(TIMESTAMP "${BR_FILE}"  _T_BR)
+        file(TIMESTAMP "${_RAW}"     _T_RAW)
+        if(_T_RAW STREQUAL _T_BR OR NOT _T_RAW STRLESS _T_BR)
+            return()
+        endif()
+    endif()
+    if(NOT EXISTS "${BR_FILE}")
         return()
     endif()
-
     find_program(BROTLI_EXECUTABLE brotli)
     if(NOT BROTLI_EXECUTABLE)
         message(FATAL_ERROR
-            "assets-fetch: brotli not found; needed to expand prebuilt .cdb.br files")
+            "assets-fetch: brotli not found; needed to decompress ${BR_FILE}")
     endif()
-
-    file(GLOB _BR_FILES "${_CDB_DIR}/*.cdb.br")
-    foreach(_BR ${_BR_FILES})
-        string(REGEX REPLACE "\\.br$" "" _OUT "${_BR}")
-        execute_process(
-            COMMAND "${BROTLI_EXECUTABLE}" -d -f -o "${_OUT}" "${_BR}"
-            RESULT_VARIABLE _R
-        )
-        if(NOT _R EQUAL 0)
-            message(FATAL_ERROR "assets-fetch: failed to decompress ${_BR}")
-        endif()
-        file(REMOVE "${_BR}")
-    endforeach()
-
-    file(WRITE "${_EXPAND_STAMP}" "${YETTY_ASSETS_VERSION}\n")
+    execute_process(
+        COMMAND "${BROTLI_EXECUTABLE}" -d -f -o "${_RAW}" "${BR_FILE}"
+        RESULT_VARIABLE _R
+    )
+    if(NOT _R EQUAL 0)
+        message(FATAL_ERROR "assets-fetch: failed to decompress ${BR_FILE}")
+    endif()
 endfunction()
 
 function(assets_fetch_yemu)
@@ -214,17 +219,27 @@ function(assets_fetch_yemu)
     message(STATUS "assets-fetch: alpine-disk-${YETTY_ASSETS_VERSION}")
     _yetty_assets_fetch_one("alpine-disk" "yemu" ".fetched-alpine-disk")
 
+    # Producer ships .br only (q11). Decompress side-by-side here so
+    # runtime path mode (tinyemu_copy_runtime_to_bundle, verify-assets)
+    # finds the raw files. Embed pipeline picks the .br directly via
+    # incbin's already-compressed path.
+    set(_YEMU "${YETTY_ASSETS_OUTPUT_DIR}/yemu")
+    _yetty_assets_decompress_br("${_YEMU}/opensbi-fw_jump.elf.br")
+    _yetty_assets_decompress_br("${_YEMU}/opensbi-fw_dynamic.bin.br")
+    _yetty_assets_decompress_br("${_YEMU}/kernel-riscv64.bin.br")
+    _yetty_assets_decompress_br("${_YEMU}/alpine-rootfs.img.br")
+
     set(TINYEMU_OPENSBI_PATH
-        "${YETTY_ASSETS_OUTPUT_DIR}/yemu/opensbi-fw_jump.elf"
+        "${_YEMU}/opensbi-fw_jump.elf"
         CACHE FILEPATH "" FORCE)
     set(QEMU_OPENSBI_PATH
-        "${YETTY_ASSETS_OUTPUT_DIR}/yemu/opensbi-fw_dynamic.bin"
+        "${_YEMU}/opensbi-fw_dynamic.bin"
         CACHE FILEPATH "" FORCE)
     set(TINYEMU_KERNEL_PATH
-        "${YETTY_ASSETS_OUTPUT_DIR}/yemu/kernel-riscv64.bin"
+        "${_YEMU}/kernel-riscv64.bin"
         CACHE FILEPATH "" FORCE)
     set(TINYEMU_ROOTFS_IMG
-        "${YETTY_ASSETS_OUTPUT_DIR}/yemu/alpine-rootfs.img"
+        "${_YEMU}/alpine-rootfs.img"
         CACHE FILEPATH "" FORCE)
 endfunction()
 
