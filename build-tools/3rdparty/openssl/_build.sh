@@ -90,10 +90,23 @@ if [ ! -d "$SRC_DIR" ]; then
     tar -C "$WORK_DIR" -xzf "$OPENSSL_TARBALL"
 fi
 
-# Use perl (available in every 3rdparty-* nix shell) for portable in-place
-# edit — sed -i has different semantics on BSD vs GNU.
-perl -i -pe 's/\Qif( HAVE_LONG_INT AND (${LONG_INT} EQUAL 8) )\E/if( HAVE_LONG_INT AND ("${LONG_INT}" EQUAL 8) )/' \
-    "$SRC_DIR/CMakeLists.txt"
+# Use python3 (available in every 3rdparty-* nix shell) for the patch:
+# str.replace doesn't interpret special chars, no shell/regex escaping
+# headaches. Idempotent — running twice is a no-op.
+python3 - "$SRC_DIR/CMakeLists.txt" <<'PYEOF'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1])
+old = "if( HAVE_LONG_INT AND (${LONG_INT} EQUAL 8) )"
+new = "if( HAVE_LONG_INT AND (\"${LONG_INT}\" EQUAL 8) )"
+c = p.read_text()
+if old in c:
+    p.write_text(c.replace(old, new))
+    print(f"==> patched LONG_INT quoting in {p.name}")
+elif new in c:
+    print(f"==> LONG_INT patch already applied in {p.name}")
+else:
+    print(f"WARNING: LONG_INT patch site not found in {p.name}", file=sys.stderr)
+PYEOF
 
 rm -rf "$BUILD_DIR" "$INSTALL_DIR" "$STAGE"
 mkdir -p "$INSTALL_DIR" "$STAGE"
@@ -223,6 +236,28 @@ mkdir -p "$STAGE/lib"
 for _D in lib lib64; do
     if [ -d "$INSTALL_DIR/$_D" ]; then
         cp -a "$INSTALL_DIR/$_D/." "$STAGE/lib/"
+    fi
+done
+
+# Normalise versioned suffixes — janbar/openssl-cmake names the static
+# archives `libssl_1_1.a` / `libcrypto_1_1.a` on Android (and possibly
+# others), but plain `libssl.a` on linux-x86_64. Rename the suffixed
+# variants to the bare names so consumer-side filename is stable.
+if [ "$TARGET_PLATFORM" = "windows-x86_64" ]; then
+    _EXT=lib
+else
+    _EXT=a
+fi
+for _name in libssl libcrypto; do
+    if [ ! -f "$STAGE/lib/${_name}.${_EXT}" ]; then
+        for _suff in _1_1 -1_1 .1.1; do
+            _src="$STAGE/lib/${_name}${_suff}.${_EXT}"
+            if [ -f "$_src" ]; then
+                mv "$_src" "$STAGE/lib/${_name}.${_EXT}"
+                echo "==> normalised ${_name}${_suff}.${_EXT} -> ${_name}.${_EXT}"
+                break
+            fi
+        done
     fi
 done
 
