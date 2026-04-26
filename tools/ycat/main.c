@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifdef __unix__
@@ -45,6 +46,11 @@ struct ycat_opts {
 	bool raw;
 	bool force_ts;          /* --ts : force tree-sitter path */
 	const char *force_type; /* name from --card/--type; NULL = autodetect */
+	int sleep_after_ms;     /* --sleep-after: sleep N ms before exit
+	                         * so a parent yetty has time to drain
+	                         * the master PTY's tty_buffer before our
+	                         * slave fd closes (workaround for libuv
+	                         * giving up reads on POLLHUP). */
 };
 
 static int terminal_columns(void)
@@ -91,6 +97,10 @@ static void usage(FILE *out, const char *prog)
 		"  -r, --raw            plain cat (no rendering)\n"
 		"  -t, --ts             force tree-sitter path (even for md/pdf)\n"
 		"  -c, --card=TYPE      force handler: markdown, pdf, text, source\n"
+		"      --sleep-after=N  after the OSC is written, sleep N ms before\n"
+		"                       exiting. Keeps the slave PTY open long enough\n"
+		"                       for the parent terminal to drain the master\n"
+		"                       (workaround for libuv giving up on POLLHUP).\n"
 		"  -h, --help           show this help\n"
 		"\n"
 		"  Use '-' or no args to read from stdin.\n",
@@ -346,6 +356,10 @@ static int process_one(const char *arg, const struct ycat_opts *opts)
  * main
  *===========================================================================*/
 
+enum {
+	OPT_SLEEP_AFTER = 1000,
+};
+
 int main(int argc, char **argv)
 {
 	struct ycat_opts opts = {
@@ -356,20 +370,22 @@ int main(int argc, char **argv)
 		.absolute = false,
 		.raw = false,
 		.force_type = NULL,
+		.sleep_after_ms = 0,
 	};
 
 	static const struct option long_opts[] = {
-		{ "width",    required_argument, NULL, 'w' },
-		{ "height",   required_argument, NULL, 'H' },
-		{ "x",        required_argument, NULL, 'x' },
-		{ "y",        required_argument, NULL, 'y' },
-		{ "absolute", no_argument,       NULL, 'a' },
-		{ "raw",      no_argument,       NULL, 'r' },
-		{ "ts",       no_argument,       NULL, 't' },
-		{ "card",     required_argument, NULL, 'c' },
-		{ "type",     required_argument, NULL, 'c' },
-		{ "help",     no_argument,       NULL, 'h' },
-		{ NULL,       0,                 NULL, 0   },
+		{ "width",       required_argument, NULL, 'w' },
+		{ "height",      required_argument, NULL, 'H' },
+		{ "x",           required_argument, NULL, 'x' },
+		{ "y",           required_argument, NULL, 'y' },
+		{ "absolute",    no_argument,       NULL, 'a' },
+		{ "raw",         no_argument,       NULL, 'r' },
+		{ "ts",          no_argument,       NULL, 't' },
+		{ "card",        required_argument, NULL, 'c' },
+		{ "type",        required_argument, NULL, 'c' },
+		{ "sleep-after", required_argument, NULL, OPT_SLEEP_AFTER },
+		{ "help",        no_argument,       NULL, 'h' },
+		{ NULL,          0,                 NULL, 0   },
 	};
 
 	int c;
@@ -384,6 +400,7 @@ int main(int argc, char **argv)
 		case 'r': opts.raw = true; break;
 		case 't': opts.force_ts = true; break;
 		case 'c': opts.force_type = optarg; break;
+		case OPT_SLEEP_AFTER: opts.sleep_after_ms = atoi(optarg); break;
 		case 'h': usage(stdout, argv[0]); return 0;
 		default:  usage(stderr, argv[0]); return 2;
 		}
@@ -404,5 +421,16 @@ int main(int argc, char **argv)
 	}
 
 	fflush(stdout);
+
+	/* Hold the slave PTY open a bit longer so a parent yetty has time
+	 * to drain the master before EOF arrives there. */
+	if (opts.sleep_after_ms > 0) {
+		struct timespec ts = {
+			.tv_sec  = opts.sleep_after_ms / 1000,
+			.tv_nsec = (long)(opts.sleep_after_ms % 1000) * 1000000L,
+		};
+		nanosleep(&ts, NULL);
+	}
+
 	return rc;
 }

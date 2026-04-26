@@ -1,15 +1,20 @@
 /*
- * imgui_impl_yetty.cpp — Minimum C++ shim over C helpers.
+ * imgui_impl_yetty.cpp — Dear ImGui ↔ yetty bridge.
  *
- * The only reason this is C++ is that Dear ImGui's API is C++. Everything
- * heavy (buffer growth, base64, OSC framing) lives in the C helpers.
- * This file is pure C syntax compiled as C++, plus direct calls into
- * ImGui's namespaced API.
+ * The renderer half encodes ImDrawData into ymgui_wire_* structs and ships
+ * them through yface (LZ4F + b64) over the OSC envelope. The platform half
+ * sets stdin to raw mode, subscribes to yetty's pixel-precise mouse, and
+ * routes incoming OSC events into ImGuiIO via the GLFW-style On* hooks.
+ *
+ * The OSC envelope scanner lives in yface — both the sync PollInput path
+ * and the async ymgui_event_loop hand bytes to yetty_yface_feed_bytes()
+ * and the yface fires typed callbacks per envelope.
  */
 
 #include "imgui_impl_yetty.h"
 #include "ymgui_encode.h"
 
+#include <yetty/yclient-lib/event-loop.h>
 #include <yetty/ymgui/wire.h>
 #include <yetty/yface/yface.h>
 #include <yetty/ycore/types.h>
@@ -32,14 +37,10 @@
 #define YMGUI_STDIN_FD  STDIN_FILENO
 #endif
 
-/* Sanity: our wire vertex layout MUST match ImDrawVert. */
-#if !defined(IMGUI_USE_BGRA_PACKED_COLOR)
-/* ImDrawVert is {ImVec2 pos, ImVec2 uv, ImU32 col} = 20 bytes */
-#endif
-
 struct ymgui_impl_state {
     int                  out_fd;
-    struct yetty_yface  *yface;       /* OSC envelope + LZ4F + b64 streamer */
+    struct yetty_yface  *yface_out;       /* OSC envelope + LZ4F + b64 streamer */
+    struct yetty_yface  *yface_in;        /* stream-scanner for incoming events */
     int                  atlas_uploaded;
 
     /* Platform / input state */
@@ -48,65 +49,47 @@ struct ymgui_impl_state {
 #ifndef _WIN32
     struct termios    saved_termios;
 #endif
-    /* Re-entrant OSC parser working buffer. We drain stdin into here every
-     * PollInput, scan for complete sequences, and slide consumed bytes
-     * out — partial trailing bytes wait for the next call. */
-    char              parse_buf[4096];
-    size_t            parse_len;
 
-    /* Latest input state, copied into ImGuiIO at NewFrame-time. */
-    float             cursor_x;
-    float             cursor_y;
-    int               buttons_held;   /* OR of (1<<button), per OSC 777778 */
-    bool              buttons_down[5];
-    float             wheel_dy;       /* accumulated since last frame */
+    /* Cached display size from the last YMGUI_OSC_SC_RESIZE. */
     float             display_w;
     float             display_h;
     int               display_known;
 };
 
 static struct ymgui_impl_state g_state = {
-    YMGUI_STDOUT_FD, NULL, 0,
+    YMGUI_STDOUT_FD, nullptr, nullptr, 0,
     YMGUI_STDIN_FD, 0,
 #ifndef _WIN32
     {},
 #endif
-    {0}, 0,
-    -1.0f, -1.0f, 0, {false, false, false, false, false}, 0.0f,
     0.0f, 0.0f, 0,
 };
 
-/* Push everything yface accumulated in out_buf to the wire via the
- * non-blocking pending-write helper, then reset out_buf so the next
- * emit starts fresh. Returns the same tri-state as ymgui_pending_write
- * (0 = ok, 1 = dropped, -1 = error). */
+/* Push everything yface_out accumulated to the wire via the non-blocking
+ * pending-write helper, then reset out_buf. Returns the same tri-state as
+ * ymgui_pending_write. */
 static int flush_yface_to_fd(void)
 {
-    if (!g_state.yface) return -1;
-    struct yetty_ycore_buffer *out = yetty_yface_out_buf(g_state.yface);
+    if (!g_state.yface_out) return -1;
+    struct yetty_ycore_buffer *out = yetty_yface_out_buf(g_state.yface_out);
     if (!out || out->size == 0) return 0;
     int rc = ymgui_pending_write(g_state.out_fd, out->data, out->size);
-    /* Whether sent, queued or dropped, we're done with these bytes; the
-     * pending-queue copies any unsent tail into its own storage. */
     yetty_ycore_buffer_clear(out);
     return rc;
 }
 
 /*===========================================================================
- * Public API
+ * Outgoing — Init / Shutdown / atlas / clear / RenderDrawData
  *=========================================================================*/
 
-void ImGui_ImplYetty_SetOutputFd(int fd)
-{
-    g_state.out_fd = fd;
-}
+void ImGui_ImplYetty_SetOutputFd(int fd) { g_state.out_fd = fd; }
 
 bool ImGui_ImplYetty_UploadFontAtlas(void)
 {
-    if (!g_state.yface) return false;
+    if (!g_state.yface_out) return false;
 
     ImGuiIO& io = ImGui::GetIO();
-    unsigned char* pixels = NULL;
+    unsigned char* pixels = nullptr;
     int w = 0, h = 0;
     /* Alpha8 — small on the wire, enough for the default font. */
     io.Fonts->GetTexDataAsAlpha8(&pixels, &w, &h);
@@ -115,7 +98,7 @@ bool ImGui_ImplYetty_UploadFontAtlas(void)
     size_t pixel_bytes = (size_t)w * (size_t)h; /* R8 */
     size_t payload_sz  = sizeof(struct ymgui_wire_tex) + pixel_bytes;
 
-    struct ymgui_wire_tex hdr = {0};
+    struct ymgui_wire_tex hdr = {};
     hdr.magic      = YMGUI_WIRE_MAGIC_TEX;
     hdr.version    = YMGUI_WIRE_VERSION;
     hdr.tex_id     = YMGUI_TEX_ID_FONT_ATLAS;
@@ -124,14 +107,12 @@ bool ImGui_ImplYetty_UploadFontAtlas(void)
     hdr.height     = (uint32_t)h;
     hdr.total_size = (uint32_t)payload_sz;
 
-    /* Stream straight through yface — header + pixels feed into LZ4F →
-     * b64 → out_buf. No intermediate scratch buffer. */
-    if (!yetty_yface_start_write(g_state.yface,
-                                 YMGUI_OSC_VENDOR_INT, "--tex").ok)
+    if (!yetty_yface_start_write(g_state.yface_out,
+                                 YMGUI_OSC_CS_TEX, /*compressed=*/1, /*args=*/NULL, /*args_len=*/0).ok)
         return false;
-    if (!yetty_yface_write(g_state.yface, &hdr, sizeof(hdr)).ok) return false;
-    if (!yetty_yface_write(g_state.yface, pixels, pixel_bytes).ok) return false;
-    if (!yetty_yface_finish_write(g_state.yface).ok) return false;
+    if (!yetty_yface_write(g_state.yface_out, &hdr, sizeof(hdr)).ok) return false;
+    if (!yetty_yface_write(g_state.yface_out, pixels, pixel_bytes).ok) return false;
+    if (!yetty_yface_finish_write(g_state.yface_out).ok) return false;
 
     if (flush_yface_to_fd() < 0) return false;
 
@@ -147,25 +128,40 @@ bool ImGui_ImplYetty_Init(void)
     io.BackendRendererUserData = &g_state;
     io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
 
-    /* yface owns the LZ4F + b64 streaming state; one instance lives for
-     * the whole session (its out_buf is reused across emits, growing
-     * to the steady-state high-water mark). */
-    struct yetty_yface_ptr_result yr = yetty_yface_create();
-    if (!yr.ok) return false;
-    g_state.yface = yr.value;
+    /* Two yface instances — one each for the encode/decode pipelines.
+     * Sharing one is technically possible but would forbid concurrent
+     * read-and-write states. */
+    {
+        struct yetty_yface_ptr_result yr = yetty_yface_create();
+        if (!yr.ok) return false;
+        g_state.yface_out = yr.value;
+    }
+    {
+        struct yetty_yface_ptr_result yr = yetty_yface_create();
+        if (!yr.ok) {
+            yetty_yface_destroy(g_state.yface_out);
+            g_state.yface_out = nullptr;
+            return false;
+        }
+        g_state.yface_in = yr.value;
+    }
 
     return ImGui_ImplYetty_UploadFontAtlas();
 }
 
 void ImGui_ImplYetty_Shutdown(void)
 {
-    if (g_state.yface) {
-        yetty_yface_destroy(g_state.yface);
-        g_state.yface = NULL;
+    if (g_state.yface_out) {
+        yetty_yface_destroy(g_state.yface_out);
+        g_state.yface_out = nullptr;
+    }
+    if (g_state.yface_in) {
+        yetty_yface_destroy(g_state.yface_in);
+        g_state.yface_in = nullptr;
     }
     ImGuiIO& io = ImGui::GetIO();
-    io.BackendRendererName     = NULL;
-    io.BackendRendererUserData = NULL;
+    io.BackendRendererName     = nullptr;
+    io.BackendRendererUserData = nullptr;
     g_state.atlas_uploaded = 0;
 }
 
@@ -177,11 +173,11 @@ void ImGui_ImplYetty_NewFrame(void)
 
 void ImGui_ImplYetty_Clear(void)
 {
-    if (!g_state.yface) return;
-    /* Empty body — just an OSC envelope around an empty LZ4 frame. */
-    if (!yetty_yface_start_write(g_state.yface,
-                                 YMGUI_OSC_VENDOR_INT, "--clear").ok) return;
-    if (!yetty_yface_finish_write(g_state.yface).ok) return;
+    if (!g_state.yface_out) return;
+    /* Empty body, raw (no LZ4 — nothing to compress). */
+    if (!yetty_yface_start_write(g_state.yface_out,
+                                 YMGUI_OSC_CS_CLEAR, /*compressed=*/0, /*args=*/NULL, /*args_len=*/0).ok) return;
+    if (!yetty_yface_finish_write(g_state.yface_out).ok) return;
     flush_yface_to_fd();
 }
 
@@ -192,13 +188,13 @@ void ImGui_ImplYetty_Clear(void)
 void ImGui_ImplYetty_RenderDrawData(ImDrawData* draw_data)
 {
     if (!draw_data || draw_data->CmdListsCount <= 0) return;
-    if (!g_state.yface) return;
+    if (!g_state.yface_out) return;
     /* Static-size sanity — we memcpy ImDrawVert straight onto the wire. */
     if (sizeof(ImDrawVert) != sizeof(struct ymgui_wire_vertex)) return;
 
-    /* Compute total payload size up-front so the frame header carries
-     * an accurate total_size (used for validation on the receiver). The
-     * walk-twice cost is negligible vs the actual encode + write. */
+    /* Compute total payload size up-front so the frame header carries an
+     * accurate total_size (used for validation on the receiver). The
+     * walk-twice cost is negligible vs. the actual encode + write. */
     size_t total_size = sizeof(struct ymgui_wire_frame);
     for (int n = 0; n < draw_data->CmdListsCount; ++n) {
         const ImDrawList* cl = draw_data->CmdLists[n];
@@ -210,7 +206,7 @@ void ImGui_ImplYetty_RenderDrawData(ImDrawData* draw_data)
                     + (size_t)cl->CmdBuffer.Size * sizeof(struct ymgui_wire_cmd);
     }
 
-    struct ymgui_wire_frame fh = {0};
+    struct ymgui_wire_frame fh = {};
     fh.magic          = YMGUI_WIRE_MAGIC_FRAME;
     fh.version        = YMGUI_WIRE_VERSION;
     fh.flags          = (sizeof(ImDrawIdx) == 4) ? YMGUI_FRAME_FLAG_IDX32 : 0;
@@ -223,35 +219,34 @@ void ImGui_ImplYetty_RenderDrawData(ImDrawData* draw_data)
     fh.fb_scale_y     = draw_data->FramebufferScale.y;
     fh.cmd_list_count = (uint32_t)draw_data->CmdListsCount;
 
-    /* Stream straight through yface. No intermediate buffer. */
-    if (!yetty_yface_start_write(g_state.yface,
-                                 YMGUI_OSC_VENDOR_INT, "--frame").ok) return;
-    if (!yetty_yface_write(g_state.yface, &fh, sizeof(fh)).ok) return;
+    if (!yetty_yface_start_write(g_state.yface_out,
+                                 YMGUI_OSC_CS_FRAME, /*compressed=*/1, /*args=*/NULL, /*args_len=*/0).ok) return;
+    if (!yetty_yface_write(g_state.yface_out, &fh, sizeof(fh)).ok) return;
 
     static const uint8_t pad[4] = {0, 0, 0, 0};
 
     for (int n = 0; n < draw_data->CmdListsCount; ++n) {
         const ImDrawList* cl = draw_data->CmdLists[n];
 
-        struct ymgui_wire_cmd_list cl_hdr = {0};
+        struct ymgui_wire_cmd_list cl_hdr = {};
         cl_hdr.vtx_count = (uint32_t)cl->VtxBuffer.Size;
         cl_hdr.idx_count = (uint32_t)cl->IdxBuffer.Size;
         cl_hdr.cmd_count = (uint32_t)cl->CmdBuffer.Size;
-        if (!yetty_yface_write(g_state.yface, &cl_hdr, sizeof(cl_hdr)).ok) return;
+        if (!yetty_yface_write(g_state.yface_out, &cl_hdr, sizeof(cl_hdr)).ok) return;
 
         if (cl_hdr.vtx_count) {
             size_t nbytes = (size_t)cl_hdr.vtx_count * sizeof(ImDrawVert);
-            if (!yetty_yface_write(g_state.yface, cl->VtxBuffer.Data, nbytes).ok)
+            if (!yetty_yface_write(g_state.yface_out, cl->VtxBuffer.Data, nbytes).ok)
                 return;
         }
         if (cl_hdr.idx_count) {
             size_t nbytes = (size_t)cl_hdr.idx_count * sizeof(ImDrawIdx);
-            if (!yetty_yface_write(g_state.yface, cl->IdxBuffer.Data, nbytes).ok)
+            if (!yetty_yface_write(g_state.yface_out, cl->IdxBuffer.Data, nbytes).ok)
                 return;
             /* Pad to 4 bytes so the cmd array starts aligned. */
             size_t rem = nbytes & 3u;
             if (rem) {
-                if (!yetty_yface_write(g_state.yface, pad, 4u - rem).ok)
+                if (!yetty_yface_write(g_state.yface_out, pad, 4u - rem).ok)
                     return;
             }
         }
@@ -259,7 +254,7 @@ void ImGui_ImplYetty_RenderDrawData(ImDrawData* draw_data)
         for (int c = 0; c < cl->CmdBuffer.Size; ++c) {
             const ImDrawCmd* dc = &cl->CmdBuffer[c];
             if (dc->UserCallback) continue; /* TODO: ImDrawCallback_ResetRenderState */
-            struct ymgui_wire_cmd wc = {0};
+            struct ymgui_wire_cmd wc = {};
             wc.clip_min_x = dc->ClipRect.x;
             wc.clip_min_y = dc->ClipRect.y;
             wc.clip_max_x = dc->ClipRect.z;
@@ -268,16 +263,16 @@ void ImGui_ImplYetty_RenderDrawData(ImDrawData* draw_data)
             wc.vtx_offset = dc->VtxOffset;
             wc.idx_offset = dc->IdxOffset;
             wc.elem_count = dc->ElemCount;
-            if (!yetty_yface_write(g_state.yface, &wc, sizeof(wc)).ok) return;
+            if (!yetty_yface_write(g_state.yface_out, &wc, sizeof(wc)).ok) return;
         }
     }
 
-    if (!yetty_yface_finish_write(g_state.yface).ok) return;
+    if (!yetty_yface_finish_write(g_state.yface_out).ok) return;
     flush_yface_to_fd();
 }
 
 /*===========================================================================
- * Platform side — raw stdin, DEC ?1500/?1501 subscription, OSC parser
+ * Platform / input — raw stdin, DEC ?1500/?1501 subscription
  *=========================================================================*/
 
 void ImGui_ImplYetty_SetInputFd(int fd) { g_state.in_fd = fd; }
@@ -299,7 +294,6 @@ static bool platform_set_raw_mode(int fd, struct termios* saved)
     raw.c_cc[VTIME] = 0;
     if (tcsetattr(fd, TCSANOW, &raw) != 0)
         return false;
-    /* Non-blocking so PollInput never stalls. */
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags >= 0)
         fcntl(fd, F_SETFL, flags | O_NONBLOCK);
@@ -322,22 +316,22 @@ bool ImGui_ImplYetty_PlatformInit(void)
         return false;
     g_state.raw_mode_active = 1;
 
-    /* Stdout non-blocking too — ymgui_osc_write parks any unsent tail in a
-     * pending queue on EAGAIN instead of blocking the loop. The CHILD pty
-     * end (/dev/pts/N) is shared between all of stdin/stdout/stderr in the
-     * default fork-pty model, so flipping O_NONBLOCK on stdout flips it
-     * for all three. That's actually what we want — both sides of our io
-     * are non-blocking. The kernel-level termios is still raw from above. */
+    /* Stdout non-blocking too — ymgui_pending_write parks any unsent tail
+     * in a queue on EAGAIN instead of blocking. The CHILD pty end is
+     * shared between stdin/stdout/stderr, so flipping O_NONBLOCK on
+     * stdout flips it for all three. That's actually what we want — both
+     * sides of our io are non-blocking. The kernel-level termios is
+     * still raw from above. */
     {
         int flags = fcntl(g_state.out_fd, F_GETFL, 0);
         if (flags >= 0)
             fcntl(g_state.out_fd, F_SETFL, flags | O_NONBLOCK);
     }
 
-    /* Subscribe: \e[?1500h \e[?1501h. ymgui-layer's text-layer settermprop
-     * hook flips the per-terminal subscription latch; rising edge also
-     * triggers a OSC 777780 pixel-size emission so we get DisplaySize
-     * before the first event arrives. */
+    /* Subscribe: \e[?1500h \e[?1501h. yetty's text-layer settermprop hook
+     * flips the per-terminal subscription latch; rising edge also triggers
+     * a YMGUI_OSC_SC_RESIZE emission so we get DisplaySize before the
+     * first event arrives. */
     static const char subscribe[] = "\033[?1500h\033[?1501h";
     ssize_t w = write(g_state.out_fd, subscribe, sizeof(subscribe) - 1);
     (void)w;
@@ -363,216 +357,122 @@ void ImGui_ImplYetty_PlatformShutdown(void)
 #endif
 }
 
-/*---------------------------------------------------------------------------
- * OSC parser — minimal scanner for our three verbs. Returns the number of
- * bytes consumed, or 0 if a complete sequence is not yet available at the
- * head of the buffer (caller should keep it for next time).
+/*===========================================================================
+ * Push-input hooks — feed events into ImGuiIO from anywhere
  *
- * Recognised:
- *   \e]777777;<card>;<btn>;<press>;<x>;<y>;<scroll-dy>\e\\
- *   \e]777778;<card>;<btn-held>;<x>;<y>\e\\
- *   \e]777780;<w>;<h>\e\\
- *
- * Anything else is consumed as one byte (so we keep advancing through
- * stray bytes from the PTY). The terminator is ESC '\\' (ST).
- *-------------------------------------------------------------------------*/
-static size_t parse_osc(const char* buf, size_t len)
-{
-    if (len < 2) return 0;
-    if (buf[0] != '\x1b') return 1;
-    if (buf[1] != ']')   return 1;
+ * All three input paths (sync PollInput, async event loop, manual app
+ * code) funnel through these so the ImGuiIO calls happen in exactly one
+ * place. The renderer is independent of how events arrive.
+ *=========================================================================*/
 
-    /* Find ST = ESC '\\' */
-    size_t end = 0;
-    for (size_t i = 2; i + 1 < len; i++) {
-        if (buf[i] == '\x1b' && buf[i + 1] == '\\') {
-            end = i;
+void ImGui_ImplYetty_OnMousePos(double x, double y, uint32_t buttons_held)
+{
+    (void)buttons_held;  /* ImGui derives drag from per-button events */
+    ImGui::GetIO().AddMousePosEvent((float)x, (float)y);
+}
+
+void ImGui_ImplYetty_OnMouseButton(int button, int pressed,
+                                   double x, double y)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddMousePosEvent((float)x, (float)y);
+    if (button >= 0 && button < 5)
+        io.AddMouseButtonEvent(button, pressed != 0);
+}
+
+void ImGui_ImplYetty_OnMouseWheel(double dy, double x, double y)
+{
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddMousePosEvent((float)x, (float)y);
+    io.AddMouseWheelEvent(0.0f, (float)dy);
+}
+
+void ImGui_ImplYetty_OnResize(double width, double height)
+{
+    if (width <= 0.0 || height <= 0.0) return;
+    g_state.display_w     = (float)width;
+    g_state.display_h     = (float)height;
+    g_state.display_known = 1;
+    ImGui::GetIO().DisplaySize = ImVec2((float)width, (float)height);
+}
+
+/*===========================================================================
+ * Sync PollInput — drains stdin through yface
+ *=========================================================================*/
+
+extern "C" {
+static void poll_on_osc(void *user, int osc_code,
+                        const uint8_t *args,    size_t args_len,
+                        const uint8_t *payload, size_t len)
+{
+    (void)user; (void)args; (void)args_len;  /* mouse/resize have no args */
+    switch (osc_code) {
+    case YMGUI_OSC_SC_MOUSE: {
+        if (len < sizeof(struct ymgui_wire_input_mouse)) return;
+        const struct ymgui_wire_input_mouse *m =
+            (const struct ymgui_wire_input_mouse *)payload;
+        if (m->magic != YMGUI_WIRE_MAGIC_INPUT_MOUSE) return;
+        switch (m->kind) {
+        case YMGUI_INPUT_MOUSE_POS:
+            ImGui_ImplYetty_OnMousePos(m->x, m->y, m->buttons_held);
+            break;
+        case YMGUI_INPUT_MOUSE_BUTTON:
+            ImGui_ImplYetty_OnMouseButton(m->button, m->pressed, m->x, m->y);
+            break;
+        case YMGUI_INPUT_MOUSE_WHEEL:
+            ImGui_ImplYetty_OnMouseWheel(m->wheel_dy, m->x, m->y);
             break;
         }
+        break;
     }
-    if (end == 0) return 0; /* incomplete */
-
-    /* Body: buf[2..end). Parse vendor code. */
-    size_t i = 2;
-    int code = 0;
-    while (i < end && buf[i] >= '0' && buf[i] <= '9') {
-        code = code * 10 + (buf[i] - '0');
-        i++;
+    case YMGUI_OSC_SC_RESIZE: {
+        if (len < sizeof(struct ymgui_wire_input_resize)) return;
+        const struct ymgui_wire_input_resize *r =
+            (const struct ymgui_wire_input_resize *)payload;
+        if (r->magic != YMGUI_WIRE_MAGIC_INPUT_RESIZE) return;
+        ImGui_ImplYetty_OnResize(r->width, r->height);
+        break;
     }
-    if (i >= end || buf[i] != ';') return end + 2; /* unknown — skip */
-    i++;
-
-    auto parse_float = [&](float* out) -> bool {
-        bool neg = false;
-        if (i < end && buf[i] == '-') { neg = true; i++; }
-        float f = 0.0f;
-        bool any = false;
-        while (i < end && buf[i] >= '0' && buf[i] <= '9') {
-            f = f * 10.0f + (float)(buf[i] - '0');
-            i++; any = true;
-        }
-        if (i < end && buf[i] == '.') {
-            i++;
-            float frac = 0.1f;
-            while (i < end && buf[i] >= '0' && buf[i] <= '9') {
-                f += (float)(buf[i] - '0') * frac;
-                frac *= 0.1f;
-                i++; any = true;
-            }
-        }
-        *out = neg ? -f : f;
-        return any;
-    };
-    auto parse_int = [&](int* out) -> bool {
-        bool neg = false;
-        if (i < end && buf[i] == '-') { neg = true; i++; }
-        int v = 0;
-        bool any = false;
-        while (i < end && buf[i] >= '0' && buf[i] <= '9') {
-            v = v * 10 + (buf[i] - '0');
-            i++; any = true;
-        }
-        *out = neg ? -v : v;
-        return any;
-    };
-    auto eat_sep = [&]() -> bool {
-        if (i >= end || buf[i] != ';') return false;
-        i++;
-        return true;
-    };
-    auto skip_field = [&]() {
-        while (i < end && buf[i] != ';') i++;
-    };
-
-    /* All input goes via the ImGuiIO event queue (AddMouse*Event), not by
-     * clobbering MousePos/MouseDown directly — otherwise a press+release
-     * landing in the same PollInput collapses to "no click", because
-     * ImGui only ever sees the final state of the frame. The queue
-     * preserves transitions even when multiple events arrive between
-     * NewFrames. */
-    ImGuiIO& io = ImGui::GetIO();
-
-    if (code == 777777) {
-        /* card; btn; press; x; y; [scroll-dy] */
-        skip_field(); if (!eat_sep()) return end + 2;
-        int btn = 0, press = 0;
-        float x = 0, y = 0, dy = 0;
-        if (!parse_int(&btn))   return end + 2; if (!eat_sep()) return end + 2;
-        if (!parse_int(&press)) return end + 2; if (!eat_sep()) return end + 2;
-        if (!parse_float(&x))   return end + 2; if (!eat_sep()) return end + 2;
-        if (!parse_float(&y))   return end + 2;
-        if (i < end && buf[i] == ';') {
-            i++;
-            (void)parse_float(&dy);
-        }
-        fprintf(stderr,
-                "[ymgui-frontend] OSC 777777 btn=%d press=%d xy=(%.1f,%.1f) dy=%.1f\n",
-                btn, press, x, y, dy);
-        io.AddMousePosEvent(x, y);
-        if (dy != 0.0f) {
-            io.AddMouseWheelEvent(0.0f, dy);
-        } else if (btn >= 0 && btn < 5) {
-            io.AddMouseButtonEvent(btn, press != 0);
-        }
-    } else if (code == 777778) {
-        skip_field(); if (!eat_sep()) return end + 2;
-        int held = 0;
-        float x = 0, y = 0;
-        if (!parse_int(&held)) return end + 2; if (!eat_sep()) return end + 2;
-        if (!parse_float(&x))  return end + 2; if (!eat_sep()) return end + 2;
-        if (!parse_float(&y))  return end + 2;
-        static int s_move_count = 0;
-        if (++s_move_count % 30 == 1) {
-            fprintf(stderr, "[ymgui-frontend] OSC 777778 mv #%d xy=(%.1f,%.1f)\n",
-                    s_move_count, x, y);
-        }
-        io.AddMousePosEvent(x, y);
-        (void)held;  /* ImGui derives drag state from the per-button events */
-    } else if (code == 777780) {
-        float w = 0, h = 0;
-        if (!parse_float(&w)) return end + 2; if (!eat_sep()) return end + 2;
-        if (!parse_float(&h)) return end + 2;
-        fprintf(stderr, "[ymgui-frontend] OSC 777780 w=%.0f h=%.0f\n", w, h);
-        if (w > 0.0f && h > 0.0f) {
-            g_state.display_w = w;
-            g_state.display_h = h;
-            g_state.display_known = 1;
-        }
-    } else {
-        fprintf(stderr, "[ymgui-frontend] OSC %d (ignored)\n", code);
+    default:
+        break;
     }
-
-    return end + 2; /* consumed up to and including ST */
 }
+}  /* extern "C" */
 
 void ImGui_ImplYetty_PollInput(void)
 {
 #ifdef _WIN32
     return;
 #else
-    if (!g_state.raw_mode_active) return;
+    if (!g_state.raw_mode_active || !g_state.yface_in) return;
 
-    /* Drain stdin into parse_buf. */
+    /* yface_in's handlers are wired once on first call. */
+    static int handlers_set = 0;
+    if (!handlers_set) {
+        yetty_yface_set_handlers(g_state.yface_in, poll_on_osc, nullptr, &g_state);
+        handlers_set = 1;
+    }
+
+    char buf[4096];
     for (;;) {
-        if (g_state.parse_len >= sizeof(g_state.parse_buf)) {
-            /* Buffer full and we couldn't make progress — drop oldest half. */
-            size_t keep = sizeof(g_state.parse_buf) / 2;
-            memmove(g_state.parse_buf,
-                    g_state.parse_buf + (g_state.parse_len - keep), keep);
-            g_state.parse_len = keep;
-        }
-        ssize_t n = read(g_state.in_fd,
-                         g_state.parse_buf + g_state.parse_len,
-                         sizeof(g_state.parse_buf) - g_state.parse_len);
+        ssize_t n = read(g_state.in_fd, buf, sizeof(buf));
         if (n <= 0) break;
-        g_state.parse_len += (size_t)n;
+        yetty_yface_feed_bytes(g_state.yface_in, buf, (size_t)n);
     }
-
-    /* Parse complete sequences from the head; keep the trailing partial. */
-    size_t off = 0;
-    while (off < g_state.parse_len) {
-        size_t consumed = parse_osc(g_state.parse_buf + off,
-                                    g_state.parse_len - off);
-        if (consumed == 0) break; /* need more data */
-        off += consumed;
-    }
-    if (off > 0 && off < g_state.parse_len) {
-        memmove(g_state.parse_buf, g_state.parse_buf + off,
-                g_state.parse_len - off);
-        g_state.parse_len -= off;
-    } else if (off >= g_state.parse_len) {
-        g_state.parse_len = 0;
-    }
-
-    /* Mouse pos/button/wheel are fed via Add*Event in the parser. The only
-     * thing we still set here is DisplaySize — it's a config value, not
-     * an event. */
-    ImGuiIO& io = ImGui::GetIO();
-    if (g_state.display_known)
-        io.DisplaySize = ImVec2(g_state.display_w, g_state.display_h);
 #endif
 }
-
-/*===========================================================================
- * Idle-mode helpers: WaitInput + DrawDataHash
- *=========================================================================*/
 
 bool ImGui_ImplYetty_WaitInput(int timeout_ms)
 {
 #ifdef _WIN32
-    /* Windows: PollInput is a no-op anyway. Sleep the timeout. */
     if (timeout_ms > 0) {
         struct timespec ts;
         ts.tv_sec  = timeout_ms / 1000;
         ts.tv_nsec = (long)(timeout_ms % 1000) * 1000000L;
-        nanosleep(&ts, NULL);
+        nanosleep(&ts, nullptr);
     }
     return false;
 #else
-    /* Already-buffered input from a previous PollInput counts — return
-     * true immediately so the caller drains it without blocking. */
-    if (g_state.parse_len > 0) return true;
-
     /* If we have an OSC tail queued for stdout, also wake on POLLOUT so
      * we can drain it as soon as the kernel buffer has space — even if
      * no new input arrives. */
@@ -590,9 +490,6 @@ bool ImGui_ImplYetty_WaitInput(int timeout_ms)
     int n = poll(pfd, (nfds_t)nfds, timeout_ms);
     if (n <= 0) return false;
 
-    /* Drain the OSC tail if stdout is now write-ready. We do this here
-     * (not in PollInput) so a tail-only wakeup doesn't get treated as
-     * a UI event by the demo loop. */
     if (nfds == 2 && (pfd[1].revents & POLLOUT))
         ymgui_pending_flush(g_state.out_fd);
 
@@ -600,3 +497,31 @@ bool ImGui_ImplYetty_WaitInput(int timeout_ms)
 #endif
 }
 
+/*===========================================================================
+ * Async — bridge ymgui_event_loop callbacks into ImGuiIO
+ *=========================================================================*/
+
+extern "C" {
+static void loop_on_pos   (void *u, double x, double y, uint32_t held) {
+    (void)u; ImGui_ImplYetty_OnMousePos(x, y, held);
+}
+static void loop_on_btn   (void *u, int b, int p, double x, double y) {
+    (void)u; ImGui_ImplYetty_OnMouseButton(b, p, x, y);
+}
+static void loop_on_wheel (void *u, double dy, double x, double y) {
+    (void)u; ImGui_ImplYetty_OnMouseWheel(dy, x, y);
+}
+static void loop_on_resize(void *u, double w, double h) {
+    (void)u; ImGui_ImplYetty_OnResize(w, h);
+}
+}  /* extern "C" */
+
+void ImGui_ImplYetty_AttachEventLoop(struct yetty_yclient_event_loop *loop)
+{
+    if (!loop) return;
+    yetty_yclient_event_loop_set_user           (loop, &g_state);
+    yetty_yclient_event_loop_set_mouse_pos_cb   (loop, loop_on_pos);
+    yetty_yclient_event_loop_set_mouse_button_cb(loop, loop_on_btn);
+    yetty_yclient_event_loop_set_mouse_wheel_cb (loop, loop_on_wheel);
+    yetty_yclient_event_loop_set_resize_cb      (loop, loop_on_resize);
+}

@@ -12,6 +12,7 @@
 #include <yetty/yrender/render-target.h>
 #include <yetty/ypaint-yaml/ypaint-yaml.h>
 #include <yetty/yterm/osc-args.h>
+#include <yetty/yterm/pty-reader.h>   /* YETTY_OSC_YPAINT_* */
 #include <yetty/yterm/ypaint-layer.h>
 #include <yetty/yconfig.h>
 #include <yetty/yetty.h>
@@ -123,7 +124,7 @@ struct yetty_yterm_ypaint_layer {
 static void ypaint_layer_destroy(struct yetty_yterm_terminal_layer *self);
 static struct yetty_ycore_void_result
 ypaint_layer_write(struct yetty_yterm_terminal_layer *self,
-                   const char *data, size_t len);
+                   int osc_code, const char *data, size_t len);
 static struct yetty_ycore_void_result
 ypaint_layer_resize_grid(struct yetty_yterm_terminal_layer *self,
                          struct grid_size grid_size);
@@ -425,133 +426,145 @@ static void ypaint_layer_destroy(struct yetty_yterm_terminal_layer *self) {
   free(layer);
 }
 
-/* Write - receives ypaint data in format "args;payload" (base64 encoded) */
+/* Split "<b64-args>;<b64-payload>" into the two slots. Returns 0 on
+ * success. Either slot may be empty (zero-length pointer is fine).
+ * On failure (no separator), `*payload` and `*payload_len` are zeroed. */
+static int split_args_payload(const char *data, size_t len,
+                              const char **args, size_t *args_len,
+                              const char **payload, size_t *payload_len) {
+  *args = data;
+  *args_len = 0;
+  *payload = NULL;
+  *payload_len = 0;
+  for (size_t i = 0; i < len; i++) {
+    if (data[i] == ';') {
+      *args_len = i;
+      *payload = data + i + 1;
+      *payload_len = len - i - 1;
+      return 0;
+    }
+  }
+  return -1;
+}
+
+static struct yetty_ycore_void_result
+ypaint_handle_clear(struct yetty_yterm_ypaint_layer *layer) {
+  ydebug("ypaint_layer_write: clearing canvas");
+  yetty_ypaint_canvas_clear(layer->canvas);
+  layer->base.dirty = 1;
+  if (layer->base.request_render_fn)
+    layer->base.request_render_fn(layer->base.request_render_userdata);
+  return YETTY_OK_VOID();
+}
+
+static struct yetty_ycore_void_result
+ypaint_handle_yaml(struct yetty_yterm_ypaint_layer *layer,
+                   const char *b64, size_t b64_len) {
+  if (!b64 || b64_len == 0)
+    return YETTY_ERR(yetty_ycore_void, "ypaint: empty yaml payload");
+
+  /* Plain b64-decode (no LZ4) into a NUL-terminated text buffer. */
+  size_t decoded_cap = b64_len;
+  char *decoded = malloc(decoded_cap + 1);
+  if (!decoded)
+    return YETTY_ERR(yetty_ycore_void, "malloc failed");
+  size_t decoded_len = yetty_ycore_base64_decode(b64, b64_len,
+                                                 decoded, decoded_cap);
+  decoded[decoded_len] = '\0';
+
+  struct yetty_ypaint_core_buffer_result res =
+      yetty_ypaint_yaml_parse(decoded, decoded_len);
+  free(decoded);
+  if (YETTY_IS_ERR(res))
+    return YETTY_ERR(yetty_ycore_void, res.error.msg);
+
+  struct yetty_ycore_void_result add_res =
+      yetty_ypaint_canvas_add_buffer(layer->canvas, res.value);
+  yetty_ypaint_core_buffer_destroy(res.value);
+  return add_res;
+}
+
+static struct yetty_ycore_void_result
+ypaint_handle_bin(struct yetty_yterm_ypaint_layer *layer,
+                  const char *b64_args, size_t b64_args_len,
+                  const char *b64_payload, size_t b64_payload_len) {
+  /* Decode args slot first to discover compressed flag. */
+  int compressed = 0;
+  if (b64_args_len > 0) {
+    /* Args is a b64-encoded yetty_yface_bin_meta (32 bytes raw → ~44 b64
+     * chars). Decode in-place into a stack buffer. */
+    char meta_raw[64];
+    size_t meta_raw_len = yetty_ycore_base64_decode(
+        b64_args, b64_args_len, meta_raw, sizeof(meta_raw));
+    if (meta_raw_len >= sizeof(struct yetty_yface_bin_meta)) {
+      const struct yetty_yface_bin_meta *m =
+          (const struct yetty_yface_bin_meta *)meta_raw;
+      if (m->magic == YETTY_YFACE_BIN_MAGIC)
+        compressed = (m->compressed != 0);
+    }
+  }
+
+  ydebug("ypaint_layer_write: bin compressed=%d payload_len=%zu",
+         compressed, b64_payload_len);
+
+  struct yetty_ycore_void_result r =
+      yetty_yface_start_read(layer->yface, compressed);
+  if (YETTY_IS_ERR(r)) return r;
+  r = yetty_yface_feed(layer->yface, b64_payload, b64_payload_len);
+  if (YETTY_IS_ERR(r)) { yetty_yface_finish_read(layer->yface); return r; }
+  r = yetty_yface_finish_read(layer->yface);
+  if (YETTY_IS_ERR(r)) return r;
+
+  struct yetty_ycore_buffer *in = yetty_yface_in_buf(layer->yface);
+  struct yetty_ypaint_core_buffer_result res =
+      yetty_ypaint_core_buffer_create_from_bytes(in->data, in->size);
+  if (YETTY_IS_ERR(res))
+    return YETTY_ERR(yetty_ycore_void, res.error.msg);
+
+  struct yetty_ycore_void_result add_res =
+      yetty_ypaint_canvas_add_buffer(layer->canvas, res.value);
+  yetty_ypaint_core_buffer_destroy(res.value);
+  return add_res;
+}
+
+/* Write — receives the OSC body after the leading "<code>;" has been
+ * stripped by pty-reader. Body shape (uniform): "<b64-args>;<b64-payload>".
+ * Dispatch is by `osc_code` — no verb parsing. */
 static struct yetty_ycore_void_result
 ypaint_layer_write(struct yetty_yterm_terminal_layer *self,
-                   const char *data, size_t len) {
+                   int osc_code, const char *data, size_t len) {
   struct yetty_yterm_ypaint_layer *layer =
       (struct yetty_yterm_ypaint_layer *)self;
-  struct yetty_yterm_osc_args args;
 
-  if (!data || len == 0)
-    return YETTY_ERR(yetty_ycore_void, "no data");
+  /* clear has an empty body — short-circuit before splitting. */
+  if (osc_code == YETTY_OSC_YPAINT_CLEAR)
+    return ypaint_handle_clear(layer);
 
-  /* Parse OSC args */
-  if (yetty_yterm_osc_args_parse(&args, data, len) < 0)
-    return YETTY_ERR(yetty_ycore_void, "failed to parse args");
+  const char *args = NULL, *payload = NULL;
+  size_t args_len = 0, payload_len = 0;
+  if (!data || len == 0 ||
+      split_args_payload(data, len, &args, &args_len,
+                         &payload, &payload_len) < 0)
+    return YETTY_ERR(yetty_ycore_void, "ypaint: malformed body (need ;)");
 
-  /* Handle --clear */
-  if (yetty_yterm_osc_args_has(&args, "clear")) {
-    ydebug("ypaint_layer_write: clearing canvas");
-    yetty_ypaint_canvas_clear(layer->canvas);
-    yetty_yterm_osc_args_free(&args);
-    layer->base.dirty = 1;
-    if (layer->base.request_render_fn)
-      layer->base.request_render_fn(layer->base.request_render_userdata);
-    return YETTY_OK_VOID();
+  struct yetty_ycore_void_result r;
+  switch (osc_code) {
+  case YETTY_OSC_YPAINT_BIN:
+    r = ypaint_handle_bin(layer, args, args_len, payload, payload_len);
+    break;
+  case YETTY_OSC_YPAINT_YAML:
+    r = ypaint_handle_yaml(layer, payload, payload_len);
+    break;
+  case YETTY_OSC_YPAINT_OVERLAY:
+    /* Same shape as bin for now — overlay layer registration uses a
+     * different terminal-layer instance, so this branch is reached
+     * only if both register for the same code. */
+    r = ypaint_handle_bin(layer, args, args_len, payload, payload_len);
+    break;
+  default:
+    return YETTY_ERR(yetty_ycore_void, "ypaint: unexpected OSC code");
   }
-
-  /* Check for payload */
-  if (!args.payload || args.payload_len == 0) {
-    ydebug("ypaint_layer_write: no payload");
-    yetty_yterm_osc_args_free(&args);
-    return YETTY_OK_VOID();
-  }
-
-  /* Handle format */
-  if (yetty_yterm_osc_args_has(&args, "yaml")) {
-    /* YAML format: decode base64, then parse YAML */
-    size_t decoded_cap = args.payload_len;
-    char *decoded = malloc(decoded_cap + 1);
-    if (!decoded) {
-      yetty_yterm_osc_args_free(&args);
-      return YETTY_ERR(yetty_ycore_void, "malloc failed");
-    }
-    size_t decoded_len = yetty_ycore_base64_decode(args.payload, args.payload_len,
-                                                  decoded, decoded_cap);
-    decoded[decoded_len] = '\0';
-
-    ydebug("ypaint_layer_write: yaml payload_len=%zu decoded_len=%zu",
-           args.payload_len, decoded_len);
-
-    struct yetty_ypaint_core_buffer_result res =
-        yetty_ypaint_yaml_parse(decoded, decoded_len);
-    free(decoded);
-
-    if (YETTY_IS_ERR(res)) {
-      yerror("ypaint_layer_write: yaml parse failed: %s", res.error.msg);
-      yetty_yterm_osc_args_free(&args);
-      return YETTY_ERR(yetty_ycore_void, res.error.msg);
-    }
-
-    ydebug("ypaint_layer_write: yaml parsed OK");
-
-    struct yetty_ycore_void_result add_res =
-        yetty_ypaint_canvas_add_buffer(layer->canvas, res.value);
-
-    ydebug("ypaint_layer_write: add_buffer result=%s",
-           YETTY_IS_OK(add_res) ? "OK" : add_res.error.msg);
-    yetty_ypaint_core_buffer_destroy(res.value);
-    if (YETTY_IS_ERR(add_res)) {
-      yetty_yterm_osc_args_free(&args);
-      return add_res;
-    }
-  } else if (yetty_yterm_osc_args_has(&args, "bin")) {
-    /* Binary format: stream the OSC body through the LAYER'S yface
-     * (b64 → LZ4F decompress) and hand the decompressed bytes — held in
-     * yface->in_buf — straight to ypaint-core. No transient yface, no
-     * intermediate copy of the decompressed payload. */
-    struct yetty_ycore_buffer_result payload =
-        yetty_yterm_osc_args_get_payload_buffer(&args);
-    if (YETTY_IS_ERR(payload)) {
-      yetty_yterm_osc_args_free(&args);
-      return YETTY_ERR(yetty_ycore_void, payload.error.msg);
-    }
-
-    ydebug("ypaint_layer_write: bin payload_len=%zu", payload.value.size);
-
-    {
-      struct yetty_ycore_void_result r = yetty_yface_start_read(layer->yface);
-      if (YETTY_IS_ERR(r)) {
-        yetty_yterm_osc_args_free(&args);
-        return r;
-      }
-      r = yetty_yface_feed(layer->yface,
-                           (const char *)payload.value.data,
-                           payload.value.size);
-      if (YETTY_IS_ERR(r)) {
-        yetty_yface_finish_read(layer->yface);
-        yetty_yterm_osc_args_free(&args);
-        return r;
-      }
-      r = yetty_yface_finish_read(layer->yface);
-      if (YETTY_IS_ERR(r)) {
-        yetty_yterm_osc_args_free(&args);
-        return r;
-      }
-    }
-
-    struct yetty_ycore_buffer *in = yetty_yface_in_buf(layer->yface);
-
-    struct yetty_ypaint_core_buffer_result res =
-        yetty_ypaint_core_buffer_create_from_bytes(in->data, in->size);
-    if (YETTY_IS_ERR(res)) {
-      yetty_yterm_osc_args_free(&args);
-      return YETTY_ERR(yetty_ycore_void, res.error.msg);
-    }
-
-    struct yetty_ycore_void_result add_res =
-        yetty_ypaint_canvas_add_buffer(layer->canvas, res.value);
-    yetty_ypaint_core_buffer_destroy(res.value);
-    if (YETTY_IS_ERR(add_res)) {
-      yetty_yterm_osc_args_free(&args);
-      return add_res;
-    }
-  } else {
-    ydebug("ypaint_layer_write: unknown format (use --yaml or --bin)");
-  }
-
-  yetty_yterm_osc_args_free(&args);
+  if (YETTY_IS_ERR(r)) return r;
 
   layer->base.dirty = 1;
   if (layer->base.request_render_fn)

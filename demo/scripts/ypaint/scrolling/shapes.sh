@@ -85,5 +85,5 @@ EOF
 )
 
 PAYLOAD=$(echo "$YAML_PAYLOAD" | base64 -w0)
-printf '\033]666674;--yaml;%s\033\\' "$PAYLOAD"
+printf '\033]600002;;%s\033\\' "$PAYLOAD"
 echo "YPaint scrolling layer: shapes demo"

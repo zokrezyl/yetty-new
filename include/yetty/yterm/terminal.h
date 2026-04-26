@@ -64,7 +64,12 @@ typedef void (*yetty_yterm_mouse_sub_fn)(int click_enabled, int move_enabled,
 /* Layer ops */
 struct yetty_yterm_terminal_layer_ops {
   void (*destroy)(struct yetty_yterm_terminal_layer *self);
+  /* OSC payload from pty-reader. `osc_code` lets the layer dispatch by
+   * code (one layer can register for multiple codes); the body is the
+   * full OSC payload after the leading "<code>;" — i.e. the yface body
+   * "<flag>;<base64...>" for yface-encoded messages. */
   struct yetty_ycore_void_result (*write)(struct yetty_yterm_terminal_layer *self,
+                                         int osc_code,
                                          const char *data, size_t len);
   struct yetty_ycore_void_result (*resize_grid)(
       struct yetty_yterm_terminal_layer *self, struct grid_size grid_size);

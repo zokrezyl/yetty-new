@@ -146,7 +146,7 @@ struct yetty_yterm_terminal_text_layer {
 static void text_layer_destroy(struct yetty_yterm_terminal_layer *self);
 static struct yetty_ycore_void_result
 text_layer_write(struct yetty_yterm_terminal_layer *self,
-                 const char *data, size_t len);
+                 int osc_code, const char *data, size_t len);
 static struct yetty_ycore_void_result
 text_layer_resize_grid(struct yetty_yterm_terminal_layer *self,
                        struct grid_size grid_size);
@@ -616,10 +616,11 @@ static void text_layer_destroy(struct yetty_yterm_terminal_layer *self)
 
 static struct yetty_ycore_void_result
 text_layer_write(struct yetty_yterm_terminal_layer *self,
-                 const char *data, size_t len)
+                 int osc_code, const char *data, size_t len)
 {
     struct yetty_yterm_terminal_text_layer *text_layer =
         container_of(self, struct yetty_yterm_terminal_text_layer, base);
+    (void)osc_code; /* text-layer is the default sink — no OSC dispatch */
 
     if (!text_layer->vterm)
         return YETTY_ERR(yetty_ycore_void, "vterm is NULL");
