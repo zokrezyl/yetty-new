@@ -586,7 +586,17 @@ IOS_CROSS_EOF
             "libffi-${LIBFFI_VERSION}.tar.gz"
         [ -d "$DEPS_DIR/libffi-${LIBFFI_VERSION}" ] || \
             tar -C "$DEPS_DIR" -xzf "$DEPS_DIR/libffi-${LIBFFI_VERSION}.tar.gz"
-        _ios_autotools_build "libffi" "$DEPS_DIR/libffi-${LIBFFI_VERSION}"
+        # src/aarch64/sysv.S emits cfi_def_cfa / cfi_adjust_cfa_offset directives
+        # that Apple clang's integrated assembler (Xcode 16.4) rejects with
+        # "invalid CFI advance_loc expression" — it can't compute the implicit
+        # advance between CFI ops in this Mach-O section layout. Override the
+        # autoconf cache so HAVE_AS_CFI_PSEUDO_OP stays undefined and libffi's
+        # cfi_* macros expand to nothing. Only DWARF unwind metadata is lost,
+        # which is irrelevant for a static lib statically linked into qemu.
+        (
+            export gcc_cv_as_cfi_pseudo_op=no
+            _ios_autotools_build "libffi" "$DEPS_DIR/libffi-${LIBFFI_VERSION}"
+        )
 
         GLIB_MINOR="${GLIB_VERSION%.*}"
         _ios_fetch "https://download.gnome.org/sources/glib/${GLIB_MINOR}/glib-${GLIB_VERSION}.tar.xz" \
