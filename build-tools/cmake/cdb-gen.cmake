@@ -1,8 +1,9 @@
 # CDB Font Generation
-# Generates MSDF CDB files from TTF fonts using yetty-ymsdf-gen tool
-# Outputs to ${CMAKE_BINARY_DIR}/assets/msdf-fonts/
+# Generates MSDF CDB files from TTF fonts using yetty-ymsdf-gen tool.
+# Output dir matches the prebuilt fetch dir (3rdparty/cdb/) so
+# shared.cmake's glob picks up local-gen and prebuilt artifacts uniformly.
 
-set(CDB_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets/msdf-fonts")
+set(CDB_OUTPUT_DIR "${CMAKE_BINARY_DIR}/3rdparty/cdb")
 set(FONT_DIR "${YETTY_ROOT}/assets/fonts")
 
 set(FONT_FILES

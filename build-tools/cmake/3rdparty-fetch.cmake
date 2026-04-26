@@ -98,7 +98,8 @@ endfunction()
 # re-extracts only if the version changed.
 #-----------------------------------------------------------------------------
 function(yetty_3rdparty_fetch LIB_NAME)
-    set(_VER_FILE "${YETTY_ROOT}/build-tools/3rdparty/${LIB_NAME}/version")
+    set(_LIB_DIR  "${YETTY_ROOT}/build-tools/3rdparty/${LIB_NAME}")
+    set(_VER_FILE "${_LIB_DIR}/version")
     if(NOT EXISTS "${_VER_FILE}")
         message(FATAL_ERROR
             "3rdparty-fetch(${LIB_NAME}): version file not found: ${_VER_FILE}")
@@ -109,14 +110,22 @@ function(yetty_3rdparty_fetch LIB_NAME)
         message(FATAL_ERROR "3rdparty-fetch(${LIB_NAME}): ${_VER_FILE} is empty")
     endif()
 
-    yetty_3rdparty_target_platform(_PLATFORM)
-    if(NOT _PLATFORM)
-        message(FATAL_ERROR
-            "3rdparty-fetch(${LIB_NAME}): no target platform mapped — \
+    # Platform-independent assets are marked with a `.noarch` file next to
+    # the version. Their tarballs omit the target slug — same artifact for
+    # every host (e.g. cdb, linux kernel, opensbi firmware, alpine ext4).
+    if(EXISTS "${_LIB_DIR}/.noarch")
+        set(_FILENAME "${LIB_NAME}-${_LIBVER}.tar.gz")
+        set(_PLAT_DESC "noarch")
+    else()
+        yetty_3rdparty_target_platform(_PLATFORM)
+        if(NOT _PLATFORM)
+            message(FATAL_ERROR
+                "3rdparty-fetch(${LIB_NAME}): no target platform mapped — \
 unsupported build configuration?")
+        endif()
+        set(_FILENAME "${LIB_NAME}-${_PLATFORM}-${_LIBVER}.tar.gz")
+        set(_PLAT_DESC "${_PLATFORM}")
     endif()
-
-    set(_FILENAME "${LIB_NAME}-${_PLATFORM}-${_LIBVER}.tar.gz")
     set(_TARBALL "${YETTY_3RDPARTY_CACHE_DIR}/${_FILENAME}")
     set(_TAG "lib-${LIB_NAME}-${_LIBVER}")
     set(_URL "${YETTY_3RDPARTY_URL_BASE}/${_TAG}/${_FILENAME}")
@@ -153,8 +162,34 @@ unsupported build configuration?")
             message(FATAL_ERROR
                 "3rdparty-fetch: failed to extract ${_TARBALL} into ${_DEST}")
         endif()
+
+        # Auto-decompress any *.br files side-by-side (keep the .br too —
+        # the embed pipeline reads it pre-compressed; the runtime path
+        # mode reads the decompressed raw file). Brotli-guarded; if brotli
+        # isn't installed and a consumer needs the raw file, that consumer
+        # will report a missing-file error with a clear path.
+        file(GLOB_RECURSE _BR_FILES "${_DEST}/*.br")
+        if(_BR_FILES)
+            find_program(BROTLI_EXECUTABLE brotli)
+            if(BROTLI_EXECUTABLE)
+                foreach(_BR ${_BR_FILES})
+                    string(REGEX REPLACE "\\.br$" "" _RAW "${_BR}")
+                    if(NOT EXISTS "${_RAW}")
+                        execute_process(
+                            COMMAND "${BROTLI_EXECUTABLE}" -d -k -f -o "${_RAW}" "${_BR}"
+                            RESULT_VARIABLE _BR_RESULT
+                        )
+                        if(NOT _BR_RESULT EQUAL 0)
+                            message(WARNING
+                                "3rdparty-fetch(${LIB_NAME}): failed to decompress ${_BR}")
+                        endif()
+                    endif()
+                endforeach()
+            endif()
+        endif()
+
         file(WRITE "${_STAMP}" "${_LIBVER}\n")
-        message(STATUS "3rdparty-fetch: ${LIB_NAME} ${_LIBVER} ready (${_PLATFORM})")
+        message(STATUS "3rdparty-fetch: ${LIB_NAME} ${_LIBVER} ready (${_PLAT_DESC})")
     endif()
 
     if(ARGC GREATER 1)

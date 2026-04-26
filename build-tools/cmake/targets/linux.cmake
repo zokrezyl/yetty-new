@@ -26,7 +26,7 @@ endif()
 
 # The shared RISC-V runtime (OpenSBI firmware, Linux kernel, Alpine rootfs)
 # and the QEMU binary are now fetched as prebuilt release assets from
-# shared.cmake via assets-fetch.cmake — no local toolchain build here.
+# shared.cmake via 3rdparty-fetch.cmake — no local toolchain build here.
 
 # Desktop-specific subdirectories
 if(YETTY_ENABLE_FEATURE_GPU)
@@ -150,10 +150,15 @@ if(YETTY_ENABLE_FEATURE_ASSETS)
     add_dependencies(yetty copy-shaders copy-assets copy-shaders-for-incbin copy-fonts-for-incbin)
 endif()
 
-# Verify all required assets are present
+# Verify all required assets are present.
+# CDB is NOT checked for desktop — the binary embeds it via incbin and
+# there's no separate runtime asset dir to verify (other targets stage
+# into APK/bundle/wasm-fs locations and check those). If incbin can't
+# find a cdb file at link time it fails the build directly, so the
+# embed pipeline is its own implicit check.
 if(YETTY_ENABLE_FEATURE_ASSETS)
     add_custom_command(TARGET yetty POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=desktop -DCHECK_CDB=${YETTY_ENABLE_FEATURE_CDB_GEN} -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
+        COMMAND ${CMAKE_COMMAND} -DBUILD_DIR=${CMAKE_BINARY_DIR} -DTARGET_TYPE=desktop -P ${YETTY_ROOT}/build-tools/cmake/verify-assets.cmake
         COMMENT "Verifying build assets..."
     )
 endif()

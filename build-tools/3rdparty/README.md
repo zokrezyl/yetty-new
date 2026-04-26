@@ -67,7 +67,7 @@ Same set as `assets/qemu/` (link targets only — no `tvos-arm64`):
 
 1. Bump (or create) `build-tools/3rdparty/<libname>/version`.
 2. Commit and push the change.
-3. `build-tools/push-lib-tag.sh <libname>` — reads the version file,
+3. `build-tools/push-3rdparty-tag.sh <libname>` — reads the version file,
    creates and pushes `lib-<libname>-<version>` tag.
 4. Workflow fires; tarballs end up on the release of the same name.
 5. Yetty's `build-tools/cmake/<libname>.cmake` reads the same `version`
@@ -107,4 +107,4 @@ Tier 0 = already pre-built (Dawn).
    existing tooling doesn't cover them.
 4. Replace `build-tools/cmake/<lib>.cmake` with a download-and-import-
    static stub via `yetty_3rdparty_fetch(<lib>)`.
-5. `build-tools/push-lib-tag.sh <lib>` to cut the first release.
+5. `build-tools/push-3rdparty-tag.sh <lib>` to cut the first release.

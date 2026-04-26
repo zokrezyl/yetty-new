@@ -1,8 +1,10 @@
 # MS-CDB Font Generation
-# Generates monospace MSDF .ms-cdb files from TTF fonts using yetty-ymsdf-gen
-# Outputs to ${CMAKE_BINARY_DIR}/assets/ms-msdf-fonts/
+# Generates monospace MSDF .ms-cdb files from TTF fonts using yetty-ymsdf-gen.
+# Output dir lives under 3rdparty/ alongside the cdb fetch dir; consumers
+# glob it explicitly (no prebuilt fetch yet for ms-msdf-fonts — generated
+# locally only).
 
-set(MS_CDB_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets/ms-msdf-fonts")
+set(MS_CDB_OUTPUT_DIR "${CMAKE_BINARY_DIR}/3rdparty/ms-msdf-fonts")
 set(FONT_DIR "${YETTY_ROOT}/assets/fonts")
 
 set(MS_FONT_FILES

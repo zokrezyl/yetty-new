@@ -28,7 +28,7 @@ case "$TARGET_PLATFORM" in
         # VCPKG_INSTALLED. Skip nix and exec the inner build.sh directly.
         if ! command -v clang-cl >/dev/null 2>&1 && ! command -v clang-cl.exe >/dev/null 2>&1; then
             echo "error: windows-x86_64 requires clang-cl on PATH" >&2
-            echo "       run via build-tools/assets/qemu/build.ps1 from PowerShell" >&2
+            echo "       run via build-tools/3rdparty/qemu/build.ps1 from PowerShell" >&2
             echo "       (it loads vcvarsall and puts LLVM bin on PATH)" >&2
             exit 1
         fi
@@ -41,4 +41,4 @@ case "$TARGET_PLATFORM" in
 esac
 
 cd "$(dirname "$0")/../../.."
-exec nix develop ".#$SHELL_NAME" --command bash build-tools/assets/qemu/_build.sh "$@"
+exec nix develop ".#$SHELL_NAME" --command bash build-tools/3rdparty/qemu/_build.sh "$@"
