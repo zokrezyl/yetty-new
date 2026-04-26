@@ -4,8 +4,8 @@ name: Build 3rdparty — qemu
 # target). Triggered on `lib-qemu-<version>` tags. Version source of
 # truth: build-tools/3rdparty/qemu/version.
 #
-# (windows-x86_64 omitted — needs MSVC self-hosted runner; same as
-# openh264/dav1d/openssl matrices.)
+# windows-x86_64 builds on a GitHub-hosted windows-latest runner via
+# msys2/setup-msys2 (CLANG64) — no self-hosted runner needed.
 
 on:
   push:
@@ -118,6 +118,57 @@ jobs:
           TARGET_PLATFORM="${{ matrix.target }}" \
           OUTPUT_DIR="$PWD/out" \
           ./build-tools/3rdparty/qemu/build.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          files: out/qemu-${{ matrix.target }}-*.tar.gz
+          fail_on_unmatched_files: true
+
+  # Windows: MSYS2 CLANG64 (clang + lld + mingw-w64 libs). Same toolchain as
+  # poc/qemu/build-tools/build-windows-minimal.sh; no MSVC, no vcpkg, no
+  # vcvarsall. setup-msys2 installs MSYS2 fresh per run with the listed
+  # packages and gives us a `msys2 {0}` shell that already has $MSYSTEM=CLANG64
+  # and the toolchain on PATH.
+  build-windows:
+    needs: resolve
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: false
+          install: >-
+            git
+            diffutils
+            tar
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-lld
+            mingw-w64-clang-x86_64-glib2
+            mingw-w64-clang-x86_64-pixman
+            mingw-w64-clang-x86_64-libslirp
+            mingw-w64-clang-x86_64-zlib
+            mingw-w64-clang-x86_64-ninja
+            mingw-w64-clang-x86_64-meson
+            mingw-w64-clang-x86_64-pkgconf
+            mingw-w64-clang-x86_64-python
+            mingw-w64-clang-x86_64-python-pip
+
+      - name: Build QEMU for ${{ matrix.target }}
+        shell: msys2 {0}
+        env:
+          TARGET_PLATFORM: ${{ matrix.target }}
+        run: |
+          mkdir -p out
+          OUTPUT_DIR="$(pwd)/out" \
+              ./build-tools/3rdparty/qemu/build.sh
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve.outputs.tag }}
