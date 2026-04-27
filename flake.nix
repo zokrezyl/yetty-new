@@ -489,9 +489,14 @@
           };
 
           # macOS native — clang comes from Xcode on the host runner.
+          # autoconf/automake/libtool are needed by libmagic (file 5.x):
+          # its `make` rules regenerate Makefile.in from Makefile.am even
+          # in --disable-maintainer-mode (file's configure.ac doesn't gate
+          # the regen rules with AM_MAINTAINER_MODE).
           "3rdparty-macos-x86_64" = pkgs.mkShell {
             buildInputs = with pkgs; [
               meson ninja gnumake perl nasm python3
+              autoconf automake libtool
               curl gnutar xz gzip
               pkg-config
             ];
@@ -501,6 +506,7 @@
           "3rdparty-macos-arm64" = pkgs.mkShell {
             buildInputs = with pkgs; [
               meson ninja gnumake perl nasm python3
+              autoconf automake libtool
               curl gnutar xz gzip
               pkg-config
             ];
