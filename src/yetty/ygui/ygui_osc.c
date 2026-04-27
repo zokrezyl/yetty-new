@@ -6,6 +6,7 @@
 #include <yetty/yface/yface.h>
 #include <yetty/ycore/types.h>
 #include <yetty/yterm/pty-reader.h>   /* YETTY_OSC_YPAINT_* */
+#include <yetty/ymgui/wire.h>         /* YMGUI_OSC_CS_CARD_*, wire structs */
 #include <stdio.h>
 #include <string.h>
 
@@ -134,6 +135,50 @@ void ygui_osc_subscribe_view_changes(int enable) {
     } else {
         write_osc("\033[?1502l", 8);
     }
+}
+
+/* Register a card with the ymgui layer. The server then hit-tests this card
+ * and routes mouse events to it as YMGUI_OSC_SC_MOUSE with card-local
+ * coords. Without this, the server's hit table has no entry for our UI and
+ * no mouse traffic ever flows back. col/row/w_cells/h_cells are in grid
+ * cells (matching ygui_engine_create's x,y,cols,rows). */
+void ygui_osc_card_place(uint32_t card_id, int col, int row,
+                          uint32_t w_cells, uint32_t h_cells) {
+    struct ymgui_wire_card_place msg = {
+        .magic   = YMGUI_WIRE_MAGIC_CARD_PLACE,
+        .version = YMGUI_WIRE_VERSION,
+        .card_id = card_id,
+        .flags   = 0,
+        .col     = col,
+        .row     = row,
+        .w_cells = w_cells,
+        .h_cells = h_cells,
+    };
+    struct yetty_ycore_buffer out = {0};
+    struct yetty_ycore_void_result r = yetty_yface_emit(
+        YMGUI_OSC_CS_CARD_PLACE, /*compressed=*/0,
+        /*args=*/NULL, /*args_len=*/0,
+        &msg, sizeof(msg), &out);
+    if (YETTY_IS_OK(r) && out.size > 0)
+        write_osc((const char *)out.data, out.size);
+    yetty_ycore_buffer_destroy(&out);
+}
+
+void ygui_osc_card_remove(uint32_t card_id) {
+    struct ymgui_wire_card_remove msg = {
+        .magic   = YMGUI_WIRE_MAGIC_CARD_REMOVE,
+        .version = YMGUI_WIRE_VERSION,
+        .card_id = card_id,
+        .flags   = 0,
+    };
+    struct yetty_ycore_buffer out = {0};
+    struct yetty_ycore_void_result r = yetty_yface_emit(
+        YMGUI_OSC_CS_CARD_REMOVE, /*compressed=*/0,
+        /*args=*/NULL, /*args_len=*/0,
+        &msg, sizeof(msg), &out);
+    if (YETTY_IS_OK(r) && out.size > 0)
+        write_osc((const char *)out.data, out.size);
+    yetty_ycore_buffer_destroy(&out);
 }
 
 void ygui_osc_zoom_card(const char* name, float level) {

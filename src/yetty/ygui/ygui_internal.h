@@ -8,6 +8,7 @@
 #include "ygui.h"
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/yfont/font.h>
+#include <yetty/yface/yface.h>
 #include <stdlib.h>
 #include <string.h>
 #include <uv.h>
@@ -302,6 +303,11 @@ struct ygui_engine {
     char* card_name;
     int card_x, card_y, card_w, card_h;
     int card_shown;      /* 0 = not shown yet, 1 = shown (use update) */
+    uint32_t card_id;    /* ymgui-layer card id (for CARD_PLACE / hit routing) */
+
+    /* Long-lived yface for parsing inbound binary OSC envelopes
+     * (YMGUI_OSC_SC_MOUSE / RESIZE / FOCUS / KEY). */
+    struct yetty_yface* yface_in;
 
     /* State */
     int dirty;
@@ -399,6 +405,9 @@ void ygui_osc_subscribe_clicks(int enable);
 void ygui_osc_subscribe_moves(int enable);
 void ygui_osc_subscribe_view_changes(int enable);
 void ygui_osc_query_cell_size(void);
+void ygui_osc_card_place(uint32_t card_id, int col, int row,
+                          uint32_t w_cells, uint32_t h_cells);
+void ygui_osc_card_remove(uint32_t card_id);
 void ygui_osc_zoom_card(const char* name, float level);
 void ygui_osc_scroll_card(const char* name, float x, float y, int absolute);
 void ygui_osc_scroll_card_delta(const char* name, float dx, float dy);
