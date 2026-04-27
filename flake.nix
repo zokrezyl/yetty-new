@@ -479,6 +479,9 @@
 
           # Cross to aarch64 Linux: pkgsCross.*.mkShell so nativeBuildInputs
           # (host-side build tools) stay out of the cross link path.
+          # Cross-X11 (libX11/Xrandr/etc.) goes via buildInputs so glfw's
+          # find_package(X11) resolves when targeting Raspberry-Pi-style
+          # boards.
           "3rdparty-linux-aarch64" = pkgs.pkgsCross.aarch64-multiplatform.mkShell {
             nativeBuildInputs = with pkgs; [
               meson ninja gnumake perl nasm python3
@@ -486,6 +489,10 @@
               pkgsCross.aarch64-multiplatform.buildPackages.gcc
               pkgsCross.aarch64-multiplatform.buildPackages.binutils
               pkgsCross.aarch64-multiplatform.buildPackages.pkg-config
+            ];
+            buildInputs = with pkgs.pkgsCross.aarch64-multiplatform; [
+              xorg.libX11 xorg.libXrandr xorg.libXinerama
+              xorg.libXcursor xorg.libXi xorg.libXext xorgproto
             ];
             shellHook = ''
               export CROSS_PREFIX="aarch64-unknown-linux-gnu-"
