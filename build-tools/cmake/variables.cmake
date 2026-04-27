@@ -201,6 +201,26 @@ if(APPLE AND NOT YETTY_IOS)
     endforeach()
 endif()
 
+# Auto-disable on macOS (host build): libmagic + ycat. libmagic is built from
+# upstream file(1) sources via cmake/Libmagic.cmake which assumes Linux-style
+# libtool/autotools paths and either picks up Homebrew's libmagic header
+# (incompatible struct layouts vs the bundled magic.mgc) or fails its
+# external-project configure step on macOS. ycat consumes libmagic for
+# MIME-dispatching, so it goes off with it. Both are disabled here until the
+# Libmagic.cmake recipe is reworked for the macOS environment.
+if(APPLE AND NOT YETTY_IOS)
+    foreach(_f
+        YETTY_ENABLE_LIB_LIBMAGIC    # cmake/Libmagic.cmake fails / mis-finds on macOS
+        YETTY_ENABLE_FEATURE_YCAT    # src/yetty/ycat — MIME dispatch needs libmagic
+        YETTY_ENABLE_TOOL_YCAT       # tool links libyetty_ycat (gone with FEATURE_YCAT)
+    )
+        if(${_f})
+            message(STATUS "Disabling ${_f} on macOS (libmagic build/detection unreliable on macOS host; see variables.cmake)")
+            set(${_f} OFF CACHE BOOL "" FORCE)
+        endif()
+    endforeach()
+endif()
+
 # Auto-disable on iOS / tvOS: tools that depend on the YCAT library, which
 # src/yetty/CMakeLists.txt deliberately skips for YETTY_IOS (the lib uses
 # desktop-only POSIX bits — strings.h / unistd.h scattered throughout). The
