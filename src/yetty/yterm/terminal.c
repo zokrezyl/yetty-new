@@ -65,7 +65,17 @@ struct yetty_yterm_terminal {
   /* Long-lived yface for emitting input events to the inferior over the
    * PTY. Reused across every emit; out_buf is cleared after each write. */
   struct yetty_yface *emit_yface;
+
+  /* tmux-style scrollback view. Mouse wheel enters scrollback and shifts
+   * the absolute viewport top (view_top_total_idx). Enter exits back to
+   * live. While active, both layers freeze their viewport at this index
+   * even as new content keeps arriving. */
+  int scrollback_active;
+  uint32_t view_top_total_idx;
 };
+
+/* How many lines a single mouse-wheel notch moves the scrollback view. */
+#define YETTY_YTERM_WHEEL_LINES_PER_TICK 3
 
 /* Forward declarations */
 static void terminal_read_pty(struct yetty_yterm_terminal *terminal);
@@ -224,6 +234,109 @@ static void terminal_emit_mouse_move(struct yetty_yterm_terminal *terminal,
       .y            = y,
   };
   terminal_yface_emit(terminal, YMGUI_OSC_SC_MOUSE, &msg, sizeof(msg));
+}
+
+/*-----------------------------------------------------------------------
+ * Scrollback view (tmux-style copy mode)
+ *
+ * Mouse-wheel events drive both layers into scrollback mode together.
+ * view_top_total_idx is an absolute line index — text-layer's sb_count
+ * and ypaint canvas's rolling_row_0 stay in lockstep (every text scroll
+ * triggers a ypaint scroll and vice versa), so the same index identifies
+ * the same line in both.
+ *
+ * PR #89 ("Ymgui 5") rewrote the OSC mouse path to forward wheel events
+ * out to the inferior as binary mouse messages. That removed the only
+ * caller of the canvas/text-layer set_view_top APIs and the scrollback
+ * regressed to dead code on origin/main. The four helpers below restore
+ * the wheel→scrollback driver while leaving #89's outbound mouse OSC
+ * behaviour untouched: when no client is subscribed (vim/less/mc not
+ * consuming clicks), wheel drives scrollback; when subscribed, wheel
+ * goes outbound. See YETTY_EVENT_SCROLL handler.
+ *---------------------------------------------------------------------*/
+
+/* Find the live anchor across layers. We use the maximum so a layer that
+ * has scrolled further (e.g. ypaint just absorbed a multi-page PDF) doesn't
+ * leave the others behind — both layers have the same anchor by design,
+ * but max() is a safe fallback in case they ever drift. */
+static uint32_t terminal_live_anchor(struct yetty_yterm_terminal *terminal) {
+  uint32_t anchor = 0;
+  for (size_t i = 0; i < terminal->layer_count; i++) {
+    struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
+    if (layer && layer->ops && layer->ops->get_live_anchor) {
+      uint32_t a = layer->ops->get_live_anchor(layer);
+      if (a > anchor)
+        anchor = a;
+    }
+  }
+  return anchor;
+}
+
+/* Push the current scrollback view state to every layer that supports it. */
+static void terminal_push_view_top(struct yetty_yterm_terminal *terminal) {
+  for (size_t i = 0; i < terminal->layer_count; i++) {
+    struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
+    if (layer && layer->ops && layer->ops->set_view_top) {
+      layer->ops->set_view_top(layer, terminal->scrollback_active,
+                               terminal->view_top_total_idx);
+    }
+  }
+  if (terminal->context.yetty_context.event_loop)
+    terminal->context.yetty_context.event_loop->ops->request_render(
+        terminal->context.yetty_context.event_loop);
+}
+
+/* Apply a relative wheel delta. Positive lines = scroll up (older). On the
+ * first wheel-up out of live mode we anchor view_top one line back from
+ * the current live position and enter scrollback. Scrolling past the live
+ * anchor exits back to live. */
+static void terminal_scrollback_apply(struct yetty_yterm_terminal *terminal,
+                                      int lines) {
+  uint32_t live = terminal_live_anchor(terminal);
+
+  if (!terminal->scrollback_active) {
+    if (lines <= 0)
+      return; /* downward wheel in live mode: nothing to do */
+    if (live == 0)
+      return; /* nothing in scrollback yet */
+    terminal->scrollback_active = 1;
+    terminal->view_top_total_idx = live - 1;
+    if ((uint32_t)lines > 1)
+      lines -= 1; /* the entry already consumed one notch */
+    else
+      lines = 0;
+  }
+
+  if (lines > 0) {
+    if ((uint32_t)lines > terminal->view_top_total_idx)
+      terminal->view_top_total_idx = 0;
+    else
+      terminal->view_top_total_idx -= (uint32_t)lines;
+  } else if (lines < 0) {
+    uint32_t n = (uint32_t)(-lines);
+    uint64_t target = (uint64_t)terminal->view_top_total_idx + n;
+    if (target >= live) {
+      /* Scrolled forward into the live region — exit scrollback. */
+      terminal->scrollback_active = 0;
+      terminal->view_top_total_idx = live;
+    } else {
+      terminal->view_top_total_idx = (uint32_t)target;
+    }
+  }
+
+  ydebug("scrollback: active=%d view_top=%u live=%u",
+         terminal->scrollback_active, terminal->view_top_total_idx, live);
+  terminal_push_view_top(terminal);
+}
+
+/* Force a return to live, regardless of current view position. */
+static void terminal_scrollback_exit(struct yetty_yterm_terminal *terminal) {
+  if (!terminal->scrollback_active)
+    return;
+  terminal->scrollback_active = 0;
+  terminal->view_top_total_idx = terminal_live_anchor(terminal);
+  ydebug("scrollback: EXIT");
+  terminal_push_view_top(terminal);
 }
 
 /* Mouse-subscription callback fired by the text-layer when libvterm flips
@@ -815,6 +928,17 @@ terminal_view_on_event(struct yetty_yui_view *view,
   case YETTY_EVENT_KEY_DOWN:
     ydebug("terminal: KEY_DOWN key=%d mods=%d", event->key.key,
            event->key.mods);
+    /* In scrollback view, Enter exits and is consumed (matches tmux copy
+     * mode). Other keys also exit scrollback before falling through to
+     * normal dispatch — this means typing while in scrollback returns to
+     * live and delivers the keystroke to the shell, which is what users
+     * expect when they meant to interact with the prompt. */
+    if (terminal->scrollback_active) {
+      int is_enter = (event->key.key == 257); /* GLFW_KEY_ENTER */
+      terminal_scrollback_exit(terminal);
+      if (is_enter)
+        return YETTY_OK(yetty_ycore_int, 1);
+    }
     for (size_t i = 0; i < terminal->layer_count; i++) {
       struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
       if (layer && layer->ops && layer->ops->on_key) {
@@ -827,6 +951,8 @@ terminal_view_on_event(struct yetty_yui_view *view,
   case YETTY_EVENT_CHAR:
     ydebug("terminal: CHAR codepoint=U+%04X mods=%d", event->chr.codepoint,
            event->chr.mods);
+    if (terminal->scrollback_active)
+      terminal_scrollback_exit(terminal);
     for (size_t i = 0; i < terminal->layer_count; i++) {
       struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
       if (layer && layer->ops && layer->ops->on_char) {
@@ -1020,16 +1146,36 @@ terminal_view_on_event(struct yetty_yui_view *view,
   }
 
   case YETTY_EVENT_SCROLL: {
-    if (!terminal->mouse_click_subscribed)
+    /* Drop horizontal-only scroll (dy==0). The ymgui wire mouse struct
+     * only carries wheel_dy, so emitting via terminal_emit_mouse_click
+     * with dy=0 falls through to the BUTTON branch and would deliver a
+     * phantom left-button press to the ymgui client. The scrollback
+     * driver is also dy-only, so dx events have nothing to do here. */
+    if (event->scroll.dy == 0.0f)
       return YETTY_OK(yetty_ycore_int, 0);
+
     float lx = event->scroll.x - view->bounds.x;
     float ly = event->scroll.y - view->bounds.y;
     if (lx < 0.0f || ly < 0.0f ||
         lx >= view->bounds.w || ly >= view->bounds.h)
       return YETTY_OK(yetty_ycore_int, 0);
-    /* Encode wheel as a synthetic press on a virtual button. The client
-     * reads the scroll-dy field from the trailing position. */
-    terminal_emit_mouse_click(terminal, 0, 1, lx, ly, event->scroll.dy);
+
+    /* Once in scrollback view, the wheel always navigates history — even
+     * if a subscribed app would normally consume it. Outside scrollback,
+     * a subscribed app (vim, less, mc...) wins; otherwise wheel drives
+     * scrollback. dy>0 = wheel up = older content. */
+    if (!terminal->scrollback_active && terminal->mouse_click_subscribed) {
+      /* Forward as a wheel-kind ymgui mouse event (terminal_emit_mouse_click
+       * dispatches kind=WHEEL when scroll_dy != 0, ignoring button/press). */
+      terminal_emit_mouse_click(terminal, 0, 0, lx, ly, event->scroll.dy);
+      return YETTY_OK(yetty_ycore_int, 1);
+    }
+
+    int lines = (int)(event->scroll.dy * YETTY_YTERM_WHEEL_LINES_PER_TICK);
+    if (lines == 0 && event->scroll.dy != 0.0f)
+      lines = (event->scroll.dy > 0) ? 1 : -1;
+    if (lines != 0)
+      terminal_scrollback_apply(terminal, lines);
     return YETTY_OK(yetty_ycore_int, 1);
   }
 
