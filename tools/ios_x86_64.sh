@@ -32,6 +32,12 @@ else
 fi
 BUNDLE_ID="com.yetty.terminal"
 
+# Hardware-keyboard layout the iOS Simulator should advertise to yetty
+# (yetty's pressesBegan: receives UIKey.characters which is the post-layout
+# value). Default Dvorak; export KEYBOARD_LAYOUT=QWERTY to override, or
+# KEYBOARD_LAYOUT=skip to leave the sim's existing setting alone.
+KEYBOARD_LAYOUT="${KEYBOARD_LAYOUT:-Dvorak}"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -157,6 +163,20 @@ boot_simulator() {
 }
 
 #-----------------------------------------------------------------------------
+# Set Simulator hardware-keyboard layout via the shared helper. See
+# tools/sim-keyboard.sh for why and how — yetty's pressesBegan: receives
+# UIKey.characters which is post-layout, so the sim's setting determines
+# what character yetty sees for each physical key.
+#-----------------------------------------------------------------------------
+set_keyboard_layout() {
+    if [ "$KEYBOARD_LAYOUT" = "skip" ]; then
+        info "Keyboard layout: leaving sim's existing setting (KEYBOARD_LAYOUT=skip)"
+        return 0
+    fi
+    "$SCRIPT_DIR/sim-keyboard.sh" "$KEYBOARD_LAYOUT" "$SIMULATOR_UDID"
+}
+
+#-----------------------------------------------------------------------------
 # Install and run app
 #-----------------------------------------------------------------------------
 install_and_run() {
@@ -264,6 +284,13 @@ main() {
             echo "  --info, -i      Show built library info"
             echo "  --help, -h      Show this help"
             echo ""
+            echo "ENV:"
+            echo "  KEYBOARD_LAYOUT  Hardware keyboard layout for the sim."
+            echo "                   Default: Dvorak. Valid: Dvorak,"
+            echo "                   DvorakLeft, DvorakRight, QWERTY, Colemak,"
+            echo "                   or 'skip' to leave the sim's setting."
+            echo "  APP_BUNDLE       Override the .app path."
+            echo ""
             echo "NOTE:"
             echo "  The iOS build produces libyetty.a (static library)."
             echo "  To run in the simulator, you need an iOS app project"
@@ -286,6 +313,7 @@ main() {
     check_xcode
     find_or_create_simulator
     boot_simulator
+    set_keyboard_layout
     show_library_info
     install_and_run
 }
