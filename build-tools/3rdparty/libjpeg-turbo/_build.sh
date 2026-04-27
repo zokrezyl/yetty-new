@@ -81,10 +81,16 @@ ios-arm64|ios-x86_64)
     _IOS_SYSROOT="$(/usr/bin/xcrun --sdk "$_IOS_SDK" --show-sdk-path)"
     CMAKE_ARGS+=(
         "-DCMAKE_SYSTEM_NAME=iOS"
+        "-DCMAKE_SYSTEM_PROCESSOR=$_IOS_ARCH"
         "-DCMAKE_OSX_ARCHITECTURES=$_IOS_ARCH"
         "-DCMAKE_OSX_SYSROOT=$_IOS_SYSROOT"
         "-DCMAKE_OSX_DEPLOYMENT_TARGET=$IOS_MIN"
         "-DCMAKE_C_COMPILER=/usr/bin/clang"
+        # libjpeg-turbo's NASM SIMD path doesn't have an iOS toolchain
+        # description that matches our cross setup — disable SIMD on
+        # iOS to skip the nasm probe.
+        "-DWITH_SIMD=OFF"
+        "-DREQUIRE_SIMD=OFF"
     ) ;;
 android-arm64-v8a|android-x86_64)
     : "${ANDROID_NDK_HOME:?ANDROID_NDK_HOME not set}"

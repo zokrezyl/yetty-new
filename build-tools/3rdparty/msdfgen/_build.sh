@@ -157,7 +157,7 @@ $EMCMAKE_PREFIX cmake -S "$SRC_DIR" -B "$BUILD_DIR" -G Ninja "${CMAKE_ARGS[@]}"
 cmake --build "$BUILD_DIR" -j"$NCPU"
 cmake --install "$BUILD_DIR" || true
 
-mkdir -p "$STAGE/lib" "$STAGE/include/msdfgen" "$STAGE/include/msdfgen-ext"
+mkdir -p "$STAGE/lib" "$STAGE/include"
 # The cmake install path is unstable across versions — pick up the .a's
 # from the build dir directly.
 find "$BUILD_DIR" -maxdepth 3 -name 'libmsdfgen*.a' -exec cp -a {} "$STAGE/lib/" \;
@@ -168,10 +168,19 @@ if ! ls "$STAGE/lib/"libmsdfgen*.a >/dev/null 2>&1; then
     done
 fi
 
-# Stage all upstream public headers (preserving directory layout under msdfgen/, msdfgen-ext/).
-cp -a "$SRC_DIR/msdfgen.h" "$STAGE/include/" 2>/dev/null || true
-cp -a "$SRC_DIR/core/." "$STAGE/include/msdfgen/" 2>/dev/null || true
-cp -a "$SRC_DIR/ext/."  "$STAGE/include/msdfgen-ext/" 2>/dev/null || true
+# Stage public headers preserving the upstream layout — msdfgen.h does
+# `#include "core/base.h"` (and ~25 more core/-prefixed includes), and
+# msdfgen-ext.h does `#include "ext/import-svg.h"`. Renaming core/→msdfgen/
+# breaks that. Mirror upstream verbatim:
+#   include/msdfgen.h
+#   include/msdfgen-ext.h
+#   include/core/*.h
+#   include/ext/*.h
+cp -a "$SRC_DIR/msdfgen.h"     "$STAGE/include/" 2>/dev/null || true
+cp -a "$SRC_DIR/msdfgen-ext.h" "$STAGE/include/" 2>/dev/null || true
+mkdir -p "$STAGE/include/core" "$STAGE/include/ext"
+cp -a "$SRC_DIR/core/." "$STAGE/include/core/"
+cp -a "$SRC_DIR/ext/."  "$STAGE/include/ext/"
 # Strip .cpp files from the staged headers (we only want declarations).
 find "$STAGE/include" -name '*.cpp' -delete 2>/dev/null || true
 
