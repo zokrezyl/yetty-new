@@ -5,6 +5,7 @@
 #include "ygui_internal.h"
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/yfont/raster-font.h>
+#include <yetty/ymgui/wire.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -66,6 +67,10 @@ static int ygui_raw_mode = 0;
 
 static void ygui_restore_terminal(void) {
     if (ygui_raw_mode) {
+        /* Leave alternate screen — host terminal restores its prior content. */
+        const char leave_alt[] = "\033[?1049l";
+        ssize_t _w = write(STDOUT_FILENO, leave_alt, sizeof(leave_alt) - 1);
+        (void)_w;
         tcsetattr(STDIN_FILENO, TCSANOW, &ygui_orig_termios);
         ygui_raw_mode = 0;
     }
@@ -108,6 +113,12 @@ int ygui_init(void) {
         return -1;
     }
     ygui_raw_mode = 1;
+
+    /* Enter alternate screen — host terminal saves its content; ygui's UI
+     * draws on a fresh buffer; on shutdown the original screen is restored. */
+    const char enter_alt[] = "\033[?1049h";
+    ssize_t _w = write(STDOUT_FILENO, enter_alt, sizeof(enter_alt) - 1);
+    (void)_w;
 
     /* Set up signal handlers for clean exit */
     signal(SIGINT, ygui_signal_handler);
@@ -231,6 +242,17 @@ static ygui_engine_t* engine_alloc_init(const char* card_name, int x, int y, int
     engine->input_fd = STDIN_FILENO;
     engine->output_fd = STDOUT_FILENO;
 
+    /* Allocate a non-zero card_id (0 = "no card" sentinel on the wire).
+     * One process can hold several engines so we hand out monotonically
+     * increasing ids. */
+    static uint32_t s_next_card_id = 1;
+    engine->card_id = s_next_card_id++;
+
+    /* Long-lived yface used to parse inbound binary OSC envelopes
+     * (mouse/resize/focus/key from the ymgui-layer hit router). */
+    struct yetty_yface_ptr_result fr = yetty_yface_create();
+    if (YETTY_IS_OK(fr)) engine->yface_in = fr.value;
+
     /* Grid initialized after pixel size known */
     ygui_grid_init(&engine->grid, 1.0f, 1.0f, 1.0f);
 
@@ -283,6 +305,17 @@ void ygui_engine_destroy(ygui_engine_t* engine) {
     /* Kill card if shown */
     if (engine->card_shown && engine->card_name) {
         ygui_osc_kill_card(engine->card_name);
+    }
+
+    /* Drop the ymgui-layer card so the server stops routing mouse to us. */
+    if (engine->card_id != 0) {
+        ygui_osc_card_remove(engine->card_id);
+    }
+
+    /* Destroy yface */
+    if (engine->yface_in) {
+        yetty_yface_destroy(engine->yface_in);
+        engine->yface_in = NULL;
     }
 
     /* Clean up libuv handles if we own the loop */
@@ -452,6 +485,13 @@ void ygui_engine_show(ygui_engine_t* engine) {
     engine->clicks_subscribed = 1;
     ygui_osc_subscribe_moves(1);
     engine->moves_subscribed = 1;
+
+    /* Register our card with the ymgui-layer so the server hit-tests the
+     * cursor against our rect and emits YMGUI_OSC_SC_MOUSE with card-local
+     * coordinates. Without this, mouse events have nowhere to go. */
+    ygui_osc_card_place(engine->card_id,
+                        engine->card_x, engine->card_y,
+                        (uint32_t)engine->card_w, (uint32_t)engine->card_h);
 
     /* In CANVAS_FIT mode, create card with minimal data first to trigger OSC 777780.
      * The real render happens after we receive the actual pixel size.
@@ -1285,6 +1325,128 @@ static void process_input(ygui_engine_t* engine, const char* data, int len) {
 }
 
 /*=============================================================================
+ * yface input — decode binary OSC envelopes from the ymgui-layer hit router
+ *
+ * The server (yetty/src/yterm/terminal.c) hit-tests the cursor against live
+ * cards and emits YMGUI_OSC_SC_MOUSE / RESIZE / FOCUS / KEY with
+ * card-local coordinates. We only react to events tagged with our own
+ * card_id. Bytes that don't form an OSC envelope (CSI replies, plain
+ * keystrokes) are forwarded through on_raw to the existing parser.
+ *===========================================================================*/
+
+static void yface_on_osc(void *user, int osc_code,
+                         const uint8_t *args, size_t args_len,
+                         const uint8_t *payload, size_t payload_len) {
+    (void)args; (void)args_len;
+    ygui_engine_t *engine = (ygui_engine_t *)user;
+    if (!engine) return;
+
+    switch (osc_code) {
+    case YMGUI_OSC_SC_MOUSE: {
+        if (payload_len < sizeof(struct ymgui_wire_input_mouse)) return;
+        const struct ymgui_wire_input_mouse *m =
+            (const struct ymgui_wire_input_mouse *)payload;
+        if (m->magic != YMGUI_WIRE_MAGIC_INPUT_MOUSE) return;
+        if (m->card_id != engine->card_id) return;  /* not ours */
+
+        switch (m->kind) {
+        case YMGUI_INPUT_MOUSE_POS:
+            ygui_engine_mouse_move(engine, m->x, m->y);
+            break;
+        case YMGUI_INPUT_MOUSE_BUTTON:
+            if (m->pressed)
+                ygui_engine_mouse_down(engine, m->x, m->y, m->button);
+            else
+                ygui_engine_mouse_up(engine, m->x, m->y, m->button);
+            break;
+        case YMGUI_INPUT_MOUSE_WHEEL:
+            ygui_engine_mouse_scroll(engine, m->x, m->y, 0.0f, m->wheel_dy);
+            break;
+        }
+        break;
+    }
+    case YMGUI_OSC_SC_RESIZE: {
+        if (payload_len < sizeof(struct ymgui_wire_input_resize)) return;
+        const struct ymgui_wire_input_resize *r =
+            (const struct ymgui_wire_input_resize *)payload;
+        if (r->magic != YMGUI_WIRE_MAGIC_INPUT_RESIZE) return;
+        if (r->card_id != engine->card_id) return;
+
+        engine->display_pixel_w = r->width;
+        engine->display_pixel_h = r->height;
+        engine->have_pixel_size = 1;
+        if (engine->reference_w == 0.0f) {
+            engine->reference_w = r->width;
+            engine->reference_h = r->height;
+        }
+        engine->needs_resize = 1;
+        engine->dirty = 1;
+        if (engine->resize_callback)
+            engine->resize_callback(engine, engine->resize_userdata);
+        break;
+    }
+    case YMGUI_OSC_SC_FOCUS: {
+        /* Focus tracking is internal to the engine for now — no public API
+         * surface. The server tells us when our card gains/loses focus;
+         * widget-level focus stays driven by mouse/key events. */
+        if (payload_len < sizeof(struct ymgui_wire_input_focus)) return;
+        const struct ymgui_wire_input_focus *f =
+            (const struct ymgui_wire_input_focus *)payload;
+        if (f->magic != YMGUI_WIRE_MAGIC_INPUT_FOCUS) return;
+        if (f->card_id != engine->card_id) return;
+        /* Currently unused — wire it through if/when we add a focus API. */
+        break;
+    }
+    case YMGUI_OSC_SC_KEY: {
+        if (payload_len < sizeof(struct ymgui_wire_input_key)) return;
+        const struct ymgui_wire_input_key *k =
+            (const struct ymgui_wire_input_key *)payload;
+        if (k->magic != YMGUI_WIRE_MAGIC_INPUT_KEY) return;
+        if (k->card_id != engine->card_id) return;
+
+        if (k->kind == YMGUI_INPUT_KEY_CHAR) {
+            char utf8[8];
+            uint32_t cp = k->codepoint;
+            int n = 0;
+            /* Quick UTF-32 → UTF-8 (ASCII-fast-path good enough here). */
+            if (cp < 0x80) { utf8[n++] = (char)cp; }
+            else if (cp < 0x800) {
+                utf8[n++] = (char)(0xC0 | (cp >> 6));
+                utf8[n++] = (char)(0x80 | (cp & 0x3F));
+            } else if (cp < 0x10000) {
+                utf8[n++] = (char)(0xE0 | (cp >> 12));
+                utf8[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                utf8[n++] = (char)(0x80 | (cp & 0x3F));
+            } else {
+                utf8[n++] = (char)(0xF0 | (cp >> 18));
+                utf8[n++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                utf8[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                utf8[n++] = (char)(0x80 | (cp & 0x3F));
+            }
+            utf8[n] = '\0';
+            ygui_engine_text_input(engine, utf8);
+        } else if (k->kind == YMGUI_INPUT_KEY_DOWN) {
+            ygui_engine_key_down(engine, (uint32_t)k->key, k->mods);
+        } else if (k->kind == YMGUI_INPUT_KEY_UP) {
+            ygui_engine_key_up(engine, (uint32_t)k->key, k->mods);
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+static void yface_on_raw(void *user, const char *bytes, size_t n) {
+    ygui_engine_t *engine = (ygui_engine_t *)user;
+    if (!engine || n == 0) return;
+    /* Non-OSC bytes (CSI replies, raw keystrokes) — feed the legacy
+     * parser, which still handles cell-size CSI / view-change OSC and
+     * direct keyboard chars. */
+    process_input(engine, bytes, (int)n);
+}
+
+/*=============================================================================
  * libuv Event Loop
  *===========================================================================*/
 
@@ -1296,7 +1458,14 @@ static void stdin_poll_cb(uv_poll_t* handle, int status, int events) {
         char buf[1024];
         ssize_t n = read(engine->input_fd, buf, sizeof(buf));
         if (n > 0) {
-            process_input(engine, buf, (int)n);
+            if (engine->yface_in) {
+                /* yface scans for \e]…\e\\ envelopes, calls on_osc per
+                 * complete envelope, and on_raw for the bytes in between. */
+                yetty_yface_feed_bytes(engine->yface_in, buf, (size_t)n);
+            } else {
+                /* No yface available — fall back to legacy text parser. */
+                process_input(engine, buf, (int)n);
+            }
         } else if (n == 0) {
             /* EOF */
             engine->running = 0;
@@ -1331,6 +1500,12 @@ void ygui_engine_attach(ygui_engine_t* engine, uv_loop_t* loop) {
 
     engine->loop = loop;
     engine->owns_loop = 0;
+
+    /* Wire up the yface handlers so feed_bytes can dispatch into us. */
+    if (engine->yface_in) {
+        yetty_yface_set_handlers(engine->yface_in,
+                                 yface_on_osc, yface_on_raw, engine);
+    }
 
     /* Set up stdin poll */
     uv_poll_init(loop, &engine->stdin_poll, engine->input_fd);

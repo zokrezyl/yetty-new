@@ -8,6 +8,7 @@
 #include "ygui.h"
 #include <yetty/ypaint-core/buffer.h>
 #include <yetty/yfont/font.h>
+#include <yetty/yface/yface.h>
 #include <stdlib.h>
 #include <string.h>
 #include <uv.h>
@@ -61,13 +62,19 @@ struct ygui_theme {
     uint32_t bg_surface;
     uint32_t bg_hover;
     uint32_t bg_header;
+    uint32_t bg_dropdown;
     uint32_t border;
     uint32_t border_light;
+    uint32_t border_muted;
     uint32_t text_primary;
     uint32_t text_muted;
     uint32_t accent;
     uint32_t thumb_normal;
     uint32_t thumb_hover;
+    uint32_t overlay_modal;
+    uint32_t shadow;
+    uint32_t tooltip_bg;
+    uint32_t selection_bg;
 };
 
 /*=============================================================================
@@ -197,6 +204,36 @@ struct ygui_widget {
         struct {
             float hue, sat, val, alpha;
         } colorpicker;
+
+        struct {
+            char* label;
+            int modal;
+            uint32_t header_color; /* 0 = use theme bg_header */
+            float scene_w, scene_h;
+        } popup;
+
+        struct {
+            char* label;
+        } collapsing_header;
+
+        struct {
+            char* label;
+        } tooltip;
+
+        struct {
+            char* label;
+        } selectable;
+
+        struct {
+            char** options;
+            int option_count;
+            int selected;
+            int hover_index;
+        } choicebox;
+
+        struct {
+            float value;     /* 0..1 */
+        } scrollbar;
     } data;
 };
 
@@ -266,6 +303,11 @@ struct ygui_engine {
     char* card_name;
     int card_x, card_y, card_w, card_h;
     int card_shown;      /* 0 = not shown yet, 1 = shown (use update) */
+    uint32_t card_id;    /* ymgui-layer card id (for CARD_PLACE / hit routing) */
+
+    /* Long-lived yface for parsing inbound binary OSC envelopes
+     * (YMGUI_OSC_SC_MOUSE / RESIZE / FOCUS / KEY). */
+    struct yetty_yface* yface_in;
 
     /* State */
     int dirty;
@@ -346,6 +388,8 @@ void ygui_render_box_outline(ygui_render_ctx_t* ctx, float x, float y, float w, 
 void ygui_render_text(ygui_render_ctx_t* ctx, const char* text, float x, float y,
                       uint32_t color, float font_size);
 void ygui_render_circle(ygui_render_ctx_t* ctx, float cx, float cy, float r, uint32_t color);
+void ygui_render_circle_outline(ygui_render_ctx_t* ctx, float cx, float cy, float r,
+                                uint32_t color, float stroke_width);
 void ygui_render_triangle(ygui_render_ctx_t* ctx, float x0, float y0,
                           float x1, float y1, float x2, float y2, uint32_t color);
 
@@ -361,6 +405,9 @@ void ygui_osc_subscribe_clicks(int enable);
 void ygui_osc_subscribe_moves(int enable);
 void ygui_osc_subscribe_view_changes(int enable);
 void ygui_osc_query_cell_size(void);
+void ygui_osc_card_place(uint32_t card_id, int col, int row,
+                          uint32_t w_cells, uint32_t h_cells);
+void ygui_osc_card_remove(uint32_t card_id);
 void ygui_osc_zoom_card(const char* name, float level);
 void ygui_osc_scroll_card(const char* name, float x, float y, int absolute);
 void ygui_osc_scroll_card_delta(const char* name, float dx, float dy);
