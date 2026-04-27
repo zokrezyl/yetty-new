@@ -68,6 +68,12 @@ typedef void (*yetty_yterm_mouse_sub_fn)(int click_enabled, int move_enabled,
 typedef void (*yetty_yterm_emit_osc_fn)(int osc_code, const void *payload,
                                         size_t len, void *userdata);
 
+/* Alt-screen-toggle callback - fired by the text-layer when libvterm
+ * switches in/out of alternate-screen mode (DEC ?1047/?1049/?47). The
+ * terminal forwards the new state to every layer via its set_alt_screen
+ * op so each layer can save/restore its content. */
+typedef void (*yetty_yterm_alt_screen_fn)(int active, void *userdata);
+
 /* Layer ops */
 struct yetty_yterm_terminal_layer_ops {
   void (*destroy)(struct yetty_yterm_terminal_layer *self);
@@ -123,6 +129,12 @@ struct yetty_yterm_terminal_layer_ops {
    * historical position even as new content keeps arriving. Optional. */
   void (*set_view_top)(struct yetty_yterm_terminal_layer *self,
                        int active, uint32_t view_top_total_idx);
+  /* Switch in/out of alternate-screen mode. active=1 → save current
+   * content and present a fresh empty surface; active=0 → drop the alt
+   * content and restore what was saved. Mirrors libvterm's behavior on
+   * DEC ?1047/?1049/?47. Optional — layers without persistent content
+   * (text-layer, since libvterm itself owns the swap) may leave NULL. */
+  void (*set_alt_screen)(struct yetty_yterm_terminal_layer *self, int active);
 };
 
 /* Layer base - embed as first member in subclasses */
@@ -153,6 +165,12 @@ struct yetty_yterm_terminal_layer {
    * focus events). */
   yetty_yterm_emit_osc_fn emit_osc_fn;
   void *emit_osc_userdata;
+  /* Alt-screen-toggle callback - set by creator. Fired by the layer
+   * that hosts libvterm (text-layer) when the inferior toggles DEC
+   * ?1049 / ?1047 / ?47. The terminal hooks this and broadcasts via
+   * each layer's set_alt_screen op. */
+  yetty_yterm_alt_screen_fn alt_screen_fn;
+  void *alt_screen_userdata;
 };
 
 /* Terminal context - contains yetty context plus terminal-owned objects */

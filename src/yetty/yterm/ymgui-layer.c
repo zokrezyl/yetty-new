@@ -122,6 +122,17 @@ struct yetty_yterm_ymgui_layer {
 
     /* Click-focus. 0 = no card focused. */
     uint32_t focused_card_id;
+
+    /* Alt-screen state. The currently-active card set is in the fields
+     * above (cards/card_count/...). The "other" set (primary while we're
+     * in alt, alt while we're in primary) is parked here. Toggle via
+     * ymgui_set_alt_screen swaps the two halves wholesale — GPU
+     * resources owned by saved cards stay alive across the swap. */
+    int                 alt_active;
+    struct ymgui_card **saved_cards;
+    size_t              saved_card_count;
+    size_t              saved_card_cap;
+    uint32_t            saved_focused_card_id;
 };
 
 /*===========================================================================
@@ -152,6 +163,8 @@ static struct yetty_ycore_void_result
 ymgui_scroll(struct yetty_yterm_terminal_layer *self, int lines);
 static void ymgui_set_cursor(struct yetty_yterm_terminal_layer *self,
                              int col, int row);
+static void ymgui_set_alt_screen(struct yetty_yterm_terminal_layer *self,
+                                 int active);
 
 static const struct yetty_yterm_terminal_layer_ops ymgui_ops = {
     .destroy              = ymgui_destroy,
@@ -166,6 +179,7 @@ static const struct yetty_yterm_terminal_layer_ops ymgui_ops = {
     .on_char              = ymgui_on_char,
     .scroll               = ymgui_scroll,
     .set_cursor           = ymgui_set_cursor,
+    .set_alt_screen       = ymgui_set_alt_screen,
 };
 
 /*===========================================================================
@@ -1243,6 +1257,50 @@ static void ymgui_set_cursor(struct yetty_yterm_terminal_layer *self,
     l->cursor_row = (uint32_t)row;
 }
 
+/* Alt-screen entry/exit: swap the live cards[] with the saved set so
+ * the entering session gets a fresh empty screen and the exiting one
+ * restores the previously-saved state. The GPU resources tied to each
+ * card (atlas, buffers, bind group) ride along with the card pointers
+ * — no GPU work needed at toggle time. */
+static void ymgui_set_alt_screen(struct yetty_yterm_terminal_layer *self,
+                                 int active)
+{
+    struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
+    int wanted = active ? 1 : 0;
+    if (l->alt_active == wanted) return;
+
+    /* Drop focus emission for the about-to-be-saved card so the client
+     * gets a clean focus-lost. We don't restore focus on the way back —
+     * focus is a transient runtime fact, not a state to preserve. */
+    if (l->focused_card_id) {
+        emit_focus(l, l->focused_card_id, 0);
+        l->focused_card_id = 0;
+    }
+
+    struct ymgui_card **tmp_cards     = l->cards;
+    size_t              tmp_card_cnt  = l->card_count;
+    size_t              tmp_card_cap  = l->card_cap;
+    uint32_t            tmp_focused   = l->focused_card_id;
+
+    l->cards            = l->saved_cards;
+    l->card_count       = l->saved_card_count;
+    l->card_cap         = l->saved_card_cap;
+    l->focused_card_id  = l->saved_focused_card_id;
+
+    l->saved_cards            = tmp_cards;
+    l->saved_card_count       = tmp_card_cnt;
+    l->saved_card_cap         = tmp_card_cap;
+    l->saved_focused_card_id  = tmp_focused;
+
+    l->alt_active = wanted;
+    self->dirty = 1;
+    if (self->request_render_fn)
+        self->request_render_fn(self->request_render_userdata);
+
+    ydebug("ymgui: alt_screen=%d (live=%zu cards, saved=%zu cards)",
+           wanted, l->card_count, l->saved_card_count);
+}
+
 /*===========================================================================
  * Create / destroy
  *=========================================================================*/
@@ -1317,6 +1375,9 @@ static void ymgui_destroy(struct yetty_yterm_terminal_layer *self)
     for (size_t i = 0; i < l->card_count; i++)
         card_destroy(l->cards[i]);
     free(l->cards);
+    for (size_t i = 0; i < l->saved_card_count; i++)
+        card_destroy(l->saved_cards[i]);
+    free(l->saved_cards);
     release_pipeline(l);
     if (l->yface) yetty_yface_destroy(l->yface);
     free(l->shader_code.data);

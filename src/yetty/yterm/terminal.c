@@ -396,6 +396,24 @@ static void terminal_mouse_sub_callback(int click_enabled, int move_enabled,
   ydebug("terminal: mouse_sub click=%d move=%d", click_enabled, move_enabled);
 }
 
+/* Alt-screen toggle from text-layer (libvterm). Broadcast to every
+ * layer that implements set_alt_screen so each can save/restore. */
+static void terminal_alt_screen_callback(int active, void *userdata) {
+  struct yetty_yterm_terminal *terminal = userdata;
+  ydebug("terminal: alt_screen=%d (broadcasting to %zu layers)",
+         active, terminal->layer_count);
+  for (size_t i = 0; i < terminal->layer_count; i++) {
+    struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
+    if (layer && layer->ops && layer->ops->set_alt_screen)
+      layer->ops->set_alt_screen(layer, active);
+  }
+  if (terminal->context.yetty_context.event_loop &&
+      terminal->context.yetty_context.event_loop->ops &&
+      terminal->context.yetty_context.event_loop->ops->request_render)
+    terminal->context.yetty_context.event_loop->ops->request_render(
+        terminal->context.yetty_context.event_loop);
+}
+
 /* Request render callback for layers */
 static void terminal_request_render_callback(void *userdata) {
   struct yetty_yterm_terminal *terminal = userdata;
@@ -665,6 +683,10 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
      * forwards DEC ?1500 / ?1501 changes here. */
     text_layer_res.value->mouse_sub_fn       = terminal_mouse_sub_callback;
     text_layer_res.value->mouse_sub_userdata = terminal;
+    /* Alt-screen toggle callback — text-layer's settermprop hook fires
+     * this when libvterm processes DEC ?1047/?1049/?47. */
+    text_layer_res.value->alt_screen_fn       = terminal_alt_screen_callback;
+    text_layer_res.value->alt_screen_userdata = terminal;
   }
   if (!YETTY_IS_OK(text_layer_res)) {
     yerror("terminal_create: failed to create text layer: %s",

@@ -470,12 +470,10 @@ bool ImGui_ImplYetty_PlatformInit(void)
         return false;
     g_state.raw_mode_active = 1;
 
-    /* Stdout non-blocking too — the pending-write queue parks tails on
-     * EAGAIN. The CHILD pty end is shared between stdin/stdout/stderr, so
-     * flipping O_NONBLOCK on stdout flips it for all three. */
-    int flags = fcntl(g_state.out_fd, F_GETFL, 0);
-    if (flags >= 0)
-        fcntl(g_state.out_fd, F_SETFL, flags | O_NONBLOCK);
+    /* Stdout stays in default (blocking) mode so partial OSC writes can
+     * never happen — kernel just blocks the writer until the receiver
+     * drains. flush_yface_to_fd's blocking-drain path covers the case
+     * if anything else flips O_NONBLOCK on the fd. */
 
     /* Subscribe: \e[?1500h \e[?1501h. */
     static const char subscribe[] = "\033[?1500h\033[?1501h";
