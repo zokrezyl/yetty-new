@@ -45,7 +45,7 @@ terminal:
       # Font size in pixels — the visual height of the glyph extent (top of
       # tallest ascender to bottom of lowest descender). Cell height/width
       # are derived from this plus the padding below.
-      size: 14
+      size: 20
       # Cell padding around the glyph, as fractions of the glyph dimensions:
       #   cell_height = size           * (1 + top  + bottom)
       #   cell_width  = size / hwratio * (1 + left + right)
@@ -55,7 +55,7 @@ terminal:
         left:   0.0
         right:  0.0
         top:    0.0
-        bottom: 0.2
+        bottom: 0.4
 
 # ─────────────────────────────────────────────────────────────────────────────
 # YPaint (non-monospace font used for ypaint text spans)
