@@ -3,6 +3,7 @@ add_library(yetty_yterm
     text-layer.c
     ypaint-layer.c
     ymgui-layer.c
+    shader-glyph-layer.c
     pty-reader.c
     osc-args.c
 )
@@ -26,4 +27,5 @@ incbin_add_resources(yetty_yterm
     text_layer_shader "${CMAKE_CURRENT_SOURCE_DIR}/text-layer.wgsl"
     ypaint_layer_shader "${CMAKE_CURRENT_SOURCE_DIR}/ypaint-layer.wgsl"
     ymgui_layer_shader "${CMAKE_CURRENT_SOURCE_DIR}/ymgui-layer.wgsl"
+    shader_glyph_layer_shader "${CMAKE_CURRENT_SOURCE_DIR}/shader-glyph-layer.wgsl"
 )

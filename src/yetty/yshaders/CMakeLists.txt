@@ -15,6 +15,7 @@ set(MODULE_SHADERS
     ${YETTY_ROOT}/src/yetty/yfont/msdf-font.wgsl
     ${YETTY_ROOT}/src/yetty/yterm/text-layer.wgsl
     ${YETTY_ROOT}/src/yetty/yterm/ypaint-layer.wgsl
+    ${YETTY_ROOT}/src/yetty/yterm/shader-glyph-layer.wgsl
     ${YETTY_ROOT}/src/yetty/yrender/blend.wgsl
 )
 
@@ -68,3 +69,23 @@ foreach(SHADER_FILE ${MODULE_SHADERS})
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${SHADER_FILE} ${SHADER_DST_DIR}/${SHADER_NAME}
     )
 endforeach()
+
+# Copy per-glyph shaders to assets/shaders/glyph-shaders/. The shader-glyph
+# layer scans this dir at runtime, reads each .wgsl, and splices them into
+# the layer shader. Drop a 0xNNNN-name.wgsl file here to add a glyph.
+file(GLOB GLYPH_SHADER_FILES "${YETTY_ROOT}/src/yetty/yfont/glyph-shaders/*.wgsl")
+add_custom_command(TARGET copy-shaders POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_DST_DIR}/glyph-shaders
+)
+foreach(GLYPH_FILE ${GLYPH_SHADER_FILES})
+    get_filename_component(GLYPH_NAME ${GLYPH_FILE} NAME)
+    add_custom_command(TARGET copy-shaders POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${GLYPH_FILE} ${SHADER_DST_DIR}/glyph-shaders/${GLYPH_NAME}
+    )
+endforeach()
+if(ANDROID_ASSETS_DIR)
+    file(MAKE_DIRECTORY ${ANDROID_ASSETS_DIR}/shaders/glyph-shaders)
+    foreach(GLYPH_FILE ${GLYPH_SHADER_FILES})
+        file(COPY ${GLYPH_FILE} DESTINATION ${ANDROID_ASSETS_DIR}/shaders/glyph-shaders)
+    endforeach()
+endif()
