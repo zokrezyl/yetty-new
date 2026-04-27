@@ -58,8 +58,12 @@ fetch() {
 fetch "$URL"          "$TARBALL_CACHE" "libpng ${VERSION}"                       libpng-source
 fetch "$ZLIB_TAR_URL" "$ZLIB_TARBALL"  "zlib ${ZLIB_VERSION} (${TARGET_PLATFORM}, build-time dep)" libpng-zlib
 
-if [ ! -d "$SRC_DIR" ];     then tar -C "$WORK_DIR" -xzf "$TARBALL_CACHE"; fi
-if [ ! -d "$ZLIB_PREFIX" ]; then mkdir -p "$ZLIB_PREFIX"; tar -C "$ZLIB_PREFIX" -xzf "$ZLIB_TARBALL"; fi
+if [ ! -d "$SRC_DIR" ]; then tar -C "$WORK_DIR" -xzf "$TARBALL_CACHE"; fi
+# Always re-extract the prebuilt dep — a stale tree from a previous
+# producer run with an older zlib tarball silently breaks the build.
+rm -rf "$ZLIB_PREFIX"
+mkdir -p "$ZLIB_PREFIX"
+tar -C "$ZLIB_PREFIX" -xzf "$ZLIB_TARBALL"
 
 [ -f "$ZLIB_PREFIX/lib/libz.a" ] || { echo "missing $ZLIB_PREFIX/lib/libz.a" >&2; exit 1; }
 [ -f "$ZLIB_PREFIX/include/zlib.h" ] || { echo "missing zlib.h" >&2; exit 1; }

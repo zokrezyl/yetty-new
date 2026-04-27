@@ -68,8 +68,14 @@ fetch "$FT_TAR_URL" "$FT_TARBALL"    "freetype ${FREETYPE_VERSION} (${TARGET_PLA
 fetch "$TX_TAR_URL" "$TX_TARBALL"    "tinyxml2 ${TINYXML2_VERSION} (${TARGET_PLATFORM})" msdfgen-tinyxml2
 
 if [ ! -d "$SRC_DIR" ];   then tar -C "$WORK_DIR" -xzf "$TARBALL_CACHE"; fi
-if [ ! -d "$FT_PREFIX" ]; then mkdir -p "$FT_PREFIX"; tar -C "$FT_PREFIX" -xzf "$FT_TARBALL"; fi
-if [ ! -d "$TX_PREFIX" ]; then mkdir -p "$TX_PREFIX"; tar -C "$TX_PREFIX" -xzf "$TX_TARBALL"; fi
+# Always re-extract dep prefixes — the dep tarballs themselves are
+# cache-keyed by version, but a stale extracted tree (from before the
+# producer started shipping cmake config files, etc.) silently breaks
+# downstream cmake's find_package. Cheap to redo.
+rm -rf "$FT_PREFIX" "$TX_PREFIX"
+mkdir -p "$FT_PREFIX" "$TX_PREFIX"
+tar -C "$FT_PREFIX" -xzf "$FT_TARBALL"
+tar -C "$TX_PREFIX" -xzf "$TX_TARBALL"
 
 rm -rf "$BUILD_DIR" "$INSTALL_DIR" "$STAGE"
 mkdir -p "$INSTALL_DIR" "$STAGE"
@@ -86,6 +92,7 @@ CMAKE_ARGS=(
     -DMSDFGEN_BUILD_STANDALONE=OFF
     -DMSDFGEN_USE_VCPKG=OFF
     -DMSDFGEN_USE_CPP11=ON
+    -DMSDFGEN_USE_SKIA=OFF
     -DMSDFGEN_DISABLE_PNG=ON
     -DMSDFGEN_DISABLE_SVG=OFF
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
@@ -94,6 +101,9 @@ CMAKE_ARGS=(
     "-DFREETYPE_LIBRARY=$FT_PREFIX/lib/libfreetype.a"
     "-Dtinyxml2_INCLUDE_DIRS=$TX_PREFIX/include"
     "-Dtinyxml2_LIBRARIES=$TX_PREFIX/lib/libtinyxml2.a"
+    # msdfgen uses find_package(tinyxml2 CONFIG) which needs the
+    # config dir, not just include + lib paths.
+    "-Dtinyxml2_DIR=$TX_PREFIX/lib/cmake/tinyxml2"
 )
 EMCMAKE_PREFIX=""
 
@@ -171,4 +181,4 @@ tar -C "$STAGE" -czf "$TARBALL" .
 echo "msdfgen $VERSION ($TARGET_PLATFORM) ready:"
 ls -lh "$TARBALL"
 echo "contents (first 30):"
-tar -tzf "$TARBALL" | head -30
+{ tar -tzf "$TARBALL" | head -30; } || true

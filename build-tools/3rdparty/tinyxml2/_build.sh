@@ -52,6 +52,9 @@ mkdir -p "$INSTALL_DIR" "$STAGE"
 
 CMAKE_ARGS=(
     -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
+    # Force lib (not lib64) so the cmake config we ship references
+    # paths that line up with our staged layout.
+    -DCMAKE_INSTALL_LIBDIR=lib
     -DCMAKE_BUILD_TYPE=Release
     -DBUILD_SHARED_LIBS=OFF
     -DBUILD_TESTING=OFF
@@ -117,6 +120,15 @@ for _D in lib lib64; do
         -exec cp -a {} "$STAGE/lib/" \;
 done
 cp "$INSTALL_DIR/include/tinyxml2.h" "$STAGE/include/"
+
+# Ship upstream's cmake config so consumers using find_package(tinyxml2
+# CONFIG) (e.g. msdfgen) can resolve. Lives under lib/cmake/tinyxml2/.
+for _D in lib lib64; do
+    if [ -d "$INSTALL_DIR/$_D/cmake/tinyxml2" ]; then
+        mkdir -p "$STAGE/lib/cmake/tinyxml2"
+        cp -a "$INSTALL_DIR/$_D/cmake/tinyxml2/." "$STAGE/lib/cmake/tinyxml2/"
+    fi
+done
 
 [ -f "$STAGE/lib/libtinyxml2.a" ] || { echo "missing libtinyxml2.a" >&2; exit 1; }
 [ -f "$STAGE/include/tinyxml2.h"   ] || { echo "missing tinyxml2.h"   >&2; exit 1; }

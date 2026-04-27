@@ -61,10 +61,9 @@ if [ ! -d "$SRC_DIR" ]; then
     mv "$WORK_DIR/.extract-$$/glfw3webgpu-${VERSION}" "$SRC_DIR"
     rmdir "$WORK_DIR/.extract-$$"
 fi
-if [ ! -d "$GLFW_PREFIX" ]; then
-    mkdir -p "$GLFW_PREFIX"
-    tar -C "$GLFW_PREFIX" -xzf "$GLFW_TARBALL"
-fi
+rm -rf "$GLFW_PREFIX"
+mkdir -p "$GLFW_PREFIX"
+tar -C "$GLFW_PREFIX" -xzf "$GLFW_TARBALL"
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/lib" "$STAGE/include"
@@ -79,16 +78,21 @@ mkdir -p "$STAGE/lib" "$STAGE/include"
 # Actually: glfw3webgpu's source #includes <webgpu/webgpu.h>. Without
 # that header, compilation fails. To keep this producer self-contained,
 # fetch the upstream webgpu-headers single-header release.
-WEBGPU_HEADERS_TAG="v25.10.10.1"
-WEBGPU_HEADERS_URL="https://github.com/webgpu-native/webgpu-headers/archive/refs/tags/${WEBGPU_HEADERS_TAG}.tar.gz"
-WEBGPU_HEADERS_TARBALL="$CACHE_DIR/webgpu-headers-${WEBGPU_HEADERS_TAG}.tar.gz"
-fetch "$WEBGPU_HEADERS_URL" "$WEBGPU_HEADERS_TARBALL" "webgpu-headers ${WEBGPU_HEADERS_TAG}" glfw3webgpu-wh
-if [ ! -d "$WORK_DIR/webgpu-headers-${WEBGPU_HEADERS_TAG#v}" ]; then
-    tar -C "$WORK_DIR" -xzf "$WEBGPU_HEADERS_TARBALL"
-fi
-WEBGPU_HEADERS_DIR="$WORK_DIR/webgpu-headers-${WEBGPU_HEADERS_TAG#v}"
+# webgpu-native/webgpu-headers has no release tags — pin to a recent
+# commit SHA. The archive URL accepts SHAs as refs.
+WEBGPU_HEADERS_SHA="dc16b3e531cf4f31be54236d1a3e988ba5f295a2"
+WEBGPU_HEADERS_URL="https://github.com/webgpu-native/webgpu-headers/archive/${WEBGPU_HEADERS_SHA}.tar.gz"
+WEBGPU_HEADERS_TARBALL="$CACHE_DIR/webgpu-headers-${WEBGPU_HEADERS_SHA}.tar.gz"
+fetch "$WEBGPU_HEADERS_URL" "$WEBGPU_HEADERS_TARBALL" "webgpu-headers @${WEBGPU_HEADERS_SHA:0:8}" glfw3webgpu-wh
+WEBGPU_HEADERS_DIR="$WORK_DIR/webgpu-headers-${WEBGPU_HEADERS_SHA}"
+rm -rf "$WEBGPU_HEADERS_DIR"
+tar -C "$WORK_DIR" -xzf "$WEBGPU_HEADERS_TARBALL"
+# webgpu-headers has webgpu.h at the repo root, but glfw3webgpu.c
+# includes <webgpu/webgpu.h>. Set up the expected dir structure.
+mkdir -p "$WEBGPU_HEADERS_DIR/include/webgpu"
+ln -sf "$WEBGPU_HEADERS_DIR/webgpu.h" "$WEBGPU_HEADERS_DIR/include/webgpu/webgpu.h"
 
-CFLAGS_BASE="-O2 -fPIC -DNDEBUG -w"
+CFLAGS_BASE="-O2 -fPIC -DNDEBUG -w -DGLFW_INCLUDE_NONE"
 CC=cc
 AR=ar
 CFLAGS_EXTRA=""
@@ -96,7 +100,9 @@ PLATFORM_DEF=""
 
 case "$TARGET_PLATFORM" in
 linux-x86_64|linux-aarch64)
-    PLATFORM_DEF="-D_GLFW_X11 -D_GLFW_WAYLAND -DWEBGPU_BACKEND_DAWN"
+    # X11 only — Wayland headers aren't in the 3rdparty-linux-* nix
+    # shells (see glfw producer for the same restriction).
+    PLATFORM_DEF="-D_GLFW_X11 -DWEBGPU_BACKEND_DAWN"
     case "$TARGET_PLATFORM" in
         linux-x86_64) CC=gcc ;;
         linux-aarch64)
@@ -126,7 +132,7 @@ echo "==> compiling glfw3webgpu @${VERSION:0:8} for $TARGET_PLATFORM"
 $CC $CFLAGS \
     -I"$SRC_DIR" \
     -I"$GLFW_PREFIX/include" \
-    -I"$WEBGPU_HEADERS_DIR" \
+    -I"$WEBGPU_HEADERS_DIR/include" \
     -c "$SRC_DIR/glfw3webgpu.c" \
     -o "$WORK_DIR/glfw3webgpu-${TARGET_PLATFORM}.o"
 

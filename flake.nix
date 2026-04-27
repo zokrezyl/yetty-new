@@ -468,6 +468,11 @@
               gcc binutils
               curl gnutar xz gzip
               pkg-config
+              # X11 dev headers — glfw 3.4 build probes for these via
+              # find_package(X11). Without them GLFW_BUILD_X11=ON fails.
+              # Wayland is intentionally OFF in the glfw producer.
+              xorg.libX11 xorg.libXrandr xorg.libXinerama xorg.libXcursor
+              xorg.libXi xorg.libXext xorg.xorgproto
             ];
             shellHook = "echo 'Yetty 3rdparty-build (linux-x86_64)'";
           };

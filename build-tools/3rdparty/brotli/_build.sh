@@ -124,4 +124,4 @@ done
 tar -C "$STAGE" -czf "$TARBALL" .
 echo "brotli $VERSION ($TARGET_PLATFORM) ready:"
 ls -lh "$TARBALL"
-tar -tzf "$TARBALL" | head -20
+{ tar -tzf "$TARBALL" | head -20; } || true

@@ -62,8 +62,11 @@ fetch() {
 fetch "$URL"          "$TARBALL_CACHE" "freetype ${VERSION} (${TAG})"            freetype-source
 fetch "$ZLIB_TAR_URL" "$ZLIB_TARBALL"  "zlib ${ZLIB_VERSION} (${TARGET_PLATFORM})" freetype-zlib
 
-if [ ! -d "$SRC_DIR" ];     then tar -C "$WORK_DIR" -xzf "$TARBALL_CACHE"; fi
-if [ ! -d "$ZLIB_PREFIX" ]; then mkdir -p "$ZLIB_PREFIX"; tar -C "$ZLIB_PREFIX" -xzf "$ZLIB_TARBALL"; fi
+if [ ! -d "$SRC_DIR" ]; then tar -C "$WORK_DIR" -xzf "$TARBALL_CACHE"; fi
+# Always re-extract the prebuilt dep — see libpng's _build.sh for why.
+rm -rf "$ZLIB_PREFIX"
+mkdir -p "$ZLIB_PREFIX"
+tar -C "$ZLIB_PREFIX" -xzf "$ZLIB_TARBALL"
 
 rm -rf "$BUILD_DIR" "$INSTALL_DIR" "$STAGE"
 mkdir -p "$INSTALL_DIR" "$STAGE"
@@ -150,4 +153,4 @@ tar -C "$STAGE" -czf "$TARBALL" .
 echo "freetype $VERSION ($TARGET_PLATFORM, zlib $ZLIB_VERSION) ready:"
 ls -lh "$TARBALL"
 echo "contents (first 30):"
-tar -tzf "$TARBALL" | head -30
+{ tar -tzf "$TARBALL" | head -30; } || true

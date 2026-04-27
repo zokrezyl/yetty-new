@@ -109,11 +109,10 @@ if [ ! -d "$SRC_DIR" ]; then
     echo "==> extracting libssh2 -> $SRC_DIR"
     tar -C "$WORK_DIR" -xzf "$LIBSSH2_TARBALL"
 fi
-if [ ! -d "$OSSL_PREFIX" ]; then
-    echo "==> extracting prebuilt openssl -> $OSSL_PREFIX"
-    mkdir -p "$OSSL_PREFIX"
-    tar -C "$OSSL_PREFIX" -xzf "$OSSL_TARBALL"
-fi
+echo "==> extracting prebuilt openssl -> $OSSL_PREFIX"
+rm -rf "$OSSL_PREFIX"
+mkdir -p "$OSSL_PREFIX"
+tar -C "$OSSL_PREFIX" -xzf "$OSSL_TARBALL"
 
 # Sanity-check: prebuilt openssl tarball must look like {lib/libssl.a, lib/libcrypto.a, include/openssl/}
 [ -f "$OSSL_PREFIX/lib/libssl.a" ]    || { echo "missing $OSSL_PREFIX/lib/libssl.a — openssl tarball layout?" >&2; exit 1; }

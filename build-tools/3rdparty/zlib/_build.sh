@@ -19,9 +19,9 @@ WORK_DIR="${WORK_DIR:-/tmp/yetty-3rdparty-zlib-$TARGET_PLATFORM}"
 CACHE_DIR="${CACHE_DIR:-$HOME/.cache/yetty-3rdparty}"
 NCPU="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
-URL="https://github.com/madler/zlib/archive/refs/tags/v${VERSION}.tar.gz"
-TARBALL_CACHE="$CACHE_DIR/zlib-${VERSION}.tar.gz"
-SRC_DIR="$WORK_DIR/zlib-${VERSION}"
+URL="https://github.com/zlib-ng/zlib-ng/archive/refs/tags/${VERSION}.tar.gz"
+TARBALL_CACHE="$CACHE_DIR/zlib-ng-${VERSION}.tar.gz"
+SRC_DIR="$WORK_DIR/zlib-ng-${VERSION}"
 BUILD_DIR="$WORK_DIR/build-${TARGET_PLATFORM}"
 INSTALL_DIR="$WORK_DIR/install-${TARGET_PLATFORM}"
 STAGE="$WORK_DIR/stage-${TARGET_PLATFORM}"
@@ -49,16 +49,20 @@ fi
 rm -rf "$BUILD_DIR" "$INSTALL_DIR" "$STAGE"
 mkdir -p "$INSTALL_DIR" "$STAGE"
 
+
 CMAKE_ARGS=(
     -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
+    -DCMAKE_INSTALL_LIBDIR=lib
     -DCMAKE_BUILD_TYPE=Release
     -DBUILD_SHARED_LIBS=OFF
-    -DZLIB_BUILD_EXAMPLES=OFF
-    -DSKIP_INSTALL_FILES=ON
+    # zlib-ng with ZLIB_COMPAT acts as a drop-in zlib (libz.a, zlib.h
+    # ABI-compatible) — same flag yetty's previous from-source build
+    # used. ZLIBNG_ENABLE_TESTS / WITH_GTEST off keeps the build small.
+    -DZLIB_COMPAT=ON
+    -DZLIB_ENABLE_TESTS=OFF
+    -DZLIBNG_ENABLE_TESTS=OFF
+    -DWITH_GTEST=OFF
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-    # zlib's upstream cmake_minimum_required is 2.8 — needs the policy
-    # bump to configure under cmake 4.x.
-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 )
 EMCMAKE_PREFIX=""
 
@@ -105,7 +109,7 @@ webasm) EMCMAKE_PREFIX="emcmake" ;;
 *) echo "unknown $TARGET_PLATFORM" >&2; exit 1 ;;
 esac
 
-echo "==> configuring zlib ${VERSION} for $TARGET_PLATFORM"
+echo "==> configuring zlib-ng ${VERSION} (compat) for $TARGET_PLATFORM"
 $EMCMAKE_PREFIX cmake -S "$SRC_DIR" -B "$BUILD_DIR" -G Ninja "${CMAKE_ARGS[@]}"
 cmake --build "$BUILD_DIR" -j"$NCPU"
 cmake --install "$BUILD_DIR"
@@ -124,8 +128,11 @@ done
 if [ ! -f "$STAGE/lib/libz.a" ] && [ -f "$STAGE/lib/libzlibstatic.a" ]; then
     cp "$STAGE/lib/libzlibstatic.a" "$STAGE/lib/libz.a"
 fi
-cp "$INSTALL_DIR/include/zlib.h"  "$STAGE/include/"
-cp "$INSTALL_DIR/include/zconf.h" "$STAGE/include/"
+# Stage all installed headers — zlib-ng compat mode installs:
+#   zlib.h, zconf.h, zlib_name_mangling.h (the third is referenced by
+#   zconf.h #include "zlib_name_mangling.h"; missing it makes downstream
+#   consumers like libpng fail with "No such file or directory").
+cp -a "$INSTALL_DIR/include/." "$STAGE/include/"
 
 [ -f "$STAGE/lib/libz.a" ]      || { echo "missing libz.a in stage" >&2; find "$INSTALL_DIR" >&2; exit 1; }
 [ -f "$STAGE/include/zlib.h" ]  || { echo "missing zlib.h"  >&2; exit 1; }
