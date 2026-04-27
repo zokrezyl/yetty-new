@@ -1,39 +1,65 @@
-# libssh2 - SSH2 protocol library
-# https://github.com/libssh2/libssh2
+# libssh2 — SSH2 protocol library.
+#
+# Consumes a prebuilt static lib + headers from the 3rdparty release
+# tarball published by build-3rdparty-libssh2.yml. The from-source build
+# (cmake driver, openssl backend, per-platform handling) lives in
+# build-tools/3rdparty/libssh2/_build.sh — it links statically against
+# the prebuilt openssl tarball we already use.
+#
+# Exposed target: `libssh2_static` — IMPORTED static archive. Same name
+# the from-source CPM build exported, so existing consumers don't need
+# to change.
+#
+# The static archive carries unresolved openssl symbols — consumer must
+# wire `OpenSSL::SSL` + `OpenSSL::Crypto` to satisfy them at link time.
+# We add those to INTERFACE_LINK_LIBRARIES so anything that links
+# libssh2_static pulls in openssl transitively. Same pattern libcurl
+# uses.
+
+include_guard(GLOBAL)
+include(${YETTY_ROOT}/build-tools/cmake/3rdparty-fetch.cmake)
+
 if(TARGET libssh2_static)
     return()
 endif()
 
-# libssh2 requires OpenSSL/crypto
+if(WIN32)
+    message(FATAL_ERROR
+        "libssh2: no windows-x86_64 tarball is published yet — yetty.exe is \
+being switched to native MSVC and the libssh2 MSVC build path will land \
+together with that work (see the windows-libs-msvc branch).")
+endif()
+
+# openssl must be resolved before us — the prebuilt libssh2 archive
+# carries unresolved openssl symbols that yetty links via OpenSSL::SSL /
+# OpenSSL::Crypto.
 include(${YETTY_ROOT}/build-tools/cmake/openssl.cmake)
 
-# Disable zlib to avoid export issues
-set(ENABLE_ZLIB_COMPRESSION OFF CACHE BOOL "" FORCE)
+yetty_3rdparty_fetch(libssh2 _LIBSSH2_DIR)
 
-CPMAddPackage(
-    NAME libssh2
-    GITHUB_REPOSITORY libssh2/libssh2
-    GIT_TAG libssh2-1.11.1
-    DOWNLOAD_ONLY YES
+if(EXISTS "${_LIBSSH2_DIR}/lib/libssh2.a")
+    set(_LIBSSH2_LIB "${_LIBSSH2_DIR}/lib/libssh2.a")
+else()
+    message(FATAL_ERROR
+        "libssh2: no static lib found in ${_LIBSSH2_DIR}/lib/ — \
+tarball layout changed? (check build-tools/3rdparty/libssh2/_build.sh)")
+endif()
+if(NOT EXISTS "${_LIBSSH2_DIR}/include/libssh2.h")
+    message(FATAL_ERROR
+        "libssh2: libssh2.h not found in ${_LIBSSH2_DIR}/include/ — tarball layout changed?")
+endif()
+
+add_library(libssh2_static STATIC IMPORTED GLOBAL)
+set_target_properties(libssh2_static PROPERTIES
+    IMPORTED_LOCATION "${_LIBSSH2_LIB}"
+    INTERFACE_INCLUDE_DIRECTORIES "${_LIBSSH2_DIR}/include"
+    INTERFACE_LINK_LIBRARIES "OpenSSL::SSL;OpenSSL::Crypto"
 )
 
-if(libssh2_ADDED)
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-    set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
-    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-    set(CRYPTO_BACKEND "OpenSSL" CACHE STRING "" FORCE)
-    # Prevent libssh2 from finding our zlib (causes export set issues)
-    set(CMAKE_DISABLE_FIND_PACKAGE_ZLIB TRUE)
-    set(ZLIB_FOUND FALSE CACHE BOOL "" FORCE)
-    add_subdirectory(${libssh2_SOURCE_DIR} ${libssh2_BINARY_DIR} EXCLUDE_FROM_ALL)
-    unset(CMAKE_DISABLE_FIND_PACKAGE_ZLIB)
+# find_package(libssh2)-compat cache vars some downstream consumers read.
+set(LIBSSH2_FOUND        TRUE                            CACHE BOOL    "" FORCE)
+set(LIBSSH2_INCLUDE_DIR  "${_LIBSSH2_DIR}/include"       CACHE PATH    "" FORCE)
+set(LIBSSH2_LIBRARY      libssh2_static                  CACHE STRING  "" FORCE)
+set(LIBSSH2_LIBRARIES    libssh2_static                  CACHE STRING  "" FORCE)
 
-    message(STATUS "libssh2: Built from source v1.11.1")
-
-    # Export variables for find_package compatibility
-    set(LIBSSH2_FOUND TRUE CACHE BOOL "" FORCE)
-    set(LIBSSH2_INCLUDE_DIR "${libssh2_SOURCE_DIR}/include;${libssh2_BINARY_DIR}/src" CACHE PATH "" FORCE)
-    set(LIBSSH2_LIBRARY libssh2_static CACHE STRING "" FORCE)
-    set(LIBSSH2_LIBRARIES libssh2_static CACHE STRING "" FORCE)
-endif()
+message(STATUS "libssh2: prebuilt v${YETTY_3RDPARTY_libssh2_VERSION} (${_LIBSSH2_LIB})")

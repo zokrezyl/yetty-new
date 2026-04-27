@@ -133,6 +133,7 @@ jobs:
             libtool
             mingw-w64-clang-x86_64-clang
             mingw-w64-clang-x86_64-lld
+            mingw-w64-clang-x86_64-libgnurx
       - name: Build libmagic for ${{ matrix.target }}
         shell: msys2 {0}
         env:

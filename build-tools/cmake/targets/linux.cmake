@@ -5,7 +5,7 @@
 # their `if(TARGET ...)` guards only see targets declared before that point.
 # (Tree-sitter is already wired via shared.cmake → TreeSitter.cmake.)
 if(YETTY_ENABLE_LIB_LIBMAGIC)
-    include(${YETTY_ROOT}/build-tools/cmake/libs/libmagic.cmake)
+    include(${YETTY_ROOT}/build-tools/cmake/Libmagic.cmake)
 endif()
 if(YETTY_ENABLE_LIB_LIBCURL)
     include(${YETTY_ROOT}/build-tools/cmake/libs/libcurl.cmake)

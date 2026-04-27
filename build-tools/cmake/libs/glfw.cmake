@@ -1,36 +1,64 @@
-# GLFW - Window and input handling
+# glfw + glfw3webgpu — desktop windowing.
+#
+# Consumes prebuilt static libs + headers from the 3rdparty releases
+# published by build-3rdparty-glfw.yml + build-3rdparty-glfw3webgpu.yml.
+# The from-source builds live in build-tools/3rdparty/{glfw,glfw3webgpu}/.
+
+include_guard(GLOBAL)
+include(${YETTY_ROOT}/build-tools/cmake/3rdparty-fetch.cmake)
+
 if(TARGET glfw)
     return()
 endif()
 
-# Disable X11 on macOS
-if(APPLE)
-    set(GLFW_BUILD_X11 OFF CACHE BOOL "" FORCE)
+if(WIN32)
+    message(FATAL_ERROR
+        "glfw: no windows-x86_64 tarball is published yet — yetty.exe is \
+being switched to native MSVC and the glfw MSVC build path will land \
+together with that work (see the windows-libs-msvc branch).")
 endif()
 
-CPMAddPackage(
-    NAME glfw
-    GITHUB_REPOSITORY glfw/glfw
-    GIT_TAG 3.4
-    OPTIONS
-        "GLFW_BUILD_DOCS OFF"
-        "GLFW_BUILD_TESTS OFF"
-        "GLFW_BUILD_EXAMPLES OFF"
-        "GLFW_INSTALL OFF"
-	"GLFW_BUILD_WAYLAND ON"
-)
+yetty_3rdparty_fetch(glfw _GLFW_DIR)
 
-# glfw3webgpu adapter
-if(NOT TARGET glfw3webgpu)
-    CPMAddPackage(
-        NAME glfw3webgpu
-        GITHUB_REPOSITORY eliemichel/glfw3webgpu
-        GIT_TAG main
+if(NOT EXISTS "${_GLFW_DIR}/lib/libglfw3.a")
+    message(FATAL_ERROR "glfw: libglfw3.a not found in ${_GLFW_DIR}/lib/ — tarball layout changed?")
+endif()
+
+add_library(glfw STATIC IMPORTED GLOBAL)
+set_target_properties(glfw PROPERTIES
+    IMPORTED_LOCATION "${_GLFW_DIR}/lib/libglfw3.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${_GLFW_DIR}/include"
+)
+# Platform link deps glfw needs from its consumers (mirrors what the
+# upstream cmake config exports as INTERFACE_LINK_LIBRARIES).
+if(APPLE)
+    set_target_properties(glfw PROPERTIES
+        INTERFACE_LINK_LIBRARIES "-framework Cocoa;-framework IOKit;-framework CoreFoundation;-framework QuartzCore"
     )
-    # glfw3webgpu needs platform define for native surface creation
-    if(UNIX AND NOT APPLE)
-        target_compile_definitions(glfw3webgpu PRIVATE _GLFW_X11 _GLFW_WAYLAND)
-    elseif(WIN32)
-        target_compile_definitions(glfw3webgpu PRIVATE _GLFW_WIN32)
+elseif(UNIX)
+    set_target_properties(glfw PROPERTIES
+        INTERFACE_LINK_LIBRARIES "pthread;dl;m;rt"
+    )
+endif()
+
+message(STATUS "glfw: prebuilt v${YETTY_3RDPARTY_glfw_VERSION} (${_GLFW_DIR}/lib/libglfw3.a)")
+
+#------------------------------------------------------------------------------
+# glfw3webgpu — adapter that creates a WGPUSurface from a glfw window.
+#------------------------------------------------------------------------------
+if(NOT TARGET glfw3webgpu)
+    yetty_3rdparty_fetch(glfw3webgpu _GLFW3WEBGPU_DIR)
+
+    if(NOT EXISTS "${_GLFW3WEBGPU_DIR}/lib/libglfw3webgpu.a")
+        message(FATAL_ERROR "glfw3webgpu: libglfw3webgpu.a not found in ${_GLFW3WEBGPU_DIR}/lib/ — tarball layout changed?")
     endif()
+
+    add_library(glfw3webgpu STATIC IMPORTED GLOBAL)
+    set_target_properties(glfw3webgpu PROPERTIES
+        IMPORTED_LOCATION "${_GLFW3WEBGPU_DIR}/lib/libglfw3webgpu.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${_GLFW3WEBGPU_DIR}/include"
+        INTERFACE_LINK_LIBRARIES "glfw"
+    )
+
+    message(STATUS "glfw3webgpu: prebuilt @${YETTY_3RDPARTY_glfw3webgpu_VERSION} (${_GLFW3WEBGPU_DIR}/lib/libglfw3webgpu.a)")
 endif()

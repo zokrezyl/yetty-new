@@ -158,7 +158,12 @@ if(YETTY_ENABLE_LIB_LIBPNG)
 endif()
 
 if(YETTY_ENABLE_LIB_FREETYPE)
-    include(${YETTY_ROOT}/build-tools/cmake/FreeType.cmake)
+    # Pull in brotli + bzip2 first — yetty's freetype consumers (e.g.
+    # FREETYPE_ALL_LIBS link order) reference brotlidec/bz2_static, and
+    # those static archives now come from their own 3rdparty fetch.
+    include(${YETTY_ROOT}/build-tools/cmake/libs/brotli.cmake)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/bzip2.cmake)
+    include(${YETTY_ROOT}/build-tools/cmake/libs/freetype.cmake)
 endif()
 
 if(YETTY_ENABLE_LIB_MSDFGEN)
