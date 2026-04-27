@@ -57,6 +57,13 @@ function(yetty_3rdparty_target_platform OUT_VAR)
         else()
             set(_P "android-arm64-v8a")
         endif()
+    elseif(YETTY_TVOS OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+        # tvOS check before iOS — tvOS targets set YETTY_IOS=1 internally to
+        # share the iOS Objective-C platform sources, so YETTY_IOS alone is
+        # not enough to disambiguate. Only tvos-x86_64 (simulator) ships
+        # 3rdparty tarballs today; the device target would need its own
+        # build-3rdparty-* matrix entry.
+        set(_P "tvos-x86_64")
     elseif(YETTY_IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
         if(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
             set(_P "ios-x86_64")

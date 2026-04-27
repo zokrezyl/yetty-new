@@ -175,6 +175,47 @@ if(WIN32)
     endforeach()
 endif()
 
+# Auto-disable on macOS (host build): libssh2 1.11.1's CMakeLists.txt calls
+# find_package(OpenSSL), which on macOS pulls Apple's clang default include
+# search path that has /usr/local/include FIRST (Homebrew prefix) — ahead
+# of our `-isystem .../3rdparty/openssl/include`. With Homebrew openssl@3
+# installed (the common case on Intel macOS), libssh2's openssl.c picks up
+# the 3.x opensslv.h, defines USE_OPENSSL_3, and emits EVP_MAC_*/OSSL_PARAM_*
+# references that the pinned 1.1.1w libcrypto.a (which yetty deliberately
+# uses to stay compatible with cpr / libcurl) does not provide → undefined
+# symbols at link time. Disable the SSH feature + libssh2 lib on APPLE
+# host builds until either (a) yetty migrates to openssl-new (4.x) or
+# (b) libssh2's include order is forced to put 3rdparty/openssl ahead of
+# the system /usr/local/include. iOS / tvOS go through different SDK
+# search paths so this only hits the host-macOS build (APPLE && NOT
+# YETTY_IOS).
+if(APPLE AND NOT YETTY_IOS)
+    foreach(_f
+        YETTY_ENABLE_FEATURE_SSH    # src/yetty/yssh consumer of libssh2
+        YETTY_ENABLE_LIB_LIBSSH2    # see comment above
+    )
+        if(${_f})
+            message(STATUS "Disabling ${_f} on macOS (Homebrew openssl@3 in /usr/local/include shadows pinned 1.1.1w; see variables.cmake)")
+            set(${_f} OFF CACHE BOOL "" FORCE)
+        endif()
+    endforeach()
+endif()
+
+# Auto-disable on iOS / tvOS: tools that depend on the YCAT library, which
+# src/yetty/CMakeLists.txt deliberately skips for YETTY_IOS (the lib uses
+# desktop-only POSIX bits — strings.h / unistd.h scattered throughout). The
+# tool unconditionally links libyetty_ycat.a → undefined library at link time.
+if(YETTY_IOS OR YETTY_TVOS)
+    foreach(_f
+        YETTY_ENABLE_TOOL_YCAT       # links yetty_ycat (lib not built on iOS/tvOS)
+    )
+        if(${_f})
+            message(STATUS "Disabling ${_f} on iOS/tvOS (yetty_ycat library not built — see src/yetty/CMakeLists.txt)")
+            set(${_f} OFF CACHE BOOL "" FORCE)
+        endif()
+    endforeach()
+endif()
+
 option(YETTY_ENABLE_FEATURE_JSLINUX   "jslinux — JSLinux integration"        ON)
 
 # Desktop-only features

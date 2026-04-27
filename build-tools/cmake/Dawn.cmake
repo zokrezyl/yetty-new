@@ -25,13 +25,12 @@ include(FetchContent)
 set(DAWN_VERSION "20260422.215810" CACHE STRING "Dawn version to use")
 set(DAWN_COMMIT "6701fe7a9a10398164e847bf6cdf2c580d3d150c" CACHE STRING "Dawn commit hash")
 
-# iOS uses XCFramework from dawn-apple package
+# iOS uses XCFramework from upstream Google dawn-apple package.
 if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(DAWN_URL "https://github.com/google/dawn/releases/download/v${DAWN_VERSION}/dawn-apple-${DAWN_COMMIT}.xcframework.tar.gz")
     set(DAWN_HEADERS_URL "https://github.com/google/dawn/releases/download/v${DAWN_VERSION}/dawn-headers-${DAWN_COMMIT}.tar.gz")
 
-    # Detect simulator vs device
-    if(CMAKE_OSX_SYSROOT MATCHES "iphonesimulator" OR CMAKE_OSX_SYSROOT MATCHES "Simulator")
+    if(CMAKE_OSX_SYSROOT MATCHES "simulator" OR CMAKE_OSX_SYSROOT MATCHES "Simulator")
         set(DAWN_IOS_PLATFORM "simulator")
         set(DAWN_LIB_SUBDIR "ios-arm64_x86_64-simulator")
     else()
@@ -42,50 +41,82 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     message(STATUS "Downloading Dawn v${DAWN_VERSION} XCFramework for iOS ${DAWN_IOS_PLATFORM}...")
     message(STATUS "  URL: ${DAWN_URL}")
 
-    FetchContent_Declare(
-        dawn_apple
-        URL "${DAWN_URL}"
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-    FetchContent_Declare(
-        dawn_headers
-        URL "${DAWN_HEADERS_URL}"
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
+    FetchContent_Declare(dawn_apple   URL "${DAWN_URL}"          DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_Declare(dawn_headers URL "${DAWN_HEADERS_URL}"  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
     FetchContent_MakeAvailable(dawn_apple dawn_headers)
 
-    # Find the xcframework and library
     set(DAWN_XCFRAMEWORK "${dawn_apple_SOURCE_DIR}")
     set(DAWN_LIB_PATH "${DAWN_XCFRAMEWORK}/${DAWN_LIB_SUBDIR}/libwebgpu_dawn.a")
-
-    # Headers are in a nested directory
     if(EXISTS "${dawn_headers_SOURCE_DIR}/include")
         set(DAWN_INCLUDE_DIR "${dawn_headers_SOURCE_DIR}/include")
     else()
         set(DAWN_INCLUDE_DIR "${dawn_headers_SOURCE_DIR}")
     endif()
 
-    # Verify files exist
     if(NOT EXISTS "${DAWN_LIB_PATH}")
-        message(FATAL_ERROR "Dawn iOS ${DAWN_IOS_PLATFORM} library not found at ${DAWN_LIB_PATH}\n"
-            "XCFramework contents: ${DAWN_XCFRAMEWORK}")
+        message(FATAL_ERROR "Dawn iOS ${DAWN_IOS_PLATFORM} library not found at ${DAWN_LIB_PATH}")
     endif()
 
-    # Create imported STATIC library target
     add_library(webgpu STATIC IMPORTED GLOBAL)
-
-    # iOS uses Metal backend
     find_library(METAL_LIBRARY Metal REQUIRED)
     find_library(QUARTZCORE_LIBRARY QuartzCore REQUIRED)
     find_library(IOSURFACE_LIBRARY IOSurface REQUIRED)
     find_library(FOUNDATION_LIBRARY Foundation REQUIRED)
-
     set_target_properties(webgpu PROPERTIES
         IMPORTED_LOCATION "${DAWN_LIB_PATH}"
         INTERFACE_INCLUDE_DIRECTORIES "${DAWN_INCLUDE_DIR}"
         INTERFACE_LINK_LIBRARIES "${METAL_LIBRARY};${QUARTZCORE_LIBRARY};${IOSURFACE_LIBRARY};${FOUNDATION_LIBRARY}"
     )
     target_compile_definitions(webgpu INTERFACE WEBGPU_BACKEND_DAWN)
+
+    message(STATUS "Dawn v${DAWN_VERSION} ready (iOS ${DAWN_IOS_PLATFORM}):")
+    message(STATUS "  Library: ${DAWN_LIB_PATH}")
+    message(STATUS "  Headers: ${DAWN_INCLUDE_DIR}")
+
+# tvOS uses dawn-exotic build (Google's dawn-apple has no tvOS slices).
+# The tarball ships an XCFramework with proper TVOS / TVOSSIMULATOR slices
+# plus its own bundled headers — no separate headers fetch.
+elseif(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+    set(DAWN_TVOS_URL "https://github.com/zokrezyl/dawn-exotic/releases/download/v${DAWN_VERSION}/dawn-tvos-release-${DAWN_VERSION}.tar.gz")
+
+    if(CMAKE_OSX_SYSROOT MATCHES "simulator" OR CMAKE_OSX_SYSROOT MATCHES "Simulator")
+        set(DAWN_TVOS_PLATFORM "simulator")
+        set(DAWN_LIB_SUBDIR "tvos-arm64_x86_64-simulator")
+    else()
+        set(DAWN_TVOS_PLATFORM "device")
+        set(DAWN_LIB_SUBDIR "tvos-arm64")
+    endif()
+
+    message(STATUS "Downloading Dawn v${DAWN_VERSION} XCFramework for tvOS ${DAWN_TVOS_PLATFORM}...")
+    message(STATUS "  URL: ${DAWN_TVOS_URL}")
+
+    FetchContent_Declare(dawn_tvos URL "${DAWN_TVOS_URL}" DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(dawn_tvos)
+
+    set(DAWN_XCFRAMEWORK "${dawn_tvos_SOURCE_DIR}/lib/webgpu_dawn.xcframework")
+    set(DAWN_LIB_PATH    "${DAWN_XCFRAMEWORK}/${DAWN_LIB_SUBDIR}/libwebgpu_dawn.a")
+    set(DAWN_INCLUDE_DIR "${dawn_tvos_SOURCE_DIR}/include")
+
+    if(NOT EXISTS "${DAWN_LIB_PATH}")
+        message(FATAL_ERROR "Dawn tvOS ${DAWN_TVOS_PLATFORM} library not found at ${DAWN_LIB_PATH}\n"
+            "XCFramework contents: ${DAWN_XCFRAMEWORK}")
+    endif()
+
+    add_library(webgpu STATIC IMPORTED GLOBAL)
+    find_library(METAL_LIBRARY Metal REQUIRED)
+    find_library(QUARTZCORE_LIBRARY QuartzCore REQUIRED)
+    find_library(IOSURFACE_LIBRARY IOSurface REQUIRED)
+    find_library(FOUNDATION_LIBRARY Foundation REQUIRED)
+    set_target_properties(webgpu PROPERTIES
+        IMPORTED_LOCATION "${DAWN_LIB_PATH}"
+        INTERFACE_INCLUDE_DIRECTORIES "${DAWN_INCLUDE_DIR}"
+        INTERFACE_LINK_LIBRARIES "${METAL_LIBRARY};${QUARTZCORE_LIBRARY};${IOSURFACE_LIBRARY};${FOUNDATION_LIBRARY}"
+    )
+    target_compile_definitions(webgpu INTERFACE WEBGPU_BACKEND_DAWN)
+
+    message(STATUS "Dawn v${DAWN_VERSION} ready (tvOS ${DAWN_TVOS_PLATFORM}):")
+    message(STATUS "  Library: ${DAWN_LIB_PATH}")
+    message(STATUS "  Headers: ${DAWN_INCLUDE_DIR}")
 
     message(STATUS "Dawn v${DAWN_VERSION} ready (iOS ${DAWN_IOS_PLATFORM}):")
     message(STATUS "  XCFramework: ${DAWN_XCFRAMEWORK}")

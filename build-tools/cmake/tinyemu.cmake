@@ -225,7 +225,10 @@ endif()
 message(STATUS "TinyEMU: RISC-V emulator v${TINYEMU_VERSION}")
 
 # Standalone temu executable for testing — POSIX-only main loop on Linux/macOS.
-if(NOT WIN32)
+# iOS/tvOS skip it: the iOS tinyemu lib doesn't include fs_disk_init (the
+# disk image bring-up path temu's main exercises), and the standalone
+# binary has no place inside an iOS app bundle anyway.
+if(NOT WIN32 AND NOT YETTY_IOS AND NOT YETTY_TVOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "tvOS")
     add_executable(temu ${TINYEMU_DIR}/temu.c)
     target_link_libraries(temu PRIVATE tinyemu)
     target_include_directories(temu PRIVATE ${TINYEMU_DIR} ${TINYEMU_DIR}/slirp)
@@ -237,7 +240,7 @@ if(NOT WIN32)
         CONFIG_RISCV_MAX_XLEN=128
         _GNU_SOURCE
     )
-else()
+elseif(WIN32)
     # Windows: build a minimal driver instead. temu.c is termios+TUN+select-
     # based and would need a substantial port; temu-test.c is just enough to
     # exercise the tinyemu library headlessly so we can isolate VM init bugs.

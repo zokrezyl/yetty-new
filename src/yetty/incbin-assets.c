@@ -190,29 +190,61 @@ static uint8_t *decompress_brotli(const uint8_t *data, size_t size,
   size_t capacity;
   BrotliDecoderResult result;
 
-  capacity = size * 10;
-  output = malloc(capacity);
-  if (!output)
+  /* The one-shot BrotliDecoderDecompress returns ERROR (not
+   * NEEDS_MORE_OUTPUT) once it has flushed enough output to fill the buffer
+   * partway through a stream that needs more — at least with the brotli
+   * version we link against. Use the streaming API instead so we can grow
+   * the buffer between chunks. */
+  BrotliDecoderState *st = BrotliDecoderCreateInstance(NULL, NULL, NULL);
+  if (!st) {
+    ydebug("decompress_brotli: BrotliDecoderCreateInstance failed");
     return NULL;
+  }
 
-  do {
-    decoded_size = capacity;
-    result = BrotliDecoderDecompress(size, data, &decoded_size, output);
+  capacity = size * 10;
+  if (capacity < 65536) capacity = 65536;
+  output = malloc(capacity);
+  if (!output) {
+    ydebug("decompress_brotli: malloc(%zu) failed for input %zu", capacity, size);
+    BrotliDecoderDestroyInstance(st);
+    return NULL;
+  }
+
+  size_t in_remaining = size;
+  const uint8_t *next_in = data;
+  size_t out_used = 0;
+
+  for (;;) {
+    size_t out_avail = capacity - out_used;
+    uint8_t *next_out = output + out_used;
+    result = BrotliDecoderDecompressStream(st, &in_remaining, &next_in,
+                                           &out_avail, &next_out, NULL);
+    out_used = capacity - out_avail;
+    if (result == BROTLI_DECODER_RESULT_SUCCESS) {
+      break;
+    }
     if (result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT) {
       capacity *= 2;
       uint8_t *new_output = realloc(output, capacity);
       if (!new_output) {
+        ydebug("decompress_brotli: realloc(%zu) failed", capacity);
         free(output);
+        BrotliDecoderDestroyInstance(st);
         return NULL;
       }
       output = new_output;
+      continue;
     }
-  } while (result == BROTLI_DECODER_RESULT_NEEDS_MORE_OUTPUT);
-
-  if (result != BROTLI_DECODER_RESULT_SUCCESS) {
+    /* ERROR or NEEDS_MORE_INPUT (one-shot input — shouldn't happen) */
+    ydebug("decompress_brotli: stream result=%d in=%zu out_used=%zu",
+           (int)result, size, out_used);
     free(output);
+    BrotliDecoderDestroyInstance(st);
     return NULL;
   }
+
+  BrotliDecoderDestroyInstance(st);
+  decoded_size = out_used;
 
   *out_size = decoded_size;
   return output;
