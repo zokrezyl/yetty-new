@@ -272,13 +272,20 @@ if [ "$NEEDS_NATIVE_BOOTSTRAP" = "1" ]; then
                 )
                 ;;
             ios-arm64|ios-x86_64)
-                # macOS runner — system clang is the host compiler.
-                # Drop the iOS-specific environment we may have set
-                # (DEVELOPER_DIR/SDKROOT/etc) for a clean native build.
+                # macOS runner — system /usr/bin/clang is the host
+                # compiler. Pin CC explicitly: configure's auto-detect
+                # would otherwise pick whatever `cc` resolves to, which
+                # in the iOS-cross nix shell is the cross compiler
+                # (produces arm64 binaries that won't run on the host).
+                # Also drop iOS-specific env so the SDK lookup defaults
+                # to macOS.
                 (
                     unset DEVELOPER_DIR MACOSX_DEPLOYMENT_TARGET SDKROOT NIX_APPLE_SDK_VERSION
                     export PATH="/usr/bin:$PATH"
-                    bash -c "$_BOOTSTRAP_CMD"
+                    env -i \
+                        HOME="$HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+                        CC=/usr/bin/clang CXX=/usr/bin/clang++ \
+                        bash -c "$_BOOTSTRAP_CMD"
                 )
                 ;;
             *)
