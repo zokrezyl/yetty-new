@@ -17,6 +17,7 @@
 #include <yetty/yterm/text-layer.h>
 #include <yetty/yterm/ypaint-layer.h>
 #include <yetty/yterm/ymgui-layer.h>
+#include <yetty/yterm/shader-glyph-layer.h>
 #include <yetty/ytrace.h>
 #include <yetty/yui/view.h>
 
@@ -672,6 +673,28 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
     } else {
       ydebug("terminal_create: failed to create ypaint layer (non-fatal): %s",
              ypaint_res.error.msg);
+    }
+  }
+
+  /* Create shader-glyph layer — animated procedurals at cells whose
+   * glyph_index is in the shader-glyph range (top half of u32). Sits
+   * above text-layer in compose order so the animations overlay text.
+   * Reads text-layer's cell buffer directly (text_layer must outlive). */
+  {
+    struct yetty_yterm_terminal_layer *text_layer = text_layer_res.value;
+    struct yetty_yterm_terminal_layer_result sg_res =
+        yetty_yterm_shader_glyph_layer_create(
+            cols, rows, text_layer->cell_size.width,
+            text_layer->cell_size.height, text_layer,
+            yetty_context, terminal_request_render_callback, terminal,
+            terminal_scroll_callback, terminal, terminal_cursor_callback,
+            terminal);
+    if (YETTY_IS_OK(sg_res)) {
+      yetty_yterm_terminal_layer_add(terminal, sg_res.value);
+      ydebug("terminal_create: shader_glyph layer created and added");
+    } else {
+      ydebug("terminal_create: failed to create shader_glyph layer (non-fatal): %s",
+             sg_res.error.msg);
     }
   }
 

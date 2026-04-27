@@ -389,6 +389,21 @@ function(yetty_embed_assets TARGET)
     file(COPY "${YETTY_ROOT}/src/yetty/yfont/ms-raster-font.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
     file(COPY "${YETTY_ROOT}/src/yetty/yfont/raster-font.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
 
+    # Shader-glyph layer + per-glyph procedurals. Layer reads the .wgsl
+    # template AND scans glyph-shaders/*.wgsl at runtime, splices them into
+    # one compiled shader. Adding a glyph is dropping a .wgsl file.
+    file(COPY "${YETTY_ROOT}/src/yetty/yterm/shader-glyph-layer.wgsl" DESTINATION "${INCBIN_DATA_DIR}/shaders")
+    file(MAKE_DIRECTORY "${INCBIN_DATA_DIR}/shaders/glyph-shaders")
+    # Glob both 0x*.wgsl (per-glyph procedurals) AND _*.wgsl (shared prelude
+    # libs). The layer's runtime assembler reads `_*.wgsl` first, then glyphs.
+    file(GLOB GLYPH_SHADER_FILES
+        "${YETTY_ROOT}/src/yetty/yfont/glyph-shaders/0x*.wgsl"
+        "${YETTY_ROOT}/src/yetty/yfont/glyph-shaders/_*.wgsl"
+    )
+    foreach(GLYPH_FILE ${GLYPH_SHADER_FILES})
+        file(COPY "${GLYPH_FILE}" DESTINATION "${INCBIN_DATA_DIR}/shaders/glyph-shaders")
+    endforeach()
+
     # Copy fonts
     file(GLOB FONT_FILES "${YETTY_ROOT}/assets/fonts/*.ttf")
     foreach(FONT_FILE ${FONT_FILES})

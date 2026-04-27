@@ -1,0 +1,52 @@
+# Shader-glyph procedurals
+
+Each `.wgsl` file in this directory defines one animated procedural glyph.
+The `shader-glyph-layer` reads them at startup, sorts by local-id, and
+splices a generated `render_shader_glyph(...)` switch dispatcher into
+`src/yetty/yterm/shader-glyph-layer.wgsl` at the
+`// SHADER_GLYPHS_PLACEHOLDER` marker.
+
+Adding a glyph = drop a `.wgsl` file here and rebuild. No codegen step,
+no list to update.
+
+## File naming
+
+```
+0xNNNN-<name>.wgsl
+```
+
+`NNNN` is the local-id (lowercase hex). The runtime stores the glyph in a
+cell using `glyph_index = 0xFFFFFFFF - local_id`. Codepoint U+E000 + N
+maps to local-id N (see `text-layer.c::resolve_glyph`).
+
+## Function contract
+
+```wgsl
+fn shader_glyph_<local_id>(
+    uv: vec2<f32>,        // 0..1 within the cell
+    time: f32,            // seconds since layer creation
+    fg: vec3<f32>,        // cell foreground color
+    bg: vec3<f32>,        // cell background color
+    pixel_pos: vec2<f32>  // absolute pixel position (for tile-coherent effects)
+) -> vec3<f32>
+```
+
+Return final RGB. The layer's fragment shader writes `vec4(rgb, 1.0)` for
+shader-glyph cells, so anything you return is opaque on top of the cell.
+
+Helpers belong in the same file, prefixed `shader_glyph_<local_id>_`,
+e.g. `shader_glyph_3_hash`. Names must not collide across files — the
+generated dispatcher merges all bodies into one WGSL module.
+
+## Tile-coherent effects
+
+For animations that should flow across tiled cells (plasma, wave,
+sparkle), consume `pixel_pos`. For per-cell effects (spinner, heart),
+just use `uv` and `time`.
+
+## Adding the input route
+
+To call a new glyph from a terminal, the codepoint must be in the PUA
+range U+E000..U+E0FF. By default `text-layer.c::resolve_glyph` maps the
+range 1:1 to local-ids. Adjust `YETTY_SHADER_GLYPH_PUA_END` in
+`include/yetty/yterm/shader-glyph-layer.h` if you need more.
