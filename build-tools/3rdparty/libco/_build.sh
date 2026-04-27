@@ -4,12 +4,13 @@
 # via #ifdefs (amd64/aarch64/arm/x86/ppc → tiny inline asm; otherwise
 # ucontext fallback).
 #
+# windows-x86_64 is intentionally absent — see build.sh for the why.
+#
 # Required env:
 #   TARGET_PLATFORM   linux-x86_64 | linux-aarch64 |
 #                     macos-arm64 | macos-x86_64 |
 #                     android-arm64-v8a | android-x86_64 |
-#                     ios-arm64 | ios-x86_64 |
-#                     windows-x86_64
+#                     ios-arm64 | ios-x86_64
 #   OUTPUT_DIR        where the tarball is written
 #
 # Version is read from this directory's `version` file. libco doesn't
@@ -124,14 +125,6 @@ android-arm64-v8a|android-x86_64)
         echo "error: $CC not on PATH (NDK shellHook expected)" >&2
         exit 1
     }
-    ;;
-windows-x86_64)
-    if [ "${MSYSTEM:-}" != "CLANG64" ]; then
-        echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=$MSYSTEM)" >&2
-        exit 1
-    fi
-    CC=clang
-    AR=llvm-ar
     ;;
 *)
     echo "unknown TARGET_PLATFORM: $TARGET_PLATFORM" >&2

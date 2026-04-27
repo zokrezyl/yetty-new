@@ -23,11 +23,16 @@ if(EMSCRIPTEN)
     return()
 endif()
 
+if(WIN32)
+    message(FATAL_ERROR
+        "libco: no windows-x86_64 tarball is published yet — yetty.exe is \
+being switched to native MSVC and the libco MSVC build path will land \
+together with that work (see the windows-libs-msvc branch).")
+endif()
+
 yetty_3rdparty_fetch(libco _LIBCO_DIR)
 
-if(WIN32 AND EXISTS "${_LIBCO_DIR}/lib/co.lib")
-    set(_LIBCO_LIB "${_LIBCO_DIR}/lib/co.lib")
-elseif(EXISTS "${_LIBCO_DIR}/lib/libco.a")
+if(EXISTS "${_LIBCO_DIR}/lib/libco.a")
     set(_LIBCO_LIB "${_LIBCO_DIR}/lib/libco.a")
 else()
     message(FATAL_ERROR

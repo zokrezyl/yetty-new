@@ -28,11 +28,16 @@ endif()
 # symbols at link time.
 include(${YETTY_ROOT}/build-tools/cmake/libs/zlib.cmake)
 
+if(WIN32)
+    message(FATAL_ERROR
+        "pdfio: no windows-x86_64 tarball is published yet — yetty.exe is \
+being switched to native MSVC and the pdfio MSVC build path will land \
+together with that work (see the windows-libs-msvc branch).")
+endif()
+
 yetty_3rdparty_fetch(pdfio _PDFIO_DIR)
 
-if(WIN32 AND EXISTS "${_PDFIO_DIR}/lib/pdfio.lib")
-    set(_PDFIO_LIB "${_PDFIO_DIR}/lib/pdfio.lib")
-elseif(EXISTS "${_PDFIO_DIR}/lib/libpdfio.a")
+if(EXISTS "${_PDFIO_DIR}/lib/libpdfio.a")
     set(_PDFIO_LIB "${_PDFIO_DIR}/lib/libpdfio.a")
 else()
     message(FATAL_ERROR

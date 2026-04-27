@@ -22,11 +22,16 @@ if(TARGET thorvg_lib)
     return()
 endif()
 
+if(WIN32)
+    message(FATAL_ERROR
+        "thorvg: no windows-x86_64 tarball is published yet — yetty.exe is \
+being switched to native MSVC and the thorvg MSVC build path will land \
+together with that work (see the windows-libs-msvc branch).")
+endif()
+
 yetty_3rdparty_fetch(thorvg _THORVG_DIR)
 
-if(WIN32 AND EXISTS "${_THORVG_DIR}/lib/thorvg.lib")
-    set(_THORVG_STATIC_LIB "${_THORVG_DIR}/lib/thorvg.lib")
-elseif(EXISTS "${_THORVG_DIR}/lib/libthorvg.a")
+if(EXISTS "${_THORVG_DIR}/lib/libthorvg.a")
     set(_THORVG_STATIC_LIB "${_THORVG_DIR}/lib/libthorvg.a")
 else()
     message(FATAL_ERROR

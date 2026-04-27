@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# thorvg 3rdparty wrapper. 10-target matrix incl. windows-x86_64 (MSYS2
-# CLANG64). Same pattern as build-tools/3rdparty/libuv/build.sh.
+# thorvg 3rdparty wrapper. 9-target matrix.
+#
+# windows-x86_64 is intentionally absent — yetty.exe is being switched
+# to native MSVC on the windows-libs-msvc branch; an MSYS2 CLANG64
+# build here would produce ABI-incompatible libs. TODO: add the MSVC
+# path once windows-libs-msvc lands on main.
 #
 # Required env:
 #   TARGET_PLATFORM   linux-x86_64 | linux-aarch64 |
 #                     macos-arm64 | macos-x86_64 |
 #                     android-arm64-v8a | android-x86_64 |
 #                     ios-arm64 | ios-x86_64 |
-#                     webasm | windows-x86_64
+#                     webasm
 #   OUTPUT_DIR        where the tarball is written
 
 set -euo pipefail
@@ -21,13 +25,6 @@ case "$TARGET_PLATFORM" in
     ios-arm64|ios-x86_64|\
     webasm)
         SHELL_NAME="3rdparty-${TARGET_PLATFORM}"
-        ;;
-    windows-x86_64)
-        if [ "${MSYSTEM:-}" != "CLANG64" ]; then
-            echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=${MSYSTEM:-unset})" >&2
-            exit 1
-        fi
-        exec bash "$(dirname "$0")/_build.sh" "$@"
         ;;
     *)
         echo "unknown TARGET_PLATFORM: $TARGET_PLATFORM" >&2

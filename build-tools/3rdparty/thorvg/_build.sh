@@ -5,12 +5,14 @@
 # the few needed source globs directly mirrors what the previous from-
 # source build-tools/cmake/thorvg.cmake did (see git history).
 #
+# windows-x86_64 is intentionally absent — see build.sh for the why.
+#
 # Required env:
 #   TARGET_PLATFORM   linux-x86_64 | linux-aarch64 |
 #                     macos-arm64 | macos-x86_64 |
 #                     android-arm64-v8a | android-x86_64 |
 #                     ios-arm64 | ios-x86_64 |
-#                     webasm | windows-x86_64
+#                     webasm
 #   OUTPUT_DIR        where the tarball is written
 #
 # Version is read from this directory's `version` file (upstream tag
@@ -203,15 +205,6 @@ webasm)
     command -v em++ >/dev/null 2>&1 || { echo "error: em++ not found" >&2; exit 1; }
     CXX=em++
     AR=emar
-    ;;
-windows-x86_64)
-    if [ "${MSYSTEM:-}" != "CLANG64" ]; then
-        echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=$MSYSTEM)" >&2
-        exit 1
-    fi
-    CXX=clang++
-    AR=llvm-ar
-    CXXFLAGS_EXTRA="-DNOMINMAX -DWIN32_LEAN_AND_MEAN"
     ;;
 *) echo "unknown TARGET_PLATFORM: $TARGET_PLATFORM" >&2; exit 1 ;;
 esac

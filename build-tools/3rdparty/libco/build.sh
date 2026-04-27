@@ -4,12 +4,18 @@
 # emscripten_fiber_t (Asyncify) directly, see ycoroutine.c on that
 # platform. Same exclusion the from-source libs/co.cmake had.
 #
+# windows-x86_64 is also intentionally absent: the rest of yetty.exe is
+# being switched to native MSVC (see the windows-libs-msvc branch). The
+# MSVC pattern hasn't landed on main yet, so adding an MSYS2 CLANG64
+# build here would produce ABI-incompatible libs that can't link with
+# the MSVC yetty.exe. TODO: add windows-x86_64 once windows-libs-msvc
+# lands and we can mirror libuv's MSVC path.
+#
 # Required env:
 #   TARGET_PLATFORM   linux-x86_64 | linux-aarch64 |
 #                     macos-arm64 | macos-x86_64 |
 #                     android-arm64-v8a | android-x86_64 |
-#                     ios-arm64 | ios-x86_64 |
-#                     windows-x86_64
+#                     ios-arm64 | ios-x86_64
 #   OUTPUT_DIR        where the tarball is written
 
 set -euo pipefail
@@ -22,13 +28,6 @@ case "$TARGET_PLATFORM" in
     android-arm64-v8a|android-x86_64|\
     ios-arm64|ios-x86_64)
         SHELL_NAME="3rdparty-${TARGET_PLATFORM}"
-        ;;
-    windows-x86_64)
-        if [ "${MSYSTEM:-}" != "CLANG64" ]; then
-            echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=${MSYSTEM:-unset})" >&2
-            exit 1
-        fi
-        exec bash "$(dirname "$0")/_build.sh" "$@"
         ;;
     webasm)
         echo "libco does not target webasm — yetty's webasm coroutines use" >&2

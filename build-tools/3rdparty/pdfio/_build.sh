@@ -3,12 +3,14 @@
 # isn't a CMake project — we compile its 16 .c files directly into a
 # static archive (same approach the previous from-source cmake used).
 #
+# windows-x86_64 is intentionally absent — see build.sh for the why.
+#
 # Required env:
 #   TARGET_PLATFORM   linux-x86_64 | linux-aarch64 |
 #                     macos-arm64 | macos-x86_64 |
 #                     android-arm64-v8a | android-x86_64 |
 #                     ios-arm64 | ios-x86_64 |
-#                     webasm | windows-x86_64
+#                     webasm
 #   OUTPUT_DIR        where the tarball is written
 #
 # Version is read from this directory's `version` file.
@@ -193,14 +195,6 @@ ssize_t getrandom(void *buf, size_t buflen, unsigned int flags) {
 }
 STUB_EOF
     EXTRA_SOURCES+=("$WORK_DIR/pdfio-getrandom-stub.c")
-    ;;
-windows-x86_64)
-    if [ "${MSYSTEM:-}" != "CLANG64" ]; then
-        echo "error: windows-x86_64 must run inside MSYS2 CLANG64 (MSYSTEM=$MSYSTEM)" >&2
-        exit 1
-    fi
-    CC=clang
-    AR=llvm-ar
     ;;
 *) echo "unknown TARGET_PLATFORM: $TARGET_PLATFORM" >&2; exit 1 ;;
 esac
