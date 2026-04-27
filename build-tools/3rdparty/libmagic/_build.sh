@@ -225,6 +225,19 @@ esac
 # Native bootstrap (cross-only): build host's mkmagic so the cross
 # `make` can compile magic.mgc from src/Magdir/* without trying to run
 # the cross binary.
+#
+# We're running INSIDE the cross shell (build.sh exec'd us via nix
+# develop .#3rdparty-${TARGET_PLATFORM}), so `cc` here is the cross
+# compiler — running ./configure here would fail with "cannot run C
+# compiled programs". Spawn a NESTED host shell for the bootstrap step.
+#
+# Host shell pick:
+#   linux runner  → .#3rdparty-linux-x86_64 (covers webasm/android/linux-aarch64 cross)
+#   macOS runner  → .#3rdparty-macos-${arm64,x86_64} (covers ios cross)
+# iOS bootstrap on macOS doesn't use nix at all — system clang is fine
+# (and we want to avoid the xcrun-vs-nix sandbox conflict). Detect that
+# case and run the bootstrap with a plain bash inheriting the current
+# PATH (the host runner already has clang via Xcode CLT).
 #-----------------------------------------------------------------------------
 NATIVE_FILE_BIN=""
 if [ "$NEEDS_NATIVE_BOOTSTRAP" = "1" ]; then
@@ -235,15 +248,44 @@ if [ "$NEEDS_NATIVE_BOOTSTRAP" = "1" ]; then
         find "$NATIVE_DIR" \
             \( -name "aclocal.m4" -o -name "configure" -o -name "Makefile.in" -o -name "config.h.in" \) \
             -exec touch {} \;
-        (
-            cd "$NATIVE_DIR"
+
+        # AUTOMAKE=true etc. for the same reason the cross-build below
+        # uses them — see the note before MAKE_OVERRIDES.
+        _BOOTSTRAP_CMD='cd "'"$NATIVE_DIR"'" && \
             ./configure --disable-shared --enable-static \
                 --disable-libseccomp --disable-bzlib --disable-xzlib \
                 --disable-zstdlib --disable-lzlib --disable-zlib \
                 --disable-maintainer-mode \
-                --prefix="$NATIVE_DIR/install" >/dev/null
-            make -j"$NCPU" >/dev/null
-        )
+                --prefix="'"$NATIVE_DIR"'/install" >/dev/null && \
+            make -j'"$NCPU"' \
+                AUTOMAKE=true ACLOCAL=true AUTOCONF=true AUTOHEADER=true MAKEINFO=true \
+                >/dev/null'
+
+        case "$TARGET_PLATFORM" in
+            linux-aarch64|android-arm64-v8a|android-x86_64|webasm)
+                # Linux runner — host shell is the linux-x86_64 3rdparty
+                # shell so we get a native gcc (not the cross compiler
+                # the outer shell installed).
+                (
+                    cd "$REPO_ROOT"
+                    nix develop ".#3rdparty-linux-x86_64" --command bash -c "$_BOOTSTRAP_CMD"
+                )
+                ;;
+            ios-arm64|ios-x86_64)
+                # macOS runner — system clang is the host compiler.
+                # Drop the iOS-specific environment we may have set
+                # (DEVELOPER_DIR/SDKROOT/etc) for a clean native build.
+                (
+                    unset DEVELOPER_DIR MACOSX_DEPLOYMENT_TARGET SDKROOT NIX_APPLE_SDK_VERSION
+                    export PATH="/usr/bin:$PATH"
+                    bash -c "$_BOOTSTRAP_CMD"
+                )
+                ;;
+            *)
+                # Fallback: use whatever the current shell provides.
+                bash -c "$_BOOTSTRAP_CMD"
+                ;;
+        esac
     fi
     NATIVE_FILE_BIN="$NATIVE_DIR/src/file"
     [ -x "$NATIVE_FILE_BIN" ] || {
@@ -264,7 +306,22 @@ echo "==> configuring file-${VERSION} for $TARGET_PLATFORM (CC=$CC)"
 )
 
 echo "==> building (-j${NCPU})"
-MAKE_OVERRIDES=()
+# file's configure.ac doesn't gate the autotools regen rules with
+# AM_MAINTAINER_MODE, so --disable-maintainer-mode is silently ignored
+# (configure even prints "unrecognized options: --disable-maintainer-mode")
+# and make happily tries to regen Makefile.in via `automake-1.16`. The
+# upstream tarball is generated with automake-1.16; nix shells provide a
+# different version, so the regen fails. Override AUTOMAKE/ACLOCAL/etc.
+# to `true` so `make` uses no-op stubs when it thinks it needs to regen
+# (the bundled Makefile.in is already correct — we don't actually want
+# any regen to happen).
+MAKE_OVERRIDES=(
+    "AUTOMAKE=true"
+    "ACLOCAL=true"
+    "AUTOCONF=true"
+    "AUTOHEADER=true"
+    "MAKEINFO=true"
+)
 if [ -n "$NATIVE_FILE_BIN" ]; then
     # Tell the cross make to use the native file binary for compiling
     # magic.mgc. file's Makefile.am uses $(FILE_COMPILE) for this; in 5.x
