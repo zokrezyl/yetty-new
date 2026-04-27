@@ -61,6 +61,13 @@ typedef void (*yetty_yterm_cursor_fn)(struct yetty_yterm_terminal_layer *source,
 typedef void (*yetty_yterm_mouse_sub_fn)(int click_enabled, int move_enabled,
                                          void *userdata);
 
+/* OSC emit callback - fires when a layer needs to send an OSC envelope
+ * back to the client app (PTY child). Used by ymgui-layer to deliver
+ * focus events, by future bidirectional layers, etc. The terminal
+ * implements this via terminal_yface_emit. */
+typedef void (*yetty_yterm_emit_osc_fn)(int osc_code, const void *payload,
+                                        size_t len, void *userdata);
+
 /* Layer ops */
 struct yetty_yterm_terminal_layer_ops {
   void (*destroy)(struct yetty_yterm_terminal_layer *self);
@@ -141,6 +148,11 @@ struct yetty_yterm_terminal_layer {
   /* Mouse-subscription callback - set by creator. Optional. */
   yetty_yterm_mouse_sub_fn mouse_sub_fn;
   void *mouse_sub_userdata;
+  /* OSC emit callback - set by creator. Optional. Used by layers that
+   * need to send envelopes back to the PTY child (e.g. ymgui-layer for
+   * focus events). */
+  yetty_yterm_emit_osc_fn emit_osc_fn;
+  void *emit_osc_userdata;
 };
 
 /* Terminal context - contains yetty context plus terminal-owned objects */

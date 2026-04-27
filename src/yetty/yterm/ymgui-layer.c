@@ -1,36 +1,29 @@
 /*
- * ymgui-layer.c — cursor-anchored, scroll-synced Dear ImGui layer.
+ * ymgui-layer.c — multi-card Dear ImGui layer.
+ *
+ * Cards
+ *   The layer hosts a registry of cards (see include/yetty/ymgui/wire.h).
+ *   Each card is a placed sub-region of the terminal grid that one
+ *   ImGui app draws into. Cards are addressed by client-allocated u32
+ *   IDs. Multiple cards may coexist; mouse hit-test routes input to
+ *   the topmost card under the cursor.
  *
  * GPU model
- *   The layer owns its own WGPURenderPipeline (compiled ONCE at first
- *   render, then cached for the layer's lifetime), its own vertex/index
- *   WGPUBuffers (grown on demand), its own atlas texture + sampler, and
- *   its own bind group. It bypasses the gpu-resource-binder fullscreen-
- *   quad path entirely — that abstraction is for SDF-style "one fragment
- *   shader over the whole viewport" layers, and ImGui needs the opposite
- *   shape: many indexed-triangle draw calls with per-call scissor.
- *
- * Frame
- *   Each --frame OSC carries an ImDrawData mesh in our wire format
- *   (include/yetty/ymgui/wire.h). On render(), the layer:
- *     1. compiles its pipeline if not yet cached
- *     2. uploads vtx/idx straight to GPU (grow buffers if needed)
- *     3. begins a render pass on the target's view (LoadOp_Clear)
- *     4. iterates ImDrawCmds — setScissorRect + drawIndexed per call
- *     5. ends pass + submits
+ *   The layer owns ONE pipeline + sampler (compiled once, cached). Per
+ *   card it owns: vertex/index buffers, atlas texture+view, uniform
+ *   buffer, and a bind group binding all three. Card geometry is in
+ *   card-local pixels; the vertex shader translates by card_origin and
+ *   projects to NDC by pane_size. Both come from the per-card UBO.
  *
  * Scrolling
- *   Anchored at the cursor's rolling row at frame arrival (ypaint-canvas
- *   model). Scroll is O(1): the vertex shader adds a y-offset uniform,
- *   computed each frame from (frame_rolling_row - row_origin)*cell_h.
- *   No re-upload of geometry on scroll.
+ *   Each card is anchored at a rolling_row at placement time (same
+ *   model the ypaint canvas uses). card_origin_y on render is computed
+ *   as (rolling_row - row0_absolute) * cell_height. Scroll is O(1):
+ *   geometry never re-uploads, the per-card uniform is rewritten.
  *
  * Atlas
- *   ImGui's font atlas comes once via --tex (R8). We create a dedicated
- *   R8Unorm WGPUTexture; the fragment shader reads .r as alpha and
- *   multiplies by vertex color — that's the standard ImGui shader for
- *   alpha8 atlases. Backgrounds use the atlas's "white pixel" so they
- *   sample 1.0 and end up with vertex color unchanged.
+ *   Each card uploads its own font atlas via --tex with that card's
+ *   id. R8 only today (matches ImGui's Alpha8 atlas).
  */
 
 #include <stdio.h>
@@ -52,64 +45,83 @@
 #include <yetty/ytrace.h>
 
 /*===========================================================================
- * Layer object
+ * Card
+ *=========================================================================*/
+
+struct ymgui_card {
+    uint32_t id;
+
+    /* Placement (grid). w_cells=0 means "until right edge" — the card's
+     * effective width tracks grid width on resize. */
+    int32_t  col;
+    uint32_t w_cells;
+    uint32_t h_cells;
+
+    /* Anchor: absolute rolling row of the card's top edge. */
+    uint32_t rolling_row;
+
+    /* Latest decoded frame (owning copy of the OSC payload, post-LZ4F). */
+    uint8_t *frame_bytes;
+    size_t   frame_size;
+    int      has_frame;
+    float    frame_display_w;   /* ImGui DisplaySize from the last frame */
+    float    frame_display_h;
+
+    /* Atlas. */
+    int             atlas_ready;
+    uint32_t        atlas_w;
+    uint32_t        atlas_h;
+    WGPUTexture     atlas_texture;
+    WGPUTextureView atlas_view;
+
+    /* GPU state owned by the card. */
+    WGPUBindGroup bind_group;        /* rebuilt when atlas changes */
+    WGPUBuffer    uniform_buffer;    /* 32 B */
+    WGPUBuffer    vtx_buf;
+    size_t        vtx_buf_capacity;
+    WGPUBuffer    idx_buf;
+    size_t        idx_buf_capacity;
+};
+
+/*===========================================================================
+ * Layer
  *=========================================================================*/
 
 struct yetty_yterm_ymgui_layer {
     struct yetty_yterm_terminal_layer base;
 
-    /* GPU context — cached at create. */
+    /* GPU context. */
     WGPUDevice         device;
     WGPUQueue          queue;
     WGPUTextureFormat  target_format;
 
-    /* WGSL source loaded from paths/shaders/ymgui-layer.wgsl at create
-     * time. Heap-owned; kept alive until destroy because the WebGPU
-     * shader-module create call may reference it during async compile.
-     * Never re-read from disk — pipeline is compiled once and cached. */
+    /* WGSL source — read once at create. */
     struct yetty_ycore_buffer shader_code;
 
-    /* Pipeline (compiled once, cached). */
-    int                pipeline_ready;
-    WGPUShaderModule   shader_module;
+    /* Shared pipeline. */
+    int                 pipeline_ready;
+    WGPUShaderModule    shader_module;
     WGPUBindGroupLayout bind_group_layout;
-    WGPUPipelineLayout pipeline_layout;
-    WGPURenderPipeline pipeline;
-    WGPUSampler        sampler;
-    WGPUBuffer         uniform_buffer;       /* fixed 32 B */
+    WGPUPipelineLayout  pipeline_layout;
+    WGPURenderPipeline  pipeline;
+    WGPUSampler         sampler;
 
-    /* Atlas (rebuilt each --tex). */
-    int                atlas_ready;
-    uint32_t           atlas_w;
-    uint32_t           atlas_h;
-    WGPUTexture        atlas_texture;
-    WGPUTextureView    atlas_view;
+    /* Card registry — newer cards are appended; topmost-under-cursor =
+     * iterate back-to-front. */
+    struct ymgui_card **cards;
+    size_t              card_count;
+    size_t              card_cap;
 
-    /* Bind group — rebuilt when atlas changes. */
-    WGPUBindGroup      bind_group;
-
-    /* Geometry buffers — grown with 25% headroom on demand. */
-    WGPUBuffer         vtx_buf;
-    size_t             vtx_buf_capacity;     /* in bytes */
-    WGPUBuffer         idx_buf;
-    size_t             idx_buf_capacity;     /* in bytes */
-
-    /* Latest decoded frame (owning copy of the OSC payload). */
-    uint8_t           *frame_bytes;
-    size_t             frame_size;
-    int                has_frame;
-
-    /* Streaming OSC decoder — feeds base64 → LZ4F → in_buf. Reused
-     * across emits, so we don't re-malloc the LZ4 dictionary each call. */
+    /* Streaming OSC decoder (b64 + LZ4F). Reused across all uploads. */
     struct yetty_yface *yface;
 
-    /* Scrolling anchor (same model as yetty_ypaint_canvas). */
-    uint32_t           frame_rolling_row;
-    uint32_t           row0_absolute;
-    uint32_t           cursor_row;
-    uint32_t           cursor_col;
-    float              frame_display_w;
-    float              frame_display_h;
+    /* Scrolling / cursor tracking. */
+    uint32_t row0_absolute;
+    uint32_t cursor_col;
+    uint32_t cursor_row;
+
+    /* Click-focus. 0 = no card focused. */
+    uint32_t focused_card_id;
 };
 
 /*===========================================================================
@@ -157,7 +169,118 @@ static const struct yetty_yterm_terminal_layer_ops ymgui_ops = {
 };
 
 /*===========================================================================
- * Pipeline + bind group (cached — built once)
+ * Card lookup / lifecycle
+ *=========================================================================*/
+
+static struct ymgui_card *card_find(const struct yetty_yterm_ymgui_layer *l,
+                                    uint32_t id)
+{
+    for (size_t i = 0; i < l->card_count; i++)
+        if (l->cards[i]->id == id) return l->cards[i];
+    return NULL;
+}
+
+static struct ymgui_card *card_alloc(struct yetty_yterm_ymgui_layer *l,
+                                     uint32_t id)
+{
+    if (l->card_count == l->card_cap) {
+        size_t cap = l->card_cap ? l->card_cap * 2u : 4u;
+        struct ymgui_card **n = (struct ymgui_card **)
+            realloc(l->cards, cap * sizeof(*n));
+        if (!n) return NULL;
+        l->cards    = n;
+        l->card_cap = cap;
+    }
+    struct ymgui_card *c = (struct ymgui_card *)calloc(1, sizeof(*c));
+    if (!c) return NULL;
+    c->id = id;
+    l->cards[l->card_count++] = c;
+    return c;
+}
+
+static void card_release_gpu(struct ymgui_card *c)
+{
+    if (c->bind_group)    { wgpuBindGroupRelease(c->bind_group);     c->bind_group = NULL; }
+    if (c->atlas_view)    { wgpuTextureViewRelease(c->atlas_view);   c->atlas_view = NULL; }
+    if (c->atlas_texture) { wgpuTextureDestroy(c->atlas_texture);
+                            wgpuTextureRelease(c->atlas_texture);    c->atlas_texture = NULL; }
+    if (c->uniform_buffer){ wgpuBufferRelease(c->uniform_buffer);    c->uniform_buffer = NULL; }
+    if (c->vtx_buf)       { wgpuBufferRelease(c->vtx_buf);           c->vtx_buf = NULL; }
+    if (c->idx_buf)       { wgpuBufferRelease(c->idx_buf);           c->idx_buf = NULL; }
+    c->vtx_buf_capacity = 0;
+    c->idx_buf_capacity = 0;
+    c->atlas_ready = 0;
+}
+
+static void card_destroy(struct ymgui_card *c)
+{
+    if (!c) return;
+    card_release_gpu(c);
+    free(c->frame_bytes);
+    free(c);
+}
+
+static void card_remove(struct yetty_yterm_ymgui_layer *l, uint32_t id)
+{
+    for (size_t i = 0; i < l->card_count; i++) {
+        if (l->cards[i]->id == id) {
+            card_destroy(l->cards[i]);
+            for (size_t j = i + 1; j < l->card_count; j++)
+                l->cards[j - 1] = l->cards[j];
+            l->card_count--;
+            return;
+        }
+    }
+}
+
+static uint32_t card_effective_w_cells(const struct yetty_yterm_ymgui_layer *l,
+                                       const struct ymgui_card *c)
+{
+    if (c->w_cells != 0) return c->w_cells;
+    /* w_cells == 0 means "until right edge". */
+    int32_t col = c->col < 0 ? 0 : c->col;
+    if ((uint32_t)col >= l->base.grid_size.cols) return 1;
+    return l->base.grid_size.cols - (uint32_t)col;
+}
+
+static float card_pixel_w(const struct yetty_yterm_ymgui_layer *l,
+                          const struct ymgui_card *c)
+{
+    return (float)card_effective_w_cells(l, c) * l->base.cell_size.width;
+}
+
+static float card_pixel_h(const struct yetty_yterm_ymgui_layer *l,
+                          const struct ymgui_card *c)
+{
+    return (float)c->h_cells * l->base.cell_size.height;
+}
+
+static float card_origin_x(const struct yetty_yterm_ymgui_layer *l,
+                           const struct ymgui_card *c)
+{
+    int32_t col = c->col < 0 ? 0 : c->col;
+    return (float)col * l->base.cell_size.width;
+}
+
+static float card_origin_y(const struct yetty_yterm_ymgui_layer *l,
+                           const struct ymgui_card *c)
+{
+    /* int32 to allow temporarily negative when scrolled off the top. */
+    return (float)((int32_t)c->rolling_row - (int32_t)l->row0_absolute)
+         * l->base.cell_size.height;
+}
+
+static int card_visible(const struct yetty_yterm_ymgui_layer *l,
+                        const struct ymgui_card *c)
+{
+    uint32_t row0 = l->row0_absolute;
+    uint32_t rows = l->base.grid_size.rows;
+    return (c->rolling_row + c->h_cells > row0)
+        && (c->rolling_row < row0 + rows);
+}
+
+/*===========================================================================
+ * Pipeline (built once, shared across all cards)
  *=========================================================================*/
 
 static void release_pipeline(struct yetty_yterm_ymgui_layer *l)
@@ -167,13 +290,11 @@ static void release_pipeline(struct yetty_yterm_ymgui_layer *l)
     if (l->bind_group_layout) { wgpuBindGroupLayoutRelease(l->bind_group_layout); l->bind_group_layout = NULL; }
     if (l->shader_module)     { wgpuShaderModuleRelease(l->shader_module);  l->shader_module = NULL; }
     if (l->sampler)           { wgpuSamplerRelease(l->sampler);             l->sampler = NULL; }
-    if (l->uniform_buffer)    { wgpuBufferRelease(l->uniform_buffer);       l->uniform_buffer = NULL; }
     l->pipeline_ready = 0;
 }
 
 static int build_pipeline(struct yetty_yterm_ymgui_layer *l)
 {
-    /* Shader module — built once from the WGSL we loaded at create time. */
     WGPUShaderSourceWGSL wgsl = {0};
     wgsl.chain.sType = WGPUSType_ShaderSourceWGSL;
     wgsl.code = (WGPUStringView){ (const char *)l->shader_code.data,
@@ -187,7 +308,6 @@ static int build_pipeline(struct yetty_yterm_ymgui_layer *l)
         return 0;
     }
 
-    /* Bind group layout: uniform + texture + sampler. */
     WGPUBindGroupLayoutEntry bgl_entries[3] = {0};
     bgl_entries[0].binding = 0;
     bgl_entries[0].visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
@@ -209,24 +329,16 @@ static int build_pipeline(struct yetty_yterm_ymgui_layer *l)
     l->bind_group_layout = wgpuDeviceCreateBindGroupLayout(l->device, &bgl_desc);
     if (!l->bind_group_layout) return 0;
 
-    /* Pipeline layout */
     WGPUPipelineLayoutDescriptor pl_desc = {0};
     pl_desc.bindGroupLayoutCount = 1;
     pl_desc.bindGroupLayouts     = &l->bind_group_layout;
     l->pipeline_layout = wgpuDeviceCreatePipelineLayout(l->device, &pl_desc);
     if (!l->pipeline_layout) return 0;
 
-    /* Vertex layout — matches ImDrawVert exactly (20 bytes). */
     WGPUVertexAttribute vattrs[3] = {0};
-    vattrs[0].format = WGPUVertexFormat_Float32x2;     /* pos */
-    vattrs[0].offset = 0;
-    vattrs[0].shaderLocation = 0;
-    vattrs[1].format = WGPUVertexFormat_Float32x2;     /* uv  */
-    vattrs[1].offset = 8;
-    vattrs[1].shaderLocation = 1;
-    vattrs[2].format = WGPUVertexFormat_Unorm8x4;      /* col */
-    vattrs[2].offset = 16;
-    vattrs[2].shaderLocation = 2;
+    vattrs[0].format = WGPUVertexFormat_Float32x2; vattrs[0].offset = 0;  vattrs[0].shaderLocation = 0;
+    vattrs[1].format = WGPUVertexFormat_Float32x2; vattrs[1].offset = 8;  vattrs[1].shaderLocation = 1;
+    vattrs[2].format = WGPUVertexFormat_Unorm8x4;  vattrs[2].offset = 16; vattrs[2].shaderLocation = 2;
 
     WGPUVertexBufferLayout vbl = {0};
     vbl.stepMode      = WGPUVertexStepMode_Vertex;
@@ -234,7 +346,6 @@ static int build_pipeline(struct yetty_yterm_ymgui_layer *l)
     vbl.attributeCount = 3;
     vbl.attributes    = vattrs;
 
-    /* Color target — standard ImGui alpha blend. */
     WGPUBlendComponent blend_color = {
         .operation = WGPUBlendOperation_Add,
         .srcFactor = WGPUBlendFactor_SrcAlpha,
@@ -271,12 +382,8 @@ static int build_pipeline(struct yetty_yterm_ymgui_layer *l)
     rpd.multisample.mask      = 0xFFFFFFFFu;
 
     l->pipeline = wgpuDeviceCreateRenderPipeline(l->device, &rpd);
-    if (!l->pipeline) {
-        yerror("ymgui: render pipeline creation failed");
-        return 0;
-    }
+    if (!l->pipeline) return 0;
 
-    /* Sampler — linear, clamp. */
     WGPUSamplerDescriptor sd = {0};
     sd.addressModeU = WGPUAddressMode_ClampToEdge;
     sd.addressModeV = WGPUAddressMode_ClampToEdge;
@@ -287,28 +394,38 @@ static int build_pipeline(struct yetty_yterm_ymgui_layer *l)
     sd.maxAnisotropy = 1;
     l->sampler = wgpuDeviceCreateSampler(l->device, &sd);
 
-    /* Uniform buffer — 32 B (16 used + 16 pad for std140 vec2 alignment). */
-    WGPUBufferDescriptor ub = {0};
-    ub.size  = 32;
-    ub.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
-    l->uniform_buffer = wgpuDeviceCreateBuffer(l->device, &ub);
-
     l->pipeline_ready = 1;
     ydebug("ymgui: pipeline compiled and cached");
     return 1;
 }
 
-static void rebuild_bind_group(struct yetty_yterm_ymgui_layer *l)
+/*===========================================================================
+ * Per-card GPU helpers
+ *=========================================================================*/
+
+static int ensure_card_uniform(struct yetty_yterm_ymgui_layer *l,
+                               struct ymgui_card *c)
 {
-    if (l->bind_group) { wgpuBindGroupRelease(l->bind_group); l->bind_group = NULL; }
-    if (!l->pipeline_ready || !l->atlas_ready) return;
+    if (c->uniform_buffer) return 1;
+    WGPUBufferDescriptor ub = {0};
+    ub.size  = 32;
+    ub.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    c->uniform_buffer = wgpuDeviceCreateBuffer(l->device, &ub);
+    return c->uniform_buffer != NULL;
+}
+
+static void rebuild_card_bind_group(struct yetty_yterm_ymgui_layer *l,
+                                    struct ymgui_card *c)
+{
+    if (c->bind_group) { wgpuBindGroupRelease(c->bind_group); c->bind_group = NULL; }
+    if (!l->pipeline_ready || !c->atlas_ready || !c->uniform_buffer) return;
 
     WGPUBindGroupEntry e[3] = {0};
     e[0].binding = 0;
-    e[0].buffer  = l->uniform_buffer;
+    e[0].buffer  = c->uniform_buffer;
     e[0].size    = 32;
     e[1].binding = 1;
-    e[1].textureView = l->atlas_view;
+    e[1].textureView = c->atlas_view;
     e[2].binding = 2;
     e[2].sampler = l->sampler;
 
@@ -316,22 +433,16 @@ static void rebuild_bind_group(struct yetty_yterm_ymgui_layer *l)
     bgd.layout     = l->bind_group_layout;
     bgd.entryCount = 3;
     bgd.entries    = e;
-    l->bind_group  = wgpuDeviceCreateBindGroup(l->device, &bgd);
+    c->bind_group  = wgpuDeviceCreateBindGroup(l->device, &bgd);
 }
-
-/*===========================================================================
- * Vertex / index buffer growth
- *=========================================================================*/
 
 static int ensure_buffer(WGPUDevice dev, WGPUBuffer *buf, size_t *cap,
                          size_t need, WGPUBufferUsage usage)
 {
     if (need <= *cap && *buf) return 1;
     if (*buf) { wgpuBufferRelease(*buf); *buf = NULL; }
-    /* 25 % headroom + minimum 4 KB so re-uploads don't churn. */
     size_t new_cap = need + need / 4u;
     if (new_cap < 4096) new_cap = 4096;
-    /* WebGPU buffer copy size must be a multiple of 4. */
     new_cap = (new_cap + 3u) & ~(size_t)3u;
     WGPUBufferDescriptor bd = {0};
     bd.size  = new_cap;
@@ -346,28 +457,21 @@ static int ensure_buffer(WGPUDevice dev, WGPUBuffer *buf, size_t *cap,
  * Atlas upload (--tex)
  *=========================================================================*/
 
-static void release_atlas(struct yetty_yterm_ymgui_layer *l)
+static int upload_card_atlas(struct yetty_yterm_ymgui_layer *l,
+                             struct ymgui_card *c,
+                             const struct ymgui_wire_tex *th)
 {
-    if (l->bind_group)    { wgpuBindGroupRelease(l->bind_group);     l->bind_group = NULL; }
-    if (l->atlas_view)    { wgpuTextureViewRelease(l->atlas_view);   l->atlas_view = NULL; }
-    if (l->atlas_texture) { wgpuTextureDestroy(l->atlas_texture);
-                            wgpuTextureRelease(l->atlas_texture);    l->atlas_texture = NULL; }
-    l->atlas_ready = 0;
-    l->atlas_w = l->atlas_h = 0;
-}
-
-static int upload_atlas(struct yetty_yterm_ymgui_layer *l,
-                        const struct ymgui_wire_tex *th)
-{
-    /* Only R8 is supported on the wire today (frontend ships Alpha8). The
-     * standard ImGui shader treats .r as alpha; we follow that. RGBA8
-     * support is a follow-up if we ever expose user textures. */
     if (th->format != YMGUI_TEX_FMT_R8) {
         yerror("ymgui: --tex format %u not supported (R8 only)", th->format);
         return 0;
     }
 
-    release_atlas(l);
+    /* Reset GPU bits owned by the atlas (texture+view+bind_group). */
+    if (c->bind_group)    { wgpuBindGroupRelease(c->bind_group);     c->bind_group = NULL; }
+    if (c->atlas_view)    { wgpuTextureViewRelease(c->atlas_view);   c->atlas_view = NULL; }
+    if (c->atlas_texture) { wgpuTextureDestroy(c->atlas_texture);
+                            wgpuTextureRelease(c->atlas_texture);    c->atlas_texture = NULL; }
+    c->atlas_ready = 0;
 
     WGPUTextureDescriptor td = {0};
     td.usage         = WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopyDst;
@@ -378,8 +482,8 @@ static int upload_atlas(struct yetty_yterm_ymgui_layer *l,
     td.format        = WGPUTextureFormat_R8Unorm;
     td.mipLevelCount = 1;
     td.sampleCount   = 1;
-    l->atlas_texture = wgpuDeviceCreateTexture(l->device, &td);
-    if (!l->atlas_texture) return 0;
+    c->atlas_texture = wgpuDeviceCreateTexture(l->device, &td);
+    if (!c->atlas_texture) return 0;
 
     WGPUTextureViewDescriptor vd = {0};
     vd.format          = WGPUTextureFormat_R8Unorm;
@@ -387,14 +491,13 @@ static int upload_atlas(struct yetty_yterm_ymgui_layer *l,
     vd.mipLevelCount   = 1;
     vd.arrayLayerCount = 1;
     vd.aspect          = WGPUTextureAspect_All;
-    l->atlas_view = wgpuTextureCreateView(l->atlas_texture, &vd);
+    c->atlas_view = wgpuTextureCreateView(c->atlas_texture, &vd);
 
-    /* Pixel data follows the wire header. */
     const uint8_t *pixels = (const uint8_t *)(th + 1);
-    size_t pixel_bytes = (size_t)th->width * (size_t)th->height; /* R8 */
+    size_t pixel_bytes = (size_t)th->width * (size_t)th->height;
 
     WGPUTexelCopyTextureInfo dest = {0};
-    dest.texture = l->atlas_texture;
+    dest.texture = c->atlas_texture;
     WGPUTexelCopyBufferLayout src_layout = {0};
     src_layout.bytesPerRow  = th->width;
     src_layout.rowsPerImage = th->height;
@@ -402,22 +505,18 @@ static int upload_atlas(struct yetty_yterm_ymgui_layer *l,
     wgpuQueueWriteTexture(l->queue, &dest, pixels, pixel_bytes,
                           &src_layout, &extent);
 
-    l->atlas_w = th->width;
-    l->atlas_h = th->height;
-    l->atlas_ready = 1;
+    c->atlas_w     = th->width;
+    c->atlas_h     = th->height;
+    c->atlas_ready = 1;
+    if (!ensure_card_uniform(l, c)) return 0;
+    rebuild_card_bind_group(l, c);
 
-    /* Bind group references atlas_view, so it must be rebuilt whenever the
-     * atlas is replaced — bind groups in WebGPU are immutable references. */
-    rebuild_bind_group(l);
-
-    ydebug("ymgui: atlas uploaded %ux%u R8", th->width, th->height);
+    ydebug("ymgui: card=%u atlas %ux%u R8", c->id, th->width, th->height);
     return 1;
 }
 
 /*===========================================================================
- * Wire decoding
- * (b64 + LZ4F decompression now handled by yetty_yface; this section is
- *  just struct validators for the post-decompression payload bytes.)
+ * Wire validators
  *=========================================================================*/
 
 static int validate_frame(const uint8_t *data, size_t size,
@@ -450,32 +549,691 @@ static int validate_tex(const uint8_t *data, size_t size,
 }
 
 /*===========================================================================
- * Frame anchor / fit-under-cursor
+ * Card placement / removal
  *=========================================================================*/
 
-static uint32_t frame_row_span(const struct yetty_yterm_ymgui_layer *l)
+static void anchor_card_and_fit(struct yetty_yterm_ymgui_layer *l,
+                                struct ymgui_card *c, int row_visible_top)
 {
-    if (!l->has_frame || l->base.cell_size.height <= 0.0f) return 0;
-    uint32_t rows = (uint32_t)((l->frame_display_h + l->base.cell_size.height
-                                - 1.0f) / l->base.cell_size.height);
-    return rows ? rows : 1u;
-}
+    /* Resolve visible-relative `row` to a rolling_row anchor. */
+    if (row_visible_top < 0) row_visible_top = 0;
+    c->rolling_row = l->row0_absolute + (uint32_t)row_visible_top;
 
-static void anchor_frame_and_fit(struct yetty_yterm_ymgui_layer *l)
-{
-    l->frame_rolling_row = l->row0_absolute + l->cursor_row;
-
-    uint32_t span = frame_row_span(l);
     uint32_t rows = l->base.grid_size.rows;
-    uint32_t room_below = (l->cursor_row >= rows) ? 0u
-                                                  : (rows - l->cursor_row);
+    uint32_t card_top_visible = (uint32_t)row_visible_top;
+    uint32_t span = c->h_cells ? c->h_cells : 1u;
+    uint32_t bottom_excl = card_top_visible + span;
 
-    if (span > room_below && l->base.scroll_fn && !l->base.in_external_scroll) {
-        int need = (int)(span - room_below);
+    if (bottom_excl > rows && l->base.scroll_fn && !l->base.in_external_scroll) {
+        int need = (int)(bottom_excl - rows);
         struct yetty_ycore_void_result r = l->base.scroll_fn(
             &l->base, need, l->base.scroll_userdata);
         if (YETTY_IS_ERR(r)) yerror("ymgui: scroll_fn failed: %s", r.error.msg);
     }
+}
+
+static struct yetty_ycore_void_result
+handle_card_place(struct yetty_yterm_ymgui_layer *l,
+                  const uint8_t *raw, size_t size)
+{
+    if (size < sizeof(struct ymgui_wire_card_place))
+        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed CARD_PLACE");
+    const struct ymgui_wire_card_place *cp =
+        (const struct ymgui_wire_card_place *)raw;
+    if (cp->magic   != YMGUI_WIRE_MAGIC_CARD_PLACE)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: bad CARD_PLACE magic");
+    if (cp->version != YMGUI_WIRE_VERSION)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: CARD_PLACE version mismatch");
+    if (cp->card_id == YMGUI_CARD_ID_NONE)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: CARD_PLACE id=0");
+    if (cp->h_cells == 0)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: CARD_PLACE h_cells=0");
+
+    struct ymgui_card *c = card_find(l, cp->card_id);
+    int created = 0;
+    if (!c) {
+        c = card_alloc(l, cp->card_id);
+        if (!c) return YETTY_ERR(yetty_ycore_void, "ymgui: card alloc failed");
+        created = 1;
+    }
+
+    c->col     = cp->col;
+    c->w_cells = cp->w_cells;
+    c->h_cells = cp->h_cells;
+
+    /* Map visible-row to rolling_row anchor; scroll up if not enough room. */
+    anchor_card_and_fit(l, c, cp->row);
+
+    /* On first placement, advance the cursor under the card so subsequent
+     * stdout flows beneath. Move/resize emits do NOT touch the cursor. */
+    if (created && l->base.cursor_fn) {
+        int new_row = cp->row + (int)c->h_cells;
+        uint32_t rows = l->base.grid_size.rows;
+        if (new_row < 0) new_row = 0;
+        if ((uint32_t)new_row >= rows) new_row = (int)rows - 1;
+        struct grid_cursor_pos pos = {
+            .cols = 0,
+            .rows = (uint16_t)new_row,
+        };
+        l->base.cursor_fn(&l->base, pos, l->base.cursor_userdata);
+    }
+
+    /* Confirm pixel size to the client (DisplaySize). */
+    if (l->base.emit_osc_fn) {
+        struct ymgui_wire_input_resize msg = {
+            .magic   = YMGUI_WIRE_MAGIC_INPUT_RESIZE,
+            .version = YMGUI_WIRE_VERSION,
+            .card_id = c->id,
+            .width   = card_pixel_w(l, c),
+            .height  = card_pixel_h(l, c),
+        };
+        l->base.emit_osc_fn(YMGUI_OSC_SC_RESIZE, &msg, sizeof(msg),
+                            l->base.emit_osc_userdata);
+    }
+
+    l->base.dirty = 1;
+    if (l->base.request_render_fn)
+        l->base.request_render_fn(l->base.request_render_userdata);
+
+    ydebug("ymgui: card %u %s at (col=%d row=%d, w=%u h=%u, rolling=%u)",
+           c->id, created ? "placed" : "moved",
+           c->col, cp->row, c->w_cells, c->h_cells, c->rolling_row);
+    return YETTY_OK_VOID();
+}
+
+static void emit_focus(struct yetty_yterm_ymgui_layer *l,
+                       uint32_t card_id, int gained)
+{
+    if (!l->base.emit_osc_fn) return;
+    struct ymgui_wire_input_focus msg = {
+        .magic   = YMGUI_WIRE_MAGIC_INPUT_FOCUS,
+        .version = YMGUI_WIRE_VERSION,
+        .card_id = card_id,
+        .gained  = gained,
+    };
+    l->base.emit_osc_fn(YMGUI_OSC_SC_FOCUS, &msg, sizeof(msg),
+                        l->base.emit_osc_userdata);
+}
+
+static struct yetty_ycore_void_result
+handle_card_remove(struct yetty_yterm_ymgui_layer *l,
+                   const uint8_t *raw, size_t size)
+{
+    if (size < sizeof(struct ymgui_wire_card_remove))
+        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed CARD_REMOVE");
+    const struct ymgui_wire_card_remove *cr =
+        (const struct ymgui_wire_card_remove *)raw;
+    if (cr->magic != YMGUI_WIRE_MAGIC_CARD_REMOVE)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: bad CARD_REMOVE magic");
+    if (cr->version != YMGUI_WIRE_VERSION)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: CARD_REMOVE version mismatch");
+    if (cr->card_id == YMGUI_CARD_ID_NONE)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: CARD_REMOVE id=0");
+
+    /* TODO: archive to ymgui-static-layer when KEEP_VISIBLE flag set. */
+    if (l->focused_card_id == cr->card_id) {
+        emit_focus(l, cr->card_id, 0);
+        l->focused_card_id = 0;
+    }
+    card_remove(l, cr->card_id);
+    l->base.dirty = 1;
+    if (l->base.request_render_fn)
+        l->base.request_render_fn(l->base.request_render_userdata);
+    return YETTY_OK_VOID();
+}
+
+static struct yetty_ycore_void_result
+handle_clear(struct yetty_yterm_ymgui_layer *l,
+             const uint8_t *raw, size_t size)
+{
+    if (size < sizeof(struct ymgui_wire_clear))
+        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed CLEAR");
+    const struct ymgui_wire_clear *cl = (const struct ymgui_wire_clear *)raw;
+    if (cl->magic != YMGUI_WIRE_MAGIC_CLEAR)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: bad CLEAR magic");
+    if (cl->version != YMGUI_WIRE_VERSION)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: CLEAR version mismatch");
+
+    /* TODO: archive to ymgui-static-layer when KEEP_VISIBLE flag set. */
+    if (cl->card_id == YMGUI_CARD_ID_NONE) {
+        if (l->focused_card_id) {
+            emit_focus(l, l->focused_card_id, 0);
+            l->focused_card_id = 0;
+        }
+        for (size_t i = 0; i < l->card_count; i++)
+            card_destroy(l->cards[i]);
+        l->card_count = 0;
+    } else {
+        if (l->focused_card_id == cl->card_id) {
+            emit_focus(l, cl->card_id, 0);
+            l->focused_card_id = 0;
+        }
+        card_remove(l, cl->card_id);
+    }
+    l->base.dirty = 1;
+    if (l->base.request_render_fn)
+        l->base.request_render_fn(l->base.request_render_userdata);
+    return YETTY_OK_VOID();
+}
+
+/*===========================================================================
+ * Frame / atlas handlers
+ *=========================================================================*/
+
+static struct yetty_ycore_void_result
+handle_frame(struct yetty_yterm_ymgui_layer *l,
+             const uint8_t *raw, size_t size)
+{
+    const struct ymgui_wire_frame *fh = NULL;
+    if (validate_frame(raw, size, &fh) != 0)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed --frame payload");
+    if (fh->card_id == YMGUI_CARD_ID_NONE)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: --frame card_id=0");
+
+    struct ymgui_card *c = card_find(l, fh->card_id);
+    if (!c)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: --frame for unknown card");
+
+    uint8_t *copy = (uint8_t *)malloc(size);
+    if (!copy) return YETTY_ERR(yetty_ycore_void, "ymgui: oom");
+    memcpy(copy, raw, size);
+
+    free(c->frame_bytes);
+    c->frame_bytes     = copy;
+    c->frame_size      = size;
+    c->has_frame       = 1;
+    c->frame_display_w = fh->display_size_x;
+    c->frame_display_h = fh->display_size_y;
+
+    l->base.dirty = 1;
+    if (l->base.request_render_fn)
+        l->base.request_render_fn(l->base.request_render_userdata);
+    return YETTY_OK_VOID();
+}
+
+static struct yetty_ycore_void_result
+handle_tex(struct yetty_yterm_ymgui_layer *l,
+           const uint8_t *raw, size_t size)
+{
+    const struct ymgui_wire_tex *th = NULL;
+    if (validate_tex(raw, size, &th) != 0)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed --tex payload");
+    if (th->card_id == YMGUI_CARD_ID_NONE)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: --tex card_id=0");
+    if (th->tex_id != YMGUI_TEX_ID_FONT_ATLAS)
+        return YETTY_OK_VOID();   /* user textures: future work */
+
+    struct ymgui_card *c = card_find(l, th->card_id);
+    if (!c)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: --tex for unknown card");
+    if (!upload_card_atlas(l, c, th))
+        return YETTY_ERR(yetty_ycore_void, "ymgui: atlas upload failed");
+    return YETTY_OK_VOID();
+}
+
+/*===========================================================================
+ * write — OSC dispatch
+ *=========================================================================*/
+
+/* Body shape after pty-reader strips "<code>;": for compressed OSCs it's
+ * "<args>;<b64-payload>". For non-compressed OSCs (CARD_PLACE, CARD_REMOVE,
+ * CLEAR) it's "<args>;<b64-payload>" too — yface_start_read(compressed=0)
+ * just b64-decodes. We always feed yface and read in_buf afterwards. */
+static struct yetty_ycore_void_result
+ymgui_decode(struct yetty_yterm_ymgui_layer *l, int compressed,
+             const char *data, size_t len)
+{
+    const char *payload = NULL;
+    size_t      payload_len = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] == ';') {
+            payload     = data + i + 1;
+            payload_len = len - i - 1;
+            break;
+        }
+    }
+    if (!payload)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed body (need ;)");
+
+    struct yetty_ycore_void_result r =
+        yetty_yface_start_read(l->yface, compressed);
+    if (YETTY_IS_ERR(r)) return r;
+    r = yetty_yface_feed(l->yface, payload, payload_len);
+    if (YETTY_IS_ERR(r)) { yetty_yface_finish_read(l->yface); return r; }
+    return yetty_yface_finish_read(l->yface);
+}
+
+static struct yetty_ycore_void_result
+ymgui_write(struct yetty_yterm_terminal_layer *self,
+            int osc_code, const char *data, size_t len)
+{
+    struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
+    if (!data || len == 0)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: empty OSC body");
+
+    int compressed = (osc_code == YMGUI_OSC_CS_FRAME ||
+                      osc_code == YMGUI_OSC_CS_TEX) ? 1 : 0;
+
+    struct yetty_ycore_void_result r = ymgui_decode(l, compressed, data, len);
+    if (YETTY_IS_ERR(r)) return r;
+
+    struct yetty_ycore_buffer *in = yetty_yface_in_buf(l->yface);
+    switch (osc_code) {
+    case YMGUI_OSC_CS_FRAME:        return handle_frame(l, in->data, in->size);
+    case YMGUI_OSC_CS_TEX:          return handle_tex  (l, in->data, in->size);
+    case YMGUI_OSC_CS_CARD_PLACE:   return handle_card_place(l, in->data, in->size);
+    case YMGUI_OSC_CS_CARD_REMOVE:  return handle_card_remove(l, in->data, in->size);
+    case YMGUI_OSC_CS_CLEAR:        return handle_clear(l, in->data, in->size);
+    default:
+        return YETTY_ERR(yetty_ycore_void, "ymgui: unexpected OSC code");
+    }
+}
+
+/*===========================================================================
+ * resize / set_cell_size / set_visual_zoom
+ *=========================================================================*/
+
+static struct yetty_ycore_void_result
+ymgui_resize_grid(struct yetty_yterm_terminal_layer *self, struct grid_size gs)
+{
+    struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
+    self->grid_size = gs;
+    self->dirty = 1;
+
+    /* Resize-aware cards (w_cells=0 = "until right edge") need to notify
+     * the client of their new pixel size so DisplaySize tracks the pane. */
+    if (l->base.emit_osc_fn) {
+        for (size_t i = 0; i < l->card_count; i++) {
+            struct ymgui_card *c = l->cards[i];
+            if (c->w_cells != 0) continue;
+            struct ymgui_wire_input_resize msg = {
+                .magic   = YMGUI_WIRE_MAGIC_INPUT_RESIZE,
+                .version = YMGUI_WIRE_VERSION,
+                .card_id = c->id,
+                .width   = card_pixel_w(l, c),
+                .height  = card_pixel_h(l, c),
+            };
+            l->base.emit_osc_fn(YMGUI_OSC_SC_RESIZE, &msg, sizeof(msg),
+                                l->base.emit_osc_userdata);
+        }
+    }
+    return YETTY_OK_VOID();
+}
+
+static struct yetty_ycore_void_result
+ymgui_set_cell_size(struct yetty_yterm_terminal_layer *self,
+                    struct pixel_size cs)
+{
+    struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
+    if (cs.width <= 0.0f || cs.height <= 0.0f)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: invalid cell size");
+    self->cell_size = cs;
+    self->dirty = 1;
+
+    /* Cell size change → every card's pixel size changes. */
+    if (l->base.emit_osc_fn) {
+        for (size_t i = 0; i < l->card_count; i++) {
+            struct ymgui_card *c = l->cards[i];
+            struct ymgui_wire_input_resize msg = {
+                .magic   = YMGUI_WIRE_MAGIC_INPUT_RESIZE,
+                .version = YMGUI_WIRE_VERSION,
+                .card_id = c->id,
+                .width   = card_pixel_w(l, c),
+                .height  = card_pixel_h(l, c),
+            };
+            l->base.emit_osc_fn(YMGUI_OSC_SC_RESIZE, &msg, sizeof(msg),
+                                l->base.emit_osc_userdata);
+        }
+    }
+    return YETTY_OK_VOID();
+}
+
+static struct yetty_ycore_void_result
+ymgui_set_visual_zoom(struct yetty_yterm_terminal_layer *self,
+                      float scale, float off_x, float off_y)
+{
+    /* Visual zoom is not yet wired through this layer. Accept silently. */
+    (void)self; (void)scale; (void)off_x; (void)off_y;
+    return YETTY_OK_VOID();
+}
+
+static struct yetty_yrender_gpu_resource_set_result
+ymgui_get_gpu_resource_set(const struct yetty_yterm_terminal_layer *self)
+{
+    (void)self;
+    static const struct yetty_yrender_gpu_resource_set empty = {0};
+    return YETTY_OK(yetty_yrender_gpu_resource_set, &empty);
+}
+
+/*===========================================================================
+ * render
+ *=========================================================================*/
+
+struct cl_offsets {
+    size_t                       vtx_byte_offset;
+    size_t                       idx_u32_offset;
+    uint32_t                     cmd_count;
+    const struct ymgui_wire_cmd *cmds;
+    uint32_t                     vtx_count;
+};
+
+static int frame_measure(const struct ymgui_card *c,
+                         size_t *out_vtx_bytes, size_t *out_idx_bytes,
+                         int *out_idx32)
+{
+    const struct ymgui_wire_frame *fh =
+        (const struct ymgui_wire_frame *)c->frame_bytes;
+    const uint8_t *cur = c->frame_bytes + sizeof(*fh);
+    const uint8_t *end = c->frame_bytes + c->frame_size;
+    int idx32 = (fh->flags & YMGUI_FRAME_FLAG_IDX32) ? 1 : 0;
+    size_t idx_bpe = idx32 ? 4u : 2u;
+
+    size_t total_vtx = 0, total_idx_bytes = 0;
+    for (uint32_t li = 0; li < fh->cmd_list_count; li++) {
+        if (cur + sizeof(struct ymgui_wire_cmd_list) > end) return 0;
+        const struct ymgui_wire_cmd_list *clh =
+            (const struct ymgui_wire_cmd_list *)cur;
+        cur += sizeof(*clh);
+
+        size_t vbytes = (size_t)clh->vtx_count * 20u;
+        cur += vbytes; if (cur > end) return 0;
+
+        size_t ibytes_padded = (size_t)clh->idx_count * idx_bpe;
+        if (ibytes_padded & 3u) ibytes_padded += 4u - (ibytes_padded & 3u);
+        cur += ibytes_padded; if (cur > end) return 0;
+
+        cur += (size_t)clh->cmd_count * sizeof(struct ymgui_wire_cmd);
+        if (cur > end) return 0;
+
+        total_vtx       += vbytes;
+        total_idx_bytes += (size_t)clh->idx_count * 4u;
+    }
+    *out_vtx_bytes = total_vtx;
+    *out_idx_bytes = total_idx_bytes;
+    *out_idx32     = idx32;
+    return 1;
+}
+
+static int frame_upload(struct yetty_yterm_ymgui_layer *l,
+                        struct ymgui_card *c,
+                        struct cl_offsets *cls, size_t cls_max,
+                        size_t *cls_count, int idx32)
+{
+    const struct ymgui_wire_frame *fh =
+        (const struct ymgui_wire_frame *)c->frame_bytes;
+    const uint8_t *cur = c->frame_bytes + sizeof(*fh);
+    const uint8_t *end = c->frame_bytes + c->frame_size;
+    size_t idx_bpe = idx32 ? 4u : 2u;
+
+    static uint32_t *idx_stage = NULL;
+    static size_t   idx_stage_cap = 0;
+
+    size_t vtx_off = 0;
+    size_t idx_off_u32 = 0;
+    size_t n = 0;
+
+    for (uint32_t li = 0; li < fh->cmd_list_count; li++) {
+        if (n >= cls_max) break;
+
+        const struct ymgui_wire_cmd_list *clh =
+            (const struct ymgui_wire_cmd_list *)cur;
+        cur += sizeof(*clh);
+
+        const uint8_t *vtx = cur;
+        size_t vbytes = (size_t)clh->vtx_count * 20u;
+        cur += vbytes;
+
+        const uint8_t *idx = cur;
+        size_t ibytes_padded = (size_t)clh->idx_count * idx_bpe;
+        if (ibytes_padded & 3u) ibytes_padded += 4u - (ibytes_padded & 3u);
+        cur += ibytes_padded;
+
+        const struct ymgui_wire_cmd *cmds = (const struct ymgui_wire_cmd *)cur;
+        cur += (size_t)clh->cmd_count * sizeof(struct ymgui_wire_cmd);
+        if (cur > end) return 0;
+
+        if (vbytes)
+            wgpuQueueWriteBuffer(l->queue, c->vtx_buf, vtx_off, vtx, vbytes);
+
+        size_t i32_bytes = (size_t)clh->idx_count * 4u;
+        if (i32_bytes) {
+            if (idx32) {
+                wgpuQueueWriteBuffer(l->queue, c->idx_buf, idx_off_u32 * 4u,
+                                     idx, i32_bytes);
+            } else {
+                if (idx_stage_cap < clh->idx_count) {
+                    free(idx_stage);
+                    idx_stage = (uint32_t *)malloc(
+                        (size_t)clh->idx_count * sizeof(uint32_t));
+                    idx_stage_cap = clh->idx_count;
+                    if (!idx_stage) return 0;
+                }
+                const uint16_t *src = (const uint16_t *)idx;
+                for (uint32_t i = 0; i < clh->idx_count; i++)
+                    idx_stage[i] = src[i];
+                wgpuQueueWriteBuffer(l->queue, c->idx_buf, idx_off_u32 * 4u,
+                                     idx_stage, i32_bytes);
+            }
+        }
+
+        cls[n].vtx_byte_offset = vtx_off;
+        cls[n].idx_u32_offset  = idx_off_u32;
+        cls[n].cmd_count       = clh->cmd_count;
+        cls[n].cmds            = cmds;
+        cls[n].vtx_count       = clh->vtx_count;
+        n++;
+
+        vtx_off     += vbytes;
+        idx_off_u32 += clh->idx_count;
+    }
+    *cls_count = n;
+    return 1;
+}
+
+static struct yetty_ycore_void_result
+draw_card(struct yetty_yterm_ymgui_layer *l, struct ymgui_card *c,
+          WGPURenderPassEncoder pass, float pane_w, float pane_h)
+{
+    if (!c->has_frame || !c->atlas_ready || !c->bind_group)
+        return YETTY_OK_VOID();
+    if (!card_visible(l, c))
+        return YETTY_OK_VOID();
+
+    size_t total_vtx_bytes = 0;
+    size_t total_idx_bytes = 0;
+    int idx32 = 0;
+    if (!frame_measure(c, &total_vtx_bytes, &total_idx_bytes, &idx32))
+        return YETTY_ERR(yetty_ycore_void, "ymgui: frame layout invalid");
+    if (total_vtx_bytes == 0 || total_idx_bytes == 0)
+        return YETTY_OK_VOID();
+
+    if (!ensure_buffer(l->device, &c->vtx_buf, &c->vtx_buf_capacity,
+                       total_vtx_bytes,
+                       WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst))
+        return YETTY_ERR(yetty_ycore_void, "ymgui: vtx alloc failed");
+    if (!ensure_buffer(l->device, &c->idx_buf, &c->idx_buf_capacity,
+                       total_idx_bytes,
+                       WGPUBufferUsage_Index | WGPUBufferUsage_CopyDst))
+        return YETTY_ERR(yetty_ycore_void, "ymgui: idx alloc failed");
+
+    enum { MAX_CL = 32 };
+    struct cl_offsets cls[MAX_CL];
+    size_t cls_count = 0;
+    if (!frame_upload(l, c, cls, MAX_CL, &cls_count, idx32))
+        return YETTY_ERR(yetty_ycore_void, "ymgui: upload failed");
+
+    /* Per-card uniform: pane_size for NDC denom, card_origin for translation.
+     * Vertex pos is in card-local pixels (matches DisplaySize / DisplayPos=0
+     * on the client). Shader: (vert + card_origin) → NDC by pane_size. */
+    float ox = card_origin_x(l, c);
+    float oy = card_origin_y(l, c);
+    float uniforms[8] = {
+        pane_w, pane_h,    /* display_size := pane_size */
+        ox,     oy,        /* frame_top    := card_origin */
+        0,0,0,0,
+    };
+    wgpuQueueWriteBuffer(l->queue, c->uniform_buffer, 0,
+                         uniforms, sizeof(uniforms));
+
+    wgpuRenderPassEncoderSetBindGroup(pass, 0, c->bind_group, 0, NULL);
+    wgpuRenderPassEncoderSetVertexBuffer(pass, 0, c->vtx_buf, 0, total_vtx_bytes);
+    wgpuRenderPassEncoderSetIndexBuffer (pass, c->idx_buf,
+                                         WGPUIndexFormat_Uint32, 0,
+                                         total_idx_bytes);
+
+    /* Card pixel rect in pane space (for scissor clamping). */
+    float cw = card_pixel_w(l, c);
+    float ch = card_pixel_h(l, c);
+    float card_x0 = ox;
+    float card_y0 = oy;
+    float card_x1 = ox + cw;
+    float card_y1 = oy + ch;
+    if (card_x0 < 0) card_x0 = 0;
+    if (card_y0 < 0) card_y0 = 0;
+    if (card_x1 > pane_w) card_x1 = pane_w;
+    if (card_y1 > pane_h) card_y1 = pane_h;
+
+    /* Iterate cmd-lists × cmds. ImGui cmd's clip rect is in card-local
+     * pixels (matches DisplayPos=0). Translate to pane and clamp to the
+     * card's visible rect — geometry outside is harmless because the
+     * card is fully contained in [card_x0,card_x1] × [card_y0,card_y1],
+     * but scissor must lie within the render target. */
+    for (size_t i = 0; i < cls_count; i++) {
+        const struct cl_offsets *cl = &cls[i];
+        uint32_t base_vtx_idx = (uint32_t)(cl->vtx_byte_offset / 20u);
+        for (uint32_t k = 0; k < cl->cmd_count; k++) {
+            const struct ymgui_wire_cmd *dc = &cl->cmds[k];
+            if (dc->elem_count == 0) continue;
+
+            float sx0 = ox + dc->clip_min_x;
+            float sy0 = oy + dc->clip_min_y;
+            float sx1 = ox + dc->clip_max_x;
+            float sy1 = oy + dc->clip_max_y;
+            if (sx0 < card_x0) sx0 = card_x0;
+            if (sy0 < card_y0) sy0 = card_y0;
+            if (sx1 > card_x1) sx1 = card_x1;
+            if (sy1 > card_y1) sy1 = card_y1;
+            if (sx1 <= sx0 || sy1 <= sy0) continue;
+
+            wgpuRenderPassEncoderSetScissorRect(pass,
+                (uint32_t)sx0, (uint32_t)sy0,
+                (uint32_t)(sx1 - sx0), (uint32_t)(sy1 - sy0));
+
+            wgpuRenderPassEncoderDrawIndexed(pass,
+                dc->elem_count, 1,
+                (uint32_t)cl->idx_u32_offset + dc->idx_offset,
+                (int32_t)(base_vtx_idx + dc->vtx_offset),
+                0);
+        }
+    }
+
+    return YETTY_OK_VOID();
+}
+
+static struct yetty_ycore_void_result
+ymgui_render(struct yetty_yterm_terminal_layer *self,
+             struct yetty_yrender_target *target)
+{
+    struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
+    if (!target || !target->ops || !target->ops->get_view)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: target has no get_view");
+
+    if (!l->pipeline_ready) {
+        if (!build_pipeline(l))
+            return YETTY_ERR(yetty_ycore_void, "ymgui: pipeline build failed");
+        for (size_t i = 0; i < l->card_count; i++)
+            rebuild_card_bind_group(l, l->cards[i]);
+    }
+
+    WGPUTextureView view = target->ops->get_view(target);
+    if (!view)
+        return YETTY_ERR(yetty_ycore_void, "ymgui: target view is NULL");
+
+    /* Always begin a pass with LoadOp_Clear so the layer texture has
+     * known transparent contents whether or not any card draws. */
+    WGPUCommandEncoderDescriptor ed = {0};
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(l->device, &ed);
+
+    WGPURenderPassColorAttachment ca = {0};
+    ca.view       = view;
+    ca.loadOp     = WGPULoadOp_Clear;
+    ca.storeOp    = WGPUStoreOp_Store;
+    ca.clearValue = (WGPUColor){0, 0, 0, 0};
+    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+    WGPURenderPassDescriptor pd = {0};
+    pd.colorAttachmentCount = 1;
+    pd.colorAttachments     = &ca;
+    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &pd);
+
+    wgpuRenderPassEncoderSetPipeline(pass, l->pipeline);
+
+    float pane_w = (float)l->base.grid_size.cols * l->base.cell_size.width;
+    float pane_h = (float)l->base.grid_size.rows * l->base.cell_size.height;
+
+    /* Older cards first, newer ones on top — matches z-order convention. */
+    for (size_t i = 0; i < l->card_count; i++) {
+        struct yetty_ycore_void_result r =
+            draw_card(l, l->cards[i], pass, pane_w, pane_h);
+        if (YETTY_IS_ERR(r)) yerror("ymgui: draw_card: %s", r.error.msg);
+    }
+
+    wgpuRenderPassEncoderEnd(pass);
+    wgpuRenderPassEncoderRelease(pass);
+
+    WGPUCommandBufferDescriptor cd = {0};
+    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, &cd);
+    wgpuQueueSubmit(l->queue, 1, &cb);
+    wgpuCommandBufferRelease(cb);
+    wgpuCommandEncoderRelease(enc);
+
+    self->dirty = 0;
+    return YETTY_OK_VOID();
+}
+
+/*===========================================================================
+ * Misc ops
+ *=========================================================================*/
+
+static int ymgui_is_empty(const struct yetty_yterm_terminal_layer *self)
+{
+    const struct yetty_yterm_ymgui_layer *l =
+        (const struct yetty_yterm_ymgui_layer *)self;
+    if (l->card_count == 0) return 1;
+    for (size_t i = 0; i < l->card_count; i++) {
+        const struct ymgui_card *c = l->cards[i];
+        if (c->has_frame && card_visible(l, c)) return 0;
+    }
+    return 1;
+}
+
+/* Keyboard routing happens in terminal.c (terminal owns emit_yface and
+ * the focused-card lookup). The layer ops just say "not consumed" so
+ * the text-layer can take the events when no card has focus. */
+static int ymgui_on_key (struct yetty_yterm_terminal_layer *self, int key, int mods)
+{ (void)self; (void)key; (void)mods; return 0; }
+
+static int ymgui_on_char(struct yetty_yterm_terminal_layer *self,
+                         uint32_t cp, int mods)
+{ (void)self; (void)cp; (void)mods; return 0; }
+
+static struct yetty_ycore_void_result
+ymgui_scroll(struct yetty_yterm_terminal_layer *self, int lines)
+{
+    struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
+    if (lines <= 0) return YETTY_OK_VOID();
+    l->row0_absolute += (uint32_t)lines;
+    self->dirty = 1;
+    return YETTY_OK_VOID();
+}
+
+static void ymgui_set_cursor(struct yetty_yterm_terminal_layer *self,
+                             int col, int row)
+{
+    struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
+    if (col < 0) col = 0;
+    if (row < 0) row = 0;
+    l->cursor_col = (uint32_t)col;
+    l->cursor_row = (uint32_t)row;
 }
 
 /*===========================================================================
@@ -495,9 +1253,6 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_ymgui_layer_create(
     if (!context->gpu_context.device || !context->gpu_context.queue)
         return YETTY_ERR(yetty_yterm_terminal_layer, "gpu context is incomplete");
 
-    /* Load the WGSL source from paths/shaders — same pattern as ypaint /
-     * text layers. Loaded ONCE at create time; the pipeline compiled from
-     * it is cached for the life of the layer. */
     struct yetty_yconfig *cfg = context->app_context.config;
     const char *shaders_dir = cfg->ops->get_string(cfg, "paths/shaders", "");
     char shader_path[512];
@@ -532,9 +1287,6 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_ymgui_layer_create(
     l->queue         = context->gpu_context.queue;
     l->target_format = context->gpu_context.surface_format;
 
-    /* yface holds the streaming b64 decoder + LZ4F decompression context.
-     * Reused across all incoming --frame / --tex emits — never destroyed
-     * until the layer goes away. */
     {
         struct yetty_yface_ptr_result yr = yetty_yface_create();
         if (YETTY_IS_ERR(yr)) {
@@ -555,506 +1307,69 @@ static void ymgui_destroy(struct yetty_yterm_terminal_layer *self)
 {
     struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
     if (!l) return;
-    release_atlas(l);
+    for (size_t i = 0; i < l->card_count; i++)
+        card_destroy(l->cards[i]);
+    free(l->cards);
     release_pipeline(l);
-    if (l->vtx_buf) wgpuBufferRelease(l->vtx_buf);
-    if (l->idx_buf) wgpuBufferRelease(l->idx_buf);
     if (l->yface) yetty_yface_destroy(l->yface);
     free(l->shader_code.data);
-    free(l->frame_bytes);
     free(l);
 }
 
 /*===========================================================================
- * write — OSC dispatch (--frame / --tex / --clear)
+ * Public API for terminal.c — hit-test / focus
  *=========================================================================*/
 
-static struct yetty_ycore_void_result
-handle_frame(struct yetty_yterm_ymgui_layer *l,
-             const uint8_t *raw, size_t raw_size)
+struct yetty_yterm_ymgui_hit
+yetty_yterm_ymgui_layer_hit_test(
+    const struct yetty_yterm_terminal_layer *layer, float px, float py)
 {
-    const struct ymgui_wire_frame *fh = NULL;
-    if (validate_frame(raw, raw_size, &fh) != 0)
-        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed --frame payload");
-
-    uint8_t *copy = (uint8_t *)malloc(raw_size);
-    if (!copy) return YETTY_ERR(yetty_ycore_void, "ymgui: oom");
-    memcpy(copy, raw, raw_size);
-
-    free(l->frame_bytes);
-    l->frame_bytes     = copy;
-    l->frame_size      = raw_size;
-    l->has_frame       = 1;
-    l->frame_display_w = fh->display_size_x;
-    l->frame_display_h = fh->display_size_y;
-
-    anchor_frame_and_fit(l);
-
-    l->base.dirty = 1;
-    if (l->base.request_render_fn)
-        l->base.request_render_fn(l->base.request_render_userdata);
-    return YETTY_OK_VOID();
-}
-
-static struct yetty_ycore_void_result
-handle_tex(struct yetty_yterm_ymgui_layer *l,
-           const uint8_t *raw, size_t raw_size)
-{
-    const struct ymgui_wire_tex *th = NULL;
-    if (validate_tex(raw, raw_size, &th) != 0)
-        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed --tex payload");
-    if (th->tex_id != YMGUI_TEX_ID_FONT_ATLAS)
-        return YETTY_OK_VOID();   /* user textures: future work */
-    if (!upload_atlas(l, th))
-        return YETTY_ERR(yetty_ycore_void, "ymgui: atlas upload failed");
-    return YETTY_OK_VOID();
-}
-
-/* Body shape after pty-reader strips "<code>;" is "<b64-args>;<b64-payload>".
- * For frame/tex the args slot carries a yetty_yface_bin_meta; we just
- * skip past the first ';' and feed the payload to yface (compressed
- * is implicit per code: frame and tex are always LZ4F-compressed). */
-static struct yetty_ycore_void_result
-ymgui_decode(struct yetty_yterm_ymgui_layer *l,
-             const char *data, size_t len)
-{
-    /* Find the args/payload separator. */
-    const char *payload = NULL;
-    size_t      payload_len = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (data[i] == ';') {
-            payload     = data + i + 1;
-            payload_len = len - i - 1;
-            break;
-        }
-    }
-    if (!payload)
-        return YETTY_ERR(yetty_ycore_void, "ymgui: malformed body (need ;)");
-
-    struct yetty_ycore_void_result r =
-        yetty_yface_start_read(l->yface, /*compressed=*/1);
-    if (YETTY_IS_ERR(r)) return r;
-    r = yetty_yface_feed(l->yface, payload, payload_len);
-    if (YETTY_IS_ERR(r)) { yetty_yface_finish_read(l->yface); return r; }
-    return yetty_yface_finish_read(l->yface);
-}
-
-static struct yetty_ycore_void_result
-ymgui_write(struct yetty_yterm_terminal_layer *self,
-            int osc_code, const char *data, size_t len)
-{
-    struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
-
-    /* Clear has an empty body — short-circuit before splitting. */
-    if (osc_code == YMGUI_OSC_CS_CLEAR) {
-        free(l->frame_bytes);
-        l->frame_bytes = NULL;
-        l->frame_size  = 0;
-        l->has_frame   = 0;
-        l->base.dirty  = 1;
-        if (l->base.request_render_fn)
-            l->base.request_render_fn(l->base.request_render_userdata);
-        return YETTY_OK_VOID();
-    }
-
-    if (!data || len == 0)
-        return YETTY_ERR(yetty_ycore_void, "ymgui: empty OSC body");
-
-    struct yetty_ycore_void_result r = ymgui_decode(l, data, len);
-    if (YETTY_IS_ERR(r)) return r;
-
-    struct yetty_ycore_buffer *in = yetty_yface_in_buf(l->yface);
-    switch (osc_code) {
-    case YMGUI_OSC_CS_FRAME: return handle_frame(l, in->data, in->size);
-    case YMGUI_OSC_CS_TEX:   return handle_tex  (l, in->data, in->size);
-    default:
-        return YETTY_ERR(yetty_ycore_void, "ymgui: unexpected OSC code");
-    }
-}
-
-/*===========================================================================
- * resize / set_cell_size / set_visual_zoom — minimal, no GPU-side reset
- * (the pipeline is independent of grid size).
- *=========================================================================*/
-
-static struct yetty_ycore_void_result
-ymgui_resize_grid(struct yetty_yterm_terminal_layer *self, struct grid_size gs)
-{
-    self->grid_size = gs;
-    self->dirty = 1;
-    return YETTY_OK_VOID();
-}
-
-static struct yetty_ycore_void_result
-ymgui_set_cell_size(struct yetty_yterm_terminal_layer *self,
-                    struct pixel_size cs)
-{
-    if (cs.width <= 0.0f || cs.height <= 0.0f)
-        return YETTY_ERR(yetty_ycore_void, "ymgui: invalid cell size");
-    self->cell_size = cs;
-    self->dirty = 1;
-    return YETTY_OK_VOID();
-}
-
-static struct yetty_ycore_void_result
-ymgui_set_visual_zoom(struct yetty_yterm_terminal_layer *self,
-                      float scale, float off_x, float off_y)
-{
-    /* Visual zoom is not yet wired into the ymgui pipeline (it would
-     * scale the projection matrix in the vertex shader). Accept the call
-     * silently so the terminal can still drive the other layers. */
-    (void)self; (void)scale; (void)off_x; (void)off_y;
-    return YETTY_OK_VOID();
-}
-
-/*===========================================================================
- * get_gpu_resource_set — required by the ops table but unused: we
- * never go through render_target->render_layer (that's the binder path).
- * Return a minimal stub pointing at a static empty rs.
- *=========================================================================*/
-
-static struct yetty_yrender_gpu_resource_set_result
-ymgui_get_gpu_resource_set(const struct yetty_yterm_terminal_layer *self)
-{
-    (void)self;
-    static const struct yetty_yrender_gpu_resource_set empty = {0};
-    return YETTY_OK(yetty_yrender_gpu_resource_set, &empty);
-}
-
-/*===========================================================================
- * render — own pipeline, own draw calls, no binder
- *=========================================================================*/
-
-struct draw_pass_inputs {
-    /* Pre-walked counts of the wire frame so we can size GPU buffers
-     * before encoding. */
-    size_t total_vtx_bytes;
-    size_t total_idx_bytes;
-};
-
-/* Walk the wire frame to size GPU buffers and validate layout. */
-static int frame_measure(const struct yetty_yterm_ymgui_layer *l,
-                         struct draw_pass_inputs *out, int *out_idx32)
-{
-    const struct ymgui_wire_frame *fh =
-        (const struct ymgui_wire_frame *)l->frame_bytes;
-    const uint8_t *cur = l->frame_bytes + sizeof(*fh);
-    const uint8_t *end = l->frame_bytes + l->frame_size;
-    int idx32 = (fh->flags & YMGUI_FRAME_FLAG_IDX32) ? 1 : 0;
-    size_t idx_bpe = idx32 ? 4u : 2u;
-
-    size_t total_vtx = 0, total_idx_bytes = 0;
-    for (uint32_t li = 0; li < fh->cmd_list_count; li++) {
-        if (cur + sizeof(struct ymgui_wire_cmd_list) > end) return 0;
-        const struct ymgui_wire_cmd_list *clh =
-            (const struct ymgui_wire_cmd_list *)cur;
-        cur += sizeof(*clh);
-
-        size_t vbytes = (size_t)clh->vtx_count * 20u;
-        cur += vbytes; if (cur > end) return 0;
-
-        size_t ibytes_padded = (size_t)clh->idx_count * idx_bpe;
-        if (ibytes_padded & 3u) ibytes_padded += 4u - (ibytes_padded & 3u);
-        cur += ibytes_padded; if (cur > end) return 0;
-
-        cur += (size_t)clh->cmd_count * sizeof(struct ymgui_wire_cmd);
-        if (cur > end) return 0;
-
-        total_vtx       += vbytes;
-        total_idx_bytes += (size_t)clh->idx_count * 4u;  /* always emit u32 */
-    }
-    out->total_vtx_bytes = total_vtx;
-    out->total_idx_bytes = total_idx_bytes;
-    *out_idx32 = idx32;
-    return 1;
-}
-
-/* Stream verts/idx from the wire to GPU buffers. We always promote indices
- * to u32 on the GPU side — keeps the pipeline single-codepath, costs at
- * most 2x index memory which is small relative to verts. Returns the
- * per-cmd-list base offsets so render() can emit the draw calls. */
-struct cl_offsets {
-    size_t vtx_byte_offset;   /* in the GPU vertex buffer */
-    size_t idx_u32_offset;    /* in the GPU index buffer (u32 elements) */
-    uint32_t cmd_count;
-    const struct ymgui_wire_cmd *cmds;
-    uint32_t vtx_count;       /* for index validation */
-};
-
-static int frame_upload(struct yetty_yterm_ymgui_layer *l,
-                        struct cl_offsets *cls, size_t cls_max,
-                        size_t *cls_count, int idx32)
-{
-    const struct ymgui_wire_frame *fh =
-        (const struct ymgui_wire_frame *)l->frame_bytes;
-    const uint8_t *cur = l->frame_bytes + sizeof(*fh);
-    const uint8_t *end = l->frame_bytes + l->frame_size;
-    size_t idx_bpe = idx32 ? 4u : 2u;
-
-    /* Single CPU-side staging for index promotion — reused across cmd lists
-     * within one frame. Lifetime is this function. */
-    static uint32_t *idx_stage = NULL;
-    static size_t   idx_stage_cap = 0;
-
-    size_t vtx_off = 0;
-    size_t idx_off_u32 = 0;
-    size_t n = 0;
-
-    for (uint32_t li = 0; li < fh->cmd_list_count; li++) {
-        if (n >= cls_max) break;
-
-        const struct ymgui_wire_cmd_list *clh =
-            (const struct ymgui_wire_cmd_list *)cur;
-        cur += sizeof(*clh);
-
-        const uint8_t *vtx = cur;
-        size_t vbytes = (size_t)clh->vtx_count * 20u;
-        cur += vbytes;
-
-        const uint8_t *idx = cur;
-        size_t ibytes_padded = (size_t)clh->idx_count * idx_bpe;
-        if (ibytes_padded & 3u) ibytes_padded += 4u - (ibytes_padded & 3u);
-        cur += ibytes_padded;
-
-        const struct ymgui_wire_cmd *cmds = (const struct ymgui_wire_cmd *)cur;
-        cur += (size_t)clh->cmd_count * sizeof(struct ymgui_wire_cmd);
-        if (cur > end) return 0;
-
-        /* Vertex data goes straight to GPU. */
-        if (vbytes)
-            wgpuQueueWriteBuffer(l->queue, l->vtx_buf, vtx_off, vtx, vbytes);
-
-        /* Index promotion u16 → u32 (no-op if already u32). */
-        size_t i32_bytes = (size_t)clh->idx_count * 4u;
-        if (i32_bytes) {
-            if (idx32) {
-                wgpuQueueWriteBuffer(l->queue, l->idx_buf, idx_off_u32 * 4u,
-                                     idx, i32_bytes);
-            } else {
-                if (idx_stage_cap < clh->idx_count) {
-                    free(idx_stage);
-                    idx_stage = (uint32_t *)malloc(
-                        (size_t)clh->idx_count * sizeof(uint32_t));
-                    idx_stage_cap = clh->idx_count;
-                    if (!idx_stage) return 0;
-                }
-                const uint16_t *src = (const uint16_t *)idx;
-                for (uint32_t i = 0; i < clh->idx_count; i++)
-                    idx_stage[i] = src[i];
-                wgpuQueueWriteBuffer(l->queue, l->idx_buf, idx_off_u32 * 4u,
-                                     idx_stage, i32_bytes);
-            }
-        }
-
-        cls[n].vtx_byte_offset = vtx_off;
-        cls[n].idx_u32_offset  = idx_off_u32;
-        cls[n].cmd_count       = clh->cmd_count;
-        cls[n].cmds            = cmds;
-        cls[n].vtx_count       = clh->vtx_count;
-        n++;
-
-        vtx_off     += vbytes;
-        idx_off_u32 += clh->idx_count;
-    }
-    *cls_count = n;
-    return 1;
-}
-
-static struct yetty_ycore_void_result
-ymgui_render(struct yetty_yterm_terminal_layer *self,
-             struct yetty_yrender_target *target)
-{
-    struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
-    if (!target || !target->ops || !target->ops->get_view)
-        return YETTY_ERR(yetty_ycore_void, "ymgui: target has no get_view");
-
-    /* Pipeline is built on first render and never recompiled. */
-    if (!l->pipeline_ready) {
-        if (!build_pipeline(l))
-            return YETTY_ERR(yetty_ycore_void, "ymgui: pipeline build failed");
-        rebuild_bind_group(l);  /* may still be NULL if no atlas yet */
-    }
-
-    WGPUTextureView view = target->ops->get_view(target);
-    if (!view)
-        return YETTY_ERR(yetty_ycore_void, "ymgui: target view is NULL");
-
-    /* Visibility test — anchor row inside the visible window. */
-    uint32_t row0 = l->row0_absolute;
-    uint32_t rows = l->base.grid_size.rows;
-    int visible = l->has_frame &&
-        l->frame_rolling_row + frame_row_span(l) > row0 &&
-        l->frame_rolling_row < row0 + rows;
-
-    /* No frame / no atlas yet → just clear the layer's texture so the
-     * compositor sees transparent for this layer. */
-    if (!visible || !l->atlas_ready || !l->bind_group) {
-        WGPUCommandEncoderDescriptor ed = {0};
-        WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(l->device, &ed);
-        WGPURenderPassColorAttachment ca = {0};
-        ca.view       = view;
-        ca.loadOp     = WGPULoadOp_Clear;
-        ca.storeOp    = WGPUStoreOp_Store;
-        ca.clearValue = (WGPUColor){0, 0, 0, 0};
-        ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-        WGPURenderPassDescriptor pd = {0};
-        pd.colorAttachmentCount = 1;
-        pd.colorAttachments     = &ca;
-        WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &pd);
-        wgpuRenderPassEncoderEnd(pass);
-        wgpuRenderPassEncoderRelease(pass);
-        WGPUCommandBufferDescriptor cd = {0};
-        WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, &cd);
-        wgpuQueueSubmit(l->queue, 1, &cb);
-        wgpuCommandBufferRelease(cb);
-        wgpuCommandEncoderRelease(enc);
-        self->dirty = 0;
-        return YETTY_OK_VOID();
-    }
-
-    /* Measure the wire frame and grow GPU buffers if needed. */
-    struct draw_pass_inputs dp;
-    int idx32 = 0;
-    if (!frame_measure(l, &dp, &idx32))
-        return YETTY_ERR(yetty_ycore_void, "ymgui: frame layout invalid");
-
-    if (dp.total_vtx_bytes == 0 || dp.total_idx_bytes == 0) {
-        self->dirty = 0;
-        return YETTY_OK_VOID();
-    }
-
-    if (!ensure_buffer(l->device, &l->vtx_buf, &l->vtx_buf_capacity,
-                       dp.total_vtx_bytes,
-                       WGPUBufferUsage_Vertex | WGPUBufferUsage_CopyDst))
-        return YETTY_ERR(yetty_ycore_void, "ymgui: vtx buffer alloc failed");
-    if (!ensure_buffer(l->device, &l->idx_buf, &l->idx_buf_capacity,
-                       dp.total_idx_bytes,
-                       WGPUBufferUsage_Index | WGPUBufferUsage_CopyDst))
-        return YETTY_ERR(yetty_ycore_void, "ymgui: idx buffer alloc failed");
-
-    /* Stream verts/idx to GPU. Up to 16 cmd lists per frame is plenty —
-     * ImGui typically emits 1 list per top-level window. */
-    enum { MAX_CL = 32 };
-    struct cl_offsets cls[MAX_CL];
-    size_t cls_count = 0;
-    if (!frame_upload(l, cls, MAX_CL, &cls_count, idx32))
-        return YETTY_ERR(yetty_ycore_void, "ymgui: frame upload failed");
-
-    /* Uniforms — display size for NDC + scroll offset for the vertex shader. */
-    float frame_top_y = (float)((int32_t)l->frame_rolling_row -
-                                (int32_t)row0) * l->base.cell_size.height;
-    float uniforms[8] = {
-        l->frame_display_w, l->frame_display_h,   /* display_size  */
-        0.0f, frame_top_y,                         /* frame_top     */
-        0.0f, 0.0f, 0.0f, 0.0f,                    /* pad to 32 B   */
-    };
-    wgpuQueueWriteBuffer(l->queue, l->uniform_buffer, 0,
-                         uniforms, sizeof(uniforms));
-
-    /* Encode the render pass. */
-    WGPUCommandEncoderDescriptor ed = {0};
-    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(l->device, &ed);
-
-    WGPURenderPassColorAttachment ca = {0};
-    ca.view       = view;
-    ca.loadOp     = WGPULoadOp_Clear;
-    ca.storeOp    = WGPUStoreOp_Store;
-    ca.clearValue = (WGPUColor){0, 0, 0, 0};
-    ca.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
-    WGPURenderPassDescriptor pd = {0};
-    pd.colorAttachmentCount = 1;
-    pd.colorAttachments     = &ca;
-    WGPURenderPassEncoder pass = wgpuCommandEncoderBeginRenderPass(enc, &pd);
-
-    wgpuRenderPassEncoderSetPipeline(pass, l->pipeline);
-    wgpuRenderPassEncoderSetBindGroup(pass, 0, l->bind_group, 0, NULL);
-    wgpuRenderPassEncoderSetVertexBuffer(pass, 0, l->vtx_buf, 0, dp.total_vtx_bytes);
-    wgpuRenderPassEncoderSetIndexBuffer(pass, l->idx_buf,
-                                        WGPUIndexFormat_Uint32, 0,
-                                        dp.total_idx_bytes);
-
-    /* Iterate the cmd lists × cmds. ImGui's cmd carries a clip rect (in
-     * frame-local pixel space) plus vtx_offset / idx_offset into the
-     * cmd-list-local arrays — convert to GPU-buffer global offsets. */
-    float W = l->frame_display_w, H = l->frame_display_h;
-    for (size_t i = 0; i < cls_count; i++) {
-        const struct cl_offsets *cl = &cls[i];
-        uint32_t base_vtx_idx = (uint32_t)(cl->vtx_byte_offset / 20u);
-        for (uint32_t c = 0; c < cl->cmd_count; c++) {
-            const struct ymgui_wire_cmd *dc = &cl->cmds[c];
-            if (dc->elem_count == 0) continue;
-
-            /* Scissor — clamp to layer dimensions and to non-negative. */
-            float sx0 = dc->clip_min_x, sy0 = dc->clip_min_y;
-            float sx1 = dc->clip_max_x, sy1 = dc->clip_max_y;
-            if (sx0 < 0) sx0 = 0;       if (sy0 < 0) sy0 = 0;
-            if (sx1 > W) sx1 = W;       if (sy1 > H) sy1 = H;
-            if (sx1 <= sx0 || sy1 <= sy0) continue;
-            wgpuRenderPassEncoderSetScissorRect(pass,
-                (uint32_t)sx0, (uint32_t)sy0,
-                (uint32_t)(sx1 - sx0), (uint32_t)(sy1 - sy0));
-
-            wgpuRenderPassEncoderDrawIndexed(pass,
-                dc->elem_count,
-                /*instanceCount*/ 1,
-                /*firstIndex   */ (uint32_t)cl->idx_u32_offset + dc->idx_offset,
-                /*baseVertex   */ (int32_t)(base_vtx_idx + dc->vtx_offset),
-                /*firstInstance*/ 0);
-        }
-    }
-
-    wgpuRenderPassEncoderEnd(pass);
-    wgpuRenderPassEncoderRelease(pass);
-
-    WGPUCommandBufferDescriptor cd = {0};
-    WGPUCommandBuffer cb = wgpuCommandEncoderFinish(enc, &cd);
-    wgpuQueueSubmit(l->queue, 1, &cb);
-    wgpuCommandBufferRelease(cb);
-    wgpuCommandEncoderRelease(enc);
-
-    self->dirty = 0;
-    return YETTY_OK_VOID();
-}
-
-/*===========================================================================
- * Misc ops — input ignored, scroll bumps row0, set_cursor latches anchor.
- *=========================================================================*/
-
-static int ymgui_is_empty(const struct yetty_yterm_terminal_layer *self)
-{
+    struct yetty_yterm_ymgui_hit h = {0, 0, 0};
+    if (!layer || layer->ops != &ymgui_ops) return h;
     const struct yetty_yterm_ymgui_layer *l =
-        (const struct yetty_yterm_ymgui_layer *)self;
-    if (!l->has_frame) return 1;
-    uint32_t span = frame_row_span(l);
-    if (l->frame_rolling_row + span <= l->row0_absolute) return 1;
-    if (l->frame_rolling_row >=
-        l->row0_absolute + l->base.grid_size.rows) return 1;
-    return 0;
+        (const struct yetty_yterm_ymgui_layer *)layer;
+
+    /* Newest card first — last-rendered = topmost. */
+    for (size_t i = l->card_count; i > 0; i--) {
+        const struct ymgui_card *c = l->cards[i - 1];
+        if (!card_visible(l, c)) continue;
+        float ox = card_origin_x(l, c);
+        float oy = card_origin_y(l, c);
+        float w  = card_pixel_w(l, c);
+        float ch = card_pixel_h(l, c);
+        if (px >= ox && px < ox + w && py >= oy && py < oy + ch) {
+            h.card_id = c->id;
+            h.local_x = px - ox;
+            h.local_y = py - oy;
+            return h;
+        }
+    }
+    return h;
 }
 
-static int ymgui_on_key (struct yetty_yterm_terminal_layer *self, int key, int mods)
-{ (void)self; (void)key; (void)mods; return 0; }
-
-static int ymgui_on_char(struct yetty_yterm_terminal_layer *self,
-                         uint32_t cp, int mods)
-{ (void)self; (void)cp; (void)mods; return 0; }
-
-static struct yetty_ycore_void_result
-ymgui_scroll(struct yetty_yterm_terminal_layer *self, int lines)
+uint32_t yetty_yterm_ymgui_layer_focused_card(
+    const struct yetty_yterm_terminal_layer *layer)
 {
-    struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
-    if (lines <= 0) return YETTY_OK_VOID();
-    l->row0_absolute += (uint32_t)lines;
-    self->dirty = 1;
-    return YETTY_OK_VOID();
+    if (!layer || layer->ops != &ymgui_ops) return 0;
+    const struct yetty_yterm_ymgui_layer *l =
+        (const struct yetty_yterm_ymgui_layer *)layer;
+    return l->focused_card_id;
 }
 
-static void ymgui_set_cursor(struct yetty_yterm_terminal_layer *self,
-                             int col, int row)
+void yetty_yterm_ymgui_layer_set_focus(
+    struct yetty_yterm_terminal_layer *layer, uint32_t card_id)
 {
-    struct yetty_yterm_ymgui_layer *l = (struct yetty_yterm_ymgui_layer *)self;
-    if (col < 0) col = 0;
-    if (row < 0) row = 0;
-    l->cursor_col = (uint32_t)col;
-    l->cursor_row = (uint32_t)row;
+    if (!layer || layer->ops != &ymgui_ops) return;
+    struct yetty_yterm_ymgui_layer *l =
+        (struct yetty_yterm_ymgui_layer *)layer;
+    if (l->focused_card_id == card_id) return;
+
+    /* Validate that card_id refers to a live card (or 0). */
+    if (card_id != 0 && !card_find(l, card_id)) return;
+
+    if (l->focused_card_id != 0)
+        emit_focus(l, l->focused_card_id, 0);
+    l->focused_card_id = card_id;
+    if (card_id != 0)
+        emit_focus(l, card_id, 1);
 }
