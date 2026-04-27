@@ -19,13 +19,30 @@ if(imgui_ADDED)
         ${imgui_SOURCE_DIR}/imgui_draw.cpp
         ${imgui_SOURCE_DIR}/imgui_tables.cpp
         ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_wgpu.cpp
     )
 
+    # imgui_impl_wgpu.cpp's __APPLE__ branch unconditionally includes
+    # <Cocoa/Cocoa.h>, which doesn't exist on iOS/tvOS. Skip it on those
+    # platforms — the only yetty consumer (ymgui_frontend) uses imgui_core,
+    # which doesn't include this backend, so the full `imgui` target's
+    # missing wgpu symbols are unreachable on iOS/tvOS.
+    if(NOT (YETTY_IOS OR YETTY_TVOS
+            OR CMAKE_SYSTEM_NAME STREQUAL "iOS"
+            OR CMAKE_SYSTEM_NAME STREQUAL "tvOS"))
+        list(APPEND IMGUI_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_wgpu.cpp)
+    endif()
+
     # Platform backend
+    # iOS/tvOS use yetty's custom imgui backend (ymgui_frontend ships frames
+    # as OSC, no GLFW) — same as Android. emscripten gets a stubbed GLFW via
+    # -sUSE_GLFW=3 so it still uses imgui_impl_glfw.
     if(EMSCRIPTEN)
         list(APPEND IMGUI_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp)
-    elseif(NOT YETTY_ANDROID)
+    elseif(YETTY_ANDROID OR YETTY_IOS OR YETTY_TVOS
+            OR CMAKE_SYSTEM_NAME STREQUAL "iOS"
+            OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+        # no platform backend — custom backend at src/yetty/ymgui/frontend
+    else()
         list(APPEND IMGUI_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp)
     endif()
 
@@ -38,7 +55,11 @@ if(imgui_ADDED)
         target_compile_options(imgui PUBLIC --use-port=emdawnwebgpu)
         target_link_options(imgui PUBLIC -sUSE_GLFW=3)
         target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_DAWN=1)
-    elseif(YETTY_ANDROID)
+    elseif(YETTY_ANDROID OR YETTY_IOS OR YETTY_TVOS
+            OR CMAKE_SYSTEM_NAME STREQUAL "iOS"
+            OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+        # Mobile / TV / Android — link only webgpu, no GLFW (the platform
+        # bridge is yetty's custom imgui backend at src/yetty/ymgui/frontend).
         target_link_libraries(imgui PUBLIC webgpu)
         if(WEBGPU_BACKEND STREQUAL "wgpu")
             target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_WGPU=1)
