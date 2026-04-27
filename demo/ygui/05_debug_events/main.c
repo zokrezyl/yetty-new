@@ -1,0 +1,65 @@
+/*
+ * Demo 05: Debug Events
+ *
+ * Visual event monitor — prints click events into labels inside the card.
+ * Ported from yetty-poc/demo/assets/ygui-c/python/00_debug_events.py.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include "ygui.h"
+
+static ygui_engine_t* g_engine = NULL;
+static ygui_widget_t* g_status1 = NULL;
+static ygui_widget_t* g_status2 = NULL;
+static ygui_widget_t* g_counter = NULL;
+static int g_click_count = 0;
+
+static void on_test_click(ygui_widget_t* w, void* u) {
+    (void)w; (void)u;
+    g_click_count++;
+    char buf[64];
+    ygui_label_set_text(g_status1, "Last event: Button CLICK");
+    ygui_label_set_text(g_status2, "Widget: test_btn");
+    snprintf(buf, sizeof(buf), "Click count: %d", g_click_count);
+    ygui_label_set_text(g_counter, buf);
+}
+
+static void on_quit(ygui_widget_t* w, void* u) {
+    (void)w; (void)u;
+    ygui_engine_stop(g_engine);
+}
+
+static void on_key(ygui_engine_t* e, uint32_t key, int mods, void* u) {
+    (void)mods; (void)u;
+    if (key == 'q' || key == 'Q') ygui_engine_stop(e);
+}
+
+int main(void) {
+    (void)freopen("/dev/null", "w", stderr);
+
+    if (ygui_init() != 0) return 1;
+
+    g_engine = ygui_engine_create_with_pixel_hint("debug-card", 2, 2, 500.0f, 300.0f);
+    if (!g_engine) { ygui_shutdown(); return 1; }
+
+    ygui_label(g_engine, "title",   20, 15, "Event Monitor");
+    g_status1 = ygui_label(g_engine, "status1", 20, 120, "Last event: None");
+    g_status2 = ygui_label(g_engine, "status2", 20, 150, "Widget: --");
+    g_counter = ygui_label(g_engine, "counter", 20, 200, "Click count: 0");
+    ygui_label(g_engine, "hint",    20, 260, "Press 'q' to quit");
+
+    ygui_widget_t* btn = ygui_button(g_engine, "test_btn", 20, 50, 200, 50, "Click Me!");
+    ygui_button_on_click(btn, on_test_click, NULL);
+
+    ygui_widget_t* quit = ygui_button(g_engine, "quit_btn", 240, 50, 100, 50, "Quit");
+    ygui_button_on_click(quit, on_quit, NULL);
+
+    ygui_engine_on_key(g_engine, on_key, NULL);
+    ygui_engine_show(g_engine);
+    ygui_engine_run(g_engine);
+
+    ygui_engine_destroy(g_engine);
+    ygui_shutdown();
+    return 0;
+}

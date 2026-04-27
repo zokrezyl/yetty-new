@@ -1389,3 +1389,634 @@ void ygui_colorpicker_get_color(const ygui_widget_t* widget,
     if (b) *b = bi;
     if (a) *a = widget->data.colorpicker.alpha;
 }
+
+/*=============================================================================
+ * Popup Widget
+ *
+ * Modal/non-modal popup window with optional header. Children only render
+ * when the popup is open. Press toggles open state.
+ *===========================================================================*/
+
+static void popup_render(ygui_widget_t* self, ygui_render_ctx_t* ctx) {
+    if (!(self->flags & YGUI_FLAG_OPEN)) return;
+    const ygui_theme_t* t = ctx->theme;
+
+    if (self->data.popup.modal) {
+        ygui_render_box(ctx, 0, 0,
+                        self->data.popup.scene_w, self->data.popup.scene_h,
+                        t->overlay_modal, 0);
+    }
+
+    /* Drop shadow */
+    ygui_render_box(ctx,
+                    self->x + t->pad_medium, self->y + t->pad_medium,
+                    self->w, self->h, t->shadow, t->radius_large);
+
+    /* Body + outline */
+    ygui_render_box(ctx, self->x, self->y, self->w, self->h,
+                    self->bg_color, t->radius_large);
+    ygui_render_box_outline(ctx, self->x, self->y, self->w, self->h,
+                            self->accent_color, t->radius_large, 2.0f);
+
+    /* Header */
+    const char* label = self->data.popup.label;
+    if (label && label[0]) {
+        uint32_t hdr = self->data.popup.header_color
+                      ? self->data.popup.header_color : t->bg_header;
+        float hdr_h = t->row_height + t->pad_medium;
+        ygui_render_box(ctx, self->x, self->y, self->w, hdr_h,
+                        hdr, t->radius_large);
+        ygui_render_text(ctx, label,
+                         self->x + t->pad_large, self->y + t->pad_large - 2,
+                         self->fg_color, t->font_size);
+    }
+}
+
+static void popup_render_all(ygui_widget_t* self, ygui_render_ctx_t* ctx) {
+    self->effective_x = self->x + ctx->offset_x;
+    self->effective_y = self->y + ctx->offset_y;
+    self->was_rendered = 1;
+
+    popup_render(self, ctx);
+
+    if (self->flags & YGUI_FLAG_OPEN) {
+        for (ygui_widget_t* child = self->first_child; child;
+             child = child->next_sibling) {
+            if (child->render_all) {
+                child->render_all(child, ctx);
+            } else {
+                ygui_widget_render_all_default(child, ctx);
+            }
+        }
+    }
+}
+
+static int popup_on_press(ygui_widget_t* self, float lx, float ly, ygui_event_t* out) {
+    (void)lx; (void)ly;
+    self->flags ^= YGUI_FLAG_OPEN;
+    out->widget_id = self->id;
+    out->type = YGUI_EVENT_CLICK;
+    out->data.bool_value = (self->flags & YGUI_FLAG_OPEN) ? 1 : 0;
+    return 1;
+}
+
+static void popup_destroy(ygui_widget_t* self) {
+    free(self->data.popup.label);
+}
+
+ygui_widget_t* ygui_popup(ygui_engine_t* engine, const char* id,
+                          float x, float y, float w, float h,
+                          const char* label) {
+    ygui_widget_t* p = ygui_widget_alloc(engine, YGUI_WIDGET_POPUP, id);
+    if (!p) return NULL;
+    ygui_widget_init_base(p, x, y, w, h);
+    p->data.popup.label = ygui_strdup(label);
+    p->data.popup.modal = 0;
+    p->data.popup.header_color = 0;
+    p->data.popup.scene_w = engine->width;
+    p->data.popup.scene_h = engine->height;
+    p->render = popup_render;
+    p->render_all = popup_render_all;
+    p->on_press = popup_on_press;
+    p->destroy = popup_destroy;
+    add_to_engine(engine, p);
+    return p;
+}
+
+void ygui_popup_set_label(ygui_widget_t* widget, const char* label) {
+    if (!widget || widget->type != YGUI_WIDGET_POPUP) return;
+    free(widget->data.popup.label);
+    widget->data.popup.label = ygui_strdup(label);
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+const char* ygui_popup_get_label(const ygui_widget_t* widget) {
+    if (!widget || widget->type != YGUI_WIDGET_POPUP) return NULL;
+    return widget->data.popup.label;
+}
+
+void ygui_popup_set_modal(ygui_widget_t* widget, int modal) {
+    if (!widget || widget->type != YGUI_WIDGET_POPUP) return;
+    widget->data.popup.modal = modal ? 1 : 0;
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+int ygui_popup_is_modal(const ygui_widget_t* widget) {
+    if (!widget || widget->type != YGUI_WIDGET_POPUP) return 0;
+    return widget->data.popup.modal;
+}
+
+void ygui_popup_set_open(ygui_widget_t* widget, int open) {
+    if (!widget || widget->type != YGUI_WIDGET_POPUP) return;
+    if (open) widget->flags |= YGUI_FLAG_OPEN;
+    else      widget->flags &= ~YGUI_FLAG_OPEN;
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+int ygui_popup_is_open(const ygui_widget_t* widget) {
+    if (!widget || widget->type != YGUI_WIDGET_POPUP) return 0;
+    return (widget->flags & YGUI_FLAG_OPEN) ? 1 : 0;
+}
+
+void ygui_popup_set_scene_size(ygui_widget_t* widget, float w, float h) {
+    if (!widget || widget->type != YGUI_WIDGET_POPUP) return;
+    widget->data.popup.scene_w = w;
+    widget->data.popup.scene_h = h;
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+void ygui_popup_set_header_color(ygui_widget_t* widget, uint32_t color) {
+    if (!widget || widget->type != YGUI_WIDGET_POPUP) return;
+    widget->data.popup.header_color = color;
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+/*=============================================================================
+ * CollapsingHeader Widget
+ *
+ * Header bar with arrow + label; toggles open on press; when open, lays its
+ * children out vertically below the header.
+ *===========================================================================*/
+
+static void collapsing_header_render(ygui_widget_t* self, ygui_render_ctx_t* ctx) {
+    const ygui_theme_t* t = ctx->theme;
+    ygui_render_box(ctx, self->x, self->y, self->w, self->h,
+                    self->bg_color, t->radius_medium);
+
+    float arrow_size = t->pad_large;
+    float arrow_x = self->x + t->pad_large + 2;
+    float arrow_y = self->y + self->h * 0.5f;
+    if (self->flags & YGUI_FLAG_OPEN) {
+        /* Down-pointing triangle */
+        ygui_render_triangle(ctx,
+                             arrow_x,                 arrow_y - arrow_size / 3.0f,
+                             arrow_x + arrow_size,    arrow_y - arrow_size / 3.0f,
+                             arrow_x + arrow_size / 2,arrow_y + arrow_size / 3.0f,
+                             self->fg_color);
+    } else {
+        /* Right-pointing triangle */
+        ygui_render_triangle(ctx,
+                             arrow_x,                 arrow_y - arrow_size / 2.0f,
+                             arrow_x,                 arrow_y + arrow_size / 2.0f,
+                             arrow_x + arrow_size * 0.7f, arrow_y,
+                             self->fg_color);
+    }
+
+    if (self->data.collapsing_header.label) {
+        ygui_render_text(ctx, self->data.collapsing_header.label,
+                         self->x + arrow_size + t->pad_large * 2 + 2,
+                         self->y + t->pad_medium,
+                         self->fg_color, t->font_size);
+    }
+    if (self->flags & YGUI_FLAG_HOVER) {
+        ygui_render_box_outline(ctx, self->x, self->y, self->w, self->h,
+                                self->accent_color, t->radius_medium, 1.5f);
+    }
+}
+
+static void collapsing_header_render_all(ygui_widget_t* self, ygui_render_ctx_t* ctx) {
+    self->effective_x = self->x + ctx->offset_x;
+    self->effective_y = self->y + ctx->offset_y;
+    self->was_rendered = 1;
+
+    collapsing_header_render(self, ctx);
+
+    if (!(self->flags & YGUI_FLAG_OPEN)) return;
+
+    /* Lay children out vertically below the header */
+    float old_offset_x = ctx->offset_x;
+    float old_offset_y = ctx->offset_y;
+    float y_accum = 0;
+    for (ygui_widget_t* child = self->first_child; child;
+         child = child->next_sibling) {
+        if (!(child->flags & YGUI_FLAG_VISIBLE)) continue;
+        ctx->offset_x = old_offset_x + self->x;
+        ctx->offset_y = old_offset_y + self->y + self->h + y_accum;
+        if (child->render_all) {
+            child->render_all(child, ctx);
+        } else {
+            ygui_widget_render_all_default(child, ctx);
+        }
+        y_accum += child->h;
+    }
+    ctx->offset_x = old_offset_x;
+    ctx->offset_y = old_offset_y;
+}
+
+static int collapsing_header_on_press(ygui_widget_t* self, float lx, float ly,
+                                      ygui_event_t* out) {
+    (void)lx; (void)ly;
+    self->flags ^= YGUI_FLAG_OPEN;
+    out->widget_id = self->id;
+    out->type = YGUI_EVENT_CLICK;
+    out->data.bool_value = (self->flags & YGUI_FLAG_OPEN) ? 1 : 0;
+    return 1;
+}
+
+static void collapsing_header_destroy(ygui_widget_t* self) {
+    free(self->data.collapsing_header.label);
+}
+
+ygui_widget_t* ygui_collapsing_header(ygui_engine_t* engine, const char* id,
+                                      float x, float y, float w, float h,
+                                      const char* label) {
+    ygui_widget_t* c = ygui_widget_alloc(engine, YGUI_WIDGET_COLLAPSING_HEADER, id);
+    if (!c) return NULL;
+    ygui_widget_init_base(c, x, y, w, h);
+    c->data.collapsing_header.label = ygui_strdup(label);
+    c->render = collapsing_header_render;
+    c->render_all = collapsing_header_render_all;
+    c->on_press = collapsing_header_on_press;
+    c->destroy = collapsing_header_destroy;
+    add_to_engine(engine, c);
+    return c;
+}
+
+void ygui_collapsing_header_set_label(ygui_widget_t* widget, const char* label) {
+    if (!widget || widget->type != YGUI_WIDGET_COLLAPSING_HEADER) return;
+    free(widget->data.collapsing_header.label);
+    widget->data.collapsing_header.label = ygui_strdup(label);
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+const char* ygui_collapsing_header_get_label(const ygui_widget_t* widget) {
+    if (!widget || widget->type != YGUI_WIDGET_COLLAPSING_HEADER) return NULL;
+    return widget->data.collapsing_header.label;
+}
+
+void ygui_collapsing_header_set_open(ygui_widget_t* widget, int open) {
+    if (!widget || widget->type != YGUI_WIDGET_COLLAPSING_HEADER) return;
+    if (open) widget->flags |= YGUI_FLAG_OPEN;
+    else      widget->flags &= ~YGUI_FLAG_OPEN;
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+int ygui_collapsing_header_is_open(const ygui_widget_t* widget) {
+    if (!widget || widget->type != YGUI_WIDGET_COLLAPSING_HEADER) return 0;
+    return (widget->flags & YGUI_FLAG_OPEN) ? 1 : 0;
+}
+
+/*=============================================================================
+ * Tooltip Widget
+ *===========================================================================*/
+
+static void tooltip_render(ygui_widget_t* self, ygui_render_ctx_t* ctx) {
+    if (!self->data.tooltip.label || !self->data.tooltip.label[0]) return;
+    const ygui_theme_t* t = ctx->theme;
+    ygui_render_box(ctx, self->x, self->y, self->w, self->h,
+                    t->tooltip_bg, t->radius_medium);
+    ygui_render_box_outline(ctx, self->x, self->y, self->w, self->h,
+                            t->border_muted, t->radius_medium, 1.0f);
+    ygui_render_text(ctx, self->data.tooltip.label,
+                     self->x + t->pad_large - 2, self->y + t->pad_medium,
+                     self->fg_color, t->font_size);
+}
+
+static void tooltip_destroy(ygui_widget_t* self) {
+    free(self->data.tooltip.label);
+}
+
+ygui_widget_t* ygui_tooltip(ygui_engine_t* engine, const char* id,
+                            float x, float y, float w, float h,
+                            const char* label) {
+    ygui_widget_t* tt = ygui_widget_alloc(engine, YGUI_WIDGET_TOOLTIP, id);
+    if (!tt) return NULL;
+    ygui_widget_init_base(tt, x, y, w, h);
+    tt->data.tooltip.label = ygui_strdup(label);
+    tt->render = tooltip_render;
+    tt->destroy = tooltip_destroy;
+    add_to_engine(engine, tt);
+    return tt;
+}
+
+void ygui_tooltip_set_label(ygui_widget_t* widget, const char* label) {
+    if (!widget || widget->type != YGUI_WIDGET_TOOLTIP) return;
+    free(widget->data.tooltip.label);
+    widget->data.tooltip.label = ygui_strdup(label);
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+const char* ygui_tooltip_get_label(const ygui_widget_t* widget) {
+    if (!widget || widget->type != YGUI_WIDGET_TOOLTIP) return NULL;
+    return widget->data.tooltip.label;
+}
+
+/*=============================================================================
+ * Selectable Widget
+ *
+ * List item that toggles its checked state on press.
+ *===========================================================================*/
+
+static void selectable_render(ygui_widget_t* self, ygui_render_ctx_t* ctx) {
+    const ygui_theme_t* t = ctx->theme;
+    if (self->flags & YGUI_FLAG_CHECKED) {
+        ygui_render_box(ctx, self->x, self->y, self->w, self->h,
+                        self->accent_color, t->radius_small);
+    } else if (self->flags & YGUI_FLAG_HOVER) {
+        ygui_render_box(ctx, self->x, self->y, self->w, self->h,
+                        t->bg_hover, t->radius_small);
+    }
+    if (self->data.selectable.label) {
+        ygui_render_text(ctx, self->data.selectable.label,
+                         self->x + t->pad_large, self->y + t->pad_medium,
+                         self->fg_color, t->font_size);
+    }
+}
+
+static int selectable_on_press(ygui_widget_t* self, float lx, float ly,
+                               ygui_event_t* out) {
+    (void)lx; (void)ly;
+    self->flags ^= YGUI_FLAG_CHECKED;
+    out->widget_id = self->id;
+    out->type = YGUI_EVENT_CLICK;
+    out->data.bool_value = (self->flags & YGUI_FLAG_CHECKED) ? 1 : 0;
+    return 1;
+}
+
+static void selectable_destroy(ygui_widget_t* self) {
+    free(self->data.selectable.label);
+}
+
+ygui_widget_t* ygui_selectable(ygui_engine_t* engine, const char* id,
+                               float x, float y, float w, float h,
+                               const char* label) {
+    ygui_widget_t* s = ygui_widget_alloc(engine, YGUI_WIDGET_SELECTABLE, id);
+    if (!s) return NULL;
+    ygui_widget_init_base(s, x, y, w, h);
+    s->data.selectable.label = ygui_strdup(label);
+    s->render = selectable_render;
+    s->on_press = selectable_on_press;
+    s->destroy = selectable_destroy;
+    add_to_engine(engine, s);
+    return s;
+}
+
+void ygui_selectable_set_label(ygui_widget_t* widget, const char* label) {
+    if (!widget || widget->type != YGUI_WIDGET_SELECTABLE) return;
+    free(widget->data.selectable.label);
+    widget->data.selectable.label = ygui_strdup(label);
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+const char* ygui_selectable_get_label(const ygui_widget_t* widget) {
+    if (!widget || widget->type != YGUI_WIDGET_SELECTABLE) return NULL;
+    return widget->data.selectable.label;
+}
+
+void ygui_selectable_set_checked(ygui_widget_t* widget, int checked) {
+    if (!widget || widget->type != YGUI_WIDGET_SELECTABLE) return;
+    if (checked) widget->flags |= YGUI_FLAG_CHECKED;
+    else         widget->flags &= ~YGUI_FLAG_CHECKED;
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+int ygui_selectable_is_checked(const ygui_widget_t* widget) {
+    if (!widget || widget->type != YGUI_WIDGET_SELECTABLE) return 0;
+    return (widget->flags & YGUI_FLAG_CHECKED) ? 1 : 0;
+}
+
+/*=============================================================================
+ * ChoiceBox Widget
+ *
+ * Vertical radio-button list. Press maps localY → option index.
+ *===========================================================================*/
+
+static void choicebox_free_options(ygui_widget_t* self) {
+    if (self->data.choicebox.options) {
+        for (int i = 0; i < self->data.choicebox.option_count; i++) {
+            free(self->data.choicebox.options[i]);
+        }
+        free(self->data.choicebox.options);
+        self->data.choicebox.options = NULL;
+    }
+    self->data.choicebox.option_count = 0;
+}
+
+static void choicebox_copy_options(ygui_widget_t* self, const char** options, int count) {
+    choicebox_free_options(self);
+    if (!options || count <= 0) return;
+    self->data.choicebox.options = (char**)malloc(count * sizeof(char*));
+    if (!self->data.choicebox.options) return;
+    for (int i = 0; i < count; i++) {
+        self->data.choicebox.options[i] = ygui_strdup(options[i]);
+    }
+    self->data.choicebox.option_count = count;
+}
+
+static void choicebox_render(ygui_widget_t* self, ygui_render_ctx_t* ctx) {
+    const ygui_theme_t* t = ctx->theme;
+    float opt_h = t->row_height;
+    float radio_size = 14.0f;
+    float cy = self->y;
+    for (int i = 0; i < self->data.choicebox.option_count; i++) {
+        int is_selected = (i == self->data.choicebox.selected);
+        int is_hovered  = (i == self->data.choicebox.hover_index);
+        float center_x = self->x + radio_size * 0.5f;
+        float center_y = cy + t->pad_medium + radio_size * 0.5f;
+
+        ygui_render_circle_outline(ctx, center_x, center_y, radio_size * 0.5f,
+                                   is_hovered ? self->accent_color : t->border_muted,
+                                   1.5f);
+        if (is_selected) {
+            ygui_render_circle(ctx, center_x, center_y, radio_size * 0.25f,
+                               self->accent_color);
+        } else if (is_hovered) {
+            ygui_render_circle(ctx, center_x, center_y, radio_size / 6.0f,
+                               t->thumb_hover);
+        }
+
+        if (self->data.choicebox.options[i]) {
+            ygui_render_text(ctx, self->data.choicebox.options[i],
+                             self->x + radio_size + t->pad_large,
+                             cy + t->pad_medium,
+                             self->fg_color, t->font_size);
+        }
+        cy += opt_h;
+    }
+}
+
+static int choicebox_on_press(ygui_widget_t* self, float lx, float ly,
+                              ygui_event_t* out) {
+    (void)lx;
+    const ygui_theme_t* t = self->engine->theme;
+    float opt_h = t->row_height;
+    int idx = (int)(ly / opt_h);
+    if (idx < 0 || idx >= self->data.choicebox.option_count) return 0;
+    self->data.choicebox.selected = idx;
+    out->widget_id = self->id;
+    out->type = YGUI_EVENT_CHANGE;
+    out->data.int_value = idx;
+    return 1;
+}
+
+static void choicebox_destroy(ygui_widget_t* self) {
+    choicebox_free_options(self);
+}
+
+ygui_widget_t* ygui_choicebox(ygui_engine_t* engine, const char* id,
+                              float x, float y, float w, float h,
+                              const char** options, int option_count) {
+    ygui_widget_t* c = ygui_widget_alloc(engine, YGUI_WIDGET_CHOICEBOX, id);
+    if (!c) return NULL;
+    ygui_widget_init_base(c, x, y, w, h);
+    c->data.choicebox.options = NULL;
+    c->data.choicebox.option_count = 0;
+    c->data.choicebox.selected = 0;
+    c->data.choicebox.hover_index = -1;
+    choicebox_copy_options(c, options, option_count);
+    c->render = choicebox_render;
+    c->on_press = choicebox_on_press;
+    c->destroy = choicebox_destroy;
+    add_to_engine(engine, c);
+    return c;
+}
+
+void ygui_choicebox_set_options(ygui_widget_t* widget,
+                                const char** options, int count) {
+    if (!widget || widget->type != YGUI_WIDGET_CHOICEBOX) return;
+    choicebox_copy_options(widget, options, count);
+    if (widget->data.choicebox.selected >= count) {
+        widget->data.choicebox.selected = count > 0 ? 0 : -1;
+    }
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+void ygui_choicebox_set_selected(ygui_widget_t* widget, int index) {
+    if (!widget || widget->type != YGUI_WIDGET_CHOICEBOX) return;
+    widget->data.choicebox.selected = index;
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+int ygui_choicebox_get_selected(const ygui_widget_t* widget) {
+    if (!widget || widget->type != YGUI_WIDGET_CHOICEBOX) return 0;
+    return widget->data.choicebox.selected;
+}
+
+/*=============================================================================
+ * Scrollbar Widgets (vertical + horizontal)
+ *
+ * Standalone scrollbar; drag thumb to set value in [0..1].
+ *===========================================================================*/
+
+static void vscrollbar_render(ygui_widget_t* self, ygui_render_ctx_t* ctx) {
+    const ygui_theme_t* t = ctx->theme;
+    float track_w = self->w > 0 ? self->w : t->scrollbar_size;
+    ygui_render_box(ctx, self->x, self->y, track_w, self->h,
+                    t->bg_secondary, track_w * 0.5f);
+
+    float thumb_h = ygui_max(20.0f, self->h * 0.2f);
+    float track_range = self->h - thumb_h;
+    float thumb_y = self->y + self->data.scrollbar.value * track_range;
+    uint32_t thumb_color = (self->flags & YGUI_FLAG_PRESSED) ? self->accent_color
+                         : (self->flags & YGUI_FLAG_HOVER ? t->thumb_hover
+                                                          : t->thumb_normal);
+    ygui_render_box(ctx, self->x + t->pad_small, thumb_y,
+                    track_w - t->pad_medium, thumb_h,
+                    thumb_color, (track_w - t->pad_medium) * 0.5f);
+}
+
+static int vscrollbar_update(ygui_widget_t* self, float ly, ygui_event_t* out) {
+    float thumb_h = ygui_max(20.0f, self->h * 0.2f);
+    float track_range = self->h - thumb_h;
+    if (track_range <= 0) return 0;
+    float pct = (ly - thumb_h * 0.5f) / track_range;
+    self->data.scrollbar.value = ygui_clamp(pct, 0.0f, 1.0f);
+    out->widget_id = self->id;
+    out->type = YGUI_EVENT_CHANGE;
+    out->data.float_value = self->data.scrollbar.value;
+    return 1;
+}
+
+static int vscrollbar_on_press(ygui_widget_t* self, float lx, float ly,
+                               ygui_event_t* out) {
+    (void)lx;
+    return vscrollbar_update(self, ly, out);
+}
+
+static int vscrollbar_on_drag(ygui_widget_t* self, float lx, float ly,
+                              ygui_event_t* out) {
+    (void)lx;
+    return vscrollbar_update(self, ly, out);
+}
+
+ygui_widget_t* ygui_vscrollbar(ygui_engine_t* engine, const char* id,
+                               float x, float y, float w, float h) {
+    ygui_widget_t* sb = ygui_widget_alloc(engine, YGUI_WIDGET_VSCROLLBAR, id);
+    if (!sb) return NULL;
+    ygui_widget_init_base(sb, x, y, w, h);
+    sb->data.scrollbar.value = 0;
+    sb->render = vscrollbar_render;
+    sb->on_press = vscrollbar_on_press;
+    sb->on_drag = vscrollbar_on_drag;
+    add_to_engine(engine, sb);
+    return sb;
+}
+
+static void hscrollbar_render(ygui_widget_t* self, ygui_render_ctx_t* ctx) {
+    const ygui_theme_t* t = ctx->theme;
+    float track_h = self->h > 0 ? self->h : t->scrollbar_size;
+    ygui_render_box(ctx, self->x, self->y, self->w, track_h,
+                    t->bg_secondary, track_h * 0.5f);
+
+    float thumb_w = ygui_max(20.0f, self->w * 0.2f);
+    float track_range = self->w - thumb_w;
+    float thumb_x = self->x + self->data.scrollbar.value * track_range;
+    uint32_t thumb_color = (self->flags & YGUI_FLAG_PRESSED) ? self->accent_color
+                         : (self->flags & YGUI_FLAG_HOVER ? t->thumb_hover
+                                                          : t->thumb_normal);
+    ygui_render_box(ctx, thumb_x, self->y + t->pad_small,
+                    thumb_w, track_h - t->pad_medium,
+                    thumb_color, (track_h - t->pad_medium) * 0.5f);
+}
+
+static int hscrollbar_update(ygui_widget_t* self, float lx, ygui_event_t* out) {
+    float thumb_w = ygui_max(20.0f, self->w * 0.2f);
+    float track_range = self->w - thumb_w;
+    if (track_range <= 0) return 0;
+    float pct = (lx - thumb_w * 0.5f) / track_range;
+    self->data.scrollbar.value = ygui_clamp(pct, 0.0f, 1.0f);
+    out->widget_id = self->id;
+    out->type = YGUI_EVENT_CHANGE;
+    out->data.float_value = self->data.scrollbar.value;
+    return 1;
+}
+
+static int hscrollbar_on_press(ygui_widget_t* self, float lx, float ly,
+                               ygui_event_t* out) {
+    (void)ly;
+    return hscrollbar_update(self, lx, out);
+}
+
+static int hscrollbar_on_drag(ygui_widget_t* self, float lx, float ly,
+                              ygui_event_t* out) {
+    (void)ly;
+    return hscrollbar_update(self, lx, out);
+}
+
+ygui_widget_t* ygui_hscrollbar(ygui_engine_t* engine, const char* id,
+                               float x, float y, float w, float h) {
+    ygui_widget_t* sb = ygui_widget_alloc(engine, YGUI_WIDGET_HSCROLLBAR, id);
+    if (!sb) return NULL;
+    ygui_widget_init_base(sb, x, y, w, h);
+    sb->data.scrollbar.value = 0;
+    sb->render = hscrollbar_render;
+    sb->on_press = hscrollbar_on_press;
+    sb->on_drag = hscrollbar_on_drag;
+    add_to_engine(engine, sb);
+    return sb;
+}
+
+void ygui_scrollbar_set_value(ygui_widget_t* widget, float value) {
+    if (!widget) return;
+    if (widget->type != YGUI_WIDGET_VSCROLLBAR &&
+        widget->type != YGUI_WIDGET_HSCROLLBAR) return;
+    widget->data.scrollbar.value = ygui_clamp(value, 0.0f, 1.0f);
+    if (widget->engine) widget->engine->dirty = 1;
+}
+
+float ygui_scrollbar_get_value(const ygui_widget_t* widget) {
+    if (!widget) return 0;
+    if (widget->type != YGUI_WIDGET_VSCROLLBAR &&
+        widget->type != YGUI_WIDGET_HSCROLLBAR) return 0;
+    return widget->data.scrollbar.value;
+}

@@ -61,13 +61,19 @@ struct ygui_theme {
     uint32_t bg_surface;
     uint32_t bg_hover;
     uint32_t bg_header;
+    uint32_t bg_dropdown;
     uint32_t border;
     uint32_t border_light;
+    uint32_t border_muted;
     uint32_t text_primary;
     uint32_t text_muted;
     uint32_t accent;
     uint32_t thumb_normal;
     uint32_t thumb_hover;
+    uint32_t overlay_modal;
+    uint32_t shadow;
+    uint32_t tooltip_bg;
+    uint32_t selection_bg;
 };
 
 /*=============================================================================
@@ -197,6 +203,36 @@ struct ygui_widget {
         struct {
             float hue, sat, val, alpha;
         } colorpicker;
+
+        struct {
+            char* label;
+            int modal;
+            uint32_t header_color; /* 0 = use theme bg_header */
+            float scene_w, scene_h;
+        } popup;
+
+        struct {
+            char* label;
+        } collapsing_header;
+
+        struct {
+            char* label;
+        } tooltip;
+
+        struct {
+            char* label;
+        } selectable;
+
+        struct {
+            char** options;
+            int option_count;
+            int selected;
+            int hover_index;
+        } choicebox;
+
+        struct {
+            float value;     /* 0..1 */
+        } scrollbar;
     } data;
 };
 
@@ -346,6 +382,8 @@ void ygui_render_box_outline(ygui_render_ctx_t* ctx, float x, float y, float w, 
 void ygui_render_text(ygui_render_ctx_t* ctx, const char* text, float x, float y,
                       uint32_t color, float font_size);
 void ygui_render_circle(ygui_render_ctx_t* ctx, float cx, float cy, float r, uint32_t color);
+void ygui_render_circle_outline(ygui_render_ctx_t* ctx, float cx, float cy, float r,
+                                uint32_t color, float stroke_width);
 void ygui_render_triangle(ygui_render_ctx_t* ctx, float x0, float y0,
                           float x1, float y1, float x2, float y2, uint32_t color);
 

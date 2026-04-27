@@ -61,6 +61,13 @@ typedef enum {
     YGUI_WIDGET_SCROLLAREA,
     YGUI_WIDGET_PROGRESS,
     YGUI_WIDGET_SEPARATOR,
+    YGUI_WIDGET_POPUP,
+    YGUI_WIDGET_COLLAPSING_HEADER,
+    YGUI_WIDGET_TOOLTIP,
+    YGUI_WIDGET_SELECTABLE,
+    YGUI_WIDGET_CHOICEBOX,
+    YGUI_WIDGET_VSCROLLBAR,
+    YGUI_WIDGET_HSCROLLBAR,
     YGUI_WIDGET_CUSTOM,
 } ygui_widget_type_t;
 
@@ -256,6 +263,32 @@ ygui_widget_t* ygui_separator(ygui_engine_t* engine, const char* id,
 ygui_widget_t* ygui_colorpicker(ygui_engine_t* engine, const char* id,
                                 float x, float y, float w, float h);
 
+ygui_widget_t* ygui_popup(ygui_engine_t* engine, const char* id,
+                          float x, float y, float w, float h,
+                          const char* label);
+
+ygui_widget_t* ygui_collapsing_header(ygui_engine_t* engine, const char* id,
+                                      float x, float y, float w, float h,
+                                      const char* label);
+
+ygui_widget_t* ygui_tooltip(ygui_engine_t* engine, const char* id,
+                            float x, float y, float w, float h,
+                            const char* label);
+
+ygui_widget_t* ygui_selectable(ygui_engine_t* engine, const char* id,
+                               float x, float y, float w, float h,
+                               const char* label);
+
+ygui_widget_t* ygui_choicebox(ygui_engine_t* engine, const char* id,
+                              float x, float y, float w, float h,
+                              const char** options, int option_count);
+
+ygui_widget_t* ygui_vscrollbar(ygui_engine_t* engine, const char* id,
+                               float x, float y, float w, float h);
+
+ygui_widget_t* ygui_hscrollbar(ygui_engine_t* engine, const char* id,
+                               float x, float y, float w, float h);
+
 /*=============================================================================
  * Widget Callbacks
  *===========================================================================*/
@@ -359,6 +392,42 @@ void ygui_colorpicker_set_color(ygui_widget_t* widget,
 void ygui_colorpicker_get_color(const ygui_widget_t* widget,
                                 float* r, float* g, float* b, float* a);
 
+/* Popup */
+void ygui_popup_set_label(ygui_widget_t* widget, const char* label);
+const char* ygui_popup_get_label(const ygui_widget_t* widget);
+void ygui_popup_set_modal(ygui_widget_t* widget, int modal);
+int  ygui_popup_is_modal(const ygui_widget_t* widget);
+void ygui_popup_set_open(ygui_widget_t* widget, int open);
+int  ygui_popup_is_open(const ygui_widget_t* widget);
+void ygui_popup_set_scene_size(ygui_widget_t* widget, float w, float h);
+void ygui_popup_set_header_color(ygui_widget_t* widget, uint32_t color);
+
+/* CollapsingHeader */
+void ygui_collapsing_header_set_label(ygui_widget_t* widget, const char* label);
+const char* ygui_collapsing_header_get_label(const ygui_widget_t* widget);
+void ygui_collapsing_header_set_open(ygui_widget_t* widget, int open);
+int  ygui_collapsing_header_is_open(const ygui_widget_t* widget);
+
+/* Tooltip */
+void ygui_tooltip_set_label(ygui_widget_t* widget, const char* label);
+const char* ygui_tooltip_get_label(const ygui_widget_t* widget);
+
+/* Selectable */
+void ygui_selectable_set_label(ygui_widget_t* widget, const char* label);
+const char* ygui_selectable_get_label(const ygui_widget_t* widget);
+void ygui_selectable_set_checked(ygui_widget_t* widget, int checked);
+int  ygui_selectable_is_checked(const ygui_widget_t* widget);
+
+/* ChoiceBox */
+void ygui_choicebox_set_options(ygui_widget_t* widget,
+                                const char** options, int count);
+void ygui_choicebox_set_selected(ygui_widget_t* widget, int index);
+int  ygui_choicebox_get_selected(const ygui_widget_t* widget);
+
+/* Scrollbars (V/H share the same value 0..1) */
+void  ygui_scrollbar_set_value(ygui_widget_t* widget, float value);
+float ygui_scrollbar_get_value(const ygui_widget_t* widget);
+
 /*=============================================================================
  * Widget Lookup
  *===========================================================================*/
@@ -389,6 +458,12 @@ void ygui_theme_set_text_primary(ygui_theme_t* theme, uint32_t color);
 void ygui_theme_set_text_muted(ygui_theme_t* theme, uint32_t color);
 void ygui_theme_set_accent(ygui_theme_t* theme, uint32_t color);
 void ygui_theme_set_border(ygui_theme_t* theme, uint32_t color);
+void ygui_theme_set_border_muted(ygui_theme_t* theme, uint32_t color);
+void ygui_theme_set_bg_dropdown(ygui_theme_t* theme, uint32_t color);
+void ygui_theme_set_overlay_modal(ygui_theme_t* theme, uint32_t color);
+void ygui_theme_set_shadow(ygui_theme_t* theme, uint32_t color);
+void ygui_theme_set_tooltip_bg(ygui_theme_t* theme, uint32_t color);
+void ygui_theme_set_selection_bg(ygui_theme_t* theme, uint32_t color);
 
 /*=============================================================================
  * Testing API
