@@ -70,10 +70,21 @@ linux-x86_64|linux-aarch64)
     # nix's cmake doesn't auto-resolve X11 via NIX_CFLAGS_COMPILE for
     # find_package(X11). pkg-config sees them; pull the paths from
     # there and inject them as cache hints. The xorg deps come from
-    # the 3rdparty-linux-x86_64 shell in flake.nix.
-    if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists x11; then
-        _X11_INC="$(pkg-config --variable=includedir x11)"
-        _X11_LIBDIR="$(pkg-config --variable=libdir x11)"
+    # the 3rdparty-linux-* shells in flake.nix.
+    #
+    # On linux-aarch64 the cross shell ships an
+    # `aarch64-unknown-linux-gnu-pkg-config` wrapper that knows about
+    # the cross PKG_CONFIG_PATH; the system /usr/bin/pkg-config (which
+    # `command -v pkg-config` finds first on Ubuntu CI) does NOT, so
+    # prefer the cross-prefixed wrapper when present.
+    _PC=pkg-config
+    if [ "$TARGET_PLATFORM" = "linux-aarch64" ] && \
+       command -v "${CROSS_PREFIX:-aarch64-unknown-linux-gnu-}pkg-config" >/dev/null 2>&1; then
+        _PC="${CROSS_PREFIX:-aarch64-unknown-linux-gnu-}pkg-config"
+    fi
+    if command -v "$_PC" >/dev/null 2>&1 && "$_PC" --exists x11; then
+        _X11_INC="$($_PC --variable=includedir x11)"
+        _X11_LIBDIR="$($_PC --variable=libdir x11)"
         CMAKE_ARGS+=(
             "-DX11_X11_INCLUDE_PATH=$_X11_INC"
             "-DX11_X11_LIB=$_X11_LIBDIR/libX11.so"
@@ -83,9 +94,9 @@ linux-x86_64|linux-aarch64)
         # knows about them; otherwise let cmake try its defaults.
         for _xorg in Xrandr Xinerama Xcursor Xi Xext; do
             _pc_name="$(echo "$_xorg" | tr '[:upper:]' '[:lower:]')"
-            if pkg-config --exists "$_pc_name"; then
-                _inc="$(pkg-config --variable=includedir "$_pc_name")"
-                _libdir="$(pkg-config --variable=libdir "$_pc_name")"
+            if "$_PC" --exists "$_pc_name"; then
+                _inc="$($_PC --variable=includedir "$_pc_name")"
+                _libdir="$($_PC --variable=libdir "$_pc_name")"
                 CMAKE_ARGS+=(
                     "-DX11_${_xorg}_INCLUDE_PATH=$_inc"
                     "-DX11_${_xorg}_LIB=$_libdir/lib${_xorg}.so"
