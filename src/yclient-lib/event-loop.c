@@ -96,6 +96,8 @@ struct yetty_yclient_event_loop {
     yetty_yclient_mouse_button_cb  on_btn;
     yetty_yclient_mouse_wheel_cb   on_wheel;
     yetty_yclient_resize_cb        on_resize;
+    yetty_yclient_focus_cb         on_focus;
+    yetty_yclient_key_cb           on_key;
     yetty_yclient_raw_cb           on_raw;
     yetty_yclient_frame_cb         on_frame;
 
@@ -142,15 +144,15 @@ static void on_yface_osc(void *user, int osc_code,
         switch (m->kind) {
         case YMGUI_INPUT_MOUSE_POS:
             if (L->on_pos)
-                L->on_pos(L->user, m->x, m->y, m->buttons_held);
+                L->on_pos(L->user, m->card_id, m->x, m->y, m->buttons_held);
             break;
         case YMGUI_INPUT_MOUSE_BUTTON:
             if (L->on_btn)
-                L->on_btn(L->user, m->button, m->pressed, m->x, m->y);
+                L->on_btn(L->user, m->card_id, m->button, m->pressed, m->x, m->y);
             break;
         case YMGUI_INPUT_MOUSE_WHEEL:
             if (L->on_wheel)
-                L->on_wheel(L->user, m->wheel_dy, m->x, m->y);
+                L->on_wheel(L->user, m->card_id, m->wheel_dy, m->x, m->y);
             break;
         }
         L->frame_pending = 1;
@@ -162,7 +164,28 @@ static void on_yface_osc(void *user, int osc_code,
             (const struct ymgui_wire_input_resize *)payload;
         if (r->magic != YMGUI_WIRE_MAGIC_INPUT_RESIZE) return;
         if (L->on_resize)
-            L->on_resize(L->user, r->width, r->height);
+            L->on_resize(L->user, r->card_id, r->width, r->height);
+        L->frame_pending = 1;
+        break;
+    }
+    case YMGUI_OSC_SC_FOCUS: {
+        if (len < sizeof(struct ymgui_wire_input_focus)) return;
+        const struct ymgui_wire_input_focus *f =
+            (const struct ymgui_wire_input_focus *)payload;
+        if (f->magic != YMGUI_WIRE_MAGIC_INPUT_FOCUS) return;
+        if (L->on_focus)
+            L->on_focus(L->user, f->card_id, f->gained);
+        L->frame_pending = 1;
+        break;
+    }
+    case YMGUI_OSC_SC_KEY: {
+        if (len < sizeof(struct ymgui_wire_input_key)) return;
+        const struct ymgui_wire_input_key *k =
+            (const struct ymgui_wire_input_key *)payload;
+        if (k->magic != YMGUI_WIRE_MAGIC_INPUT_KEY) return;
+        if (L->on_key)
+            L->on_key(L->user, k->card_id, (int)k->kind, k->key, k->mods,
+                      k->codepoint);
         L->frame_pending = 1;
         break;
     }
@@ -370,6 +393,8 @@ void yetty_yclient_event_loop_set_mouse_pos_cb   (struct yetty_yclient_event_loo
 void yetty_yclient_event_loop_set_mouse_button_cb(struct yetty_yclient_event_loop *L, yetty_yclient_mouse_button_cb c)  { L->on_btn    = c; }
 void yetty_yclient_event_loop_set_mouse_wheel_cb (struct yetty_yclient_event_loop *L, yetty_yclient_mouse_wheel_cb c)   { L->on_wheel  = c; }
 void yetty_yclient_event_loop_set_resize_cb      (struct yetty_yclient_event_loop *L, yetty_yclient_resize_cb c)        { L->on_resize = c; }
+void yetty_yclient_event_loop_set_focus_cb       (struct yetty_yclient_event_loop *L, yetty_yclient_focus_cb c)         { L->on_focus  = c; }
+void yetty_yclient_event_loop_set_key_cb         (struct yetty_yclient_event_loop *L, yetty_yclient_key_cb c)           { L->on_key    = c; }
 void yetty_yclient_event_loop_set_raw_cb         (struct yetty_yclient_event_loop *L, yetty_yclient_raw_cb c)           { L->on_raw    = c; }
 void yetty_yclient_event_loop_set_frame_cb       (struct yetty_yclient_event_loop *L, yetty_yclient_frame_cb c)         { L->on_frame  = c; }
 

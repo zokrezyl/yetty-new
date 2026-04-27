@@ -34,16 +34,31 @@ struct yetty_yclient_event_loop;
 /*=============================================================================
  * Input callbacks (GLFW-style: one setter per event type)
  *
- * Coordinates are pixel-precise relative to the terminal's view origin.
- * Buttons follow ImGui ordering: 0=left, 1=right, 2=middle, 3=x1, 4=x2.
+ * Every event carries a `card_id` (see <yetty/ymgui/wire.h> — cards are
+ * placed sub-regions of the terminal grid). Coordinates are card-local
+ * pixels, origin at the card's top-left. Buttons follow ImGui ordering:
+ * 0=left, 1=right, 2=middle, 3=x1, 4=x2.
  *===========================================================================*/
-typedef void (*yetty_yclient_mouse_pos_cb)   (void *user, double x, double y,
+typedef void (*yetty_yclient_mouse_pos_cb)   (void *user, uint32_t card_id,
+                                              double x, double y,
                                               uint32_t buttons_held);
-typedef void (*yetty_yclient_mouse_button_cb)(void *user, int button, int pressed,
+typedef void (*yetty_yclient_mouse_button_cb)(void *user, uint32_t card_id,
+                                              int button, int pressed,
                                               double x, double y);
-typedef void (*yetty_yclient_mouse_wheel_cb) (void *user, double dy,
+typedef void (*yetty_yclient_mouse_wheel_cb) (void *user, uint32_t card_id,
+                                              double dy,
                                               double x, double y);
-typedef void (*yetty_yclient_resize_cb)      (void *user, double width, double height);
+typedef void (*yetty_yclient_resize_cb)      (void *user, uint32_t card_id,
+                                              double width, double height);
+/* Click-focus transition. gained=1 → card focused, gained=0 → card lost
+ * focus (use this to drain key-up / mouse-up on the previously-focused
+ * card before switching contexts). */
+typedef void (*yetty_yclient_focus_cb)       (void *user, uint32_t card_id,
+                                              int gained);
+/* Keyboard. kind: 0=down, 1=up, 2=char (codepoint set, key=-1). */
+typedef void (*yetty_yclient_key_cb)         (void *user, uint32_t card_id,
+                                              int kind, int key, int mods,
+                                              uint32_t codepoint);
 
 /* Raw passthrough — bytes outside any OSC envelope. The app plugs
  * their keyboard / CSI parser here. May be NULL to drop them. */
@@ -87,6 +102,8 @@ void yetty_yclient_event_loop_set_mouse_pos_cb   (struct yetty_yclient_event_loo
 void yetty_yclient_event_loop_set_mouse_button_cb(struct yetty_yclient_event_loop *, yetty_yclient_mouse_button_cb);
 void yetty_yclient_event_loop_set_mouse_wheel_cb (struct yetty_yclient_event_loop *, yetty_yclient_mouse_wheel_cb);
 void yetty_yclient_event_loop_set_resize_cb      (struct yetty_yclient_event_loop *, yetty_yclient_resize_cb);
+void yetty_yclient_event_loop_set_focus_cb       (struct yetty_yclient_event_loop *, yetty_yclient_focus_cb);
+void yetty_yclient_event_loop_set_key_cb         (struct yetty_yclient_event_loop *, yetty_yclient_key_cb);
 void yetty_yclient_event_loop_set_raw_cb         (struct yetty_yclient_event_loop *, yetty_yclient_raw_cb);
 void yetty_yclient_event_loop_set_frame_cb       (struct yetty_yclient_event_loop *, yetty_yclient_frame_cb);
 

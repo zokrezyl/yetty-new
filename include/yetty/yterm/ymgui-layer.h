@@ -9,29 +9,30 @@ extern "C" {
 #endif
 
 /*
- * ymgui layer — renders a Dear ImGui frame delivered over OSC vendor 666680.
+ * ymgui layer — renders Dear ImGui frames produced by client apps.
  *
- * Semantics mirror ypaint-layer's scrolling mode:
- *   - The frame is anchored at the cursor row at the moment --frame arrives.
- *   - The anchor row is stored as a rolling_row (monotonic counter, same
- *     model the ypaint canvas uses), so scrolling is O(1): a uniform offset
- *     tells the fragment shader where the frame sits relative to the top
- *     visible row.
- *   - If the frame needs more rows than remain below the cursor, the layer
- *     propagates `scroll_fn(rows_needed)` so the terminal scrolls up before
- *     the frame is shown — exactly what a shell does when a tall command
- *     prints near the bottom of the screen.
- *   - When the anchor row scrolls off the top, the layer reports is_empty()
- *     and the renderer skips it.
+ * v2 model: the layer hosts a registry of "cards" — placed sub-regions
+ * of the terminal grid, each with its own ImGui frame and font atlas.
+ * Cards are addressed by client-allocated u32 IDs. Wire details live
+ * in include/yetty/ymgui/wire.h.
  *
- * Wire format: see include/yetty/ymgui/wire.h. Three OSC verbs are honoured:
- *   --frame;<base64(ymgui_wire_frame)>   replace current frame
- *   --tex;<base64(ymgui_wire_tex)>       upload / replace a texture (atlas)
- *   --clear                              drop current frame
- *
- * Create as scrolling_mode=1. (Overlay mode is not yet wired — ImGui's
- * native model is cursor-anchored, terminal-scrolling output.)
+ * Each card is anchored at a rolling_row at placement time and scrolls
+ * with terminal content (same anchoring model the ypaint canvas uses).
+ * Width/height are in grid cells; the layer derives pixel size from
+ * cell_size. CARD_PLACE on an unknown id creates the card; on a known
+ * id moves/resizes it.
  */
+
+/* Result of a hit-test against the live cards. card_id == 0 means no
+ * card was under the queried point (or the topmost card had been
+ * scrolled off-screen). When card_id != 0, local_x/y are the cursor
+ * coordinates expressed in the card's own pixel space (origin at the
+ * card's top-left). */
+struct yetty_yterm_ymgui_hit {
+    uint32_t card_id;
+    float    local_x;
+    float    local_y;
+};
 
 struct yetty_yterm_terminal_layer_result yetty_yterm_ymgui_layer_create(
     uint32_t cols, uint32_t rows,
@@ -43,6 +44,24 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_ymgui_layer_create(
     void *scroll_userdata,
     yetty_yterm_cursor_fn cursor_fn,
     void *cursor_userdata);
+
+/* Hit-test: which card sits under the terminal-pane pixel (px, py)?
+ * Returns {card_id=0} if none. The pane-pixel coordinate space is the
+ * terminal's view-local space (already de-offset against view bounds). */
+struct yetty_yterm_ymgui_hit
+yetty_yterm_ymgui_layer_hit_test(
+    const struct yetty_yterm_terminal_layer *layer, float px, float py);
+
+/* Currently focused card, or 0 if no card has focus. */
+uint32_t yetty_yterm_ymgui_layer_focused_card(
+    const struct yetty_yterm_terminal_layer *layer);
+
+/* Set focus to `card_id` (0 = no focus). If this differs from the
+ * current focus, the layer fires FOCUS-lost on the old card and
+ * FOCUS-gained on the new card via the layer's emit_osc_fn. No-op
+ * when the new id matches the current focus. */
+void yetty_yterm_ymgui_layer_set_focus(
+    struct yetty_yterm_terminal_layer *layer, uint32_t card_id);
 
 #ifdef __cplusplus
 }

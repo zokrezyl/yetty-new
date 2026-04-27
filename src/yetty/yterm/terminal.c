@@ -72,6 +72,11 @@ struct yetty_yterm_terminal {
    * even as new content keeps arriving. */
   int scrollback_active;
   uint32_t view_top_total_idx;
+
+  /* The ymgui layer (cards). Cached during creation so the mouse / KB
+   * handlers can hit-test cards without scanning the layers array.
+   * Borrowed pointer — owned by the layers[] array. */
+  struct yetty_yterm_terminal_layer *ymgui_layer;
 };
 
 /* How many lines a single mouse-wheel notch moves the scrollback view. */
@@ -176,64 +181,104 @@ reset:
   }
 }
 
-/* Emit YMGUI_OSC_SC_RESIZE — pixel size of the terminal's view. The
- * client uses it as ImGui's DisplaySize. Re-sent every time the size
- * changes or the subscription rises. */
-static void terminal_emit_pixel_size(struct yetty_yterm_terminal *terminal) {
-  float w = terminal->view.bounds.w;
-  float h = terminal->view.bounds.h;
-  if (w <= 0.0f || h <= 0.0f) {
-    ydebug("terminal_emit_pixel_size: skipped (bounds=%.0fx%.0f)", w, h);
-    return;
-  }
-  struct ymgui_wire_input_resize msg = {
-      .magic   = YMGUI_WIRE_MAGIC_INPUT_RESIZE,
-      .version = YMGUI_WIRE_VERSION,
-      .width   = w,
-      .height  = h,
-  };
-  terminal_yface_emit(terminal, YMGUI_OSC_SC_RESIZE, &msg, sizeof(msg));
-  ydebug("terminal_emit_pixel_size: %.0fx%.0f", w, h);
+/* Layer → terminal OSC emit. Wired into ymgui-layer at create time so
+ * the layer can ship FOCUS / RESIZE events back to the focused client
+ * without owning its own emit_yface. */
+static void terminal_layer_emit_osc(int osc_code, const void *payload,
+                                    size_t len, void *userdata) {
+  struct yetty_yterm_terminal *terminal = userdata;
+  terminal_yface_emit(terminal, osc_code, payload, len);
 }
 
-/* Mouse events — pixel-precise, relative to the terminal's view origin.
- * Single struct (ymgui_wire_input_mouse) with kind discriminator covers
- * button transitions, wheel ticks, and pure cursor motion. */
-static void terminal_emit_mouse_click(struct yetty_yterm_terminal *terminal,
-                                      int button, int press,
-                                      float x, float y, float scroll_dy) {
+/* Card-aware mouse forwarding. Each emit carries a card_id and
+ * card-local pixel coords. card_id=0 means "no card here" — clients
+ * use that to clear their hover state. */
+static void terminal_emit_card_mouse_button(
+    struct yetty_yterm_terminal *terminal,
+    uint32_t card_id, float lx, float ly,
+    int button, int press, float wheel_dy) {
   struct ymgui_wire_input_mouse msg = {
-      .magic        = YMGUI_WIRE_MAGIC_INPUT_MOUSE,
-      .version      = YMGUI_WIRE_VERSION,
-      .x            = x,
-      .y            = y,
+      .magic   = YMGUI_WIRE_MAGIC_INPUT_MOUSE,
+      .version = YMGUI_WIRE_VERSION,
+      .card_id = card_id,
+      .x       = lx,
+      .y       = ly,
   };
-  if (scroll_dy != 0.0f) {
+  if (wheel_dy != 0.0f) {
     msg.kind     = YMGUI_INPUT_MOUSE_WHEEL;
     msg.button   = -1;
-    msg.wheel_dy = scroll_dy;
+    msg.wheel_dy = wheel_dy;
   } else {
     msg.kind    = YMGUI_INPUT_MOUSE_BUTTON;
     msg.button  = button;
     msg.pressed = press;
   }
   terminal_yface_emit(terminal, YMGUI_OSC_SC_MOUSE, &msg, sizeof(msg));
-  ydebug("terminal_emit_mouse_click: btn=%d press=%d (%.1f,%.1f) dy=%.1f",
-         button, press, x, y, scroll_dy);
 }
 
-static void terminal_emit_mouse_move(struct yetty_yterm_terminal *terminal,
-                                     int buttons_held, float x, float y) {
+static void terminal_emit_card_mouse_move(
+    struct yetty_yterm_terminal *terminal,
+    uint32_t card_id, float lx, float ly, int buttons_held) {
   struct ymgui_wire_input_mouse msg = {
       .magic        = YMGUI_WIRE_MAGIC_INPUT_MOUSE,
       .version      = YMGUI_WIRE_VERSION,
+      .card_id      = card_id,
       .kind         = YMGUI_INPUT_MOUSE_POS,
       .button       = -1,
       .buttons_held = (uint32_t)buttons_held,
-      .x            = x,
-      .y            = y,
+      .x            = lx,
+      .y            = ly,
   };
   terminal_yface_emit(terminal, YMGUI_OSC_SC_MOUSE, &msg, sizeof(msg));
+}
+
+/* Resolve the pane-pixel point (lx, ly) to a card-local hit. If a card
+ * is "captured" (drag in progress), the captured card always wins and
+ * coords are reported as-if-projected into that card's local space.
+ * Otherwise the topmost visible card under the cursor wins. */
+static struct yetty_yterm_ymgui_hit
+terminal_resolve_card_hit(struct yetty_yterm_terminal *terminal,
+                          float lx, float ly,
+                          uint32_t captured_card_id) {
+  struct yetty_yterm_ymgui_hit hit = {0, 0, 0};
+  if (!terminal->ymgui_layer) return hit;
+
+  if (captured_card_id != 0) {
+    /* Drag: route to the captured card; project the cursor into its
+     * local space even when the cursor leaves the card's rect. */
+    hit = yetty_yterm_ymgui_layer_hit_test(terminal->ymgui_layer, lx, ly);
+    if (hit.card_id == captured_card_id) return hit;
+    /* Cursor left the captured card. Report local coords by re-asking
+     * the layer for the captured card's origin via a dummy probe at
+     * its own anchor — but the layer only has hit_test today, so fall
+     * back to (lx, ly) tagged with the captured id; clients clamp. */
+    struct yetty_yterm_ymgui_hit captured = {captured_card_id, lx, ly};
+    return captured;
+  }
+
+  return yetty_yterm_ymgui_layer_hit_test(terminal->ymgui_layer, lx, ly);
+}
+
+/* Emit a keyboard event for the focused card. Returns 1 if delivered
+ * (caller should treat the keystroke as consumed), 0 otherwise. */
+static int terminal_emit_card_key(struct yetty_yterm_terminal *terminal,
+                                  uint32_t kind, int key, int mods,
+                                  uint32_t codepoint) {
+  uint32_t focused = terminal->ymgui_layer
+      ? yetty_yterm_ymgui_layer_focused_card(terminal->ymgui_layer) : 0;
+  if (focused == 0) return 0;
+
+  struct ymgui_wire_input_key msg = {
+      .magic     = YMGUI_WIRE_MAGIC_INPUT_KEY,
+      .version   = YMGUI_WIRE_VERSION,
+      .card_id   = focused,
+      .kind      = kind,
+      .key       = key,
+      .mods      = mods,
+      .codepoint = codepoint,
+  };
+  terminal_yface_emit(terminal, YMGUI_OSC_SC_KEY, &msg, sizeof(msg));
+  return 1;
 }
 
 /*-----------------------------------------------------------------------
@@ -340,17 +385,33 @@ static void terminal_scrollback_exit(struct yetty_yterm_terminal *terminal) {
 }
 
 /* Mouse-subscription callback fired by the text-layer when libvterm flips
- * DEC mode 1500/1501. Latch state on the terminal; emit pixel-size once
- * on the rising edge so the client can lay out before the first event. */
+ * DEC mode 1500/1501. Latch state on the terminal. (No pane-size emission
+ * on the rising edge — under the card model, each CARD_PLACE confirms
+ * the card's pixel size via YMGUI_OSC_SC_RESIZE individually.) */
 static void terminal_mouse_sub_callback(int click_enabled, int move_enabled,
                                         void *userdata) {
   struct yetty_yterm_terminal *terminal = userdata;
-  int rising = (!terminal->mouse_click_subscribed && click_enabled) ||
-               (!terminal->mouse_move_subscribed && move_enabled);
   terminal->mouse_click_subscribed = click_enabled;
   terminal->mouse_move_subscribed  = move_enabled;
   ydebug("terminal: mouse_sub click=%d move=%d", click_enabled, move_enabled);
-  if (rising) terminal_emit_pixel_size(terminal);
+}
+
+/* Alt-screen toggle from text-layer (libvterm). Broadcast to every
+ * layer that implements set_alt_screen so each can save/restore. */
+static void terminal_alt_screen_callback(int active, void *userdata) {
+  struct yetty_yterm_terminal *terminal = userdata;
+  ydebug("terminal: alt_screen=%d (broadcasting to %zu layers)",
+         active, terminal->layer_count);
+  for (size_t i = 0; i < terminal->layer_count; i++) {
+    struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
+    if (layer && layer->ops && layer->ops->set_alt_screen)
+      layer->ops->set_alt_screen(layer, active);
+  }
+  if (terminal->context.yetty_context.event_loop &&
+      terminal->context.yetty_context.event_loop->ops &&
+      terminal->context.yetty_context.event_loop->ops->request_render)
+    terminal->context.yetty_context.event_loop->ops->request_render(
+        terminal->context.yetty_context.event_loop);
 }
 
 /* Request render callback for layers */
@@ -622,6 +683,10 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
      * forwards DEC ?1500 / ?1501 changes here. */
     text_layer_res.value->mouse_sub_fn       = terminal_mouse_sub_callback;
     text_layer_res.value->mouse_sub_userdata = terminal;
+    /* Alt-screen toggle callback — text-layer's settermprop hook fires
+     * this when libvterm processes DEC ?1047/?1049/?47. */
+    text_layer_res.value->alt_screen_fn       = terminal_alt_screen_callback;
+    text_layer_res.value->alt_screen_userdata = terminal;
   }
   if (!YETTY_IS_OK(text_layer_res)) {
     yerror("terminal_create: failed to create text layer: %s",
@@ -687,14 +752,23 @@ yetty_yterm_terminal_create(struct grid_size grid_size,
             terminal);
     if (YETTY_IS_OK(ymgui_res)) {
       yetty_yterm_terminal_layer_add(terminal, ymgui_res.value);
+      terminal->ymgui_layer = ymgui_res.value;
+      /* Wire the layer's emit-back path so it can ship FOCUS / RESIZE
+       * events through this terminal's emit_yface. */
+      ymgui_res.value->emit_osc_fn       = terminal_layer_emit_osc;
+      ymgui_res.value->emit_osc_userdata = terminal;
       if (terminal->pty_reader) {
         yetty_yterm_pty_reader_register_osc_sink(
-            terminal->pty_reader, YMGUI_OSC_CS_CLEAR, ymgui_res.value);
+            terminal->pty_reader, YMGUI_OSC_CS_CLEAR,       ymgui_res.value);
         yetty_yterm_pty_reader_register_osc_sink(
-            terminal->pty_reader, YMGUI_OSC_CS_FRAME, ymgui_res.value);
+            terminal->pty_reader, YMGUI_OSC_CS_FRAME,       ymgui_res.value);
         yetty_yterm_pty_reader_register_osc_sink(
-            terminal->pty_reader, YMGUI_OSC_CS_TEX,   ymgui_res.value);
-        ydebug("terminal_create: ymgui layer registered for OSC 610000/610001/610002");
+            terminal->pty_reader, YMGUI_OSC_CS_TEX,         ymgui_res.value);
+        yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YMGUI_OSC_CS_CARD_PLACE,  ymgui_res.value);
+        yetty_yterm_pty_reader_register_osc_sink(
+            terminal->pty_reader, YMGUI_OSC_CS_CARD_REMOVE, ymgui_res.value);
+        ydebug("terminal_create: ymgui layer registered for OSC 610000-610004");
       }
     } else {
       ydebug("terminal_create: failed to create ymgui layer (non-fatal): %s",
@@ -939,6 +1013,12 @@ terminal_view_on_event(struct yetty_yui_view *view,
       if (is_enter)
         return YETTY_OK(yetty_ycore_int, 1);
     }
+    /* If a ymgui card has focus, route the keystroke to it as an OSC
+     * envelope and DO NOT also feed libvterm — otherwise the shell
+     * would see the keystroke alongside the card. */
+    if (terminal_emit_card_key(terminal, YMGUI_INPUT_KEY_DOWN,
+                               event->key.key, event->key.mods, 0))
+      return YETTY_OK(yetty_ycore_int, 1);
     for (size_t i = 0; i < terminal->layer_count; i++) {
       struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
       if (layer && layer->ops && layer->ops->on_key) {
@@ -948,11 +1028,22 @@ terminal_view_on_event(struct yetty_yui_view *view,
     }
     return YETTY_OK(yetty_ycore_int, 1);
 
+  case YETTY_EVENT_KEY_UP:
+    ydebug("terminal: KEY_UP key=%d mods=%d", event->key.key, event->key.mods);
+    if (terminal_emit_card_key(terminal, YMGUI_INPUT_KEY_UP,
+                               event->key.key, event->key.mods, 0))
+      return YETTY_OK(yetty_ycore_int, 1);
+    return YETTY_OK(yetty_ycore_int, 0);
+
   case YETTY_EVENT_CHAR:
     ydebug("terminal: CHAR codepoint=U+%04X mods=%d", event->chr.codepoint,
            event->chr.mods);
     if (terminal->scrollback_active)
       terminal_scrollback_exit(terminal);
+    /* See KEY_DOWN: focused card consumes the codepoint. */
+    if (terminal_emit_card_key(terminal, YMGUI_INPUT_KEY_CHAR,
+                               -1, event->chr.mods, event->chr.codepoint))
+      return YETTY_OK(yetty_ycore_int, 1);
     for (size_t i = 0; i < terminal->layer_count; i++) {
       struct yetty_yterm_terminal_layer *layer = terminal->layers[i];
       if (layer && layer->ops && layer->ops->on_char) {
@@ -1001,9 +1092,9 @@ terminal_view_on_event(struct yetty_yui_view *view,
         }
       }
     }
-    /* Tell subscribed clients about the new viewport so they can re-layout. */
-    if (terminal->mouse_click_subscribed || terminal->mouse_move_subscribed)
-      terminal_emit_pixel_size(terminal);
+    /* Cards self-announce their pixel size via per-card YMGUI_OSC_SC_RESIZE
+     * fired from the layer (see ymgui-layer.c::ymgui_resize_grid). No
+     * pane-size emission needed here. */
     return YETTY_OK(yetty_ycore_int, 1);
   }
 
@@ -1097,12 +1188,20 @@ terminal_view_on_event(struct yetty_yui_view *view,
     return YETTY_OK(yetty_ycore_int, 1);
 
   /*-------------------------------------------------------------------------
-   * Mouse forwarding — only emit when the client has subscribed via DEC
-   * ?1500/?1501. Coordinates are converted from window-absolute (the GLFW
-   * pipe gives us this) to terminal-local pixels by subtracting the view
-   * origin, so a split layout still gives each terminal coords starting
-   * at (0,0). Skip events fully outside the view — they belong to a
-   * different pane.
+   * Card-aware mouse forwarding.
+   *
+   * Coordinates start window-absolute (GLFW pipe), get de-offset against
+   * view bounds for terminal-local pane pixels, then hit-tested against
+   * the ymgui-layer's card registry. Each emit carries a card_id and
+   * card-local coords so the client never has to know where its cards
+   * sit in the pane.
+   *
+   * Click-focus: MOUSE_DOWN updates the focused card to whatever sat
+   * under the cursor at click time (may be 0 = release focus).
+   *
+   * Drag capture: while any button is held, MOVE events route to the
+   * focused (= clicked) card even if the cursor leaves the rect — same
+   * convention as desktop drag.
    *-----------------------------------------------------------------------*/
   case YETTY_EVENT_MOUSE_DOWN:
   case YETTY_EVENT_MOUSE_UP: {
@@ -1125,8 +1224,24 @@ terminal_view_on_event(struct yetty_yui_view *view,
       terminal->mouse_buttons_held |= (1 << btn);
     else
       terminal->mouse_buttons_held &= ~(1 << btn);
-    /* Send button INDEX so release events still identify which button. */
-    terminal_emit_mouse_click(terminal, btn, press, lx, ly, 0.0f);
+
+    uint32_t focused = terminal->ymgui_layer
+        ? yetty_yterm_ymgui_layer_focused_card(terminal->ymgui_layer) : 0;
+    /* On release, route to the captured (focused) card so the client
+     * sees a paired down/up. On press, hit-test the cursor. */
+    struct yetty_yterm_ymgui_hit hit;
+    if (press) {
+      hit = terminal_resolve_card_hit(terminal, lx, ly, 0);
+      /* Click-focus: update focus to whoever was clicked (incl. 0). */
+      if (terminal->ymgui_layer)
+        yetty_yterm_ymgui_layer_set_focus(terminal->ymgui_layer, hit.card_id);
+    } else {
+      hit = terminal_resolve_card_hit(terminal, lx, ly, focused);
+    }
+    if (hit.card_id != 0)
+      terminal_emit_card_mouse_button(terminal, hit.card_id,
+                                      hit.local_x, hit.local_y,
+                                      btn, press, 0.0f);
     return YETTY_OK(yetty_ycore_int, 1);
   }
 
@@ -1141,16 +1256,23 @@ terminal_view_on_event(struct yetty_yui_view *view,
     if (lx < 0.0f || ly < 0.0f ||
         lx >= view->bounds.w || ly >= view->bounds.h)
       return YETTY_OK(yetty_ycore_int, 0);
-    terminal_emit_mouse_move(terminal, terminal->mouse_buttons_held, lx, ly);
+
+    /* Capture during drag → route to focused card; otherwise topmost
+     * under cursor. */
+    uint32_t captured = 0;
+    if (terminal->mouse_buttons_held && terminal->ymgui_layer)
+      captured = yetty_yterm_ymgui_layer_focused_card(terminal->ymgui_layer);
+    struct yetty_yterm_ymgui_hit hit =
+        terminal_resolve_card_hit(terminal, lx, ly, captured);
+    if (hit.card_id != 0)
+      terminal_emit_card_mouse_move(terminal, hit.card_id,
+                                    hit.local_x, hit.local_y,
+                                    terminal->mouse_buttons_held);
     return YETTY_OK(yetty_ycore_int, 1);
   }
 
   case YETTY_EVENT_SCROLL: {
-    /* Drop horizontal-only scroll (dy==0). The ymgui wire mouse struct
-     * only carries wheel_dy, so emitting via terminal_emit_mouse_click
-     * with dy=0 falls through to the BUTTON branch and would deliver a
-     * phantom left-button press to the ymgui client. The scrollback
-     * driver is also dy-only, so dx events have nothing to do here. */
+    /* dy==0 dropped: wire only carries wheel_dy. */
     if (event->scroll.dy == 0.0f)
       return YETTY_OK(yetty_ycore_int, 0);
 
@@ -1160,15 +1282,18 @@ terminal_view_on_event(struct yetty_yui_view *view,
         lx >= view->bounds.w || ly >= view->bounds.h)
       return YETTY_OK(yetty_ycore_int, 0);
 
-    /* Once in scrollback view, the wheel always navigates history — even
-     * if a subscribed app would normally consume it. Outside scrollback,
-     * a subscribed app (vim, less, mc...) wins; otherwise wheel drives
-     * scrollback. dy>0 = wheel up = older content. */
+    /* Once in scrollback view, wheel always drives history. Otherwise
+     * if a card is under the cursor (or if a subscribed-but-cardless
+     * client is listening) the wheel goes outbound; else scrollback. */
     if (!terminal->scrollback_active && terminal->mouse_click_subscribed) {
-      /* Forward as a wheel-kind ymgui mouse event (terminal_emit_mouse_click
-       * dispatches kind=WHEEL when scroll_dy != 0, ignoring button/press). */
-      terminal_emit_mouse_click(terminal, 0, 0, lx, ly, event->scroll.dy);
-      return YETTY_OK(yetty_ycore_int, 1);
+      struct yetty_yterm_ymgui_hit hit =
+          terminal_resolve_card_hit(terminal, lx, ly, 0);
+      if (hit.card_id != 0) {
+        terminal_emit_card_mouse_button(terminal, hit.card_id,
+                                        hit.local_x, hit.local_y,
+                                        0, 0, event->scroll.dy);
+        return YETTY_OK(yetty_ycore_int, 1);
+      }
     }
 
     int lines = (int)(event->scroll.dy * YETTY_YTERM_WHEEL_LINES_PER_TICK);

@@ -17,6 +17,7 @@
 #include <io.h>
 #define YMGUI_WRITE _write
 #else
+#include <poll.h>
 #include <unistd.h>
 #define YMGUI_WRITE write
 #endif
@@ -56,6 +57,30 @@ int ymgui_pending_flush(int fd)
 int ymgui_pending_active(void)
 {
     return g_pending.data != NULL;
+}
+
+int ymgui_pending_drain_blocking(int fd)
+{
+#ifdef _WIN32
+    /* Windows path is rarely exercised; rely on the kernel buffer being
+     * big enough and the existing non-blocking flush. */
+    return ymgui_pending_flush(fd);
+#else
+    while (g_pending.data) {
+        int r = try_drain_pending(fd);
+        if (r < 0) return -1;
+        if (r == 0) return 0;
+        struct pollfd pfd = { .fd = fd, .events = POLLOUT, .revents = 0 };
+        int n = poll(&pfd, 1, 5000 /* ms */);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return -1;
+        }
+        if (n == 0) return -1;        /* timed out — receiver wedged */
+        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) return -1;
+    }
+    return 0;
+#endif
 }
 
 int ymgui_pending_write(int fd, const uint8_t *bytes, size_t len)

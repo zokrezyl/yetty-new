@@ -44,6 +44,12 @@ int ymgui_pending_flush(int fd);
 /* True if a previous ymgui_pending_write left bytes queued. */
 int ymgui_pending_active(void);
 
+/* Block (poll for POLLOUT, retry write) until the pending tail is
+ * drained. Used after must-reach writes (atlas upload) so subsequent
+ * fresh emits aren't silently dropped by the at-most-one-in-flight
+ * rule. Returns 0 on success, -1 on hard error. */
+int ymgui_pending_drain_blocking(int fd);
+
 #ifdef __cplusplus
 }
 #endif
