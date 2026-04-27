@@ -118,8 +118,11 @@ macos-x86_64|macos-arm64)
         macos-arm64)  CFLAGS_EXTRA="-arch arm64"  ;;
     esac
     # glfw3webgpu uses Objective-C on macOS to grab the CAMetalLayer.
-    # Compile as Obj-C++.
-    CFLAGS_EXTRA="$CFLAGS_EXTRA -ObjC -fobjc-arc"
+    # Compile as Obj-C. NO ARC — upstream's source predates ARC and
+    # uses implicit `id -> void *` casts (e.g. `fromMetalLayer.layer =
+    # metal_layer`) that ARC rejects without `__bridge`. MRR mode lets
+    # them through.
+    CFLAGS_EXTRA="$CFLAGS_EXTRA -ObjC -fno-objc-arc"
     ;;
 *) echo "unsupported $TARGET_PLATFORM" >&2; exit 1 ;;
 esac

@@ -49,7 +49,8 @@ from rich.console import Console
 from rich.table import Table
 
 
-# Canonical platform order for the matrix columns.
+# Canonical platform order for the matrix columns. tvOS columns reflect
+# qemu's matrix (native arm64 device + x86_64 simulator on Intel macOS).
 ALL_PLATFORMS = [
     "linux-x86_64",
     "linux-aarch64",
@@ -57,6 +58,8 @@ ALL_PLATFORMS = [
     "macos-arm64",
     "ios-arm64",
     "ios-x86_64",
+    "tvos-arm64",
+    "tvos-x86_64",
     "android-arm64-v8a",
     "android-x86_64",
     "webasm",
@@ -90,13 +93,15 @@ def parse_supported_platforms(build_sh: Path) -> set[str] | None:
 
     Returns None for noarch producers (any platform yields the same
     single tarball). Returns the set of declared platforms otherwise.
+
+    A platform listed in a branch whose body REJECTS it (e.g. libco's
+    `webasm) ... exit 1 ;;`) is NOT counted. Detection: branches whose
+    only meaningful action is exit / error are treated as rejection;
+    branches that set SHELL_NAME or exec into _build.sh are accepted.
     """
     if (build_sh.parent / ".noarch").exists():
         return None
     text = build_sh.read_text()
-    # Match the case block starting at `case "$TARGET_PLATFORM" in`. We
-    # scan tokens in the value lists between `case ... in` and `*)` /
-    # `esac`. This is approximate but matches every producer's idiom.
     m = re.search(
         r'case\s+"\$TARGET_PLATFORM"\s+in(.*?)esac',
         text, re.DOTALL,
@@ -104,13 +109,40 @@ def parse_supported_platforms(build_sh: Path) -> set[str] | None:
     if not m:
         return set()
     body = m.group(1)
-    # Strip the catch-all branch.
-    body = re.sub(r'\*\)[^;]*;;', '', body, flags=re.DOTALL)
+
+    # Strip bash line-continuations so multi-line patterns collapse to a
+    # single line: `linux-x86_64|...|\\\n    macos-x86_64|...)` becomes
+    # `linux-x86_64|...|    macos-x86_64|...)` — fine for whole-word match.
+    body_flat = re.sub(r'\\\s*\n', ' ', body)
+
+    # Split on the `;;` branch terminator; for each segment extract the
+    # `pattern) body` halves on the FIRST unparenthesised `)`.
     found: set[str] = set()
-    for plat in ALL_PLATFORMS:
-        # Match the platform as a whole word in the case branch.
-        if re.search(rf'\b{re.escape(plat)}\b', body):
-            found.add(plat)
+    for raw_branch in body_flat.split(';;'):
+        if not raw_branch.strip():
+            continue
+        # Split off the leading whitespace — patterns start at the first
+        # non-whitespace char after the previous `;;`.
+        m = re.match(r'\s*(?P<pat>[^)]+)\)(?P<body>.*)', raw_branch, re.DOTALL)
+        if not m:
+            continue
+        pat = m.group('pat')
+        b = m.group('body')
+        # Skip the catch-all `*)` branch.
+        if pat.strip() == '*':
+            continue
+        # Reject branches: body has `exit 1` (or non-zero exit) AND no
+        # SHELL_NAME assignment AND no exec into _build.sh.
+        is_accept = (
+            re.search(r'\bSHELL_NAME\s*=', b)
+            or re.search(r'exec\s+bash\b.*_build\.sh', b, re.DOTALL)
+        )
+        is_reject = bool(re.search(r'\bexit\s+1\b', b)) and not is_accept
+        if is_reject:
+            continue
+        for plat in ALL_PLATFORMS:
+            if re.search(rf'\b{re.escape(plat)}\b', pat):
+                found.add(plat)
     return found
 
 
