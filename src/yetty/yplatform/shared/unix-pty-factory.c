@@ -8,7 +8,9 @@
 #include <yetty/ycore/types.h>
 #include <yetty/yqemu/qemu.h>
 #include <yetty/ytelnet/telnet-pty.h>
+#if defined(YETTY_HAS_SSH)
 #include <yetty/yssh/ssh-pty.h>
+#endif
 
 #include <stdlib.h>
 
@@ -55,10 +57,12 @@ static struct yetty_yplatform_pty_result unix_pty_factory_create_pty(
         return tinyemu_pty_create(config);
     }
 
+#if defined(YETTY_HAS_SSH)
     /* --ssh: remote shell via libssh2 */
     if (config && config->ops->get_bool(config, YETTY_YCONFIG_KEY_SSH, 0)) {
         return ssh_pty_create(config);
     }
+#endif
 
     /* --qemu: QEMU via telnet */
     if (config && config->ops->get_bool(config, YETTY_YCONFIG_KEY_QEMU, 0)) {

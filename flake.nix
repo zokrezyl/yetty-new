@@ -447,6 +447,15 @@
             shellHook = "echo 'Yetty asset-build (qemu tvos-arm64)'";
           };
 
+          assets-qemu-tvos-x86_64 = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              meson ninja pkg-config python3 bison flex gnumake perl
+              curl gnutar xz gzip
+              glib pixman
+            ];
+            shellHook = "echo 'Yetty asset-build (qemu tvos-x86_64 simulator)'";
+          };
+
           # 3rdparty library build shells — one per target platform.
           # Used by build-tools/3rdparty/<lib>/build.sh wrappers, which
           # invoke nix develop .#3rdparty-<target> before re-execing into
@@ -516,6 +525,16 @@
               pkg-config
             ];
             shellHook = "echo 'Yetty 3rdparty-build (ios-x86_64 simulator)'";
+          };
+
+          # tvOS — same toolchain shape as iOS; x86_64 is the appletvsimulator.
+          "3rdparty-tvos-x86_64" = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              meson ninja gnumake perl nasm python3
+              curl gnutar xz gzip
+              pkg-config
+            ];
+            shellHook = "echo 'Yetty 3rdparty-build (tvos-x86_64 simulator)'";
           };
 
           # Android — NDK-direct cross. The NDK comes in via $ANDROID_NDK_HOME

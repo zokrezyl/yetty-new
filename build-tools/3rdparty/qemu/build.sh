@@ -6,7 +6,8 @@
 #   TARGET_PLATFORM   one of:
 #     linux-x86_64 | linux-aarch64 | windows-x86_64 |
 #     android-arm64-v8a | android-x86_64 |
-#     macos-arm64 | macos-x86_64 | ios-arm64 | ios-x86_64 | tvos-arm64
+#     macos-arm64 | macos-x86_64 | ios-arm64 | ios-x86_64 |
+#     tvos-arm64 | tvos-x86_64
 #   VERSION, OUTPUT_DIR  see _build.sh
 #
 # Note: no wasm target — the webasm yetty build uses in-process TinyEMU
@@ -18,7 +19,7 @@ set -euo pipefail
 
 case "$TARGET_PLATFORM" in
     linux-x86_64|linux-aarch64|android-arm64-v8a|android-x86_64|\
-    macos-x86_64|macos-arm64|ios-arm64|ios-x86_64|tvos-arm64)
+    macos-x86_64|macos-arm64|ios-arm64|ios-x86_64|tvos-arm64|tvos-x86_64)
         SHELL_NAME="assets-qemu-${TARGET_PLATFORM}"
         ;;
     windows-x86_64)

@@ -47,6 +47,10 @@ BUILD_DIR_IOS_YTRACE_RELEASE := build-ios-ytrace-release
 BUILD_DIR_IOS_X86_64_YTRACE_DEBUG := build-ios_x86_64-ytrace-debug
 BUILD_DIR_IOS_X86_64_YTRACE_RELEASE := build-ios_x86_64-ytrace-release
 
+# tvOS x86_64 (Apple TV simulator only — no device build wired up yet)
+BUILD_DIR_TVOS_X86_64_YTRACE_DEBUG := build-tvos_x86_64-ytrace-debug
+BUILD_DIR_TVOS_X86_64_YTRACE_RELEASE := build-tvos_x86_64-ytrace-release
+
 # Parallel jobs (override with: make build-... PARALLEL_JOBS=30)
 PARALLEL_JOBS ?=
 CMAKE_PARALLEL := $(if $(PARALLEL_JOBS),--parallel $(PARALLEL_JOBS),--parallel)
@@ -447,6 +451,34 @@ build-ios_x86_64-ytrace-release: ## Build iOS x86_64 ytrace release (simulator, 
 	$(CHECK_MACOS)
 	@if [ ! -f "$(BUILD_DIR_IOS_X86_64_YTRACE_RELEASE)/build.ninja" ]; then $(MAKE) config-ios_x86_64-ytrace-release; fi
 	$(CMAKE) --build $(BUILD_DIR_IOS_X86_64_YTRACE_RELEASE) $(CMAKE_PARALLEL)
+
+#=============================================================================
+# tvOS x86_64 (Apple TV simulator) - requires macOS with Xcode
+#=============================================================================
+
+CMAKE_TVOS_SIMULATOR_TOOLCHAIN := -DCMAKE_SYSTEM_NAME=tvOS -DCMAKE_OSX_ARCHITECTURES=x86_64 -DCMAKE_OSX_SYSROOT=appletvsimulator -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0
+
+.PHONY: config-tvos_x86_64-ytrace-debug
+config-tvos_x86_64-ytrace-debug: ## Configure tvOS x86_64 ytrace debug build (simulator, macOS only)
+	$(CHECK_MACOS)
+	$(CMAKE) -B $(BUILD_DIR_TVOS_X86_64_YTRACE_DEBUG) $(CMAKE_GENERATOR) $(CMAKE_DEBUG) $(CMAKE_LOGLEVEL_YTRACE) $(CMAKE_TVOS_SIMULATOR_TOOLCHAIN) -DYETTY_TVOS=ON
+
+.PHONY: config-tvos_x86_64-ytrace-release
+config-tvos_x86_64-ytrace-release: ## Configure tvOS x86_64 ytrace release build (simulator, macOS only)
+	$(CHECK_MACOS)
+	$(CMAKE) -B $(BUILD_DIR_TVOS_X86_64_YTRACE_RELEASE) $(CMAKE_GENERATOR) $(CMAKE_RELEASE) $(CMAKE_LOGLEVEL_YTRACE) $(CMAKE_TVOS_SIMULATOR_TOOLCHAIN) -DYETTY_TVOS=ON
+
+.PHONY: build-tvos_x86_64-ytrace-debug
+build-tvos_x86_64-ytrace-debug: ## Build tvOS x86_64 ytrace debug (simulator, macOS only)
+	$(CHECK_MACOS)
+	@if [ ! -f "$(BUILD_DIR_TVOS_X86_64_YTRACE_DEBUG)/build.ninja" ]; then $(MAKE) config-tvos_x86_64-ytrace-debug; fi
+	$(CMAKE) --build $(BUILD_DIR_TVOS_X86_64_YTRACE_DEBUG) $(CMAKE_PARALLEL)
+
+.PHONY: build-tvos_x86_64-ytrace-release
+build-tvos_x86_64-ytrace-release: ## Build tvOS x86_64 ytrace release (simulator, macOS only)
+	$(CHECK_MACOS)
+	@if [ ! -f "$(BUILD_DIR_TVOS_X86_64_YTRACE_RELEASE)/build.ninja" ]; then $(MAKE) config-tvos_x86_64-ytrace-release; fi
+	$(CMAKE) --build $(BUILD_DIR_TVOS_X86_64_YTRACE_RELEASE) $(CMAKE_PARALLEL)
 
 #=============================================================================
 # Clean

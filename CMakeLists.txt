@@ -19,6 +19,7 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libraries" FORCE)
 # Build options
 option(YETTY_ANDROID "Build for Android" OFF)
 option(YETTY_IOS "Build for iOS" OFF)
+option(YETTY_TVOS "Build for tvOS" OFF)
 set(WEBGPU_BACKEND "dawn" CACHE STRING "WebGPU backend (wgpu or dawn)")
 set(TOYBOX_PATH "" CACHE PATH "Path to Toybox binary")
 
@@ -28,9 +29,14 @@ include(${YETTY_ROOT}/build-tools/cmake/variables.cmake)
 # Include CPM
 include(${YETTY_ROOT}/build-tools/cmake/CPM.cmake)
 
-# Detect platform and include appropriate target
+# Detect platform and include appropriate target.
+# tvOS check comes BEFORE iOS — tvOS sets YETTY_IOS=1 internally to share
+# the iOS code paths in src/yetty/yplatform/ios/, but the build target
+# selection itself must pick targets/tvos.cmake.
 if(YETTY_ANDROID)
     include(${YETTY_ROOT}/build-tools/cmake/targets/android.cmake)
+elseif(YETTY_TVOS OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+    include(${YETTY_ROOT}/build-tools/cmake/targets/tvos.cmake)
 elseif(YETTY_IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
     include(${YETTY_ROOT}/build-tools/cmake/targets/ios.cmake)
 elseif(EMSCRIPTEN)
