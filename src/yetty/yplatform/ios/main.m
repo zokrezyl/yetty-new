@@ -265,6 +265,75 @@ static void *render_thread_func(void *arg)
     _pipe->ops->write(_pipe, &ev, sizeof(ev));
 }
 
+#pragma mark - UIPress (hardware keyboard, required for tvOS)
+
+/* tvOS has no on-screen keyboard, so UIKeyInput's insertText: never fires
+ * for hardware-keyboard input. Both iOS and tvOS deliver hardware keys via
+ * pressesBegan:withEvent: with the modern UIKey API (iOS 13.4+ / tvOS 13.4+).
+ * Forward characters as YETTY_EVENT_CHAR; map a few control keys (BS, return,
+ * arrows, escape) to GLFW-numbered YETTY_EVENT_KEY_DOWN. */
+- (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+    if (!_pipe) {
+        [super pressesBegan:presses withEvent:event];
+        return;
+    }
+
+    BOOL anyHandled = NO;
+    for (UIPress *press in presses) {
+        UIKey *key = press.key;
+        if (!key) continue;
+        anyHandled = YES;
+
+        NSString *chars = key.characters;
+        ydebug("pressesBegan: keyCode=%ld chars='%s' mods=0x%lx",
+               (long)key.keyCode,
+               chars.length ? [chars UTF8String] : "",
+               (unsigned long)key.modifierFlags);
+
+        /* Map a small set of control keys to GLFW-style key codes via
+         * YETTY_EVENT_KEY_DOWN — vterm needs these for navigation/editing. */
+        int glfw_key = 0;
+        switch (key.keyCode) {
+            case UIKeyboardHIDUsageKeyboardReturnOrEnter: glfw_key = 257; break; /* GLFW_KEY_ENTER */
+            case UIKeyboardHIDUsageKeyboardTab:           glfw_key = 258; break; /* GLFW_KEY_TAB */
+            case UIKeyboardHIDUsageKeyboardDeleteOrBackspace: glfw_key = 259; break; /* BACKSPACE */
+            case UIKeyboardHIDUsageKeyboardEscape:        glfw_key = 256; break; /* ESC */
+            case UIKeyboardHIDUsageKeyboardLeftArrow:     glfw_key = 263; break;
+            case UIKeyboardHIDUsageKeyboardRightArrow:    glfw_key = 262; break;
+            case UIKeyboardHIDUsageKeyboardUpArrow:       glfw_key = 265; break;
+            case UIKeyboardHIDUsageKeyboardDownArrow:     glfw_key = 264; break;
+            case UIKeyboardHIDUsageKeyboardHome:          glfw_key = 268; break;
+            case UIKeyboardHIDUsageKeyboardEnd:           glfw_key = 269; break;
+            case UIKeyboardHIDUsageKeyboardPageUp:        glfw_key = 266; break;
+            case UIKeyboardHIDUsageKeyboardPageDown:      glfw_key = 267; break;
+            default: break;
+        }
+
+        if (glfw_key) {
+            struct yetty_ycore_event ev = {0};
+            ev.type = YETTY_EVENT_KEY_DOWN;
+            ev.key.key = glfw_key;
+            ev.key.mods = (uint32_t)key.modifierFlags;
+            ev.key.scancode = (int)key.keyCode;
+            _pipe->ops->write(_pipe, &ev, sizeof(ev));
+            continue;
+        }
+
+        /* Plain printable character(s) — feed each as YETTY_EVENT_CHAR. */
+        for (NSUInteger i = 0; i < chars.length; i++) {
+            unichar ch = [chars characterAtIndex:i];
+            struct yetty_ycore_event ev = {0};
+            ev.type = YETTY_EVENT_CHAR;
+            ev.chr.codepoint = (uint32_t)ch;
+            ev.chr.mods = (uint32_t)key.modifierFlags;
+            _pipe->ops->write(_pipe, &ev, sizeof(ev));
+        }
+    }
+
+    if (!anyHandled)
+        [super pressesBegan:presses withEvent:event];
+}
+
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
 
