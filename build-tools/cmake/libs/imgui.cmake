@@ -1,113 +1,122 @@
-# ImGui - Immediate mode GUI
-# Platform-specific: GLFW on desktop, WebGPU backend on all
+# imgui — Immediate-mode GUI.
+#
+# Consumes a prebuilt static lib (5 core .cpp files) + headers + backend
+# SOURCE files from the 3rdparty release tarball published by
+# build-3rdparty-imgui.yml. The from-source build lives in
+# build-tools/3rdparty/imgui/_build.sh.
+#
+# Why ship backend SOURCE rather than prebuilt: the imgui_impl_glfw and
+# imgui_impl_wgpu backends need target-specific compile defines
+# (IMGUI_IMPL_WEBGPU_BACKEND_DAWN/WGPU, -x objective-c++ on macOS for
+# wgpu, etc.). Prebuilding them per-host doesn't match yetty's flag
+# matrix; we compile them fresh here.
+#
+# Exposed targets:
+#   imgui       — full target (core + platform-appropriate backends)
+#   imgui_core  — lean target (just the 5 core .cpp), for consumers
+#                 that bring their own backend (e.g. ymgui_frontend).
+
+include_guard(GLOBAL)
+include(${YETTY_ROOT}/build-tools/cmake/3rdparty-fetch.cmake)
+
 if(TARGET imgui)
     return()
 endif()
 
-CPMAddPackage(
-    NAME imgui
-    URL https://github.com/ocornut/imgui/archive/refs/tags/v1.92.5.tar.gz
-    VERSION 1.92.5
-    DOWNLOAD_ONLY YES
+if(WIN32)
+    message(FATAL_ERROR
+        "imgui: no windows-x86_64 tarball is published yet — yetty.exe is \
+being switched to native MSVC and the imgui MSVC build path will land \
+together with that work (see the windows-libs-msvc branch).")
+endif()
+
+yetty_3rdparty_fetch(imgui _IMGUI_DIR)
+
+if(NOT EXISTS "${_IMGUI_DIR}/lib/libimgui_core.a")
+    message(FATAL_ERROR "imgui: libimgui_core.a not found in ${_IMGUI_DIR}/lib/ — tarball layout changed?")
+endif()
+
+#-----------------------------------------------------------------------------
+# imgui_core — the prebuilt lean target.
+#-----------------------------------------------------------------------------
+add_library(imgui_core STATIC IMPORTED GLOBAL)
+set_target_properties(imgui_core PROPERTIES
+    IMPORTED_LOCATION "${_IMGUI_DIR}/lib/libimgui_core.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${_IMGUI_DIR}/include"
 )
 
-if(imgui_ADDED)
-    # Core ImGui sources
-    set(IMGUI_SOURCES
-        ${imgui_SOURCE_DIR}/imgui.cpp
-        ${imgui_SOURCE_DIR}/imgui_demo.cpp
-        ${imgui_SOURCE_DIR}/imgui_draw.cpp
-        ${imgui_SOURCE_DIR}/imgui_tables.cpp
-        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-    )
+#-----------------------------------------------------------------------------
+# imgui — full target. Built fresh from the staged backend sources +
+# imgui_core, with target-specific compile defines applied.
+#-----------------------------------------------------------------------------
+set(_IMGUI_BACKEND_SOURCES "")
 
-    # imgui_impl_wgpu.cpp's __APPLE__ branch unconditionally includes
-    # <Cocoa/Cocoa.h>, which doesn't exist on iOS/tvOS. Skip it on those
-    # platforms — the only yetty consumer (ymgui_frontend) uses imgui_core,
-    # which doesn't include this backend, so the full `imgui` target's
-    # missing wgpu symbols are unreachable on iOS/tvOS.
-    if(NOT (YETTY_IOS OR YETTY_TVOS
-            OR CMAKE_SYSTEM_NAME STREQUAL "iOS"
-            OR CMAKE_SYSTEM_NAME STREQUAL "tvOS"))
-        list(APPEND IMGUI_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_wgpu.cpp)
-    endif()
-
-    # Platform backend
-    # iOS/tvOS use yetty's custom imgui backend (ymgui_frontend ships frames
-    # as OSC, no GLFW) — same as Android. emscripten gets a stubbed GLFW via
-    # -sUSE_GLFW=3 so it still uses imgui_impl_glfw.
-    if(EMSCRIPTEN)
-        list(APPEND IMGUI_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp)
-    elseif(YETTY_ANDROID OR YETTY_IOS OR YETTY_TVOS
-            OR CMAKE_SYSTEM_NAME STREQUAL "iOS"
-            OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
-        # no platform backend — custom backend at src/yetty/ymgui/frontend
-    else()
-        list(APPEND IMGUI_SOURCES ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp)
-    endif()
-
-    add_library(imgui STATIC ${IMGUI_SOURCES})
-    target_include_directories(imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
-
-    # Link and compile options based on platform
-    if(EMSCRIPTEN)
-        target_link_libraries(imgui PUBLIC webgpu)
-        target_compile_options(imgui PUBLIC --use-port=emdawnwebgpu)
-        target_link_options(imgui PUBLIC -sUSE_GLFW=3)
-        target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_DAWN=1)
-    elseif(YETTY_ANDROID OR YETTY_IOS OR YETTY_TVOS
-            OR CMAKE_SYSTEM_NAME STREQUAL "iOS"
-            OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
-        # Mobile / TV / Android — link only webgpu, no GLFW (the platform
-        # bridge is yetty's custom imgui backend at src/yetty/ymgui/frontend).
-        target_link_libraries(imgui PUBLIC webgpu)
-        if(WEBGPU_BACKEND STREQUAL "wgpu")
-            target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_WGPU=1)
-        else()
-            target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_DAWN=1)
-        endif()
-    else()
-        # Desktop
-        include(${CMAKE_CURRENT_LIST_DIR}/glfw.cmake)
-        if(APPLE)
-            target_link_libraries(imgui PUBLIC glfw webgpu)
-            set_source_files_properties(
-                ${imgui_SOURCE_DIR}/backends/imgui_impl_wgpu.cpp
-                PROPERTIES COMPILE_FLAGS "-x objective-c++"
-            )
-        elseif(WIN32)
-            target_link_libraries(imgui PUBLIC glfw webgpu)
-        else()
-            # Linux - requires X11
-            find_package(X11 REQUIRED)
-            target_link_libraries(imgui PUBLIC glfw webgpu X11::X11)
-        endif()
-        if(WEBGPU_BACKEND STREQUAL "wgpu")
-            target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_WGPU=1)
-        else()
-            target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_DAWN=1)
-        endif()
-    endif()
-
-    set_target_properties(imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-    # ──────────────────────────────────────────────────────────────────
-    # Lean core-only target for consumers that bring their own renderer
-    # and platform backends (e.g. ymgui_frontend, which IS a renderer
-    # backend that ships frames as OSC). No GLFW, no WebGPU, no platform
-    # defines — just the five core .cpp files + headers.
-    # ──────────────────────────────────────────────────────────────────
-    add_library(imgui_core STATIC
-        ${imgui_SOURCE_DIR}/imgui.cpp
-        ${imgui_SOURCE_DIR}/imgui_demo.cpp
-        ${imgui_SOURCE_DIR}/imgui_draw.cpp
-        ${imgui_SOURCE_DIR}/imgui_tables.cpp
-        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-    )
-    target_include_directories(imgui_core SYSTEM PUBLIC ${imgui_SOURCE_DIR})
-    set_target_properties(imgui_core PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-    )
+# imgui_impl_wgpu.cpp: skip on iOS/tvOS — the backend unconditionally
+# includes <Cocoa/Cocoa.h> in its __APPLE__ branch, which doesn't exist
+# on iOS/tvOS. Same exclusion the from-source consumer had.
+if(NOT (YETTY_IOS OR YETTY_TVOS
+        OR CMAKE_SYSTEM_NAME STREQUAL "iOS"
+        OR CMAKE_SYSTEM_NAME STREQUAL "tvOS"))
+    list(APPEND _IMGUI_BACKEND_SOURCES "${_IMGUI_DIR}/src-backends/imgui_impl_wgpu.cpp")
 endif()
+
+# Platform backend: GLFW on desktop + emscripten (USE_GLFW=3 stub),
+# none on iOS/tvOS/Android (custom yetty backend).
+if(EMSCRIPTEN)
+    list(APPEND _IMGUI_BACKEND_SOURCES "${_IMGUI_DIR}/src-backends/imgui_impl_glfw.cpp")
+elseif(YETTY_ANDROID OR YETTY_IOS OR YETTY_TVOS
+        OR CMAKE_SYSTEM_NAME STREQUAL "iOS"
+        OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+    # no platform backend
+else()
+    list(APPEND _IMGUI_BACKEND_SOURCES "${_IMGUI_DIR}/src-backends/imgui_impl_glfw.cpp")
+endif()
+
+add_library(imgui STATIC ${_IMGUI_BACKEND_SOURCES})
+target_link_libraries(imgui PUBLIC imgui_core)
+target_include_directories(imgui PUBLIC "${_IMGUI_DIR}/include" "${_IMGUI_DIR}/src-backends")
+set_target_properties(imgui PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+)
+target_compile_options(imgui PRIVATE -w)
+
+# Platform-specific link + compile flags. Mirrors the from-source
+# imgui.cmake exactly — only the source-of-truth changed (now staged
+# files instead of CPM-fetched).
+if(EMSCRIPTEN)
+    target_link_libraries(imgui PUBLIC webgpu)
+    target_compile_options(imgui PUBLIC --use-port=emdawnwebgpu)
+    target_link_options(imgui PUBLIC -sUSE_GLFW=3)
+    target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_DAWN=1)
+elseif(YETTY_ANDROID OR YETTY_IOS OR YETTY_TVOS
+        OR CMAKE_SYSTEM_NAME STREQUAL "iOS"
+        OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+    target_link_libraries(imgui PUBLIC webgpu)
+    if(WEBGPU_BACKEND STREQUAL "wgpu")
+        target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_WGPU=1)
+    else()
+        target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_DAWN=1)
+    endif()
+else()
+    # Desktop: glfw + webgpu, plus Obj-C++ flag for wgpu impl on macOS.
+    include(${CMAKE_CURRENT_LIST_DIR}/glfw.cmake)
+    if(APPLE)
+        target_link_libraries(imgui PUBLIC glfw webgpu)
+        set_source_files_properties(
+            "${_IMGUI_DIR}/src-backends/imgui_impl_wgpu.cpp"
+            PROPERTIES COMPILE_FLAGS "-x objective-c++"
+        )
+    else()
+        find_package(X11 REQUIRED)
+        target_link_libraries(imgui PUBLIC glfw webgpu X11::X11)
+    endif()
+    if(WEBGPU_BACKEND STREQUAL "wgpu")
+        target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_WGPU=1)
+    else()
+        target_compile_definitions(imgui PUBLIC IMGUI_IMPL_WEBGPU_BACKEND_DAWN=1)
+    endif()
+endif()
+
+message(STATUS "imgui: prebuilt v${YETTY_3RDPARTY_imgui_VERSION} (core: ${_IMGUI_DIR}/lib/libimgui_core.a)")
