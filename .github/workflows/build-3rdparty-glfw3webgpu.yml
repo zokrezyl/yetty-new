@@ -1,0 +1,89 @@
+name: Build 3rdparty — glfw3webgpu
+
+# Desktop only — yetty's mobile/web builds don't use glfw3webgpu.
+
+on:
+  push:
+    tags: ['lib-glfw3webgpu-*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      tag:     ${{ steps.read.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          set -euo pipefail
+          V="$(tr -d '[:space:]' < build-tools/3rdparty/glfw3webgpu/version)"
+          [ -n "$V" ] || { echo "version file is empty" >&2; exit 1; }
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            REF="${GITHUB_REF#refs/tags/}"
+            EXPECT="lib-glfw3webgpu-$V"
+            if [ "$REF" != "$EXPECT" ]; then
+              echo "tag $REF does not match version file ($EXPECT)" >&2
+              exit 1
+            fi
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=lib-glfw3webgpu-$V" >> "$GITHUB_OUTPUT"
+
+  build-linux:
+    needs: resolve
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: { target: [linux-x86_64, linux-aarch64] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with: { extra-conf: "experimental-features = nix-command flakes" }
+      - run: mkdir -p out
+      - run: TARGET_PLATFORM="${{ matrix.target }}" OUTPUT_DIR="$PWD/out" ./build-tools/3rdparty/glfw3webgpu/build.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          files: out/glfw3webgpu-${{ matrix.target }}-*.tar.gz
+          fail_on_unmatched_files: true
+
+  build-darwin-arm64:
+    needs: resolve
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix: { target: [macos-arm64] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with: { extra-conf: "experimental-features = nix-command flakes" }
+      - run: mkdir -p out
+      - run: TARGET_PLATFORM="${{ matrix.target }}" OUTPUT_DIR="$PWD/out" ./build-tools/3rdparty/glfw3webgpu/build.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          files: out/glfw3webgpu-${{ matrix.target }}-*.tar.gz
+          fail_on_unmatched_files: true
+
+  build-darwin-x86_64:
+    needs: resolve
+    runs-on: macos-15-intel
+    strategy:
+      fail-fast: false
+      matrix: { target: [macos-x86_64] }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with: { extra-conf: "experimental-features = nix-command flakes" }
+      - run: mkdir -p out
+      - run: TARGET_PLATFORM="${{ matrix.target }}" OUTPUT_DIR="$PWD/out" ./build-tools/3rdparty/glfw3webgpu/build.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          files: out/glfw3webgpu-${{ matrix.target }}-*.tar.gz
+          fail_on_unmatched_files: true

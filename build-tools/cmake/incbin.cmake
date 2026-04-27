@@ -25,24 +25,31 @@ else()
 endif()
 message(STATUS "incbin: Brotli quality level: ${BROTLI_QUALITY}")
 
-# Download incbin from GitHub
-CPMAddPackage(
-    NAME incbin
-    GITHUB_REPOSITORY graphitemaster/incbin
-    GIT_TAG main
-    DOWNLOAD_ONLY YES
-)
+# Fetch incbin (noarch tarball) from the 3rdparty release published by
+# .github/workflows/build-3rdparty-incbin.yml. Tarball layout:
+#   include/incbin.h     — the macro header used via inline assembly
+#   src/incbin.c         — used only by the MSVC code path below
+include(${YETTY_ROOT}/build-tools/cmake/3rdparty-fetch.cmake)
+yetty_3rdparty_fetch(incbin _INCBIN_DIR)
 
-if(NOT incbin_ADDED)
-    message(FATAL_ERROR "Failed to download incbin")
+if(NOT EXISTS "${_INCBIN_DIR}/include/incbin.h")
+    message(FATAL_ERROR
+        "incbin: incbin.h not found in ${_INCBIN_DIR}/include/ — tarball layout changed?")
 endif()
 
-# Export incbin include directory
-set(INCBIN_INCLUDE_DIR ${incbin_SOURCE_DIR} CACHE INTERNAL "incbin include directory")
+# Export incbin include directory (consumers expect the directory that
+# contains incbin.h to be added to their include path)
+set(INCBIN_INCLUDE_DIR "${_INCBIN_DIR}/include" CACHE INTERNAL "incbin include directory")
 
-# For MSVC, build the incbin tool
+# For MSVC, build the incbin tool from the bundled incbin.c (host build —
+# the tool processes input files at our build time, doesn't ship in the
+# yetty binary).
 if(MSVC)
-    add_executable(incbin_tool ${incbin_SOURCE_DIR}/incbin.c)
+    if(NOT EXISTS "${_INCBIN_DIR}/src/incbin.c")
+        message(FATAL_ERROR
+            "incbin: src/incbin.c missing in tarball — needed for MSVC code path")
+    endif()
+    add_executable(incbin_tool "${_INCBIN_DIR}/src/incbin.c")
     set_target_properties(incbin_tool PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools
     )

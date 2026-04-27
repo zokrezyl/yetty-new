@@ -215,10 +215,10 @@ static void init_yetty(struct app_state *state)
     paths.runtime_dir = runtime_dir;
     paths.bin_dir = NULL;
 
-    /* Config — default to --qemu (QEMU via telnet) on Android. There's
+    /* Config — default to --temu (in-process TinyEMU) on Android. There's
      * no shell command line on Android, so synthesize one. */
     {
-        char *fake_argv[] = { (char *)"yetty", (char *)"--qemu", NULL };
+        char *fake_argv[] = { (char *)"yetty", (char *)"--temu", NULL };
         int fake_argc = 2;
         config_result = yetty_yconfig_create(fake_argc, fake_argv, &paths);
     }

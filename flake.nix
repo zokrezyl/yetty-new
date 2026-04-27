@@ -468,6 +468,11 @@
               gcc binutils
               curl gnutar xz gzip
               pkg-config
+              # X11 dev headers — glfw 3.4 build probes for these via
+              # find_package(X11). Without them GLFW_BUILD_X11=ON fails.
+              # Wayland is intentionally OFF in the glfw producer.
+              xorg.libX11 xorg.libXrandr xorg.libXinerama xorg.libXcursor
+              xorg.libXi xorg.libXext xorg.xorgproto
             ];
             shellHook = "echo 'Yetty 3rdparty-build (linux-x86_64)'";
           };
@@ -489,9 +494,14 @@
           };
 
           # macOS native — clang comes from Xcode on the host runner.
+          # autoconf/automake/libtool are needed by libmagic (file 5.x):
+          # its `make` rules regenerate Makefile.in from Makefile.am even
+          # in --disable-maintainer-mode (file's configure.ac doesn't gate
+          # the regen rules with AM_MAINTAINER_MODE).
           "3rdparty-macos-x86_64" = pkgs.mkShell {
             buildInputs = with pkgs; [
               meson ninja gnumake perl nasm python3
+              autoconf automake libtool
               curl gnutar xz gzip
               pkg-config
             ];
@@ -501,6 +511,7 @@
           "3rdparty-macos-arm64" = pkgs.mkShell {
             buildInputs = with pkgs; [
               meson ninja gnumake perl nasm python3
+              autoconf automake libtool
               curl gnutar xz gzip
               pkg-config
             ];

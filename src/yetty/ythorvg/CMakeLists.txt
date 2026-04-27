@@ -14,11 +14,12 @@ target_include_directories(yetty_ythorvg PUBLIC
     ${YETTY_ROOT}/src
 )
 
-# ThorVG internal headers (RenderMethod, PAINT() macro).
-# thorvg_SOURCE_DIR is set by thorvg.cmake via CPM.
+# ThorVG internal headers (RenderMethod, PAINT() macro). The 3rdparty
+# tarball ships them under include-internal/ preserving thorvg's upstream
+# src/<subdir>/ layout — see build-tools/cmake/thorvg.cmake.
 target_include_directories(yetty_ythorvg PRIVATE
-    ${thorvg_SOURCE_DIR}/src/renderer
-    ${thorvg_SOURCE_DIR}/src/common
+    ${YETTY_3RDPARTY_thorvg_INTERNAL_INCLUDE_DIR}/renderer
+    ${YETTY_3RDPARTY_thorvg_INTERNAL_INCLUDE_DIR}/common
 )
 
 # Windows: prevent min/max macros from windows.h conflicting with std::min/max.

@@ -1,0 +1,59 @@
+name: Build 3rdparty — incbin
+
+# incbin (graphitemaster/incbin) — header-only C macro lib for embedding
+# binary files via inline assembly. Platform-independent (.noarch) — one
+# tarball serves every yetty target. Triggered on `lib-incbin-<version>`
+# tags. Version source of truth: build-tools/3rdparty/incbin/version
+# (commit SHA — incbin doesn't tag releases).
+
+on:
+  push:
+    tags:
+      - 'lib-incbin-*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      tag:     ${{ steps.read.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          set -euo pipefail
+          V="$(tr -d '[:space:]' < build-tools/3rdparty/incbin/version)"
+          [ -n "$V" ] || { echo "version file is empty" >&2; exit 1; }
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            REF="${GITHUB_REF#refs/tags/}"
+            EXPECT="lib-incbin-$V"
+            if [ "$REF" != "$EXPECT" ]; then
+              echo "tag $REF does not match version file ($EXPECT)" >&2
+              exit 1
+            fi
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=lib-incbin-$V" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+      - run: mkdir -p out
+      - run: |
+          OUTPUT_DIR="$PWD/out" \
+          ./build-tools/3rdparty/incbin/build.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          files: out/incbin-*.tar.gz
+          fail_on_unmatched_files: true

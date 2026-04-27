@@ -1,5 +1,5 @@
 include(${YETTY_ROOT}/build-tools/cmake/libs/msdfgen.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/FreeType.cmake)
+include(${YETTY_ROOT}/build-tools/cmake/libs/freetype.cmake)
 
 add_library(yetty_ymsdf_gen STATIC
     ymsdf-gen.cpp

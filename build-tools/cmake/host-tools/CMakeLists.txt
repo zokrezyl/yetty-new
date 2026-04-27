@@ -57,8 +57,11 @@ include(${YETTY_ROOT}/build-tools/cmake/libs/zlib.cmake)
 # libpng (required by FreeType)
 include(${YETTY_ROOT}/build-tools/cmake/libs/libpng.cmake)
 
-# FreeType (includes brotli, bzip2)
-include(${YETTY_ROOT}/build-tools/cmake/FreeType.cmake)
+# FreeType + its companions (brotli, bzip2) — each fetched as its own
+# 3rdparty tarball.
+include(${YETTY_ROOT}/build-tools/cmake/libs/brotli.cmake)
+include(${YETTY_ROOT}/build-tools/cmake/libs/bzip2.cmake)
+include(${YETTY_ROOT}/build-tools/cmake/libs/freetype.cmake)
 
 # msdfgen
 CPMAddPackage(
