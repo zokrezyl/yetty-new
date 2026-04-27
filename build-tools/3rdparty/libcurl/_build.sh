@@ -11,7 +11,7 @@
 #   TARGET_PLATFORM   linux-x86_64 | linux-aarch64 |
 #                     macos-arm64 | macos-x86_64 |
 #                     android-arm64-v8a | android-x86_64 |
-#                     ios-arm64 | ios-x86_64 |
+#                     ios-arm64 | ios-x86_64 | tvos-x86_64 |
 #                     webasm | windows-x86_64
 #   OUTPUT_DIR        where the tarball is written
 #
@@ -208,21 +208,32 @@ macos-arm64)
     CMAKE_ARGS+=("-DCMAKE_OSX_ARCHITECTURES=arm64")
     ;;
 
-ios-arm64|ios-x86_64)
+ios-arm64|ios-x86_64|tvos-x86_64)
     unset DEVELOPER_DIR MACOSX_DEPLOYMENT_TARGET SDKROOT NIX_APPLE_SDK_VERSION
     export PATH="/usr/bin:$PATH"
     : "${IOS_MIN:=15.0}"
+    : "${TVOS_MIN:=17.0}"
     case "$TARGET_PLATFORM" in
-        ios-arm64)  _IOS_SDK="iphoneos";        _IOS_ARCH="arm64"  ;;
-        ios-x86_64) _IOS_SDK="iphonesimulator"; _IOS_ARCH="x86_64" ;;
+        ios-arm64)
+            _IOS_SDK="iphoneos";         _IOS_ARCH="arm64"
+            _CMAKE_SYS="iOS";  _CMAKE_DEPL="$IOS_MIN"
+            ;;
+        ios-x86_64)
+            _IOS_SDK="iphonesimulator";  _IOS_ARCH="x86_64"
+            _CMAKE_SYS="iOS";  _CMAKE_DEPL="$IOS_MIN"
+            ;;
+        tvos-x86_64)
+            _IOS_SDK="appletvsimulator"; _IOS_ARCH="x86_64"
+            _CMAKE_SYS="tvOS"; _CMAKE_DEPL="$TVOS_MIN"
+            ;;
     esac
     _IOS_SYSROOT="$(/usr/bin/xcrun --sdk "$_IOS_SDK" --show-sdk-path)"
-    [ -d "$_IOS_SYSROOT" ] || { echo "missing iOS SDK: $_IOS_SYSROOT" >&2; exit 1; }
+    [ -d "$_IOS_SYSROOT" ] || { echo "missing SDK: $_IOS_SYSROOT" >&2; exit 1; }
     CMAKE_ARGS+=(
-        "-DCMAKE_SYSTEM_NAME=iOS"
+        "-DCMAKE_SYSTEM_NAME=$_CMAKE_SYS"
         "-DCMAKE_OSX_ARCHITECTURES=$_IOS_ARCH"
         "-DCMAKE_OSX_SYSROOT=$_IOS_SYSROOT"
-        "-DCMAKE_OSX_DEPLOYMENT_TARGET=$IOS_MIN"
+        "-DCMAKE_OSX_DEPLOYMENT_TARGET=$_CMAKE_DEPL"
         "-DCMAKE_C_COMPILER=/usr/bin/clang"
         "-DCMAKE_CXX_COMPILER=/usr/bin/clang++"
     )

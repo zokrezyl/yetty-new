@@ -7,7 +7,7 @@
 #   TARGET_PLATFORM   linux-x86_64 | linux-aarch64 |
 #                     macos-arm64 | macos-x86_64 |
 #                     android-arm64-v8a | android-x86_64 |
-#                     ios-arm64 | ios-x86_64 |
+#                     ios-arm64 | ios-x86_64 | tvos-x86_64 |
 #                     webasm | windows-x86_64
 #   OUTPUT_DIR        where the tarball is written
 #
@@ -145,11 +145,12 @@ macos-arm64)
     CC="clang -arch arm64"
     ;;
 
-ios-arm64|ios-x86_64)
+ios-arm64|ios-x86_64|tvos-x86_64)
     # nix-on-macOS xcrun trap.
     unset DEVELOPER_DIR MACOSX_DEPLOYMENT_TARGET SDKROOT NIX_APPLE_SDK_VERSION
     export PATH="/usr/bin:$PATH"
     : "${IOS_MIN:=15.0}"
+    : "${TVOS_MIN:=17.0}"
     case "$TARGET_PLATFORM" in
         ios-arm64)
             _IOS_SDK="iphoneos"; _IOS_ARCH="arm64"
@@ -161,9 +162,14 @@ ios-arm64|ios-x86_64)
             EXTRA_CONFIGURE+=("--host=x86_64-apple-darwin")
             _MIN_FLAG="-mios-simulator-version-min=${IOS_MIN}"
             ;;
+        tvos-x86_64)
+            _IOS_SDK="appletvsimulator"; _IOS_ARCH="x86_64"
+            EXTRA_CONFIGURE+=("--host=x86_64-apple-darwin")
+            _MIN_FLAG="-mtvos-simulator-version-min=${TVOS_MIN}"
+            ;;
     esac
     _IOS_SYSROOT="$(/usr/bin/xcrun --sdk "$_IOS_SDK" --show-sdk-path)"
-    [ -d "$_IOS_SYSROOT" ] || { echo "missing iOS SDK: $_IOS_SYSROOT" >&2; exit 1; }
+    [ -d "$_IOS_SYSROOT" ] || { echo "missing SDK: $_IOS_SYSROOT" >&2; exit 1; }
     CC="/usr/bin/clang -arch $_IOS_ARCH -isysroot $_IOS_SYSROOT $_MIN_FLAG"
     NEEDS_NATIVE_BOOTSTRAP=1
     ;;
