@@ -1,46 +1,55 @@
-# msdfgen - Multi-channel signed distance field generator
-# Depends on freetype, tinyxml2
+# msdfgen — multi-channel signed distance field generator.
+#
+# Consumes a prebuilt static lib + headers from the 3rdparty release
+# tarball published by build-3rdparty-msdfgen.yml. The from-source
+# build (cmake; depends on prebuilt freetype + tinyxml2 at compile time)
+# lives in build-tools/3rdparty/msdfgen/_build.sh.
+#
+# Exposed targets:
+#   msdfgen-core / msdfgen::msdfgen-core
+#   msdfgen-ext  / msdfgen::msdfgen-ext (links freetype + tinyxml2)
+
+include_guard(GLOBAL)
+include(${YETTY_ROOT}/build-tools/cmake/3rdparty-fetch.cmake)
+
 if(TARGET msdfgen::msdfgen-core)
     return()
 endif()
 
-include(${CMAKE_CURRENT_LIST_DIR}/tinyxml2.cmake)
-include(${YETTY_ROOT}/build-tools/cmake/FreeType.cmake)
-
-CPMAddPackage(
-    NAME msdfgen
-    GITHUB_REPOSITORY Chlumsky/msdfgen
-    GIT_TAG v1.12
-    DOWNLOAD_ONLY YES
-)
-
-if(msdfgen_ADDED)
-    # Core library - pure math, no external deps
-    file(GLOB MSDFGEN_CORE_SOURCES "${msdfgen_SOURCE_DIR}/core/*.cpp")
-    file(GLOB MSDFGEN_CORE_HEADERS "${msdfgen_SOURCE_DIR}/core/*.h")
-    add_library(msdfgen-core STATIC ${MSDFGEN_CORE_SOURCES} ${MSDFGEN_CORE_HEADERS})
-    add_library(msdfgen::msdfgen-core ALIAS msdfgen-core)
-    target_include_directories(msdfgen-core PUBLIC ${msdfgen_SOURCE_DIR})
-    target_compile_features(msdfgen-core PUBLIC cxx_std_11)
-    target_compile_definitions(msdfgen-core PUBLIC MSDFGEN_PUBLIC= MSDFGEN_USE_CPP11)
-    set_target_properties(msdfgen-core PROPERTIES POSITION_INDEPENDENT_CODE ON)
-
-    # Extensions library - freetype for font import, tinyxml2 for SVG
-    set(MSDFGEN_EXT_SOURCES
-        ${msdfgen_SOURCE_DIR}/ext/import-font.cpp
-        ${msdfgen_SOURCE_DIR}/ext/import-svg.cpp
-        ${msdfgen_SOURCE_DIR}/ext/resolve-shape-geometry.cpp
-    )
-    file(GLOB MSDFGEN_EXT_HEADERS "${msdfgen_SOURCE_DIR}/ext/*.h")
-    add_library(msdfgen-ext STATIC ${MSDFGEN_EXT_SOURCES} ${MSDFGEN_EXT_HEADERS})
-    add_library(msdfgen::msdfgen-ext ALIAS msdfgen-ext)
-    target_include_directories(msdfgen-ext PUBLIC ${msdfgen_SOURCE_DIR} PRIVATE ${FREETYPE_INCLUDE_DIR})
-    target_compile_definitions(msdfgen-ext PUBLIC
-        MSDFGEN_EXT_PUBLIC=
-        MSDFGEN_EXTENSIONS
-        MSDFGEN_USE_TINYXML2
-        MSDFGEN_DISABLE_PNG
-    )
-    target_link_libraries(msdfgen-ext PRIVATE msdfgen::msdfgen-core tinyxml2::tinyxml2)
-    set_target_properties(msdfgen-ext PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(WIN32)
+    message(FATAL_ERROR
+        "msdfgen: no windows-x86_64 tarball is published yet — yetty.exe is \
+being switched to native MSVC and the msdfgen MSVC build path will land \
+together with that work (see the windows-libs-msvc branch).")
 endif()
+
+# Pull in deps — msdfgen-ext links freetype + tinyxml2.
+include(${CMAKE_CURRENT_LIST_DIR}/tinyxml2.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/freetype.cmake)
+
+yetty_3rdparty_fetch(msdfgen _MSDFGEN_DIR)
+
+if(NOT EXISTS "${_MSDFGEN_DIR}/lib/libmsdfgen-core.a")
+    message(FATAL_ERROR "msdfgen: libmsdfgen-core.a not found in ${_MSDFGEN_DIR}/lib/ — tarball layout changed?")
+endif()
+
+add_library(msdfgen-core STATIC IMPORTED GLOBAL)
+set_target_properties(msdfgen-core PROPERTIES
+    IMPORTED_LOCATION "${_MSDFGEN_DIR}/lib/libmsdfgen-core.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${_MSDFGEN_DIR}/include"
+    INTERFACE_COMPILE_DEFINITIONS "MSDFGEN_PUBLIC=;MSDFGEN_USE_CPP11"
+)
+add_library(msdfgen::msdfgen-core ALIAS msdfgen-core)
+
+if(EXISTS "${_MSDFGEN_DIR}/lib/libmsdfgen-ext.a")
+    add_library(msdfgen-ext STATIC IMPORTED GLOBAL)
+    set_target_properties(msdfgen-ext PROPERTIES
+        IMPORTED_LOCATION "${_MSDFGEN_DIR}/lib/libmsdfgen-ext.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${_MSDFGEN_DIR}/include"
+        INTERFACE_COMPILE_DEFINITIONS "MSDFGEN_EXT_PUBLIC=;MSDFGEN_EXTENSIONS;MSDFGEN_USE_TINYXML2;MSDFGEN_DISABLE_PNG"
+        INTERFACE_LINK_LIBRARIES "msdfgen-core;Freetype::Freetype;tinyxml2::tinyxml2"
+    )
+    add_library(msdfgen::msdfgen-ext ALIAS msdfgen-ext)
+endif()
+
+message(STATUS "msdfgen: prebuilt v${YETTY_3RDPARTY_msdfgen_VERSION} (${_MSDFGEN_DIR}/lib/)")

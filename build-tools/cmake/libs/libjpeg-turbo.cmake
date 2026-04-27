@@ -1,121 +1,48 @@
-# libjpeg-turbo - JPEG compression library with SIMD optimizations
-# BSD-3-Clause license, MIT-compatible
+# libjpeg-turbo — JPEG codec with SIMD optimisations.
 #
-# libjpeg-turbo explicitly blocks add_subdirectory() in their CMakeLists.txt
-# So we use CPM to download and ExternalProject to build it
+# Consumes a prebuilt static lib + headers from the 3rdparty release
+# tarball published by build-3rdparty-libjpeg-turbo.yml. The from-source
+# build (cmake + NASM) lives in build-tools/3rdparty/libjpeg-turbo/_build.sh.
+#
+# Exposed target: turbojpeg-static — IMPORTED static archive (same name
+# the from-source ExternalProject build exported).
+
+include_guard(GLOBAL)
+include(${YETTY_ROOT}/build-tools/cmake/3rdparty-fetch.cmake)
+
 if(TARGET turbojpeg-static)
     return()
 endif()
 
-include(ExternalProject)
+if(WIN32)
+    message(FATAL_ERROR
+        "libjpeg-turbo: no windows-x86_64 tarball is published yet — yetty.exe \
+is being switched to native MSVC and the libjpeg-turbo MSVC build path will \
+land together with that work (see the windows-libs-msvc branch).")
+endif()
 
-# Use CPM to download only
-CPMAddPackage(
-    NAME libjpeg-turbo
-    GITHUB_REPOSITORY libjpeg-turbo/libjpeg-turbo
-    GIT_TAG 3.1.3
-    DOWNLOAD_ONLY YES
+yetty_3rdparty_fetch(libjpeg-turbo _LIBJPEG_DIR)
+
+if(NOT EXISTS "${_LIBJPEG_DIR}/lib/libturbojpeg.a")
+    message(FATAL_ERROR "libjpeg-turbo: libturbojpeg.a not found in ${_LIBJPEG_DIR}/lib/ — tarball layout changed?")
+endif()
+
+add_library(turbojpeg-static STATIC IMPORTED GLOBAL)
+set_target_properties(turbojpeg-static PROPERTIES
+    IMPORTED_LOCATION "${_LIBJPEG_DIR}/lib/libturbojpeg.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${_LIBJPEG_DIR}/include"
 )
 
-# CPM sets CPM_PACKAGE_<name>_SOURCE_DIR - access via cache
-set(_LIBJPEG_SRC_DIR "${CMAKE_BINARY_DIR}/_deps/libjpeg-turbo-src")
-
-if(EXISTS "${_LIBJPEG_SRC_DIR}/src/turbojpeg.h")
-    set(LIBJPEG_TURBO_INSTALL_DIR "${CMAKE_BINARY_DIR}/libjpeg-turbo-install")
-
-    # Determine library directory and name
-    if(WIN32)
-        set(_LIBJPEG_LIB_SUBDIR "lib")
-        set(_LIBJPEG_LIB_NAME "turbojpeg-static.lib")
-    elseif(CMAKE_SIZEOF_VOID_P EQUAL 8 AND NOT APPLE AND NOT EMSCRIPTEN)
-        set(_LIBJPEG_LIB_SUBDIR "lib64")
-        set(_LIBJPEG_LIB_NAME "libturbojpeg.a")
-    else()
-        set(_LIBJPEG_LIB_SUBDIR "lib")
-        set(_LIBJPEG_LIB_NAME "libturbojpeg.a")
-    endif()
-
-    # Platform-specific CMake arguments
-    set(_LIBJPEG_CMAKE_ARGS
-        -DCMAKE_INSTALL_PREFIX=${LIBJPEG_TURBO_INSTALL_DIR}
-        -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-        -DCMAKE_INSTALL_LIBDIR=${_LIBJPEG_LIB_SUBDIR}
-        -DENABLE_SHARED=OFF
-        -DENABLE_STATIC=ON
-        -DWITH_TURBOJPEG=ON
-        -DWITH_JPEG8=ON
+if(EXISTS "${_LIBJPEG_DIR}/lib/libjpeg.a")
+    add_library(jpeg-static STATIC IMPORTED GLOBAL)
+    set_target_properties(jpeg-static PROPERTIES
+        IMPORTED_LOCATION "${_LIBJPEG_DIR}/lib/libjpeg.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${_LIBJPEG_DIR}/include"
     )
-
-    if(EMSCRIPTEN)
-        # For Emscripten: use the toolchain and disable SIMD (use C fallback)
-        list(APPEND _LIBJPEG_CMAKE_ARGS
-            -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-            -DWITH_SIMD=OFF
-            -DREQUIRE_SIMD=OFF
-        )
-    elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
-        # For iOS / tvOS: pass cross-compilation settings, disable SIMD to avoid
-        # CMake bugs in libjpeg-turbo's cross-compile NASM detection.
-        list(APPEND _LIBJPEG_CMAKE_ARGS
-            -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}
-            -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
-            -DCMAKE_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
-            -DCMAKE_SYSTEM_PROCESSOR=${CMAKE_OSX_ARCHITECTURES}
-            -DWITH_SIMD=OFF
-            -DREQUIRE_SIMD=OFF
-        )
-    elseif(ANDROID)
-        # For Android: pass cross-compilation settings
-        if(CMAKE_TOOLCHAIN_FILE)
-            list(APPEND _LIBJPEG_CMAKE_ARGS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
-        endif()
-        if(ANDROID_ABI)
-            list(APPEND _LIBJPEG_CMAKE_ARGS -DANDROID_ABI=${ANDROID_ABI})
-        endif()
-        if(ANDROID_NDK)
-            list(APPEND _LIBJPEG_CMAKE_ARGS -DANDROID_NDK=${ANDROID_NDK})
-        endif()
-        if(ANDROID_PLATFORM)
-            list(APPEND _LIBJPEG_CMAKE_ARGS -DANDROID_PLATFORM=${ANDROID_PLATFORM})
-        endif()
-        if(CMAKE_ANDROID_NDK)
-            list(APPEND _LIBJPEG_CMAKE_ARGS -DCMAKE_ANDROID_NDK=${CMAKE_ANDROID_NDK})
-        endif()
-    endif()
-
-    # Build libjpeg-turbo as external project
-    ExternalProject_Add(libjpeg-turbo-ext
-        SOURCE_DIR ${_LIBJPEG_SRC_DIR}
-        INSTALL_DIR ${LIBJPEG_TURBO_INSTALL_DIR}
-        CMAKE_ARGS ${_LIBJPEG_CMAKE_ARGS}
-        BUILD_BYPRODUCTS
-            ${LIBJPEG_TURBO_INSTALL_DIR}/${_LIBJPEG_LIB_SUBDIR}/${_LIBJPEG_LIB_NAME}
-    )
-
-    # Create imported target
-    add_library(turbojpeg-static STATIC IMPORTED GLOBAL)
-    add_dependencies(turbojpeg-static libjpeg-turbo-ext)
-
-    set_target_properties(turbojpeg-static PROPERTIES
-        IMPORTED_LOCATION "${LIBJPEG_TURBO_INSTALL_DIR}/${_LIBJPEG_LIB_SUBDIR}/${_LIBJPEG_LIB_NAME}"
-    )
-
-    # Use SOURCE directory headers (available immediately after CPM download)
-    # turbojpeg.h is in src/ subdirectory
-    target_include_directories(turbojpeg-static INTERFACE
-        "${_LIBJPEG_SRC_DIR}"
-        "${_LIBJPEG_SRC_DIR}/src"
-    )
-
-    # Export variables
-    set(JPEG_FOUND TRUE CACHE BOOL "" FORCE)
-    set(JPEG_INCLUDE_DIRS "${_LIBJPEG_SRC_DIR};${_LIBJPEG_SRC_DIR}/src" CACHE PATH "" FORCE)
-    set(JPEG_LIBRARIES turbojpeg-static CACHE STRING "" FORCE)
-
-    message(STATUS "libjpeg-turbo: Building from source v3.1.3 (ExternalProject)")
-    message(STATUS "libjpeg-turbo: Include dirs = ${JPEG_INCLUDE_DIRS}")
-else()
-    message(WARNING "libjpeg-turbo: Source directory not found at ${_LIBJPEG_SRC_DIR}")
 endif()
+
+set(JPEG_FOUND        TRUE                       CACHE BOOL   "" FORCE)
+set(JPEG_INCLUDE_DIRS "${_LIBJPEG_DIR}/include"  CACHE PATH   "" FORCE)
+set(JPEG_LIBRARIES    turbojpeg-static           CACHE STRING "" FORCE)
+
+message(STATUS "libjpeg-turbo: prebuilt v${YETTY_3RDPARTY_libjpeg-turbo_VERSION} (${_LIBJPEG_DIR}/lib/libturbojpeg.a)")
