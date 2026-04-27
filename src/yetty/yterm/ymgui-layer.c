@@ -140,6 +140,8 @@ static struct yetty_ycore_void_result
 ymgui_scroll(struct yetty_yterm_terminal_layer *self, int lines);
 static void ymgui_set_cursor(struct yetty_yterm_terminal_layer *self,
                              int col, int row);
+static void ymgui_get_input_origin(const struct yetty_yterm_terminal_layer *self,
+                                   float *out_x, float *out_y);
 
 static const struct yetty_yterm_terminal_layer_ops ymgui_ops = {
     .destroy              = ymgui_destroy,
@@ -154,6 +156,7 @@ static const struct yetty_yterm_terminal_layer_ops ymgui_ops = {
     .on_char              = ymgui_on_char,
     .scroll               = ymgui_scroll,
     .set_cursor           = ymgui_set_cursor,
+    .get_input_origin     = ymgui_get_input_origin,
 };
 
 /*===========================================================================

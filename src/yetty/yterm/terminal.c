@@ -1146,6 +1146,14 @@ terminal_view_on_event(struct yetty_yui_view *view,
   }
 
   case YETTY_EVENT_SCROLL: {
+    /* Drop horizontal-only scroll (dy==0). The ymgui wire mouse struct
+     * only carries wheel_dy, so emitting via terminal_emit_mouse_click
+     * with dy=0 falls through to the BUTTON branch and would deliver a
+     * phantom left-button press to the ymgui client. The scrollback
+     * driver is also dy-only, so dx events have nothing to do here. */
+    if (event->scroll.dy == 0.0f)
+      return YETTY_OK(yetty_ycore_int, 0);
+
     float lx = event->scroll.x - view->bounds.x;
     float ly = event->scroll.y - view->bounds.y;
     if (lx < 0.0f || ly < 0.0f ||
@@ -1157,9 +1165,9 @@ terminal_view_on_event(struct yetty_yui_view *view,
      * a subscribed app (vim, less, mc...) wins; otherwise wheel drives
      * scrollback. dy>0 = wheel up = older content. */
     if (!terminal->scrollback_active && terminal->mouse_click_subscribed) {
-      /* Encode wheel as a synthetic press on a virtual button. The client
-       * reads the scroll-dy field from the trailing position. */
-      terminal_emit_mouse_click(terminal, 0, 1, lx, ly, event->scroll.dy);
+      /* Forward as a wheel-kind ymgui mouse event (terminal_emit_mouse_click
+       * dispatches kind=WHEEL when scroll_dy != 0, ignoring button/press). */
+      terminal_emit_mouse_click(terminal, 0, 0, lx, ly, event->scroll.dy);
       return YETTY_OK(yetty_ycore_int, 1);
     }
 

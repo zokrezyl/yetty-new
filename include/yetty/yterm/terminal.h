@@ -116,6 +116,16 @@ struct yetty_yterm_terminal_layer_ops {
    * historical position even as new content keeps arriving. Optional. */
   void (*set_view_top)(struct yetty_yterm_terminal_layer *self,
                        int active, uint32_t view_top_total_idx);
+  /* Pixel offset, relative to the terminal-view top-left, where the
+   * layer's input-coordinate (0,0) lives. The terminal subtracts this
+   * from terminal-local mouse coords before forwarding to a layer-aware
+   * consumer (e.g. the ymgui frontend reads from ImGui's DisplaySize-
+   * sized space and expects mouse coords inside that space, not the
+   * whole terminal view). Optional — NULL is treated as (0, 0).
+   * Layers whose render origin moves (ymgui frame anchored to a grid
+   * row, scrolling cards, …) should report their *current* origin. */
+  void (*get_input_origin)(const struct yetty_yterm_terminal_layer *self,
+                           float *out_x, float *out_y);
 };
 
 /* Layer base - embed as first member in subclasses */
