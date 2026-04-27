@@ -118,18 +118,30 @@ EOF
 # from libstdc++ will skip thorvg's free, causing alloc/dealloc mismatches
 # in this archive. Same goes for nothrow new — SPIRV-Tools uses it heavily.
 #
-# We apply the patch idempotently via python3 (handles re-runs cleanly).
+# Implementation: pure-shell append. The added operators have signatures
+# that are distinct from upstream's, so appending at end-of-file is
+# equivalent to splicing in place — no python3 needed (MSYS2 CLANG64
+# doesn't ship it). Idempotent via a grep guard.
 #-----------------------------------------------------------------------------
 TVG_INIT="$SRC_DIR/src/renderer/tvgInitializer.cpp"
 [ -f "$TVG_INIT" ] || { echo "missing $TVG_INIT — upstream layout changed?" >&2; exit 1; }
 
-python3 - <<PY
-import sys, pathlib
-p = pathlib.Path("$TVG_INIT")
-src = p.read_text()
-needle = "void operator delete(void* ptr) noexcept {\n    tvg::free(ptr);\n}"
-addition = """
+if grep -q 'operator delete(void\* ptr, std::size_t)' "$TVG_INIT"; then
+    echo "tvgInitializer.cpp already patched, skipping" >&2
+else
+    # Sanity-check the upstream symbol layout we're complementing.
+    grep -q 'void operator delete(void\* ptr) noexcept' "$TVG_INIT" || {
+        echo "PATCH FAILED: upstream layout in tvgInitializer.cpp changed — \
+expected 'void operator delete(void* ptr) noexcept' to be defined" >&2
+        exit 1
+    }
+    cat >> "$TVG_INIT" <<'PATCH_EOF'
 
+// --- yetty 3rdparty patch: complete the global allocator overrides ---
+// Upstream defines only operator new(size_t) and operator delete(void*).
+// Without sized-delete + nothrow forms, consumers (litehtml, SPIRV-Tools,
+// etc.) get alloc/dealloc mismatches when they pick the standard form
+// inlined from libstdc++ instead of thorvg's overrides.
 void operator delete(void* ptr, std::size_t) noexcept {
     tvg::free(ptr);
 }
@@ -140,16 +152,10 @@ void* operator new(std::size_t size, const std::nothrow_t&) noexcept {
 
 void operator delete(void* ptr, const std::nothrow_t&) noexcept {
     tvg::free(ptr);
-}"""
-if "operator delete(void* ptr, std::size_t)" in src:
-    sys.stderr.write("tvgInitializer.cpp already patched, skipping\n")
-    sys.exit(0)
-if needle not in src:
-    sys.stderr.write("PATCH FAILED: needle not found in tvgInitializer.cpp\n")
-    sys.exit(1)
-p.write_text(src.replace(needle, needle + addition, 1))
-sys.stderr.write("tvgInitializer.cpp patched (sized-delete + nothrow new/delete)\n")
-PY
+}
+PATCH_EOF
+    echo "tvgInitializer.cpp patched (sized-delete + nothrow new/delete)" >&2
+fi
 
 #-----------------------------------------------------------------------------
 # Per-platform compiler.

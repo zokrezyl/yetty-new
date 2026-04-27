@@ -143,6 +143,35 @@ android-arm64-v8a|android-x86_64)
     CC="${_NDK_TRIPLE}${ANDROID_API}-clang"
     AR="llvm-ar"
     command -v "$CC" >/dev/null 2>&1 || { echo "error: $CC not on PATH" >&2; exit 1; }
+    # NDK API 26 libc doesn't export getrandom (landed in API 28), and
+    # the NDK <sys/random.h> declaration is hidden behind
+    # `__ANDROID_API__ >= 28`. We can't bump the API just for pdfio
+    # without breaking ABI compat with the rest of yetty, so we
+    # force-include a tiny shim header that forward-declares getrandom
+    # before pdfio's first call site, and ship a syscall wrapper so the
+    # symbol is also satisfied at link time. Linker drops this object if
+    # libc ever does provide the symbol (won't happen at API 26).
+    cat > "$WORK_DIR/pdfio-getrandom-shim.h" <<'SHIM_EOF'
+/* yetty 3rdparty shim: pdfio-crypto.c uses getrandom but the NDK
+ * <sys/random.h> hides its declaration when __ANDROID_API__ < 28. The
+ * symbol is provided by pdfio-getrandom-stub.c via direct syscall. */
+#include <sys/types.h>
+#ifdef __cplusplus
+extern "C"
+#endif
+ssize_t getrandom(void *buf, size_t buflen, unsigned int flags);
+SHIM_EOF
+    CFLAGS_EXTRA="-include $WORK_DIR/pdfio-getrandom-shim.h"
+    cat > "$WORK_DIR/pdfio-getrandom-stub.c" <<'STUB_EOF'
+/* Android API < 28 stub: getrandom() symbol via direct syscall. */
+#include <sys/syscall.h>
+#include <sys/types.h>
+#include <unistd.h>
+ssize_t getrandom(void *buf, size_t buflen, unsigned int flags) {
+    return syscall(__NR_getrandom, buf, buflen, flags);
+}
+STUB_EOF
+    EXTRA_SOURCES+=("$WORK_DIR/pdfio-getrandom-stub.c")
     ;;
 webasm)
     command -v emcc >/dev/null 2>&1 || { echo "error: emcc not found" >&2; exit 1; }
@@ -155,6 +184,7 @@ webasm)
 /* Emscripten stub: provide getrandom() shim that pdfio expects. */
 #include <stddef.h>
 #include <stdlib.h>
+#include <sys/types.h>   /* ssize_t */
 ssize_t getrandom(void *buf, size_t buflen, unsigned int flags) {
     (void)flags;
     unsigned char *p = (unsigned char *)buf;
