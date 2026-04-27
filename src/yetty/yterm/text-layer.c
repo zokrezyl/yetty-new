@@ -1,4 +1,5 @@
 #include <yetty/yterm/text-layer.h>
+#include <yetty/yterm/shader-glyph-layer.h>
 #include <yetty/yfont/ms-font.h>
 #include <yetty/yfont/ms-raster-font.h>
 #include <yetty/yfont/ms-msdf-font.h>
@@ -178,8 +179,25 @@ static VTermResolvedGlyph resolve_glyph(const uint32_t *chars, int count,
 
     ydebug("resolve_glyph ENTER: count=%d cp=U+%04X bold=%d italic=%d", count, count > 0 ? chars[0] : 0u, bold, italic);
 
-    if (!text_layer->font || !text_layer->font->ops || count == 0) {
-        ydebug("resolve_glyph EXIT early: font=%p count=%d", (void *)text_layer->font, count);
+    if (count == 0) {
+        ydebug("resolve_glyph EXIT early: count=0");
+        return result;
+    }
+
+    /* PUA → shader-glyph route. The shader-glyph "font" lives in the top
+     * half of the u32 glyph_index space and is consumed by shader-glyph
+     * layer instead of the text-layer's font. No bit-pattern reservation:
+     * IDs are allocated from UINT32_MAX downward. */
+    if (yetty_shader_glyph_codepoint_in_range(chars[0])) {
+        result.glyph_index = yetty_shader_glyph_id_from_codepoint(chars[0]);
+        result.font_type = 0;
+        ydebug("resolve_glyph SHADER: U+%04X -> glyph_index=0x%08X",
+               chars[0], result.glyph_index);
+        return result;
+    }
+
+    if (!text_layer->font || !text_layer->font->ops) {
+        ydebug("resolve_glyph EXIT early: font=%p", (void *)text_layer->font);
         return result;
     }
 
@@ -805,6 +823,30 @@ static struct yetty_ycore_void_result text_layer_render(
     struct yetty_yterm_terminal_layer *self, struct yetty_yrender_target *target)
 {
     return target->ops->render_layer(target, self);
+}
+
+/* Borrow the current GPU cell buffer. Used by sibling layers (e.g. the
+ * shader-glyph layer) that need to read the same grid as the text shader.
+ * Returns the same pointer text-layer uploads — live screen in normal mode,
+ * stitched scrollback view when view_active. */
+void yetty_yterm_terminal_text_layer_get_cells(
+    const struct yetty_yterm_terminal_layer *self,
+    const uint8_t **out_data, size_t *out_size)
+{
+    const struct yetty_yterm_terminal_text_layer *text_layer =
+        container_of((struct yetty_yterm_terminal_layer *)self,
+                     struct yetty_yterm_terminal_text_layer, base);
+
+    if (text_layer->view_active && text_layer->view_staging) {
+        if (out_data) *out_data = (const uint8_t *)text_layer->view_staging;
+        if (out_size) *out_size = (size_t)text_layer->base.grid_size.cols *
+                                  text_layer->base.grid_size.rows *
+                                  sizeof(VTermScreenCell);
+        return;
+    }
+
+    if (out_data) *out_data = (const uint8_t *)vterm_screen_get_buffer(text_layer->screen);
+    if (out_size) *out_size = vterm_screen_get_buffer_size(text_layer->screen);
 }
 
 /* VTerm callbacks */

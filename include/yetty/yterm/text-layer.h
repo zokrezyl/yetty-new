@@ -21,6 +21,14 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_terminal_text_layer_create(
     yetty_yterm_cursor_fn cursor_fn,
     void *cursor_userdata);
 
+/* Borrow the GPU cell buffer (12 bytes per cell, see text-layer.wgsl).
+ * Pointer is owned by the text layer (or libvterm). Valid only until the
+ * next call into text-layer that mutates the screen — read inside one
+ * get_gpu_resource_set / render call only. */
+void yetty_yterm_terminal_text_layer_get_cells(
+    const struct yetty_yterm_terminal_layer *self,
+    const uint8_t **out_data, size_t *out_size);
+
 #ifdef __cplusplus
 }
 #endif

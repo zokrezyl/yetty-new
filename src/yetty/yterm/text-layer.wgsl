@@ -92,7 +92,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     var final_color = bg_color;
 
-    if (glyph != 0u) {
+    // glyph_index >= 0x80000000 -> rendered by the shader-glyph layer.
+    // We still draw the cell's bg here so it composes underneath, but
+    // skip font_sample (the index is out of any font's atlas range).
+    if (glyph != 0u && glyph < 0x80000000u) {
         let alpha = font_sample(glyph, local_px, cell_size);
         final_color = mix(bg_color, fg_color, alpha);
     }
