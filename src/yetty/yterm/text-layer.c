@@ -409,6 +409,20 @@ static int on_settermprop(VTermProp prop, VTermValue *val, void *user)
             layer->mouse_move_subscribed = v;
             changed = 1;
         }
+    } else if (prop == VTERM_PROP_ALTSCREEN) {
+        /* libvterm has already swapped its internal buffer pointer; refresh
+         * our GPU-side pointer so the next render samples the right one,
+         * and notify the terminal so the other layers can save/restore. */
+        layer->rs.buffers[0].data =
+            (uint8_t *)vterm_screen_get_buffer(layer->screen);
+        layer->rs.buffers[0].size =
+            vterm_screen_get_buffer_size(layer->screen);
+        layer->rs.buffers[0].dirty = 1;
+        layer->base.dirty = 1;
+        if (layer->base.alt_screen_fn) {
+            layer->base.alt_screen_fn(val->boolean ? 1 : 0,
+                                      layer->base.alt_screen_userdata);
+        }
     }
 
     if (changed && layer->base.mouse_sub_fn) {

@@ -1,39 +1,40 @@
 /*
  * imgui_impl_yetty.h — Dear ImGui renderer + platform backend for yetty.
  *
- * Renderer (no input):
+ * Card model (v2)
  *
- *     ImGui::CreateContext();
- *     ImGui_ImplYetty_Init();              // uploads font atlas
+ *   A "card" is a placed sub-region of the terminal grid that the app
+ *   draws ImGui content into. The client may own multiple cards;
+ *   each carries its own ImGuiContext (own DisplaySize, own font atlas,
+ *   own focus state).
+ *
+ *   Lifecycle:
+ *
+ *     ImGui_ImplYetty_Init();                 // backend state
+ *     ImGui_ImplYetty_PlatformInit();         // raw stdin + DEC subscribe
+ *     uint32_t card = ImGui_ImplYetty_CreateCard(card_id, col, row, w, h);
+ *
  *     // each frame:
- *     ImGui_ImplYetty_NewFrame();
+ *     ImGui_ImplYetty_BeginCardFrame(card);   // context current + NewFrame
  *     ImGui::NewFrame();
- *     // … your UI …
+ *     // … draw …
  *     ImGui::Render();
- *     ImGui_ImplYetty_RenderDrawData(ImGui::GetDrawData());
- *     ImGui_ImplYetty_Shutdown();
+ *     ImGui_ImplYetty_RenderCardDrawData(card, ImGui::GetDrawData());
  *
- * Output goes to STDOUT_FILENO by default (redirect with SetOutputFd
- * before Init).
+ *   At shutdown the app should ImGui_ImplYetty_Clear() with keep_visible
+ *   if it wants its last frames to remain on screen as scrollback.
  *
- * Platform / input — three options, pick one:
+ * Input
  *
- *   (1) Manage your own loop: call PlatformInit, then PollInput / WaitInput
- *       once per frame. Same shape as the original sync API.
+ *   The terminal forwards all input as OSC envelopes carrying a card_id
+ *   and card-local coordinates. Three ways to consume them:
  *
- *   (2) Push events explicitly: implement your own loop and call
- *       ImGui_ImplYetty_OnMousePos / OnMouseButton / OnMouseWheel /
- *       OnResize from wherever the events come from. The renderer is
- *       independent of input plumbing.
+ *     (1) PollInput() once per frame (sync drain).
+ *     (2) AttachEventLoop(loop) (async, libuv) — preferred.
+ *     (3) Push events yourself via the ImGui_ImplYetty_OnCard* hooks.
  *
- *   (3) Async with libuv: create a `yetty_yclient_event_loop`
- *       (<yetty/yclient-lib/event-loop.h>), then call
- *       ImGui_ImplYetty_AttachEventLoop(loop) — wires the loop's
- *       per-event callbacks into ImGuiIO so the app's only job is to
- *       set a frame_cb that does NewFrame → Render → RenderDrawData.
- *       App code can also register its own fds / timers / posted tasks
- *       on the same loop for network etc. The loop is shared with
- *       ygui / yrich / ycat — same primitive across all client tools.
+ *   In every case the backend dispatches the event to the right card's
+ *   ImGuiContext automatically — the app code only needs a frame_cb.
  */
 
 #ifndef YETTY_YMGUI_IMGUI_IMPL_YETTY_H
@@ -48,71 +49,102 @@
 
 struct yetty_yclient_event_loop;
 
+/*=============================================================================
+ * Backend lifecycle
+ *===========================================================================*/
+
 IMGUI_IMPL_API bool ImGui_ImplYetty_Init(void);
 IMGUI_IMPL_API void ImGui_ImplYetty_Shutdown(void);
-IMGUI_IMPL_API void ImGui_ImplYetty_NewFrame(void);
-IMGUI_IMPL_API void ImGui_ImplYetty_RenderDrawData(ImDrawData* draw_data);
 
 /* Optional — call before Init. Default is STDOUT_FILENO. */
 IMGUI_IMPL_API void ImGui_ImplYetty_SetOutputFd(int fd);
-
-/* Optional — re-upload the font atlas (e.g. after AddFontFromFile at runtime). */
-IMGUI_IMPL_API bool ImGui_ImplYetty_UploadFontAtlas(void);
-
-/* Optional — emit clear to wipe the receiver canvas. */
-IMGUI_IMPL_API void ImGui_ImplYetty_Clear(void);
-
-/*=============================================================================
- * Platform side — raw mode + DEC ?1500/?1501 subscription
- *
- * PlatformInit:
- *   - puts stdin in raw (cbreak) mode
- *   - subscribes to yetty's pixel-precise mouse events: \e[?1500h \e[?1501h
- *   - stashes the previous termios for shutdown
- *
- * PlatformShutdown: \e[?1500l \e[?1501l, restore termios.
- *
- * Input fd defaults to STDIN_FILENO; override with SetInputFd before Init.
- *===========================================================================*/
-IMGUI_IMPL_API bool ImGui_ImplYetty_PlatformInit(void);
-IMGUI_IMPL_API void ImGui_ImplYetty_PlatformShutdown(void);
+/* Optional — input fd. Default STDIN_FILENO. */
 IMGUI_IMPL_API void ImGui_ImplYetty_SetInputFd(int fd);
 
+/* Drop ALL ymgui state at the server. If keep_visible, last frame of
+ * each live card is archived to the static scrollback layer. Call at
+ * app shutdown after the last RenderCardDrawData. */
+IMGUI_IMPL_API void ImGui_ImplYetty_Clear(bool keep_visible);
+
 /*=============================================================================
- * Sync input (option 1)
- *
- * PollInput drains stdin through yface and routes decoded OSC events
- * into ImGuiIO. Call once per frame, before ImGui::NewFrame().
- *
- * WaitInput blocks until either input arrives on the input fd or
- * timeout_ms elapses; pair with PollInput in a sleep-then-drain loop
- * for a 0-CPU idle.
+ * Platform — raw mode + DEC ?1500/?1501 mouse subscription
  *===========================================================================*/
+
+IMGUI_IMPL_API bool ImGui_ImplYetty_PlatformInit(void);
+IMGUI_IMPL_API void ImGui_ImplYetty_PlatformShutdown(void);
+
+/*=============================================================================
+ * Card lifecycle
+ *
+ * Card IDs are client-allocated u32 (per wire.h). Pass 0 to let the
+ * backend pick the next free id (returned). w_cells == 0 means "until
+ * right edge of the pane" — the card auto-resizes with the terminal.
+ *===========================================================================*/
+
+IMGUI_IMPL_API uint32_t ImGui_ImplYetty_CreateCard(
+    uint32_t card_id, int col, int row,
+    uint32_t w_cells, uint32_t h_cells);
+
+IMGUI_IMPL_API void ImGui_ImplYetty_MoveCard(
+    uint32_t card_id, int col, int row,
+    uint32_t w_cells, uint32_t h_cells);
+
+/* Remove `card_id`. If keep_visible, the server archives the last
+ * frame to the static scrollback layer; otherwise it's just dropped. */
+IMGUI_IMPL_API void ImGui_ImplYetty_RemoveCard(uint32_t card_id,
+                                               bool keep_visible);
+
+/* Returns the ImGuiContext bound to a card, or NULL if not found. */
+IMGUI_IMPL_API ImGuiContext *ImGui_ImplYetty_GetCardContext(uint32_t card_id);
+
+/* Currently focused card per the latest server-side click-focus event,
+ * or 0 if none. */
+IMGUI_IMPL_API uint32_t ImGui_ImplYetty_FocusedCard(void);
+
+/*=============================================================================
+ * Per-card frame
+ *
+ * BeginCardFrame: makes the card's ImGuiContext current and uploads
+ * the font atlas if needed. Caller still calls ImGui::NewFrame()
+ * (and ImGui::Render() / RenderCardDrawData) explicitly.
+ *
+ * RenderCardDrawData: ships the ImDrawData over the wire as the named
+ * card's frame.
+ *===========================================================================*/
+
+IMGUI_IMPL_API void ImGui_ImplYetty_BeginCardFrame(uint32_t card_id);
+IMGUI_IMPL_API void ImGui_ImplYetty_RenderCardDrawData(
+    uint32_t card_id, ImDrawData *draw_data);
+
+/*=============================================================================
+ * Sync input drain (option 1)
+ *===========================================================================*/
+
 IMGUI_IMPL_API void ImGui_ImplYetty_PollInput(void);
 IMGUI_IMPL_API bool ImGui_ImplYetty_WaitInput(int timeout_ms);
 
 /*=============================================================================
- * Push input (option 2) — call from anywhere to feed ImGuiIO
- *
- * GLFW-style: each function pushes one event. Same routing the sync
- * PollInput uses internally — safe to mix with manual polling if you want.
+ * Push input (option 3) — feed ImGuiIO of the named card directly
  *===========================================================================*/
-IMGUI_IMPL_API void ImGui_ImplYetty_OnMousePos   (double x, double y,
-                                                  uint32_t buttons_held);
-IMGUI_IMPL_API void ImGui_ImplYetty_OnMouseButton(int button, int pressed,
-                                                  double x, double y);
-IMGUI_IMPL_API void ImGui_ImplYetty_OnMouseWheel (double dy,
-                                                  double x, double y);
-IMGUI_IMPL_API void ImGui_ImplYetty_OnResize     (double width, double height);
+
+IMGUI_IMPL_API void ImGui_ImplYetty_OnCardMousePos(
+    uint32_t card_id, double x, double y, uint32_t buttons_held);
+IMGUI_IMPL_API void ImGui_ImplYetty_OnCardMouseButton(
+    uint32_t card_id, int button, int pressed, double x, double y);
+IMGUI_IMPL_API void ImGui_ImplYetty_OnCardMouseWheel(
+    uint32_t card_id, double dy, double x, double y);
+IMGUI_IMPL_API void ImGui_ImplYetty_OnCardResize(
+    uint32_t card_id, double width, double height);
+IMGUI_IMPL_API void ImGui_ImplYetty_OnCardFocus(
+    uint32_t card_id, int gained);
+IMGUI_IMPL_API void ImGui_ImplYetty_OnCardKey(
+    uint32_t card_id, int kind, int key, int mods, uint32_t codepoint);
 
 /*=============================================================================
- * Async with libuv (option 3) — preferred
- *
- * Wires the loop's input callbacks into the ImGui_ImplYetty_On* hooks above
- * and sets the loop's `user` pointer to point at this backend's state. The
- * app's frame_cb is the only thing the app still owns — it does
- * NewFrame → ImGui::NewFrame → render UI → ImGui::Render → RenderDrawData.
+ * Async with libuv (option 2) — preferred
  *===========================================================================*/
-IMGUI_IMPL_API void ImGui_ImplYetty_AttachEventLoop(struct yetty_yclient_event_loop *loop);
+
+IMGUI_IMPL_API void ImGui_ImplYetty_AttachEventLoop(
+    struct yetty_yclient_event_loop *loop);
 
 #endif /* YETTY_YMGUI_IMGUI_IMPL_YETTY_H */

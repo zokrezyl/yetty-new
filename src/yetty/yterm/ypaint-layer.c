@@ -118,6 +118,16 @@ struct yetty_yterm_ypaint_layer {
   /* Streaming OSC decoder (b64 → LZ4F → in_buf) — one per layer, lives
    * for the layer's lifetime. Same pattern as ymgui-layer. */
   struct yetty_yface *yface;
+
+  /* Cached at create — needed to lazily build the alt-screen canvas
+   * on first ?1049 toggle. */
+  const struct yetty_context  *create_context;
+
+  /* Alt-screen state. The active canvas is `canvas` above; the saved
+   * counterpart (primary while in alt, alt while in primary) lives
+   * here. Toggle via ypaint_layer_set_alt_screen swaps the two. */
+  int                          alt_active;
+  struct yetty_ypaint_canvas  *saved_canvas;
 };
 
 /* Forward declarations */
@@ -145,6 +155,8 @@ static uint32_t ypaint_layer_get_live_anchor(
     const struct yetty_yterm_terminal_layer *self);
 static void ypaint_layer_set_view_top(struct yetty_yterm_terminal_layer *self,
                                       int active, uint32_t view_top_total_idx);
+static void ypaint_layer_set_alt_screen(
+    struct yetty_yterm_terminal_layer *self, int active);
 
 /* Canvas scroll callback - propagate to other layers */
 static struct yetty_ycore_void_result
@@ -264,6 +276,7 @@ static const struct yetty_yterm_terminal_layer_ops ypaint_layer_ops = {
     .set_cursor = ypaint_layer_set_cursor,
     .get_live_anchor = ypaint_layer_get_live_anchor,
     .set_view_top = ypaint_layer_set_view_top,
+    .set_alt_screen = ypaint_layer_set_alt_screen,
 };
 
 /* Create */
@@ -328,6 +341,7 @@ struct yetty_yterm_terminal_layer_result yetty_yterm_ypaint_layer_create(
   layer->base.cursor_userdata = cursor_userdata;
 
   layer->scrolling_mode = scrolling_mode;
+  layer->create_context = context;
 
   /* Create canvas (passes context for default font creation) */
   if (!context) {
@@ -420,6 +434,8 @@ static void ypaint_layer_destroy(struct yetty_yterm_terminal_layer *self) {
     yetty_yface_destroy(layer->yface);
   if (layer->canvas)
     yetty_ypaint_canvas_destroy(layer->canvas);
+  if (layer->saved_canvas)
+    yetty_ypaint_canvas_destroy(layer->saved_canvas);
 
   free(layer->shader_code.data);
   free(layer->sdf_lib_code.data);
@@ -751,6 +767,53 @@ static void ypaint_layer_set_view_top(struct yetty_yterm_terminal_layer *self,
   layer->base.dirty = 1;
   if (layer->base.request_render_fn)
     layer->base.request_render_fn(layer->base.request_render_userdata);
+}
+
+/* Alt-screen entry/exit: swap the active canvas with a saved one. The
+ * alt canvas is built lazily on first ?1049 entry — most sessions
+ * never use it, so paying the cost up-front is wasteful. Each canvas
+ * keeps its own primitives, fonts, and rolling-row state; toggling is
+ * just a pointer swap (no GPU work, no data copy). */
+static void ypaint_layer_set_alt_screen(
+    struct yetty_yterm_terminal_layer *self, int active) {
+  struct yetty_yterm_ypaint_layer *layer =
+      (struct yetty_yterm_ypaint_layer *)self;
+  int wanted = active ? 1 : 0;
+  if (layer->alt_active == wanted) return;
+
+  /* Lazy-build the saved-side canvas the first time we toggle. The
+   * empty side starts on the alt slot when we enter (alt_active=1),
+   * and on the primary slot if for some reason we exit before having
+   * entered (shouldn't happen, but cheap to handle). */
+  if (!layer->saved_canvas && layer->create_context) {
+    layer->saved_canvas =
+        yetty_ypaint_canvas_create(layer->scrolling_mode ? true : false,
+                                   layer->create_context);
+    if (layer->saved_canvas) {
+      yetty_ypaint_canvas_set_cell_size(layer->saved_canvas,
+                                        layer->base.cell_size);
+      yetty_ypaint_canvas_set_grid_size(layer->saved_canvas,
+                                        layer->base.grid_size);
+      yetty_ypaint_canvas_set_scroll_callback(
+          layer->saved_canvas, on_canvas_scroll,
+          (struct yetty_ycore_void_result *)layer);
+      yetty_ypaint_canvas_set_cursor_callback(
+          layer->saved_canvas, on_canvas_cursor_set,
+          (struct yetty_ycore_void_result *)layer);
+    }
+  }
+  if (!layer->saved_canvas) return;
+
+  struct yetty_ypaint_canvas *tmp = layer->canvas;
+  layer->canvas       = layer->saved_canvas;
+  layer->saved_canvas = tmp;
+  layer->alt_active   = wanted;
+
+  layer->base.dirty = 1;
+  if (layer->base.request_render_fn)
+    layer->base.request_render_fn(layer->base.request_render_userdata);
+
+  ydebug("ypaint: alt_screen=%d", wanted);
 }
 
 /* Set cursor - called when another layer moves cursor */
