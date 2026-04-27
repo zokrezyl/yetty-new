@@ -24,6 +24,7 @@ struct demo_state {
     int      frames_rendered;
     int      frames_max;
     uint64_t last_ns;
+    bool     window_open;
 };
 
 static uint64_t now_ns(void) {
@@ -55,13 +56,15 @@ static void on_frame(void *user)
     ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
     ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
 
-    bool show = true;
-    ImGui::ShowDemoWindow(&show);
+    ImGui::ShowDemoWindow(&S->window_open);
 
     ImGui::Render();
     ImGui_ImplYetty_RenderCardDrawData(S->card_id, ImGui::GetDrawData());
 
     S->frames_rendered++;
+    /* User clicked the [x] in the demo window — exit. */
+    if (!S->window_open)
+        yetty_yclient_event_loop_stop(S->loop);
     if (S->frames_max > 0 && S->frames_rendered >= S->frames_max)
         yetty_yclient_event_loop_stop(S->loop);
 }
@@ -91,14 +94,14 @@ int main(int argc, char **argv)
     }
 
     struct demo_state state = {};
-    state.frames_max = frames_max;
+    state.frames_max  = frames_max;
+    state.window_open = true;
 
-    /* Card at the current cursor row, full pane width, 24 rows tall.
-     * Server scrolls up if there isn't room and advances the cursor
-     * underneath. */
+    /* Card filling the whole pane (w_cells=0 → right edge dynamically;
+     * h_cells=0 → bottom edge at placement time). */
     state.card_id = ImGui_ImplYetty_CreateCard(
         /*card_id=*/0, /*col=*/0, /*row=*/0,
-        /*w_cells=*/0, /*h_cells=*/24);
+        /*w_cells=*/0, /*h_cells=*/0);
 
     struct yetty_yclient_event_loop_config cfg = {};
     cfg.in_fd = -1;

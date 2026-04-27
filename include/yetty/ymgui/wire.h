@@ -249,8 +249,9 @@ struct ymgui_wire_card_place {
     uint32_t flags;           /* reserved, send 0 */
     int32_t  col;             /* grid column (0-based) */
     int32_t  row;             /* grid row (0-based, relative to visible top) */
-    uint32_t w_cells;         /* width  in cells; 0 = "until right edge" */
-    uint32_t h_cells;         /* height in cells; 0 = error (must be set) */
+    uint32_t w_cells;         /* width  in cells; 0 = "until right edge"   */
+    uint32_t h_cells;         /* height in cells; 0 = "until bottom (at
+                               *                       placement time)"    */
 };
 
 /*---------------------------------------------------------------------------

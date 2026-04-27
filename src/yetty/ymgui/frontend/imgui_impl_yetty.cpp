@@ -104,6 +104,11 @@ static ymgui_card_state *find_card(uint32_t id) {
     return nullptr;
 }
 
+/* Push everything yface_out accumulated to the wire, blocking until it's
+ * fully drained. The pending-write helper queues unfinished tails on
+ * EAGAIN, but the libuv loop here doesn't watch POLLOUT, so a queued
+ * tail would stall every subsequent emit until the next stdin event
+ * incidentally drained it. Cheaper to just block briefly per emit. */
 static int flush_yface_to_fd(void)
 {
     if (!g_state.yface_out) return -1;
@@ -111,12 +116,15 @@ static int flush_yface_to_fd(void)
     if (!out || out->size == 0) return 0;
     int rc = ymgui_pending_write(g_state.out_fd, out->data, out->size);
     yetty_ycore_buffer_clear(out);
-    return rc;
+    if (rc < 0) return rc;
+    if (ymgui_pending_active())
+        return ymgui_pending_drain_blocking(g_state.out_fd);
+    return 0;
 }
 
-/* Build a no-args OSC envelope around `payload` and ship it. compressed
- * controls LZ4F framing — ON for big payloads (frames, textures), OFF
- * for short ones (clear, card-place, card-remove). */
+/* Build a no-args OSC envelope around `payload` and ship it. flush_yface
+ * blocks until the entire envelope is drained, so every emit either
+ * fully reaches the server or returns an error. */
 static bool emit_osc(int osc_code, bool compressed,
                      const void *payload, size_t len)
 {

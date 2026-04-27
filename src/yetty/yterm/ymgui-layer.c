@@ -586,8 +586,6 @@ handle_card_place(struct yetty_yterm_ymgui_layer *l,
         return YETTY_ERR(yetty_ycore_void, "ymgui: CARD_PLACE version mismatch");
     if (cp->card_id == YMGUI_CARD_ID_NONE)
         return YETTY_ERR(yetty_ycore_void, "ymgui: CARD_PLACE id=0");
-    if (cp->h_cells == 0)
-        return YETTY_ERR(yetty_ycore_void, "ymgui: CARD_PLACE h_cells=0");
 
     struct ymgui_card *c = card_find(l, cp->card_id);
     int created = 0;
@@ -599,7 +597,16 @@ handle_card_place(struct yetty_yterm_ymgui_layer *l,
 
     c->col     = cp->col;
     c->w_cells = cp->w_cells;
-    c->h_cells = cp->h_cells;
+    /* h_cells == 0 = "until bottom edge of the pane at placement time".
+     * Resolved once here; the card's height is fixed from then on (the
+     * width still tracks the pane if w_cells == 0 — that's dynamic). */
+    if (cp->h_cells == 0) {
+        int32_t row = cp->row < 0 ? 0 : cp->row;
+        uint32_t rows = l->base.grid_size.rows;
+        c->h_cells = ((uint32_t)row >= rows) ? 1u : (rows - (uint32_t)row);
+    } else {
+        c->h_cells = cp->h_cells;
+    }
 
     /* Map visible-row to rolling_row anchor; scroll up if not enough room. */
     anchor_card_and_fit(l, c, cp->row);
