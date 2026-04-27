@@ -4,9 +4,15 @@
 # Note: variables.cmake is included from root CMakeLists.txt
 
 # Determine platform name for config file selection
+# tvOS check before iOS — tvos.cmake doesn't set YETTY_IOS at cmake level,
+# but APPLE is true for tvOS so without an explicit branch it would fall
+# through to "macos" and pick assets/default-config-macos.yaml instead of
+# the new assets/default-config-tvos.yaml.
 if(YETTY_ANDROID)
     set(YETTY_PLATFORM "android")
-elseif(YETTY_IOS)
+elseif(YETTY_TVOS OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+    set(YETTY_PLATFORM "tvos")
+elseif(YETTY_IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
     set(YETTY_PLATFORM "ios")
 elseif(EMSCRIPTEN)
     set(YETTY_PLATFORM "webasm")
