@@ -130,6 +130,17 @@ void ygui_render_circle(ygui_render_ctx_t* ctx, float cx, float cy, float r,
     yetty_ysdf_add_circle(ctx->buffer, 0, color, 0, 0.0f, &geom);
 }
 
+void ygui_render_circle_outline(ygui_render_ctx_t* ctx, float cx, float cy, float r,
+                                uint32_t color, float stroke_width) {
+    if (!ctx->buffer) return;
+
+    float ax = cx + ctx->offset_x;
+    float ay = cy + ctx->offset_y;
+
+    struct yetty_ysdf_circle geom = { .center_x = ax, .center_y = ay, .radius = r };
+    yetty_ysdf_add_circle(ctx->buffer, 0, 0, color, stroke_width, &geom);
+}
+
 void ygui_render_triangle(ygui_render_ctx_t* ctx, float x0, float y0,
                           float x1, float y1, float x2, float y2, uint32_t color) {
     if (!ctx->buffer) return;
